@@ -18,7 +18,6 @@ pub(super) fn attachment_adoption_case() -> GeneratedCase {
                     turn_id: "attachment-adoption",
                 }),
                 checkpoint: CheckpointSpec::Empty,
-                usage: true,
                 adopt_attachment: true,
             },
             StoreOperation::PinLeaf,

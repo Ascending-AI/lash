@@ -371,12 +371,12 @@ where
                 .expect("subscription revision"),
         ),
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
+        ArtifactReferrer::StartInput {
+            start_key: lash_core::StartKey::for_host("canonical-start"),
+            starter: journal.clone(),
+        },
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-        ArtifactReferrer::DefinitionRevision(
-            lash_core::DefinitionRevisionId::new("definition".into(), 1)
-                .expect("definition revision"),
-        ),
         ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
             lash_core::SessionId::from("canonical-session"),
@@ -398,4 +398,121 @@ where
     }
     assert!(ArtifactReferrer::decode("owner", "old").is_err());
     assert!(ArtifactReferrer::decode("host_pin", "host-pin:v1:INVALID").is_err());
+}
+
+/// FIG-4256: declarations and retained process records share the captured
+/// environment. Ending one reader cannot reclaim another reader's bytes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates every store step"
+)]
+pub async fn captured_environments_are_shared_until_the_last_referrer_ends<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let fixture = make();
+    let store = &fixture.open.process_env;
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy {
+            prompt: lash_core::PromptLayer::new().with_contribution(
+                lash_core::PromptContribution::new(
+                    lash_core::PromptSlot::ProjectInstructions,
+                    "instructions",
+                    "x".repeat(128 * 1024),
+                ),
+            ),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        },
+    );
+    let first_ref = spec.stable_ref().expect("first captured digest");
+    let second_ref = spec.clone().stable_ref().expect("second captured digest");
+    assert_eq!(
+        first_ref, second_ref,
+        "equal captures address one stored copy"
+    );
+    let journal = lash_core::ExecutionScope::runtime_operation(format!(
+        "env-capture-{}",
+        HostArtifactPin::mint()
+    ))
+    .journal_identity()
+    .expect("journal");
+    let declaration = ArtifactReferrer::Execution(journal);
+    let claim = ReferrerClaim::guarded(
+        declaration.clone(),
+        lash_core::ArtifactCleanupPlan::AwaitJournal,
+    )
+    .expect("declaration claim");
+    let bytes = spec.to_store_bytes().expect("environment bytes");
+    for env_ref in [&first_ref, &second_ref] {
+        store
+            .publish_process_execution_env(&claim, env_ref, &bytes)
+            .await
+            .expect("capture publishes");
+    }
+    let first = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+        "captured-environment-first",
+    ));
+    let second = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+        "captured-environment-second",
+    ));
+    for reader in [&first, &second] {
+        store
+            .acquire_process_execution_env(
+                &ReferrerClaim::unguarded(reader.clone()).expect("process claim"),
+                &first_ref,
+            )
+            .await
+            .expect("process holds captured environment");
+    }
+    store
+        .end_process_env_referrer(&end(declaration.clone()))
+        .await
+        .expect("declaration ends");
+    let reopened = (fixture.reopen)();
+    assert_eq!(
+        reopened
+            .process_env
+            .get_process_execution_env(&first_ref)
+            .await
+            .expect("read after declaration"),
+        Some(bytes.clone())
+    );
+    reopened
+        .process_env
+        .end_process_env_referrer(&end(first))
+        .await
+        .expect("first process ends");
+    assert_eq!(
+        store
+            .get_process_execution_env(&second_ref)
+            .await
+            .expect("read after first process"),
+        Some(bytes)
+    );
+    reopened
+        .process_env
+        .end_process_env_referrer(&end(second.clone()))
+        .await
+        .expect("last process ends");
+    assert_eq!(
+        store
+            .get_process_execution_env(&first_ref)
+            .await
+            .expect("read after last reader"),
+        None
+    );
+    store
+        .end_process_env_referrer(&end(second.clone()))
+        .await
+        .expect("cleanup replay");
+    assert!(
+        matches!(store.acquire_process_execution_env(&claim, &first_ref).await,
+        Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == declaration)
+    );
+    let ended_claim = ReferrerClaim::unguarded(second.clone()).expect("ended process claim");
+    assert!(
+        matches!(store.publish_process_execution_env(&ended_claim, &first_ref, &spec.to_store_bytes().expect("bytes")).await,
+        Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == second)
+    );
 }

@@ -39,18 +39,46 @@ pub(super) enum VmEffect {
     Fail,
 }
 
+/// How an operation the run awaits came back from its host: settled, or the
+/// host parked the run on it (FIG-4159, FIG-4275). `P` is what a park leaves
+/// for the continuation to carry.
+pub(super) enum Awaited<T, P = ()> {
+    Settled(T),
+    Parked(P),
+}
+
+/// One await's walk over a handle or a container of handles: the leaf
+/// results a resumed run settled before it parked, taken in traversal order
+/// instead of asking the host again, and every leaf result the walk has.
+struct AwaitCursor {
+    replay: std::vec::IntoIter<Value>,
+    settled: Vec<Value>,
+}
+
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) async fn resolve_effect(
         &mut self,
         effect: VmEffect,
         instruction_ip: usize,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
-        // An operation issued again after a declined park resumes normally:
-        // a continuation captured past it resumes at the next instruction.
-        self.resume_point = super::VmResumePoint::NextInstruction;
-        let active = self.begin_lashlang_execution(instruction_ip);
-        let result =
-            Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
+        // An operation issued again after a park or a declined park resumes
+        // normally: a continuation captured past it resumes at the next
+        // instruction.
+        let reissued = match std::mem::replace(
+            &mut self.resume_point,
+            super::VmResumePoint::NextInstruction,
+        ) {
+            super::VmResumePoint::ReissueOperation { operation, .. } => Some(operation),
+            super::VmResumePoint::NextInstruction => None,
+        };
+        let active = self.begin_lashlang_effect(instruction_ip, reissued.is_some());
+        let result = Box::pin(self.resolve_effect_inner(
+            effect,
+            active.as_ref(),
+            instruction_ip,
+            reissued.as_ref(),
+        ))
+        .await;
         match (&result, active.as_ref()) {
             // A handed-over wait did not complete: its node is left for the
             // continuation that issues the wait again. An operation the run
@@ -86,6 +114,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         effect: VmEffect,
         active: Option<&ActiveLashlangExecutionNode>,
         instruction_ip: usize,
+        reissued: Option<&super::VmSuspendedOperation>,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
         match effect {
             VmEffect::ResourceCall { operation, argc } => {
@@ -156,9 +185,23 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(value);
             }
             VmEffect::AwaitArray { consumer } => {
-                self.await_pending_array(consumer, instruction_ip).await?;
+                let items = self.pop_stack()?;
+                match self
+                    .await_pending_array(&items, consumer, instruction_ip, reissued.is_some())
+                    .await?
+                {
+                    Awaited::Settled(value) => self.stack.push(value),
+                    Awaited::Parked(()) => {
+                        return Ok(Some(self.park_on_operation(
+                            instruction_ip,
+                            vec![items],
+                            super::VmSuspendedOperation::ResourceOperationBatch,
+                        )));
+                    }
+                }
             }
             VmEffect::AwaitPending => {
+                let settled = self.take_settled_await_results(reissued)?;
                 let value = self.pop_stack()?;
                 match self.classify_awaited(&value) {
                     // A process handle that reached the tool-await path (a
@@ -167,20 +210,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // element position refuses it, because only there did the
                     // retired second phase settle it out of the batch order.
                     AwaitedValue::Leaf(id) if is_runtime_process_handle_id(&id) => {
-                        let value = self.await_value_unwrap(value, active).await?;
-                        self.stack.push(value);
+                        match self
+                            .await_value_unwrap(value.clone(), active, reissued.is_some(), settled)
+                            .await?
+                        {
+                            Awaited::Settled(result) => self.stack.push(result),
+                            Awaited::Parked(settled) => {
+                                return Ok(Some(self.park_on_await(
+                                    instruction_ip,
+                                    value,
+                                    settled,
+                                )));
+                            }
+                        }
                     }
                     AwaitedValue::Leaf(id) => {
                         if !self.live_pending_request(&id) {
                             return Err(self.unsettleable_handle(&id));
                         }
-                        self.stack.push(Value::List(vec![value].into()));
-                        self.await_pending_array(AggregateConsumer::All, instruction_ip)
-                            .await?;
-                        let Value::List(values) = self.pop_stack()? else {
-                            unreachable!()
-                        };
-                        self.stack.push(values[0].clone());
+                        let items = Value::List(vec![value.clone()].into());
+                        match self
+                            .await_pending_array(
+                                &items,
+                                AggregateConsumer::All,
+                                instruction_ip,
+                                reissued.is_some(),
+                            )
+                            .await?
+                        {
+                            Awaited::Settled(Value::List(values)) => {
+                                self.stack.push(values[0].clone());
+                            }
+                            Awaited::Settled(_) => unreachable!(),
+                            Awaited::Parked(()) => {
+                                return Ok(Some(self.park_on_operation(
+                                    instruction_ip,
+                                    vec![value],
+                                    super::VmSuspendedOperation::ResourceOperationBatch,
+                                )));
+                            }
+                        }
                     }
                     AwaitedValue::Plain => {
                         return Err(RuntimeError::PendingTool {
@@ -190,13 +259,40 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
             VmEffect::ResourceOperationBatch(batch) => {
-                self.resolve_resource_operation_batch(batch, instruction_ip)
-                    .await?;
+                let count = self.chunk.resource_operation_batches[batch].stack_value_count;
+                let start = self.stack_drain_start(count)?;
+                let values = self.stack.drain(start..).collect::<Vec<_>>();
+                match self
+                    .resolve_resource_operation_batch(
+                        batch,
+                        &values,
+                        instruction_ip,
+                        reissued.is_some(),
+                    )
+                    .await?
+                {
+                    Awaited::Settled(value) => self.stack.push(value),
+                    Awaited::Parked(()) => {
+                        return Ok(Some(self.park_on_operation(
+                            instruction_ip,
+                            values,
+                            super::VmSuspendedOperation::ResourceOperationBatch,
+                        )));
+                    }
+                }
             }
             VmEffect::AwaitHandle => {
+                let settled = self.take_settled_await_results(reissued)?;
                 let handle = self.pop_stack()?;
-                let result = self.await_value(handle, active).await?;
-                self.stack.push(result);
+                match self
+                    .await_value(handle.clone(), active, reissued.is_some(), settled)
+                    .await?
+                {
+                    Awaited::Settled(result) => self.stack.push(result),
+                    Awaited::Parked(settled) => {
+                        return Ok(Some(self.park_on_await(instruction_ip, handle, settled)));
+                    }
+                }
             }
             VmEffect::Sleep(kind) => {
                 let value = self.pop_stack()?;
@@ -251,9 +347,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(value);
             }
             VmEffect::AwaitHandleUnwrap => {
+                let settled = self.take_settled_await_results(reissued)?;
                 let handle = self.pop_stack()?;
-                let result = self.await_value_unwrap(handle, active).await?;
-                self.stack.push(result);
+                match self
+                    .await_value_unwrap(handle.clone(), active, reissued.is_some(), settled)
+                    .await?
+                {
+                    Awaited::Settled(result) => self.stack.push(result),
+                    Awaited::Parked(settled) => {
+                        return Ok(Some(self.park_on_await(instruction_ip, handle, settled)));
+                    }
+                }
             }
             VmEffect::Print => {
                 let value = self.pop_stack()?;
@@ -292,16 +396,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(None)
     }
 
-    /// Whether the run stands on an operation its host parked it on, rather
-    /// than a signal wait handed to a successor segment.
+    /// Whether the next instruction reissues an operation already started.
     fn parked_on_effect(&self) -> bool {
         matches!(
             &self.resume_point,
-            super::VmResumePoint::ReissueOperation {
-                operation: super::VmSuspendedOperation::ResourceOperation { .. }
-                    | super::VmSuspendedOperation::Sleep,
-                ..
-            }
+            super::VmResumePoint::ReissueOperation { .. }
         )
     }
 
@@ -326,20 +425,62 @@ impl<H: ExecutionHost> Vm<'_, H> {
         VmOutcome::HandedOver
     }
 
+    /// Parks the run on the await of `awaited`, the value its instruction
+    /// took, with the leaf results it had already received riding above it
+    /// ([`super::VmSuspendedOperation::Await`], FIG-4275).
+    fn park_on_await(
+        &mut self,
+        instruction_ip: usize,
+        awaited: Value,
+        settled: Vec<Value>,
+    ) -> VmOutcome {
+        let count = settled.len();
+        let mut operands = vec![awaited];
+        if count > 0 {
+            operands.push(Value::List(settled.into()));
+        }
+        self.park_on_operation(
+            instruction_ip,
+            operands,
+            super::VmSuspendedOperation::Await { settled: count },
+        )
+    }
+
+    /// The leaf results a run parked on an await had already received: the
+    /// list that stands above the awaited value when the await is issued
+    /// again.
+    fn take_settled_await_results(
+        &mut self,
+        reissued: Option<&super::VmSuspendedOperation>,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let Some(super::VmSuspendedOperation::Await { settled }) = reissued else {
+            return Ok(Vec::new());
+        };
+        if *settled == 0 {
+            return Ok(Vec::new());
+        }
+        match self.pop_stack()? {
+            Value::List(results) if results.len() == *settled => {
+                Ok(results.iter().cloned().collect())
+            }
+            _ => Err(RuntimeError::AggregateAwaitValueOutOfRange),
+        }
+    }
+
     async fn resolve_resource_operation_batch(
         &mut self,
         batch: usize,
+        values: &[Value],
         instruction_ip: usize,
-    ) -> Result<(), RuntimeError> {
+        reissued: bool,
+    ) -> Result<Awaited<Value>, RuntimeError> {
         let batch = &self.chunk.resource_operation_batches[batch];
-        let start = self.stack_drain_start(batch.stack_value_count)?;
-        let values = self.stack.drain(start..).collect::<Vec<_>>();
         let mut leaves = Vec::new();
         let mut expanded_values = Vec::new();
         let shape = expand_aggregate_await_shape(
             &batch.shape,
             batch,
-            &values,
+            values,
             &mut leaves,
             &mut expanded_values,
         )?;
@@ -350,7 +491,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: batch.aggregate_unwrap,
             consumer: batch.consumer,
         };
-        self.resolve_batch_spec(&expanded, expanded_values, instruction_ip)
+        self.resolve_batch_spec(&expanded, expanded_values, instruction_ip, reissued)
             .await
     }
 
@@ -361,13 +502,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// is one durable settlement order for the whole aggregate and no second
     /// phase to sequence against it. Non-leaf positions are plain values and
     /// are carried through untouched (ADR 0096: settlement is shallow, over
-    /// element positions only).
+    /// element positions only). A run its host parks on the batch settles
+    /// nothing: its leaves' execution nodes are taken back, and a run resumed
+    /// from its continuation issues the same batch again (FIG-4275).
     pub(super) async fn resolve_batch_spec(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: Vec<Value>,
         instruction_ip: usize,
-    ) -> Result<(), RuntimeError> {
+        reissued: bool,
+    ) -> Result<Awaited<Value>, RuntimeError> {
         // Element positions are the only ones that could have settled, so they
         // are the only ones where a handle is a mistake rather than data. A
         // handle here named the retired second phase; the repair names the tool
@@ -382,15 +526,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
 
         let mut value = match batch.consumer {
-            AggregateConsumer::Race | AggregateConsumer::Any => {
-                self.settle_selecting_aggregate(batch, &values, instruction_ip)
-                    .await?
-            }
+            AggregateConsumer::Race | AggregateConsumer::Any => match self
+                .settle_selecting_aggregate(batch, &values, instruction_ip, reissued)
+                .await?
+            {
+                Awaited::Settled(value) => value,
+                Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+            },
             AggregateConsumer::All | AggregateConsumer::AllSettled => {
                 let leaf_values = if batch.leaves.is_empty() {
                     Vec::new()
                 } else {
-                    self.settle_tool_leaves(batch, &values).await?
+                    match self.settle_tool_leaves(batch, &values, reissued).await? {
+                        Awaited::Settled(leaf_values) => leaf_values,
+                        Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+                    }
                 };
                 build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?
             }
@@ -398,16 +548,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if batch.aggregate_unwrap {
             value = unwrap_tool_result(value)?;
         }
-        self.stack.push(value);
-        Ok(())
+        Ok(Awaited::Settled(value))
     }
 
     /// One host operation per unique leaf, in leaf order, with each leaf's
-    /// execution node begun.
+    /// execution node begun, or, for a batch issued again after a park, its
+    /// occurrence taken again without starting it a second time.
     fn batch_leaf_operations(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
+        reissued: bool,
     ) -> Result<
         (
             Vec<ResourceOperationBatchLeaf>,
@@ -418,10 +569,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
         for leaf in batch.leaves.iter() {
-            let active = leaf
-                .site
-                .clone()
-                .map(|site| self.begin_lashlang_execution_site(site));
+            let active = leaf.site.clone().map(|site| {
+                if reissued {
+                    self.reissue_lashlang_execution_site(site)
+                } else {
+                    self.begin_lashlang_execution_site(site)
+                }
+            });
             let receiver = values
                 .get(leaf.receiver_stack_index)
                 .cloned()
@@ -461,11 +615,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
-    ) -> Result<Vec<Value>, RuntimeError> {
-        let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
-        let reply = self
+        reissued: bool,
+    ) -> Result<Awaited<Vec<Value>>, RuntimeError> {
+        let (operations, active_nodes) = self.batch_leaf_operations(batch, values, reissued)?;
+        let reply = match self
             .perform_resource_operation_batch(operations, &active_nodes, batch.consumer, None)
-            .await?;
+            .await?
+        {
+            Awaited::Settled(reply) => reply,
+            Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+        };
         match reply {
             ResourceOperationBatchOutcome::AllResults(results) => self
                 .settle_resource_operation_leaves(
@@ -475,7 +634,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .map(|leaf| (leaf.unwrap, leaf.source_span)),
                     results,
                     &active_nodes,
-                ),
+                )
+                .map(Awaited::Settled),
             ResourceOperationBatchOutcome::Selected {
                 leaf,
                 result: ResourceOperationOutcome::Error(source),
@@ -513,7 +673,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
         instruction_ip: usize,
-    ) -> Result<Value, RuntimeError> {
+        reissued: bool,
+    ) -> Result<Awaited<Value>, RuntimeError> {
         let CompiledAggregateAwaitShape::List(elements) = &batch.shape else {
             return Err(RuntimeError::InvalidAggregateAwaitRecordShape);
         };
@@ -534,6 +695,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 Some(index) => values
                     .get(index)
                     .cloned()
+                    .map(Awaited::Settled)
                     .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
                 None if batch.consumer == AggregateConsumer::Race => {
                     Err(RuntimeError::AggregateAwaitUnsettled {
@@ -560,16 +722,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 _ => return Err(RuntimeError::InvalidAggregateAwaitRecordShape),
             }
         }
-        let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
-        let reply = self
+        let (operations, active_nodes) = self.batch_leaf_operations(batch, values, reissued)?;
+        let reply = match self
             .perform_resource_operation_batch(
                 operations,
                 &active_nodes,
                 batch.consumer,
                 settled_value_after,
             )
-            .await?;
-        match reply {
+            .await?
+        {
+            Awaited::Settled(reply) => reply,
+            Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+        };
+        let value = match reply {
             ResourceOperationBatchOutcome::Selected { leaf, result } => match result {
                 ResourceOperationOutcome::Value(value) => {
                     if let Some(Some(active)) = active_nodes.get(leaf) {
@@ -610,7 +776,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         problem: format!("a {aggregate} cannot be answered with every result"),
                     },
                 )),
-        }
+        };
+        value.map(Awaited::Settled)
     }
 
     /// The `AggregateError` a `Promise.any` rejects with when no operand
@@ -654,14 +821,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// The one host call an aggregate makes, with its reply validated against
     /// the consumer mode that asked for it. Any refusal fails every leaf's
     /// execution node before it is returned: a malformed reply fails closed
-    /// rather than being repaired into a plausible answer.
+    /// rather than being repaired into a plausible answer. A host that parks
+    /// the run on the batch answers nothing: every leaf's node takes back the
+    /// occurrence it began with, for the batch issued again.
     async fn perform_resource_operation_batch(
         &mut self,
         leaves: Vec<ResourceOperationBatchLeaf>,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
         consumer: AggregateConsumer,
         settled_value_after: Option<usize>,
-    ) -> Result<ResourceOperationBatchOutcome, RuntimeError> {
+    ) -> Result<Awaited<ResourceOperationBatchOutcome>, RuntimeError> {
         let expected = leaves.len();
         let result = self
             .host
@@ -673,7 +842,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .await;
         let reply = match result {
             Ok(AbilityOutcome::ResourceOperationBatch(reply)) => reply,
-            Ok(AbilityOutcome::Value(_) | AbilityOutcome::Unit | AbilityOutcome::HandedOver) => {
+            Ok(AbilityOutcome::HandedOver) => {
+                // Last begun, first taken back: leaves of one node give their
+                // occurrences back down to the first they took.
+                for active in active_nodes.iter().rev().flatten() {
+                    self.rewind_lashlang_execution(active);
+                }
+                return Ok(Awaited::Parked(()));
+            }
+            Ok(AbilityOutcome::Value(_) | AbilityOutcome::Unit) => {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
                     RuntimeError::InvalidResourceBatchResult,
@@ -755,7 +932,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 RuntimeError::ResourceBatchReply { problem },
             ));
         }
-        Ok(reply)
+        Ok(Awaited::Settled(reply))
     }
 
     fn fail_resource_operation_batch(
@@ -825,95 +1002,129 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// record of them, into result records. A value with no handle in it is
     /// already resolved: awaiting it is a guest error, never a wrapped
     /// `{ ok: false }` that reads like a host failure.
-    fn await_value<'vm>(
-        &'vm self,
+    ///
+    /// Each handle is one host await, in traversal order. A host may park the
+    /// run on any of them (FIG-4275): the walk stops there and answers the
+    /// results it already has, which the continuation carries, so a run
+    /// resumed from it (`settled`) takes those instead of asking again and
+    /// issues only the await it parked on. A `reissued` await was observed
+    /// waiting before its park, and is not observed again.
+    async fn await_value(
+        &self,
         handle: Value,
-        active: Option<&'vm ActiveLashlangExecutionNode>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + 'vm>,
-    > {
-        Box::pin(async move {
+        active: Option<&ActiveLashlangExecutionNode>,
+        reissued: bool,
+        settled: Vec<Value>,
+    ) -> Result<Awaited<Value, Vec<Value>>, RuntimeError> {
+        if !reissued {
             self.observe_child_process_wait(active, &handle);
-            let result = self.await_value_at(handle, String::new()).await;
-            if result.is_ok() && !self.host.is_cancelled() {
-                self.observe_wait_resumed(active);
+        }
+        let mut cursor = AwaitCursor {
+            replay: settled.into_iter(),
+            settled: Vec::new(),
+        };
+        match self
+            .await_value_at(handle, String::new(), &mut cursor)
+            .await?
+        {
+            Awaited::Settled(value) => {
+                // The results a continuation carried are the walk's first
+                // leaves; one it never reached is not this value's.
+                if cursor.replay.next().is_some() {
+                    return Err(RuntimeError::AggregateAwaitValueOutOfRange);
+                }
+                if !self.host.is_cancelled() {
+                    self.observe_wait_resumed(active);
+                }
+                Ok(Awaited::Settled(value))
             }
-            result
-        })
+            Awaited::Parked(()) => Ok(Awaited::Parked(cursor.settled)),
+        }
     }
 
     fn await_value_at<'vm>(
         &'vm self,
         handle: Value,
         path: String,
+        cursor: &'vm mut AwaitCursor,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + 'vm>,
+        Box<dyn std::future::Future<Output = Result<Awaited<Value>, RuntimeError>> + Send + 'vm>,
     > {
         Box::pin(async move {
             match handle {
                 Value::Tuple(handles) => {
                     let mut values = Vec::with_capacity(handles.len());
                     for (index, handle) in handles.iter().cloned().enumerate() {
-                        values.push(
-                            self.await_value_at(handle, format!("{path}[{index}]"))
-                                .await?,
-                        );
+                        match self
+                            .await_value_at(handle, format!("{path}[{index}]"), cursor)
+                            .await?
+                        {
+                            Awaited::Settled(value) => values.push(value),
+                            Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+                        }
                     }
-                    Ok(Value::Tuple(values.into()))
+                    Ok(Awaited::Settled(Value::Tuple(values.into())))
                 }
                 Value::List(handles) => {
                     let mut values = Vec::with_capacity(handles.len());
                     for (index, handle) in handles.iter().cloned().enumerate() {
-                        values.push(
-                            self.await_value_at(handle, format!("{path}[{index}]"))
-                                .await?,
-                        );
+                        match self
+                            .await_value_at(handle, format!("{path}[{index}]"), cursor)
+                            .await?
+                        {
+                            Awaited::Settled(value) => values.push(value),
+                            Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+                        }
                     }
-                    Ok(Value::List(values.into()))
+                    Ok(Awaited::Settled(Value::List(values.into())))
                 }
                 Value::Record(handles) if is_process_handle(&handles) => {
-                    let result = self
-                        .host
-                        .perform(AbilityOp::Await(Value::Record(handles)))
-                        .await;
-                    Ok(match result {
-                        Ok(AbilityOutcome::Value(value)) => host_success(value, "await"),
-                        Ok(AbilityOutcome::ResourceOperationBatch(_)) => {
-                            execution_host_error_value(
-                                ExecutionHostError::new(
-                                    "await returned a resource operation batch result",
-                                ),
+                    let value = match cursor.replay.next() {
+                        Some(value) => value,
+                        None => match self
+                            .host
+                            .perform(AbilityOp::Await(Value::Record(handles)))
+                            .await
+                        {
+                            Ok(AbilityOutcome::HandedOver) => return Ok(Awaited::Parked(())),
+                            Ok(AbilityOutcome::Value(value)) => host_success(value, "await"),
+                            Ok(AbilityOutcome::ResourceOperationBatch(_)) => {
+                                execution_host_error_value(
+                                    ExecutionHostError::new(
+                                        "await returned a resource operation batch result",
+                                    ),
+                                    "await",
+                                )
+                            }
+                            Ok(AbilityOutcome::Unit) => execution_host_error_value(
+                                ExecutionHostError::new("await returned no value"),
                                 "await",
-                            )
-                        }
-                        Ok(AbilityOutcome::Unit) => execution_host_error_value(
-                            ExecutionHostError::new("await returned no value"),
-                            "await",
-                        ),
-                        Ok(AbilityOutcome::HandedOver) => execution_host_error_value(
-                            ExecutionHostError::new("await returned a hand-over"),
-                            "await",
-                        ),
-                        Err(error) => execution_host_error_value(error, "await"),
-                    })
+                            ),
+                            Err(error) => execution_host_error_value(error, "await"),
+                        },
+                    };
+                    cursor.settled.push(value.clone());
+                    Ok(Awaited::Settled(value))
                 }
                 Value::Record(handles) => {
                     let mut record = record_with_capacity(handles.len());
                     for entry in handles.entries.iter() {
-                        record.insert_symbolized(
-                            &entry.symbol,
-                            self.await_value_at(
-                                entry.value.clone(),
-                                if path.is_empty() {
-                                    entry.symbol.as_str().to_string()
-                                } else {
-                                    format!("{path}.{}", entry.symbol.as_str())
-                                },
-                            )
-                            .await?,
-                        );
+                        let path = if path.is_empty() {
+                            entry.symbol.as_str().to_string()
+                        } else {
+                            format!("{path}.{}", entry.symbol.as_str())
+                        };
+                        match self
+                            .await_value_at(entry.value.clone(), path, cursor)
+                            .await?
+                        {
+                            Awaited::Settled(value) => {
+                                record.insert_symbolized(&entry.symbol, value);
+                            }
+                            Awaited::Parked(()) => return Ok(Awaited::Parked(())),
+                        }
                     }
-                    Ok(Value::Record(Arc::new(record)))
+                    Ok(Awaited::Settled(Value::Record(Arc::new(record))))
                 }
                 resolved => Err(RuntimeError::AwaitExpectsHandle {
                     found: if path.is_empty() {
@@ -926,23 +1137,37 @@ impl<H: ExecutionHost> Vm<'_, H> {
         })
     }
 
+    /// [`Self::await_value`] with each result unwrapped; a lone handle's
+    /// failure is raised as it arrives.
     async fn await_value_unwrap(
         &self,
         handle: Value,
         active: Option<&ActiveLashlangExecutionNode>,
-    ) -> Result<Value, RuntimeError> {
+        reissued: bool,
+        settled: Vec<Value>,
+    ) -> Result<Awaited<Value, Vec<Value>>, RuntimeError> {
         match handle {
             Value::Record(handles) if is_process_handle(&handles) => {
-                self.observe_child_process_wait(active, &Value::Record(handles.clone()));
+                // A lone handle parks with nothing settled.
+                if !settled.is_empty() {
+                    return Err(RuntimeError::AggregateAwaitValueOutOfRange);
+                }
+                if !reissued {
+                    self.observe_child_process_wait(active, &Value::Record(handles.clone()));
+                }
                 let result = self
                     .host
                     .perform(AbilityOp::Await(Value::Record(handles)))
                     .await;
+                if matches!(result, Ok(AbilityOutcome::HandedOver)) {
+                    return Ok(Awaited::Parked(Vec::new()));
+                }
                 if result.is_ok() && !self.host.is_cancelled() {
                     self.observe_wait_resumed(active);
                 }
                 result
                     .and_then(|result| result.into_value("await"))
+                    .map(Awaited::Settled)
                     .map_err(|error| {
                         if error.tool_failure_code().is_some() {
                             RuntimeError::UnwrappedHostToolResultFailed { source: error }
@@ -954,7 +1179,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     })
             }
             Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
-                unwrap_tool_result(self.await_value(handle, active).await?)
+                match self.await_value(handle, active, reissued, settled).await? {
+                    Awaited::Settled(value) => unwrap_tool_result(value).map(Awaited::Settled),
+                    Awaited::Parked(settled) => Ok(Awaited::Parked(settled)),
+                }
             }
             resolved => Err(RuntimeError::AwaitExpectsHandle {
                 found: value_type_name(&resolved).to_string(),

@@ -1754,8 +1754,8 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_tu
     // `BeforeCompletion` checkpoint never extends it — the committed answer
     // stays the turn's answer, and the admission is carried into a follow-on
     // physical turn of the same logical run: no idle gap, no wait for the
-    // user, and the session execution lease held across the seam so the
-    // admission stays generation-valid (ADR 0029).
+    // user, and the root retains its admitted rows across the seam under
+    // the drive fence (ADR 0101).
     const SESSION_ID: &str = "terminal-checkpoint-follow-on";
 
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -2411,17 +2411,11 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
     ));
 }
 
-// Regression (ADR 0029): a long-running turn must keep the queued work it
-// already admitted across a stall, no matter how short the lease TTL is.
-// Queued-work batches are admitted at active-turn checkpoints to the turn's
-// root; the binding carries no TTL of its own. So a turn that admits a batch
-// at one checkpoint, stalls past the (tiny) lease TTL -- here a slow provider
-// call, while the session lease keeps renewing on its background cadence and
-// preserves its generation -- then crosses another checkpoint re-runs
-// `admit_at_checkpoint` under the *same* live fence, which can never
-// self-steal its own rows. At finalization the root still holds its rows and
-// the commit succeeds. Before generation fencing this failed with
-// a binding-expiry refusal because the binding expired under the stalled owner.
+// Regression (ADR 0101): a long-running turn keeps the queued work its
+// root admitted across a provider stall. Root bindings carry no TTL, and
+// re-executing admission reads the existing binding instead of taking rows
+// twice. At finalization the root still holds its rows and the fenced
+// commit succeeds.
 //
 // This test must FAIL if anyone reintroduces time- or renewal-based binding
 // invalidation. The turn is driven with an in-process `TurnInput` (not an

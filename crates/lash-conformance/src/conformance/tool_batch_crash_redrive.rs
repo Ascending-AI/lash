@@ -3,7 +3,7 @@
 //! One model response issues two parallel tool calls, which the runtime
 //! dispatches as one batch. The `settled` member answers at once; the `held`
 //! member starts and then waits on a gate the law controls. Once the settled
-//! member has answered and its settlement has had time to become durable, the
+//! member has a reread durable final, the
 //! law kills the turn's execution where it stands, with the held member still
 //! in flight, and leaves the turn to the tier's recovery: a fresh driver over
 //! the same host in process, Restate's redelivery of the same invocation on a
@@ -29,11 +29,6 @@ use lash_sansio::sync::MutexExt as _;
 /// The law's deadlock budget for each run of the turn.
 const TURN_BUDGET: Duration = Duration::from_secs(60);
 
-/// How long the settled member's settlement is given to become durable before
-/// the crash. The member answered by then; this covers only the journaling of
-/// its answer, so the crash cuts after a completion the recovery must reuse.
-const SETTLEMENT_GRACE: Duration = Duration::from_millis(500);
-
 const SETTLED: &str = "batch_redrive_settled";
 const HELD: &str = "batch_redrive_held";
 
@@ -41,6 +36,8 @@ const HELD: &str = "batch_redrive_held";
 #[derive(Default)]
 struct MemberWitness {
     started: std::sync::Mutex<BTreeMap<String, usize>>,
+    call_ids: std::sync::Mutex<BTreeMap<String, crate::ToolCallId>>,
+    recorded: Arc<super::recorded_batch::RecordedBatch>,
     executed: std::sync::Mutex<BTreeMap<String, usize>>,
     released: tokio::sync::Notify,
     open: std::sync::atomic::AtomicBool,
@@ -107,6 +104,10 @@ impl crate::ToolProvider for RedriveMembers {
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let name = call.name().to_string();
+        self.witness
+            .call_ids
+            .lock_recover()
+            .insert(name.clone(), call.context.call_id().clone());
         *self
             .witness
             .started
@@ -188,6 +189,9 @@ async fn drive_redrive_turn(
             }
         })
         .build();
+    let recorded = Arc::clone(&witness.recorded);
+    let turn_scope = crate::testing::LayeredEffectHost::layer_scoped(turn_scope, recorded.layer())
+        .expect("observe batch group opens");
     let law_backend = crate::LawBackend::over_stores(Arc::clone(&stores), host);
     let mut config = law_backend.host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -317,12 +321,18 @@ pub async fn a_settled_batch_member_runs_once_across_a_turn_crash(
     };
     let fire = {
         let witness = Arc::clone(&witness);
+        let host = Arc::clone(&host);
+        let admitted = admitted.clone();
         let crash = crash.clone();
         crate::task::spawn(async move {
             while !(witness.executed(SETTLED) >= 1 && witness.started(HELD) >= 1) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(SETTLEMENT_GRACE).await;
+            let call_id = witness.call_ids.lock_recover()[SETTLED].clone();
+            witness
+                .recorded
+                .final_for(host.as_ref(), admitted, &call_id, TURN_BUDGET)
+                .await;
             // The held member is still in flight: its gate opens only in the
             // redriving attempt.
             assert_eq!(

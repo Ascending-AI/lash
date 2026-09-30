@@ -268,11 +268,11 @@ impl RuntimeEffectController for RecordingEffectController<'_> {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
             .controller()
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 }
@@ -675,7 +675,10 @@ async fn provider_panic_is_typed_and_non_retryable() {
     lash_core::panic_containment::set_loud(false);
     let mut provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let failure = provider
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("typed failure");
 
@@ -703,7 +706,10 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
         ClassifierKeywordPanicProvider,
     )));
     let failure = provider
-        .complete(request())
+        .complete(
+            request(),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("typed failure");
 
@@ -1226,6 +1232,300 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
             "lash:provider_panicked".into()
         ),
         "the callback and task join retain the same typed failure"
+    );
+    lash_core::panic_containment::set_loud(false);
+    drop(controller);
+    handler.close().await.unwrap();
+}
+
+/// Which callback of [`DesugaredPanicProvider`] panics before returning its
+/// future.
+#[derive(Clone, Copy, Debug)]
+enum DesugaredPanicCallback {
+    Complete,
+    Close,
+    Reconcile,
+}
+
+impl DesugaredPanicCallback {
+    fn payload(self) -> &'static str {
+        match self {
+            Self::Complete => "desugared complete construction payload",
+            Self::Close => "desugared close construction payload",
+            Self::Reconcile => "desugared reconciliation construction payload",
+        }
+    }
+
+    /// Panics with a literal payload so the loud-mode path propagates the
+    /// original `&'static str` value, not a formatted `String`.
+    fn panic_at_construction(self) -> ! {
+        match self {
+            Self::Complete => panic!("desugared complete construction payload"),
+            Self::Close => panic!("desugared close construction payload"),
+            Self::Reconcile => panic!("desugared reconciliation construction payload"),
+        }
+    }
+}
+
+/// A `Provider` written the way `#[async_trait]` desugars the trait: each
+/// method's body runs when the handle invokes it, so this panic happens while
+/// the call's boxed future is being constructed — before any future exists
+/// for the unwind catcher's poll to cover.
+#[derive(Clone, Debug)]
+struct DesugaredPanicProvider {
+    callback: DesugaredPanicCallback,
+}
+
+impl Provider for DesugaredPanicProvider {
+    fn kind(&self) -> &'static str {
+        "desugared-panic-provider"
+    }
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+    fn set_options(&mut self, _: ProviderOptions) {}
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+    fn complete<'life0, 'async_trait>(
+        &'life0 mut self,
+        _: LlmRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<LlmResponse, LlmTransportError>>
+                + Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        let callback = self.callback;
+        if matches!(callback, DesugaredPanicCallback::Complete) {
+            callback.panic_at_construction();
+        }
+        Box::pin(async move {
+            let mut auxiliary =
+                ProviderHandle::new(ProviderComponents::new(Box::new(DesugaredPanicProvider {
+                    callback,
+                })));
+            match callback {
+                DesugaredPanicCallback::Close => auxiliary.close().await?,
+                DesugaredPanicCallback::Reconcile => {
+                    auxiliary.reconcile_usage("generation").await?;
+                }
+                DesugaredPanicCallback::Complete => {
+                    unreachable!("the complete arm panics before boxing")
+                }
+            }
+            panic!("the panicking callback cannot succeed")
+        })
+    }
+    fn close<'life0, 'async_trait>(
+        &'life0 self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), LlmTransportError>> + Send + 'async_trait>,
+    >
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        if matches!(self.callback, DesugaredPanicCallback::Close) {
+            self.callback.panic_at_construction();
+        }
+        Box::pin(async { Ok(()) })
+    }
+    fn reconcile_usage<'life0, 'life1, 'async_trait>(
+        &'life0 mut self,
+        _: &'life1 str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        Option<lash_core::provider::ReconciledUsage>,
+                        LlmTransportError,
+                    >,
+                > + Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        if matches!(self.callback, DesugaredPanicCallback::Reconcile) {
+            self.callback.panic_at_construction();
+        }
+        Box::pin(async { Ok(None) })
+    }
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "isolated test processes own the process-scoped panic mode"
+)]
+#[tokio::test]
+async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_modes() {
+    use futures_util::FutureExt as _;
+    const TEST: &str = "provider_desugared_construction_panics_are_typed_in_quiet_and_loud_modes";
+    let Ok(case) = std::env::var("LASH_DESUGARED_PANIC_CASE") else {
+        for case in [
+            "quiet-complete",
+            "loud-complete",
+            "quiet-close",
+            "loud-close",
+            "quiet-reconcile",
+            "loud-reconcile",
+        ] {
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                tokio::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+                    .env("LASH_DESUGARED_PANIC_CASE", case)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .expect("isolated panic case has a bounded lifetime")
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "isolated case must actually run"
+            );
+        }
+        return;
+    };
+    let loud = case.starts_with("loud");
+    let callback = match case
+        .strip_prefix("quiet-")
+        .or_else(|| case.strip_prefix("loud-"))
+    {
+        Some("complete") => DesugaredPanicCallback::Complete,
+        Some("close") => DesugaredPanicCallback::Close,
+        Some("reconcile") => DesugaredPanicCallback::Reconcile,
+        other => panic!("unknown desugared panic case {other:?}"),
+    };
+    let expected_message = callback.payload();
+    lash_core::panic_containment::set_loud(loud);
+    let mut auxiliary =
+        ProviderHandle::new(ProviderComponents::new(Box::new(DesugaredPanicProvider {
+            callback,
+        })));
+    let mut complete_call_record = None;
+    let direct = std::panic::AssertUnwindSafe(async {
+        match callback {
+            DesugaredPanicCallback::Complete => auxiliary
+                .complete(
+                    request(),
+                    <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|failure| {
+                    complete_call_record = Some(failure.call_record);
+                    failure.error
+                }),
+            DesugaredPanicCallback::Close => auxiliary.close().await,
+            DesugaredPanicCallback::Reconcile => {
+                auxiliary.reconcile_usage("generation").await.map(|_| ())
+            }
+        }
+    })
+    .catch_unwind()
+    .await;
+    if loud {
+        let payload = direct.expect_err("loud construction panic propagates");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&expected_message));
+    } else {
+        let error = direct
+            .expect("quiet containment does not unwind")
+            .expect_err("typed callback failure");
+        assert_eq!(
+            error.code.as_ref().unwrap().to_string(),
+            "lash:provider_panicked"
+        );
+        assert_eq!(error.message, expected_message);
+        assert!(!error.is_retryable());
+        if let Some(record) = complete_call_record {
+            assert_eq!(
+                record.attempts.len(),
+                1,
+                "a construction panic cannot retry"
+            );
+            assert_eq!(
+                record.attempts[0]
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.reason.as_deref()),
+                Some("not_retryable")
+            );
+        }
+    }
+    let double = double(0x4318).await;
+    let backend = double.lash_backend();
+    let session_id = SessionId::from("desugared-panic-session");
+    let turn_id = TurnId::from("desugared-panic-turn");
+    let handler = double
+        .open_handler(AdmittedScope::turn(session_id.clone(), turn_id.clone()))
+        .await
+        .unwrap();
+    let controller = recording_controller(&handler);
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend,
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(ProviderHandle::new(
+        ProviderComponents::new(Box::new(DesugaredPanicProvider { callback })),
+    )));
+    let mut runtime = Box::pin(
+        LashRuntime::builder(host, test_runtime_owner())
+            .with_session_id(session_id.to_string())
+            .with_policy(policy("desugared-panic-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
+    )
+    .await
+    .unwrap();
+    let result = std::panic::AssertUnwindSafe(runtime.drive_turn(
+        TurnInput::text("invoke desugared callback"),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            recording_turn_scope(&controller, &session_id, &turn_id),
+        ),
+    ))
+    .catch_unwind()
+    .await;
+    assert_eq!(
+        result.is_err(),
+        loud,
+        "only loud mode propagates after recording"
+    );
+    if !loud {
+        result.unwrap().expect("quiet turn settles");
+    }
+    assert_eq!(
+        controller.provider_panic_projection(),
+        (
+            Some("lash:provider_panicked".into()),
+            "provider call failed".into(),
+            "lash:provider_panicked".into()
+        ),
+        "the construction panic and task join retain the same typed failure"
     );
     lash_core::panic_containment::set_loud(false);
     drop(controller);

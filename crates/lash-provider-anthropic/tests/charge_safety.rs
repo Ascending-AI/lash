@@ -104,9 +104,11 @@ fn output_started_refusal(body: &'static str, tokens_at_stake: u64) -> ProviderC
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(
-            handle.complete_with_charge_safety(request(), ChargeSafetyPolicy::RequireGuarantee),
-        )
+        .block_on(handle.complete_with_charge_safety(
+            request(),
+            ChargeSafetyPolicy::RequireGuarantee,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        ))
         .expect_err("escaped provider output must stop the retry ladder");
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -140,9 +142,11 @@ fn empty_stream_partial_retry(body: &'static str) -> ProviderCompletionError {
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(
-            handle.complete_with_charge_safety(request(), ChargeSafetyPolicy::RequireGuarantee),
-        )
+        .block_on(handle.complete_with_charge_safety(
+            request(),
+            ChargeSafetyPolicy::RequireGuarantee,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        ))
         .expect_err("two truncated responses exhaust the retry budget");
 
     assert_eq!(calls.load(Ordering::SeqCst), 2);

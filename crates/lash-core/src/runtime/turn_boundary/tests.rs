@@ -7,8 +7,7 @@ use crate::store::SessionStore;
 use crate::testing::RuntimeStoreTestDriveExt as _;
 use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
-    AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
-    shared_parts,
+    AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
 };
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 use lash_sansio::sync::MutexExt;
@@ -31,20 +30,6 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
             None,
         )]),
         origin: None,
-    }
-}
-fn usage_entry(source: &str, model: &str, input_tokens: i64) -> crate::TokenLedgerEntry {
-    crate::TokenLedgerEntry {
-        source: source.to_string(),
-        model: model.to_string(),
-        usage: TokenUsage {
-            input_tokens,
-            output_tokens: 2,
-            cache_read_input_tokens: 1,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 0,
-        },
-        usage_disposition: Default::default(),
     }
 }
 #[test]
@@ -313,7 +298,6 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled {
                 evidence: honoured.clone(),
@@ -665,7 +649,6 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             },
             agent_frame_switch_materializes: true,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &outcome,
             ingress_settlement: TurnIngressSettlement::default(),
@@ -731,7 +714,6 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
@@ -837,7 +819,6 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
@@ -948,7 +929,6 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
@@ -1031,7 +1011,6 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             ingress_settlement: TurnIngressSettlement::default(),
@@ -1065,7 +1044,9 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
 }
 #[tokio::test]
 async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::sqlite_recording_backend()
+        .await
+        .attachment_store();
     let attachment = crate::AttachmentStore::put(
         backend.as_ref(),
         vec![1, 2, 3],
@@ -1104,7 +1085,7 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
 
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(
-        crate::AttachmentStore::get(backend.as_ref(), &attachment.id)
+        crate::AttachmentStore::get(backend.as_ref(), &attachment.id, 32 * 1024 * 1024)
             .await
             .expect("replayed exec attachment survives GC")
             .bytes,
@@ -1113,18 +1094,11 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
 }
 
 #[tokio::test]
-async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
+async fn final_commit_updates_persisted_graph_count() {
     let graph =
         SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-    let usage_entries = vec![
-        usage_entry("child", "gpt", 5),
-        usage_entry("turn", "gpt", 17),
-    ];
     let (_, store) = recording_session().await;
     let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
-    let usage =
-        crate::store::RuntimeUsageDelta::for_operation(&pipeline.final_operation(), &usage_entries)
-            .expect("stage test usage");
     let returned_state = pipeline.export_state_for_assembly();
 
     pipeline
@@ -1136,7 +1110,6 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             ),
             agent_frame_switch_materializes: false,
             store: Some(&store),
-            usage_deltas: &usage,
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             tool_calls: &[],
@@ -1154,16 +1127,6 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
         .await
         .expect("commit");
 
-    assert_eq!(
-        store
-            .load_usage_totals()
-            .await
-            .expect("load committed usage")
-            .rows
-            .len(),
-        2
-    );
-    assert_eq!(pipeline.state_mut().usage.rows.len(), 2);
     assert!(pipeline.state_mut().execution_state_snapshot().is_none());
     assert!(pipeline.state_mut().head_revision > 0);
 }
@@ -1203,7 +1166,6 @@ async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
                 execution_state_update: ExecutionStateUpdate::Clean,
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
-                usage_deltas: &[],
                 failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
@@ -1239,17 +1201,10 @@ async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
 }
 
 #[tokio::test]
-async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usage() {
+async fn no_store_final_commit_discards_snapshots_without_touching_graph() {
     let graph =
         SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-    let usage = vec![usage_entry("turn", "model", 5)];
     let mut state = state_with_graph(graph.clone());
-    for entry in &usage {
-        state
-            .usage
-            .fold_checked(entry)
-            .expect("fold the resident usage");
-    }
     state.set_tool_state_snapshot(Some(crate::ToolState::default()));
     state.set_plugin_state(Some(crate::PluginState::default()));
     state.set_execution_state_snapshot(Some(b"runtime".to_vec().into()));
@@ -1263,7 +1218,6 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
             store: None,
-            usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
             tool_calls: &[],
@@ -1283,7 +1237,6 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
 
     let state = pipeline.state_mut();
     assert_eq!(state.session_graph.nodes.len(), graph.nodes.len() + 1);
-    assert_eq!(state.usage.rows.len(), usage.len());
     assert!(state.tool_state_snapshot().is_none());
     assert!(state.plugin_state().is_none());
     // Without a store the committed execution snapshot is the only accepted

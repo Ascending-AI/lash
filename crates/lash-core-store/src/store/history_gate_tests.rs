@@ -6,7 +6,6 @@ fn history_reads_are_budgeted_or_predicates() {
     let materialized = [
         "SessionWindowRead",
         "HistoryPage",
-        "UsageLedgerPage",
         "FailureEvidencePage",
         "SessionNodeRecord",
         "SessionGraph",
@@ -33,21 +32,13 @@ fn history_reads_are_budgeted_or_predicates() {
         [
             "load_session_window",
             "load_ancestors",
-            "load_usage_ledger_page",
             "load_failure_evidence_page",
         ],
         "the materializing history operation inventory changed"
     );
 
-    // The first operation is an existence predicate. The second returns only
-    // grouped counters and outstanding holes, with no historical payloads.
-    let non_materializing = [
-        ("contains_active_ancestor", "Result<bool, StoreError>"),
-        (
-            "load_usage_totals",
-            "Result<crate::usage::SessionUsageTotals, StoreError>",
-        ),
-    ];
+    // The only non-materializing operation is an existence predicate.
+    let non_materializing = [("contains_active_ancestor", "Result<bool, StoreError>")];
     for (name, answer) in non_materializing {
         let signature = operations
             .iter()

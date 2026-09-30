@@ -69,7 +69,7 @@ counterpart use the durable sequential async-map driver. The all-settled form
 wraps each callback in guest `try`/`catch`, so a rejection becomes that input's
 `{status: "rejected", reason}` record and later callbacks still run. Promise
 chaining and synthetic promises remain named rejects.
-Tool calls require `await` and use explicit `typescript.tool` module paths;
+Tool calls require `await` and use explicit `lash.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
 
@@ -91,6 +91,9 @@ process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. A capture the lift cannot carry by value rejects as a non-liftable
 capture.
 
+A trigger target uses `{ definition: worker }` or `{ definition_id: id }`
+(ADR 0095). The definition can also be an inline async arrow:
+`target: { definition: async (event) => { return event; } }`.
 A trigger registration binds the fired event through the `inputs` arrow:
 `inputs: (event) => ({ tick: event })`, on `triggers.register` / `update` /
 `revive` alike. The arrow is a template the

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Check ADR narration, numbered citations, and the live README index.
 
-This gate uses the Python standard library. Report-only defaults let the
-FIG-4326 rewrite batches land before enforcement. Self-tests use explicit
-enforcement, so warning mode does not weaken the regression evidence.
+This gate uses the Python standard library. Every rule enforces on main;
+the explicit flags keep the report-only mode reachable for staged rollouts.
+Self-tests exercise both modes, so warning mode does not weaken the
+regression evidence.
 """
 
 from __future__ import annotations
@@ -17,8 +18,8 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENFORCE_NARRATION = False
-ENFORCE_CITATIONS = False
+ENFORCE_NARRATION = True
+ENFORCE_CITATIONS = True
 SCAN_ROOTS = ("crates", "scripts", "runbooks", "examples", "docs", "tests")
 SKIP_DIRS = {".git", "node_modules", "target", ".tgt", ".venv", "__pycache__"}
 INDEX_START = "<!-- adr-index:start -->"

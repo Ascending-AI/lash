@@ -33,7 +33,8 @@ pub mod testing;
 
 pub use authority::{
     AdmittedContext, ArgumentContract, AuthorityRefusal, BoundOperation, FrozenBindings,
-    HandleGrant, Invocation, OperationRequest, RequestFingerprint, ToolRoute,
+    HandleGrant, Invocation, OperationRequest, OperationRequestCodec, RequestFingerprint,
+    ToolRoute,
 };
 pub use broker::{
     Broker, BrokerBounds, BrokerFailure, BrokeredEnd, FrameFence, ParkedOperation, RunStart,

@@ -18,6 +18,7 @@ pub(super) use crate::llm::types::{
 pub(super) use lash_sansio::llm::capability::ReasoningIntent;
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};
 
+pub(super) use super::dispatch_admission::*;
 #[cfg(test)]
 pub(super) use super::handle::*;
 pub(super) use super::options::*;

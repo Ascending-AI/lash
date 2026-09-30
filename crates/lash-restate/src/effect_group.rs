@@ -75,15 +75,15 @@ pub use wire::{
 mod shape;
 pub use shape::{EffectGroupMembership, EffectGroupShape};
 
+/// Who dispatches a preparing group. The adopted dispatcher's id is kept so a
+/// retirement before registration can cancel it and the child calls it
+/// tracks; the children's own ids are recorded only by the registration that
+/// makes the group ready (FIG-4308).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupDispatchState {
     Unadopted,
-    Adopted {
-        id: String,
-        #[serde(with = "btree_map_as_pairs")]
-        dispatched: BTreeMap<usize, String>,
-    },
+    Adopted { id: String },
 }
 
 mod state_record;
@@ -250,12 +250,9 @@ pub(crate) trait EffectGroupState {
     async fn probe_and_adopt(
         call: Call<EffectGroupAdoptRequest>,
     ) -> HandlerResult<Reply<EffectGroupProbeAdoptResponse>>;
-    async fn record_dispatch(
-        call: Call<EffectGroupRecordDispatchRequest>,
-    ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>>;
-    async fn register_children(
-        call: Call<EffectGroupRegisterRequest>,
-    ) -> HandlerResult<Reply<EffectGroupRegisterResponse>>;
+    async fn register_dispatch(
+        call: Call<EffectGroupRegisterDispatchRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterDispatchResponse>>;
     async fn register_refusal(
         call: Call<EffectGroupRefusalRequest>,
     ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>>;
@@ -413,7 +410,6 @@ impl EffectGroupState for EffectGroupStateImpl {
                         live: EffectGroupStateLiveRecord {
                             shape: request.shape,
                             next_rank: 1,
-                            next_commit_seq: 1,
                             commit_states: BTreeMap::new(),
                             settlements: BTreeMap::new(),
                             settled_positions: BTreeMap::new(),
@@ -505,7 +501,6 @@ impl EffectGroupState for EffectGroupStateImpl {
                 EffectGroupDispatchState::Unadopted => {
                     *dispatch = EffectGroupDispatchState::Adopted {
                         id: request.invocation_id,
-                        dispatched: BTreeMap::new(),
                     };
                     store_index(&ctx, object.writer, record);
                     EffectGroupProbeAdoptResponse::Adopted {
@@ -530,137 +525,94 @@ impl EffectGroupState for EffectGroupStateImpl {
         Ok(Reply::at(wire, response))
     }
 
-    async fn record_dispatch(
+    /// Records every child's invocation id and makes the group ready, in one
+    /// step (FIG-4308): the dispatch has issued every child call and journaled
+    /// every id before it registers, so nothing is awaited before this point
+    /// (ADR 0099 §2). The live record moves over as it stands — a child that
+    /// settled while the group was preparing (a generation refusal, which
+    /// precedes admission) keeps its seat. Every ADMIT wake and READY resolve
+    /// in one round trip; a redriven registration of the same map re-resolves
+    /// them, which is idempotent. A retired group is never made ready again.
+    async fn register_dispatch(
         &self,
         ctx: ObjectContext<'_>,
-        call: Call<EffectGroupRecordDispatchRequest>,
-    ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>> {
+        call: Call<EffectGroupRegisterDispatchRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterDispatchResponse>> {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
         let group_key = ctx.key().to_string();
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Reply::at(
                 wire,
-                EffectGroupRecordDispatchResponse::UnknownGroup,
+                EffectGroupRegisterDispatchResponse::UnknownGroup,
             ));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Reply::at(wire, EffectGroupRecordDispatchResponse::Retired));
-        }
-        let shape = record.live()?.shape.clone();
-        let expected_positions = (0..shape.children()).collect::<Vec<_>>();
-        if request.dispatched.keys().copied().collect::<Vec<_>>() != expected_positions {
             return Ok(Reply::at(
                 wire,
-                EffectGroupRecordDispatchResponse::DispatchMismatch,
+                EffectGroupRegisterDispatchResponse::Retired,
             ));
-        }
-        let response = match &mut record.lifecycle {
-            EffectGroupLifecycle::Preparing {
-                dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
-                ..
-            } => {
-                if *dispatched == request.dispatched {
-                    EffectGroupRecordDispatchResponse::Duplicate
-                } else if dispatched
-                    .iter()
-                    .any(|(position, id)| request.dispatched.get(position) != Some(id))
-                {
-                    EffectGroupRecordDispatchResponse::DispatchMismatch
-                } else {
-                    dispatched.clone_from(&request.dispatched);
-                    store_index(&ctx, object.writer, record.clone());
-                    EffectGroupRecordDispatchResponse::Recorded
-                }
-            }
-            EffectGroupLifecycle::Preparing { .. } => {
-                EffectGroupRecordDispatchResponse::DispatchMismatch
-            }
-            EffectGroupLifecycle::Ready { .. } | EffectGroupLifecycle::Closed { .. } => {
-                EffectGroupRecordDispatchResponse::NotPreparing
-            }
-            EffectGroupLifecycle::Retired { .. } => EffectGroupRecordDispatchResponse::Retired,
-        };
-        if matches!(
-            response,
-            EffectGroupRecordDispatchResponse::Recorded
-                | EffectGroupRecordDispatchResponse::Duplicate
-        ) {
-            resolve_group_waits(
-                &ctx,
-                &self.namespace,
-                &shape.wait_scope,
-                &group_key,
-                expected_positions.iter().map(|&position| {
-                    (
-                        EffectGroupWaitKind::Admit(position),
-                        EffectGroupWaitResolution::Admit,
-                    )
-                }),
-            )
-            .await?;
-        }
-        Ok(Reply::at(wire, response))
-    }
-
-    async fn register_children(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<EffectGroupRegisterRequest>,
-    ) -> HandlerResult<Reply<EffectGroupRegisterResponse>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let group_key = ctx.key().to_string();
-        let Some(mut record) = load_index(&ctx).await? else {
-            return Ok(Reply::at(wire, EffectGroupRegisterResponse::UnknownGroup));
-        };
-        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
-            return Ok(Reply::at(wire, EffectGroupRegisterResponse::Retired));
         }
         let shape = record.live()?.shape.clone();
         let expected_positions = (0..shape.children()).collect::<Vec<_>>();
         if request.addresses.keys().copied().collect::<Vec<_>>() != expected_positions {
             return Ok(Reply::at(
                 wire,
-                EffectGroupRegisterResponse::RegistrationMismatch,
+                EffectGroupRegisterDispatchResponse::Mismatch,
             ));
         }
         let response = match &record.lifecycle {
             EffectGroupLifecycle::Preparing {
-                dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
+                dispatch: EffectGroupDispatchState::Adopted { .. },
                 live,
-            } if dispatched == &request.addresses => {
+            } => {
                 record.lifecycle = EffectGroupLifecycle::Ready {
                     addresses: request.addresses,
                     live: live.clone(),
                 };
-                store_index(&ctx, object.writer, record.clone());
-                resolve_group_wait(
-                    &ctx,
-                    &self.namespace,
-                    &shape.wait_scope,
-                    &group_key,
-                    EffectGroupWaitKind::Ready,
-                    EffectGroupWaitResolution::Ready,
-                )
-                .await?;
-                EffectGroupRegisterResponse::Registered
+                store_index(&ctx, object.writer, record);
+                EffectGroupRegisterDispatchResponse::Registered
             }
-            EffectGroupLifecycle::Preparing { .. } => {
-                EffectGroupRegisterResponse::RegistrationMismatch
-            }
+            EffectGroupLifecycle::Preparing {
+                dispatch: EffectGroupDispatchState::Unadopted,
+                ..
+            } => EffectGroupRegisterDispatchResponse::Mismatch,
             EffectGroupLifecycle::Ready { addresses, .. } if addresses == &request.addresses => {
-                EffectGroupRegisterResponse::AlreadyRegistered
+                EffectGroupRegisterDispatchResponse::AlreadyRegistered
             }
-            EffectGroupLifecycle::Ready { .. } => EffectGroupRegisterResponse::RegistrationMismatch,
             EffectGroupLifecycle::Closed { addresses, .. } if addresses == &request.addresses => {
-                EffectGroupRegisterResponse::AlreadyClosed
+                EffectGroupRegisterDispatchResponse::AlreadyClosed
             }
-            EffectGroupLifecycle::Closed { .. } => {
-                EffectGroupRegisterResponse::RegistrationMismatch
+            EffectGroupLifecycle::Ready { .. } | EffectGroupLifecycle::Closed { .. } => {
+                EffectGroupRegisterDispatchResponse::Mismatch
             }
-            EffectGroupLifecycle::Retired { .. } => EffectGroupRegisterResponse::Retired,
+            EffectGroupLifecycle::Retired { .. } => EffectGroupRegisterDispatchResponse::Retired,
         };
+        if matches!(
+            response,
+            EffectGroupRegisterDispatchResponse::Registered
+                | EffectGroupRegisterDispatchResponse::AlreadyRegistered
+        ) {
+            resolve_group_waits(
+                &ctx,
+                &self.namespace,
+                &shape.wait_scope,
+                &group_key,
+                expected_positions
+                    .iter()
+                    .map(|&position| {
+                        (
+                            EffectGroupWaitKind::Admit(position),
+                            EffectGroupWaitResolution::Admit,
+                        )
+                    })
+                    .chain(std::iter::once((
+                        EffectGroupWaitKind::Ready,
+                        EffectGroupWaitResolution::Ready,
+                    ))),
+            )
+            .await?;
+        }
         Ok(Reply::at(wire, response))
     }
 
@@ -746,16 +698,17 @@ impl EffectGroupState for EffectGroupStateImpl {
     }
 
     /// The §4 point for one child's final record: `pending` to `committed`,
-    /// allocating the durable `commit_seq` the §5 barrier orders drains by.
+    /// reserving the settlement rank the child's seat later publishes
+    /// (FIG-4308). A cancel decision takes its rank from the same counter, so
+    /// rank order is the order of §4 decisions.
     ///
-    /// The durable boundary the SQL tiers' `commit_group_child` mirrors: the
-    /// decision and the position commit here, before the child's payload and
+    /// The decision and the rank commit here, before the child's payload and
     /// settlement writes, so a completion reaching the index after a cancel
     /// decision is refused by name and a redrive reads its own commit back
-    /// instead of re-deciding. `blocking_positions` is the barrier as the
-    /// index sees it at the point — every committed sibling below this
-    /// child's position still owed a seat — so the caller waits on durable
-    /// wakes rather than polling.
+    /// instead of re-deciding: a repeated commit allocates nothing. A repeat
+    /// also answers the §5 barrier as the index sees it — every committed
+    /// sibling below the reserved rank still owed a seat — for a seat that did
+    /// not win the commit and so cannot know what it declared.
     async fn commit_child(
         &self,
         ctx: ObjectContext<'_>,
@@ -802,35 +755,24 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupCommitChildResponse::CancelDecided { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { commit_seq }) => {
+            Some(EffectGroupChildCommitState::Committed { rank }) => {
                 return Ok(Reply::at(
                     wire,
                     EffectGroupCommitChildResponse::AlreadyCommitted {
-                        commit_seq,
-                        blocking_positions: blocking_positions(live, commit_seq),
+                        rank,
+                        blocking_positions: blocking_positions(live, rank),
                     },
                 ));
             }
             None => {}
         }
-        let commit_seq = live.next_commit_seq;
-        live.next_commit_seq = live.next_commit_seq.checked_add(1).ok_or_else(|| {
-            TerminalError::new(format!(
-                "effect group {group_key} exhausted commit positions"
-            ))
-        })?;
-        live.commit_states.insert(
-            position,
-            EffectGroupChildCommitState::Committed { commit_seq },
-        );
-        let blocking_positions = blocking_positions(live, commit_seq);
+        let rank = live.reserve_rank(&group_key)?;
+        live.commit_states
+            .insert(position, EffectGroupChildCommitState::Committed { rank });
         store_index(&ctx, object.writer, record);
         Ok(Reply::at(
             wire,
-            EffectGroupCommitChildResponse::Committed {
-                commit_seq,
-                blocking_positions,
-            },
+            EffectGroupCommitChildResponse::Committed { rank },
         ))
     }
 
@@ -884,9 +826,9 @@ impl EffectGroupState for EffectGroupStateImpl {
         ))
     }
 
-    /// The last-committed unseated sibling below `commit_seq`. Its drained
-    /// wake covers every lower-committed sibling by transitivity. An absent
-    /// or retired group holds no committed children, so nothing blocks.
+    /// Every committed sibling ranked below `rank` that has not seated yet.
+    /// An absent or retired group holds no committed children, so nothing
+    /// blocks: retirement releases every barrier.
     async fn drain_blockers(
         &self,
         ctx: SharedObjectContext<'_>,
@@ -897,7 +839,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         let response = match load_index_shared(&ctx).await? {
             Some(record) => match record.live() {
                 Ok(live) => {
-                    let positions = blocking_positions(live, request.commit_seq);
+                    let positions = blocking_positions(live, request.rank);
                     if positions.is_empty() {
                         EffectGroupDrainBlockersResponse::Admitted
                     } else {
@@ -943,11 +885,12 @@ impl EffectGroupState for EffectGroupStateImpl {
         }
         // The §4 point is the decision, not the seat: a child whose cancel
         // disposition committed first is refused by name, one whose own
-        // commit landed seats its rank here, and a settled one reports its
-        // rank back idempotently. A settlement arriving with no commit at
-        // all is a protocol defect — `commit_child` is the only writer of
-        // `Committed` and it runs before any payload exists to settle.
-        match live.commit_states.get(&request.position).copied() {
+        // commit landed publishes the rank that commit reserved, and a
+        // settled one reports its rank back idempotently. A settlement
+        // arriving with no commit at all is a protocol defect — `commit_child`
+        // is the only writer of `Committed` and it runs before any payload
+        // exists to settle.
+        let rank = match live.commit_states.get(&request.position).copied() {
             Some(EffectGroupChildCommitState::CancelDecided) => {
                 let rank = live
                     .settled_positions
@@ -965,10 +908,10 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupRecordSettlementResponse::CancelDecided { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { .. })
+            Some(EffectGroupChildCommitState::Committed { rank })
                 if live.settled_positions.contains_key(&request.position) =>
             {
-                let rank = live
+                let seated = live
                     .settled_positions
                     .get(&request.position)
                     .copied()
@@ -979,6 +922,14 @@ impl EffectGroupState for EffectGroupStateImpl {
                             request.position
                         ))
                     })?;
+                if seated != rank {
+                    return Err(TerminalError::new(format!(
+                        "effect group {group_key} child {} seated rank {seated}, but its \
+                         commit reserved rank {rank}; a seat publishes only its reserved rank",
+                        request.position
+                    ))
+                    .into());
+                }
                 resolve_group_wait(
                     &ctx,
                     &self.namespace,
@@ -993,7 +944,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupRecordSettlementResponse::Duplicate { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { .. }) => {}
+            Some(EffectGroupChildCommitState::Committed { rank }) => rank,
             None => {
                 return Err(TerminalError::new(format!(
                     "effect group {group_key} child {} reached record_settlement with no \
@@ -1003,13 +954,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 ))
                 .into());
             }
-        }
-        let rank = live.next_rank;
-        live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
-            TerminalError::new(format!(
-                "effect group {group_key} exhausted settlement ranks"
-            ))
-        })?;
+        };
         let settlement = EffectGroupSettlementRecord {
             position: request.position,
             sequence: rank,
@@ -1081,7 +1026,29 @@ impl EffectGroupState for EffectGroupStateImpl {
             return Ok(Reply::at(wire, EffectGroupReadRankResponse::Closed));
         }
         let live = record.live()?;
-        if request.run && live.settlements.contains_key(&request.rank) {
+        // A rank is served only inside the seated prefix: every rank up to it
+        // is seated (FIG-4308). A rank reserved at its commit may still be
+        // unpublished while a higher one has seated, and no reader — the
+        // consuming await or the cursorless read — is answered past that
+        // hole. An unserved rank of a group closed to its caller answers
+        // `Closed` to every reader. A reopened caller parks like a live group:
+        // an RTC loser still lands, and a committed child under Cancel seats
+        // its rank when the drain finishes (FIG-3481).
+        let served = (1..=live.seated_prefix())
+            .contains(&request.rank)
+            .then(|| live.settlements.get(&request.rank).cloned())
+            .flatten();
+        let Some(settlement) = served else {
+            return Ok(Reply::at(
+                wire,
+                if closed_to_caller {
+                    EffectGroupReadRankResponse::Closed
+                } else {
+                    EffectGroupReadRankResponse::NotSettled
+                },
+            ));
+        };
+        if request.run {
             let group_key = ctx.key().to_string();
             let ranks = served_run(&ctx, &self.namespace, &group_key, live, request.rank).await?;
             return Ok(Reply::at(
@@ -1089,29 +1056,15 @@ impl EffectGroupState for EffectGroupStateImpl {
                 EffectGroupReadRankResponse::SettledRun { ranks },
             ));
         }
-        if let Some(settlement) = live.settlements.get(&request.rank).cloned() {
-            let child_replay_key = live
-                .shape
-                .member_replay_key(settlement.position)?
-                .to_string();
-            return Ok(Reply::at(
-                wire,
-                EffectGroupReadRankResponse::Settled {
-                    settlement,
-                    child_replay_key,
-                },
-            ));
-        }
-        // An unsettled rank of a group closed to its caller answers `Closed`
-        // to every reader. A reopened caller parks like a live group: an RTC
-        // loser still lands, and a committed child under Cancel seats its
-        // rank when the drain finishes (FIG-3481).
+        let child_replay_key = live
+            .shape
+            .member_replay_key(settlement.position)?
+            .to_string();
         Ok(Reply::at(
             wire,
-            if closed_to_caller {
-                EffectGroupReadRankResponse::Closed
-            } else {
-                EffectGroupReadRankResponse::NotSettled
+            EffectGroupReadRankResponse::Settled {
+                settlement,
+                child_replay_key,
             },
         ))
     }
@@ -1176,12 +1129,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 live.commit_states
                     .insert(position, EffectGroupChildCommitState::CancelDecided);
                 decided.push(position);
-                let rank = live.next_rank;
-                live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
-                    TerminalError::new(format!(
-                        "effect group {group_key} exhausted settlement ranks"
-                    ))
-                })?;
+                let rank = live.reserve_rank(&group_key)?;
                 live.settlements.insert(
                     rank,
                     EffectGroupSettlementRecord {
@@ -1284,13 +1232,9 @@ impl EffectGroupState for EffectGroupStateImpl {
             (live.shape.clone(), live.clone())
         };
         let (dispatcher, dispatched) = match &record.lifecycle {
-            EffectGroupLifecycle::Preparing { dispatch, .. } => {
-                let dispatched = match dispatch {
-                    EffectGroupDispatchState::Unadopted => BTreeMap::new(),
-                    EffectGroupDispatchState::Adopted { dispatched, .. } => dispatched.clone(),
-                };
-                (dispatch.clone(), dispatched)
-            }
+            // Before registration no child id is recorded: retirement cancels
+            // the adopted dispatcher, and the child calls it tracks with it.
+            EffectGroupLifecycle::Preparing { dispatch, .. } => (dispatch.clone(), BTreeMap::new()),
             EffectGroupLifecycle::Ready { addresses, .. }
             | EffectGroupLifecycle::Closed { addresses, .. } => {
                 // A workflow run is exactly-once per workflow key. Re-sending
@@ -1316,7 +1260,6 @@ impl EffectGroupState for EffectGroupStateImpl {
                 (
                     EffectGroupDispatchState::Adopted {
                         id: handle.invocation_id().to_owned(),
-                        dispatched: addresses.clone(),
                     },
                     addresses.clone(),
                 )
@@ -1432,12 +1375,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 live.commit_states
                     .insert(position, EffectGroupChildCommitState::CancelDecided);
                 decided.push(position);
-                let rank = live.next_rank;
-                live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
-                    TerminalError::new(format!(
-                        "effect group {group_key} exhausted settlement ranks during retirement"
-                    ))
-                })?;
+                let rank = live.reserve_rank(&group_key)?;
                 live.settlements.insert(
                     rank,
                     EffectGroupSettlementRecord {

@@ -2,20 +2,18 @@
 //! root's terminal or its park, read from the store alone.
 //!
 //! Resolution makes no engine call. It is engine-neutral, so the interim SQL
-//! engine and Restate share it, and it answers the same after a restart.
+//! engine and Restate share it, and it answers the same after a restart. A
+//! committed root answers from its terminal evidence, which the head commit
+//! of its final physical turn writes with the outcome it committed: one
+//! read, however deep the engine's queues are (FIG-4345).
 
-use std::time::Duration;
-
-use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
+use lash_core::facade_support::TurnOutcome;
 use lash_core::runtime::TurnInputAcceptanceReceipt;
-use lash_core::store::PhysicalTurn;
+use lash_core::store::{PhysicalTurn, RootTerminalCause};
 use lash_core::{InputId, TurnId};
 
 use super::{ParkedTurn, SendParts, StalledDelivery};
 use crate::error::Result;
-
-/// How long one read waits for a committed turn's terminal publication.
-const TERMINAL_READ: Duration = Duration::from_millis(250);
 
 /// What the store says about an input or a root, right now.
 #[derive(Debug)]
@@ -99,89 +97,61 @@ async fn stalled_delivery(parts: &SendParts, input: &InputId) -> Result<Option<S
     }))
 }
 
-/// Resolve a logical root.
+/// Resolve a logical root from its durable record: its terminal evidence,
+/// then its park.
+///
+/// A root the head commit of its final physical turn ended is settled with
+/// the outcome that commit wrote. A parked root is parked. A root whose run
+/// ended with a typed refusal is refused. Any other root is undecided.
 pub(super) async fn resolve_root(parts: &SendParts, root: &TurnId) -> Result<Resolution> {
-    let root = root.clone();
-    let mut ordinal = 0_u64;
-    loop {
-        let physical = PhysicalTurn::derive_turn_id(&root, ordinal);
-        match terminal_of(parts, &physical).await? {
-            Some(TurnTerminal::Committed {
-                outcome: TurnOutcome::AgentFrameSwitch { .. },
-                ..
-            }) => {
-                ordinal = ordinal.saturating_add(1);
-            }
-            Some(TurnTerminal::Committed { outcome, .. }) => {
-                return Ok(Resolution::Settled { root, outcome });
-            }
-            Some(TurnTerminal::Failed { .. }) | None => {
-                if let Some(parked) = park_of(parts, &root).await? {
-                    return Ok(Resolution::Parked(parked));
-                }
-                if let Some(refusal) = refusal_of(parts, &root).await? {
-                    return Ok(Resolution::Refused { root, refusal });
-                }
-                return Ok(Resolution::Undecided { root: Some(root) });
-            }
-        }
-    }
-}
-
-/// The published terminal of one physical turn, once its commit is durable.
-async fn terminal_of(parts: &SendParts, turn: &TurnId) -> Result<Option<TurnTerminal>> {
-    let address = TurnAddress::new(parts.session_id.clone(), turn.clone());
-    match parts.store.turn_is_committed(&address).await {
-        Ok(false) => return Ok(None),
-        Ok(true) => {}
-        // A store that cannot answer the commit read is asked for the
-        // terminal directly.
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => {}
-        Err(error) => return Err(store_error(error)),
-    }
-    let driver = TurnWorkDriver::for_session(
-        std::sync::Arc::clone(&parts.effect_host),
-        parts.session_id.to_string(),
-        std::sync::Arc::clone(parts.store.store()),
-    );
-    match driver
-        .await_terminal_with_timeout(&address, TERMINAL_READ)
+    let cause = parts
+        .store
+        .root_terminal(root)
         .await
-    {
-        Ok(terminal) => Ok(Some(terminal)),
-        Err(error) => {
-            tracing::debug!(
-                session_id = %parts.session_id,
-                turn_id = %turn,
-                error = %error,
-                "committed turn's terminal is not readable yet"
-            );
-            Ok(None)
+        .map_err(store_error)?
+        .map(|terminal| terminal.cause);
+    let refusal = match cause {
+        Some(RootTerminalCause::Committed { outcome, .. }) => {
+            return Ok(Resolution::Settled {
+                root: root.clone(),
+                outcome: TurnOutcome::from(outcome),
+            });
         }
-    }
-}
-
-/// The refusal `root`'s run ended with, when its terminal evidence is one.
-async fn refusal_of(parts: &SendParts, root: &TurnId) -> Result<Option<lash_core::RuntimeError>> {
-    let terminal = match parts.store.root_terminal(root).await {
-        Ok(terminal) => terminal,
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
-        Err(error) => return Err(store_error(error)),
-    };
-    Ok(terminal.and_then(|terminal| match terminal.cause {
-        lash_core::store::RootTerminalCause::Refused {
+        Some(RootTerminalCause::Refused {
             code,
             message,
             refusal_cause,
-        } => {
+        }) => {
             // The structured cause is the refusal's type: a session-retirement
             // refusal must answer as one, not as its bare code.
             let mut refusal = lash_core::RuntimeError::new(code, message);
             refusal.cause = refusal_cause;
             Some(refusal)
         }
-        _ => None,
-    }))
+        // An operator's end, the session's deletion or a lost run carries no
+        // answer of its own, and a command root answers no send: its
+        // commands settle through their own receipts.
+        Some(
+            RootTerminalCause::CommandsApplied
+            | RootTerminalCause::OperatorCancelled { .. }
+            | RootTerminalCause::Forked { .. }
+            | RootTerminalCause::SessionDeleted { .. }
+            | RootTerminalCause::SubstrateLost { .. },
+        )
+        | None => None,
+    };
+    if let Some(parked) = park_of(parts, root).await? {
+        return Ok(Resolution::Parked(parked));
+    }
+    if let Some(refusal) = refusal {
+        return Ok(Resolution::Refused {
+            root: root.clone(),
+            refusal,
+        });
+    }
+    Ok(Resolution::Undecided {
+        root: Some(root.clone()),
+    })
 }
 
 /// The session's park, when it holds `root`.

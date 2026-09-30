@@ -534,7 +534,12 @@ impl SessionGraphScenario {
         };
         let operation_id = self.next_operation_id("append");
         let live = self.live.get(&slot).expect("ensured live session");
-        let mut runtime = property_runtime(live.store.store(), &live.request).await?;
+        let runtime = property_runtime(live.store.store(), &live.request).await?;
+        // The plugin-facing service writes straight through the store's
+        // append path: nothing drives this session, so nothing owns its head.
+        let service = runtime
+            .session_graph_service()
+            .map_err(|error| error.to_string())?;
         let nodes = (0..usize::from(node_count.max(1)))
             .map(|ordinal| {
                 crate::SessionAppendNode::plugin(
@@ -543,13 +548,14 @@ impl SessionGraphScenario {
                 )
             })
             .collect();
-        let result = Box::pin(
-            runtime.append_session_nodes(crate::AppendSessionNodesRequest {
+        let result = Box::pin(service.append_session_nodes(
+            &live.request.session_id,
+            crate::AppendSessionNodesRequest {
                 operation_id,
                 nodes,
                 requires_ancestor_node_id: required.clone(),
-            }),
-        )
+            },
+        ))
         .await
         .map_err(|error| error.to_string())?;
 
@@ -867,7 +873,7 @@ impl SessionGraphScenario {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "checkpoint subject has no persisted state".to_string())?;
         state.turn_index += 1;
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             &state.session_id,
             operation,
@@ -1054,7 +1060,7 @@ impl SessionGraphScenario {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "malformed subject has no persisted state".to_string())?;
         let operation = crate::OperationId::turn(&state.session_id, operation_key, "malformed");
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
         commit.graph = malformed_graph_append(&state, &operation, shape % 4)?;
         if matches!(shape % 4, 0 | 2 | 3) {
@@ -1117,7 +1123,7 @@ impl SessionGraphScenario {
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "stale-CAS subject has no persisted state".to_string())?;
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.expected_head_revision = state.head_revision - 1;
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             &state.session_id,
@@ -1747,7 +1753,6 @@ async fn persisted_projection(
             "window": read.window,
             "checkpoint_ref": read.checkpoint_ref,
             "checkpoint": read.checkpoint,
-            "usage": read.usage,
         })
     }))
 }

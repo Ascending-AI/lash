@@ -89,6 +89,16 @@ impl PostgresStore {
                 .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
+        use lash_core_execution::store::{
+            EnumerationProgress, PostgresBlobRootSource, ReclamationEnumeration,
+        };
+        let mut enumeration = ReclamationEnumeration::<PostgresBlobRootSource, String>::new();
+        enumeration.page(
+            PostgresBlobRootSource::Checkpoints,
+            0,
+            root_refs.iter().cloned(),
+            EnumerationProgress::Exhausted,
+        )?;
         let root_count = root_refs.len();
         let mut retained = std::collections::BTreeSet::<String>::new();
         for checkpoint_hash in root_refs {
@@ -124,6 +134,28 @@ impl PostgresStore {
                 retained.insert(descriptor.blob_ref.0.clone());
             }
         }
+        enumeration.page(
+            PostgresBlobRootSource::CheckpointComponents,
+            0,
+            retained,
+            EnumerationProgress::Exhausted,
+        )?;
+        let retained = enumeration.finish()?;
+        let deleted_blob_count = Self::reclaim_unretained_blobs_tx(&mut tx, &retained).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(GcReport {
+            root_count,
+            retained_blob_count: retained.len(),
+            deleted_blob_count,
+        })
+    }
+    async fn reclaim_unretained_blobs_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        retained: &lash_core_execution::store::CompleteEnumeration<
+            lash_core_execution::store::PostgresBlobRootSource,
+            String,
+        >,
+    ) -> Result<usize, StoreError> {
         // Projection edges belong to live head/anchor roots. Sever every dead
         // root's complete outgoing set before the blob sweep: a strict
         // component FK must never be weakened to accommodate stale ownership
@@ -148,11 +180,6 @@ impl PostgresStore {
         let deleted_blob_count = usize::try_from(deleted_blob_count).map_err(|_| {
             StoreError::Backend("gc deleted blob count does not fit usize".to_string())
         })?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(GcReport {
-            root_count,
-            retained_blob_count: retained.len(),
-            deleted_blob_count,
-        })
+        Ok(deleted_blob_count)
     }
 }

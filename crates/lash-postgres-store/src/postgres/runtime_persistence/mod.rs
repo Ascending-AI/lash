@@ -107,40 +107,66 @@ pub(crate) async fn ensure_session_not_deleted_tx(
 /// explicit anchor. Every writer that adds an edge or root locks the target
 /// node first, so the reachability query runs from a fresh snapshot after
 /// concurrent additions have either committed or failed.
+/// Carries one complete child/head/anchor check and the node lock it ran under.
+struct RetirableAncestryNode {
+    node_id: String,
+    parent_node_id: Option<String>,
+}
+
+async fn retirable_ancestry_node_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+) -> Result<Option<RetirableAncestryNode>, StoreError> {
+    let parent = sqlx::query_scalar::<_, Option<String>>(
+        session_sql().graph_postgres.select_parent_for_update.sql(),
+    )
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let Some(parent_node_id) = parent else {
+        return Ok(None);
+    };
+    let reachable =
+        sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.exists_reachable.sql())
+            .bind(node_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if reachable {
+        return Ok(None);
+    }
+    Ok(Some(RetirableAncestryNode {
+        node_id: node_id.to_owned(),
+        parent_node_id,
+    }))
+}
+
+async fn retire_ancestry_node_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    witness: RetirableAncestryNode,
+) -> Result<Option<String>, StoreError> {
+    sqlx::query(session_sql().graph_postgres.retire.sql())
+        .bind(&witness.node_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(witness.parent_node_id)
+}
+
 pub(crate) async fn retire_unreachable_ancestry_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     first_node_id: &str,
 ) -> Result<(), StoreError> {
     let mut node_id = first_node_id.to_string();
     loop {
-        let parent_node_id = sqlx::query_scalar::<_, Option<String>>(
-            session_sql().graph_postgres.select_parent_for_update.sql(),
-        )
-        .bind(&node_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let Some(parent_node_id) = parent_node_id else {
+        let Some(witness) = retirable_ancestry_node_tx(tx, &node_id).await? else {
             return Ok(());
         };
-        let reachable =
-            sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.exists_reachable.sql())
-                .bind(&node_id)
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        if reachable {
-            return Ok(());
-        }
-        sqlx::query(session_sql().graph_postgres.retire.sql())
-            .bind(&node_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let Some(parent_node_id) = parent_node_id else {
+        let Some(parent) = retire_ancestry_node_tx(tx, witness).await? else {
             return Ok(());
         };
-        node_id = parent_node_id;
+        node_id = parent;
     }
 }
 

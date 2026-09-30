@@ -16,7 +16,9 @@ mod admitted_scope_tests {
     /// would present.
     #[tokio::test]
     async fn a_rescope_onto_another_process_is_refused() {
-        let registry = crate::support::memory_store_set().await.process_registry();
+        let registry = crate::support::sqlite_memory_store_set()
+            .await
+            .process_registry();
         let registration = || {
             crate::ProcessRegistration::new(
                 crate::ProcessInput::External {

@@ -94,3 +94,51 @@ finish(values);
         .expect("list-comprehension node")["kind"]["future"] = serde_json::json!(true);
     assert!(!validator.is_valid(&unknown));
 }
+
+#[test]
+fn published_schema_requires_a_closed_workflow_diagnostic_classification() {
+    let graph = workflow_graph_from_source("finish(1);").expect("fixture projects");
+    let mut value = serde_json::to_value(graph).expect("graph encodes");
+    value["facet_schema_version"] = serde_json::json!(4);
+    value["main"]["nodes"][0]["type_facets"] = serde_json::json!({
+        "diagnostics": [{
+            "node_id": value["main"]["nodes"][0]["id"].clone(),
+            "kind": "unknown_name",
+            "classification": "definite",
+            "message": "fixture"
+        }]
+    });
+    let schema = serde_json::from_str::<serde_json::Value>(include_str!(
+        "../../../schemas/host/workflow-graph/v21.schema.json"
+    ))
+    .expect("published schema parses");
+    let validator = jsonschema::JSONSchema::compile(&schema).expect("published schema compiles");
+    for classification in ["definite", "advisory"] {
+        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+            serde_json::json!(classification);
+        assert!(
+            validator.is_valid(&value),
+            "closed classification must validate"
+        );
+    }
+    for classification in [
+        serde_json::Value::Null,
+        serde_json::json!("future"),
+        serde_json::json!(0),
+    ] {
+        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+            classification;
+        assert!(
+            !validator.is_valid(&value),
+            "invalid classification must be refused"
+        );
+    }
+    value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]
+        .as_object_mut()
+        .expect("diagnostic object")
+        .remove("classification");
+    assert!(
+        !validator.is_valid(&value),
+        "unclassified diagnostics must be refused"
+    );
+}

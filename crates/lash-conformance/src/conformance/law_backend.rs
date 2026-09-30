@@ -144,7 +144,8 @@ pub fn backend_over(
 /// [`backend_over`] with the recording double as its effect host: for a
 /// storage law that reaches a backend's storage ports and runs no effect.
 pub fn recording_backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
-    backend_over(stores, Arc::new(crate::RecordingEffectHost::default()))
+    let effect_host = crate::RecordingEffectHost::over_usage_accounting(stores.usage_accounting());
+    backend_over(stores, Arc::new(effect_host))
 }
 
 /// The backend of a store law's runtime: a law over one session store that
@@ -232,7 +233,109 @@ impl StoreLawStores {
     }
 }
 
+/// The usage ledger of a store law's runtime: the law runs no effect, so
+/// nothing spends, and every write or read is refused like the other ports
+/// that would name a second substrate. The runtime still holds a ledger,
+/// because every host binds one (ADR 0125).
+struct StoreLawUsageAccounting;
+
+impl StoreLawUsageAccounting {
+    fn refused() -> crate::StoreError {
+        crate::StoreError::Backend(
+            "a store law's runtime spends nothing: its substrate is the store it was handed"
+                .to_string(),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::UsageAccountingStore for StoreLawUsageAccounting {
+    async fn admit_usage_run(
+        &self,
+        _admission: &lash_core::UsageRunAdmission,
+    ) -> Result<lash_core::UsageRunAdmitted, lash_core::UsageAdmissionError> {
+        Err(lash_core::UsageAdmissionError::Store(Self::refused()))
+    }
+
+    async fn settle_usage(
+        &self,
+        _settlement: &lash_core::UsageSettlement,
+        _now_ms: u64,
+    ) -> Result<lash_core::UsageSettleReceipt, lash_core::UsageAppendError> {
+        Err(lash_core::UsageAppendError::Store(Self::refused()))
+    }
+
+    async fn mark_usage_settlement_conflicted(
+        &self,
+        _settlement: &lash_core::UsageSettlement,
+        _conflict: &lash_core::UsageFactConflict,
+        _now_ms: u64,
+    ) -> Result<(), crate::StoreError> {
+        Err(Self::refused())
+    }
+
+    async fn append_usage_corrections(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _corrections: &[lash_core::UsageCorrection],
+        _now_ms: u64,
+    ) -> Result<lash_core::UsageAppendReceipt, lash_core::UsageAppendError> {
+        Err(lash_core::UsageAppendError::Store(Self::refused()))
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _execution_scope_key: &str,
+        _now_ms: u64,
+    ) -> Result<u64, crate::StoreError> {
+        Err(Self::refused())
+    }
+
+    async fn retire_usage_owner(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _now_ms: u64,
+    ) -> Result<lash_core::UsageOwnerRetired, crate::StoreError> {
+        Err(Self::refused())
+    }
+
+    async fn load_owner_usage(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::OwnerUsage, crate::StoreError> {
+        Err(Self::refused())
+    }
+
+    async fn load_usage_fact_page(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _after: Option<&lash_core::UsageFactCursor>,
+        _limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageFactPage, crate::StoreError> {
+        Err(Self::refused())
+    }
+
+    async fn load_usage_run_page(
+        &self,
+        _owner: &lash_core::RuntimeOwner,
+        _filter: lash_core::UsageRunFilter,
+        _after: Option<&lash_core::UsageRunCursor>,
+        _limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageRunPage, crate::StoreError> {
+        Err(Self::refused())
+    }
+}
+
 impl crate::StoreSet for StoreLawStores {
+    fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
+        Self::no_second_substrate("worker recovery accounting")
+    }
+
+    fn usage_accounting(&self) -> Arc<dyn lash_core::UsageAccountingStore> {
+        Arc::new(StoreLawUsageAccounting)
+    }
+
     fn binding_identity(&self) -> &crate::StoreBindingId {
         &self.binding
     }
@@ -264,10 +367,6 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("trigger store")
     }
 
-    fn process_definition_registry(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
-        Self::no_second_substrate("process-definition registry")
-    }
-
     fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore)
     }
@@ -280,7 +379,7 @@ impl crate::StoreSet for StoreLawStores {
         Arc::new(UnavailableModuleArtifacts)
     }
 
-    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
         Arc::new(UnavailableProcessDefinitions)
     }
 
@@ -468,6 +567,14 @@ impl crate::store::ArtifactCleanupLedger for UnavailableArtifactCleanup {
     }
 
     async fn nudge(&self, _: &crate::ArtifactReferrer, _: u64) -> Result<bool, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
+    async fn nudge_awaiting_journal(
+        &self,
+        _: &lash_sansio::EffectJournalIdentity,
+        _: u64,
+    ) -> Result<u64, crate::StoreError> {
         StoreLawStores::no_second_substrate("artifact cleanup ledger")
     }
 

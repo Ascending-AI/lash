@@ -53,10 +53,12 @@ impl InterruptedSweepRoot {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for InterruptedSweepRoot {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
-        self.inner.live_attachment_refs().await
+        source: lash_core::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash_core::attachments::AttachmentRootPage, StoreError> {
+        self.inner.attachment_root_page(source, after).await
     }
 
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
@@ -155,8 +157,12 @@ impl AttachmentStore for DeleteLog {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
 
     #[expect(
@@ -499,7 +505,10 @@ pub async fn persistently_failing_delete_stalls_typed(
             stalled.then_some(AttachmentDeleteStallReason::AttemptsExhausted),
             "attempt {attempt}"
         );
-        assert!(backend.get(&reference.id).await.is_ok(), "the bytes remain");
+        assert!(
+            backend.get(&reference.id, 32 * 1024 * 1024).await.is_ok(),
+            "the bytes remain"
+        );
         if attempt < MAX_ATTACHMENT_DELETE_ATTEMPTS {
             clock.advance(900_000);
         }
@@ -573,8 +582,12 @@ impl AttachmentStore for RefusingDeleteStore {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -622,7 +635,7 @@ async fn stalled_delete(
         assert_eq!(report.failed_ids, vec![reference.id.clone()]);
         let listed = f.list_condemnations().await.unwrap();
         assert_eq!(listed[0].delete_attempts, attempt);
-        assert!(backend.get(&reference.id).await.is_ok());
+        assert!(backend.get(&reference.id, 32 * 1024 * 1024).await.is_ok());
         if attempt < MAX_ATTACHMENT_DELETE_ATTEMPTS {
             clock.advance(900_000);
         }
@@ -778,8 +791,12 @@ impl AttachmentStore for PausedRetryStore {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         self.inner.put(bytes, meta).await
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         self.inner.delete(id).await

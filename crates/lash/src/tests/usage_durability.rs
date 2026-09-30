@@ -1,9 +1,10 @@
-//! FIG-2765 fix round: billed-but-unreported calls must survive a restart.
+//! FIG-2765: billed-but-unreported calls must survive a restart.
 //!
-//! The ledger is the only place that knows a call was billed and never counted.
-//! These witnesses drive the whole loop through a real store round trip — hole,
-//! reconciliation, park, reopen — and pin the cancellation schedule that used to
-//! eat pending work when a lookup future was dropped.
+//! The owner's usage accounting is the only place that knows a call was
+//! billed and never counted (ADR 0125). These witnesses drive the whole loop
+//! through a real store round trip — unreported attempt, reconciliation,
+//! park, reopen — and pin the cancellation schedule that used to eat pending
+//! work when a lookup future was dropped.
 
 use super::*;
 
@@ -119,75 +120,80 @@ async fn usage_durability_core_with_store(
     Ok((core, store_factory, double))
 }
 
-/// The defect this closes: before the fix both store read paths rebuilt every
-/// ledger row with a defaulted disposition and nothing repopulated the pending
-/// registry, so reopening a session turned a billed call into a free one.
+/// An unreported attempt is an accounting fact of the session's owner, so it
+/// survives close and reopen with its attribution, and reading it never talks
+/// to the provider.
 #[test]
-fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<()> {
-    run_async_test_on_stack_budget("fig2765-hole-survives-reopen", || async {
+fn unreported_attempts_survive_close_and_reopen_with_their_attribution() -> Result<()> {
+    run_async_test_on_stack_budget("fig2765-unreported-survives-reopen", || async {
         let log = Arc::new(LookupLog::default());
         let (core, _double) = usage_durability_core(aborting_provider(
-            "fig2765-hole",
+            "fig2765-unreported",
             vec![Some("gen-alpha"), None],
             |_| None,
             Arc::clone(&log),
         ))
         .await?;
 
-        let session = core.session("fig2765-hole").created().await.open().await?;
+        let session = core
+            .session("fig2765-unreported")
+            .created()
+            .await
+            .open()
+            .await?;
         let first = session.send(TurnInput::text("one")).output().await?;
         let second = session.send(TurnInput::text("two")).output().await?;
-        let first_call = first.result.llm_calls[0].call_id.0.clone();
-        let second_call = second.result.llm_calls[0].call_id.0.clone();
+        let first_call = first.result.llm_calls[0].call_id.clone();
+        let second_call = second.result.llm_calls[0].call_id.clone();
         assert_ne!(first_call, second_call);
-        let mut live = session.unreported_usage_attempts().await;
-        assert_eq!(live.len(), 2, "one hole per aborted attempt");
+        let live = settled_usage(&session).await?.outstanding;
+        assert_eq!(live.len(), 2, "one outstanding attempt per aborted call");
         Box::pin(session.close()).await?;
 
-        let reopened = core.session("fig2765-hole").created().await.open().await?;
-        let mut restored = reopened.unreported_usage_attempts().await;
-        // Durable rows carry their holes in canonical key order, so compare the
-        // sets rather than the order they happened to be registered in.
-        live.sort_by(|a, b| (&a.call_id, a.attempt_ordinal).cmp(&(&b.call_id, b.attempt_ordinal)));
-        restored
-            .sort_by(|a, b| (&a.call_id, a.attempt_ordinal).cmp(&(&b.call_id, b.attempt_ordinal)));
+        let reopened = core
+            .session("fig2765-unreported")
+            .created()
+            .await
+            .open()
+            .await?;
+        let usage = settled_usage(&reopened).await?;
         assert_eq!(
-            restored, live,
-            "reopening must rebuild every hole with its original attribution"
+            usage.outstanding, live,
+            "reopening reads every outstanding attempt with its original attribution"
         );
-        let by_call = |call_id: &str| {
-            restored
+        let by_call = |call_id: &lash_core::LlmCallId| {
+            usage
+                .outstanding
                 .iter()
-                .find(|attempt| attempt.call_id == call_id)
+                .find(|attempt| &attempt.llm_call_id == call_id)
                 .cloned()
-                .expect("hole for call")
+                .expect("outstanding attempt for call")
         };
         let alpha = by_call(&first_call);
-        assert_eq!(alpha.attempt_ordinal, 1);
+        assert_eq!(alpha.provider_attempt, 1);
         assert_eq!(alpha.source, "turn");
         assert_eq!(alpha.model, mock_model_spec().id);
         assert_eq!(alpha.generation_id.as_deref(), Some("gen-alpha"));
-        // A hole with no generation id is a fact, not missing data: it survives
-        // the reload as an unreconcilable hole rather than disappearing.
+        // An attempt with no generation id is a fact, not missing data: it
+        // stays outstanding as unreconcilable rather than disappearing.
         assert_eq!(by_call(&second_call).generation_id, None);
 
-        let report = reopened.usage_report();
+        let report = usage.report();
         assert_eq!(report.usage.unreported_attempts, 2);
         assert_eq!(report.usage.reconciled_attempts, 0);
         assert_eq!(report.usage.total_tokens, 0);
         assert!(
             log.snapshot().is_empty(),
-            "reopening must not talk to the provider"
+            "reading usage must not talk to the provider"
         );
         Box::pin(reopened.close()).await?;
         Ok(())
     })
 }
 
-/// The defect this closes: reconciliation appended its correction to the shared
-/// pending ledger, and park's flush predicate ignored that ledger, so closing a
-/// session immediately after a successful reconciliation dropped the recovered
-/// charge on the floor.
+/// A correction is appended to the owner's accounting when it is recovered,
+/// so closing the session right after reconciling loses nothing, and a
+/// repeated reconciliation asks the provider nothing.
 #[test]
 fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-correction-survives-close", || async {
@@ -207,6 +213,7 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
             .open()
             .await?;
         session.send(TurnInput::text("one")).output().await?;
+        settled_usage(&session).await?;
         Box::pin(session.close()).await?;
 
         let reopened = core
@@ -219,8 +226,6 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         assert_eq!(report.reconciled.len(), 1);
         assert!(report.unresolved.is_empty());
         assert_eq!(report.reconciled[0].usage.input_tokens, 334);
-        // Closing immediately: the correction has not ridden any other
-        // boundary, so park is the only thing that can persist it.
         Box::pin(reopened.close()).await?;
 
         let after = core
@@ -229,12 +234,13 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
             .await
             .open()
             .await?;
-        let totals = after.usage_report().usage;
+        let usage = settled_usage(&after).await?;
+        let totals = usage.report().usage;
         assert_eq!(totals.usage.input_tokens, 334);
         assert_eq!(totals.total_tokens, 334);
         assert_eq!(totals.reconciled_attempts, 1);
         assert_eq!(totals.unreported_attempts, 0);
-        assert!(after.unreported_usage_attempts().await.is_empty());
+        assert!(usage.outstanding.is_empty());
 
         let repeat = after.reconcile_unreported_usage().await?;
         assert!(repeat.reconciled.is_empty());
@@ -244,7 +250,11 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
             vec!["gen-alpha".to_string()],
             "a filled attempt is never looked up again"
         );
-        assert_eq!(after.usage_report().usage, totals, "totals do not move");
+        assert_eq!(
+            settled_usage(&after).await?.report().usage,
+            totals,
+            "totals do not move"
+        );
         Box::pin(after.close()).await?;
 
         // The same survival through park/resume rather than close/open.
@@ -256,17 +266,17 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
             .await?;
         let parked = Box::pin(resumed_session.park()).await?;
         let resumed = Box::pin(core.resume(parked)).await?;
-        assert_eq!(resumed.usage_report().usage, totals);
+        assert_eq!(settled_usage(&resumed).await?.report().usage, totals);
         Box::pin(resumed.close()).await?;
         Ok(())
     })
 }
 
-/// The defect this closes: `reconcile_unreported_usage` took the pending vector
-/// with `mem::take` before its first await, so dropping the future erased every
-/// attempt it had not reached while the durable holes stayed open.
+/// Reconciliation appends each correction as it is recovered, so dropping the
+/// future keeps every correction it recorded and leaves every attempt it did
+/// not finish outstanding.
 #[test]
-fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Result<()> {
+fn dropping_a_reconciliation_future_keeps_unfinished_attempts_outstanding() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-cancel-reconciliation", || async {
         let log = Arc::new(LookupLog::default());
         let block = Arc::new(AtomicBool::new(true));
@@ -337,7 +347,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
             .await?;
         session.send(TurnInput::text("one")).output().await?;
         session.send(TurnInput::text("two")).output().await?;
-        assert_eq!(session.unreported_usage_attempts().await.len(), 2);
+        assert_eq!(settled_usage(&session).await?.outstanding.len(), 2);
 
         let mut pending = Box::pin(session.reconcile_unreported_usage());
         tokio::select! {
@@ -346,9 +356,9 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
         }
         drop(pending);
 
-        // The first attempt's correction is recorded and it is off the
-        // registry; the second was still in flight and stays registered.
-        let still_open = session.unreported_usage_attempts().await;
+        // The first attempt's correction is recorded and it is no longer
+        // outstanding; the second was still in flight and stays outstanding.
+        let still_open = settled_usage(&session).await?.outstanding;
         assert_eq!(
             still_open.len(),
             1,
@@ -370,7 +380,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
             "only the attempt the dropped future never finished is left to do"
         );
         assert!(report.unresolved.is_empty());
-        let totals = session.usage_report().usage;
+        let totals = settled_usage(&session).await?.report().usage;
         assert_eq!(
             totals.usage.input_tokens, 333,
             "the correction the dropped future did record was kept"
@@ -394,21 +404,22 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
             .await
             .open()
             .await?;
-        let totals = reopened.usage_report().usage;
+        let usage = settled_usage(&reopened).await?;
+        let totals = usage.report().usage;
         assert_eq!(totals.usage.input_tokens, 333);
         assert_eq!(totals.reconciled_attempts, 2);
         assert_eq!(totals.unreported_attempts, 0);
-        assert!(reopened.unreported_usage_attempts().await.is_empty());
+        assert!(usage.outstanding.is_empty());
         Box::pin(reopened.close()).await?;
         Ok(())
     })
 }
 
-/// Park stays a durable no-op when nothing is pending — including when the
-/// session carries durable unresolved holes, which are already committed — and
-/// commits exactly once when a correction is waiting.
+/// Usage accounting never rides a session commit (ADR 0125): outstanding
+/// attempts, a reconciliation and the parks around them leave the session
+/// head where the turn left it.
 #[test]
-fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result<()> {
+fn reconciliation_and_park_never_move_the_session_head() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-park-head-revision", || async {
         let log = Arc::new(LookupLog::default());
         let (core, store_factory, _double) = usage_durability_core_with_store(aborting_provider(
@@ -435,13 +446,12 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
 
         let session = core.session(session_id).created().await.open().await?;
         session.send(TurnInput::text("one")).output().await?;
+        settled_usage(&session).await?;
         Box::pin(session.close()).await?;
         let after_turn = head_revision().await;
 
-        // Durable unresolved holes on their own are not pending work: opening
-        // and closing again must not bump the head.
         let quiet = core.session(session_id).created().await.open().await?;
-        assert_eq!(quiet.unreported_usage_attempts().await.len(), 1);
+        assert_eq!(settled_usage(&quiet).await?.outstanding.len(), 1);
         Box::pin(quiet.close()).await?;
         assert_eq!(
             head_revision().await,
@@ -449,25 +459,105 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
             "a clean park must stay a durable no-op"
         );
 
-        // One pending correction, one commit.
         let reconciling = core.session(session_id).created().await.open().await?;
         reconciling.reconcile_unreported_usage().await?;
         Box::pin(reconciling.close()).await?;
-        let after_correction = head_revision().await;
         assert_eq!(
-            after_correction,
-            after_turn + 1,
-            "a pending correction causes exactly one durable commit"
+            head_revision().await,
+            after_turn,
+            "a correction is accounting, not a session commit"
         );
 
         let quiet_again = core.session(session_id).created().await.open().await?;
-        assert_eq!(quiet_again.usage_report().usage.usage.input_tokens, 334);
-        Box::pin(quiet_again.close()).await?;
         assert_eq!(
-            head_revision().await,
-            after_correction,
-            "a subsequent clean park causes none"
+            settled_usage(&quiet_again)
+                .await?
+                .report()
+                .usage
+                .usage
+                .input_tokens,
+            334
         );
+        Box::pin(quiet_again.close()).await?;
+        assert_eq!(head_revision().await, after_turn);
+        Ok(())
+    })
+}
+
+/// E8 (FIG-4236, ADR 0125): reconciliation reads the outstanding attempts
+/// from the ledger, not from a host's memory, and a correction has its own
+/// identity. Two hosts over the same deployment each reconcile the aborted
+/// attempt: the first appends its one correction, the second finds nothing
+/// outstanding, and the ledger holds exactly one correction fact.
+#[test]
+fn reconciliation_appends_one_correction() -> Result<()> {
+    run_async_test_on_stack_budget("fig4236-reconciliation-two-hosts", || async {
+        let log = Arc::new(LookupLog::default());
+        let provider = |log: &Arc<LookupLog>| {
+            aborting_provider(
+                "fig4236-reconcile",
+                vec![Some("gen-alpha")],
+                |generation_id| (generation_id == "gen-alpha").then(|| reconciled(55)),
+                Arc::clone(log),
+            )
+        };
+        let (first_host, double) = usage_durability_core(provider(&log)).await?;
+        let session = first_host
+            .session("fig4236-reconcile")
+            .created()
+            .await
+            .open()
+            .await?;
+        session.send(TurnInput::text("one")).output().await?;
+        let before = settled_usage(&session).await?;
+        assert_eq!(
+            before.outstanding.len(),
+            1,
+            "one aborted attempt is outstanding"
+        );
+        let report = session.reconcile_unreported_usage().await?;
+        assert_eq!(report.reconciled.len(), 1);
+        Box::pin(session.close()).await?;
+
+        let second_host = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
+            .provider(provider(&log))
+            .model(mock_model_spec())
+            .abort_drain_grace(Duration::from_millis(50))
+            .build(crate::testing::runtime_lease_owner())?;
+        let reopened = second_host
+            .session("fig4236-reconcile")
+            .created()
+            .await
+            .open()
+            .await?;
+        let repeat = reopened.reconcile_unreported_usage().await?;
+        assert!(
+            repeat.reconciled.is_empty(),
+            "the second host finds it corrected"
+        );
+        assert!(repeat.unresolved.is_empty());
+        let after = settled_usage(&reopened).await?;
+        assert!(after.outstanding.is_empty(), "nothing is outstanding");
+        let owner = lash_core::RuntimeOwner::Session(SessionId::from("fig4236-reconcile"));
+        let page = second_host
+            .usage_fact_page(
+                &owner,
+                None,
+                std::num::NonZeroU32::new(64).expect("nonzero"),
+            )
+            .await?;
+        let corrections = page
+            .facts
+            .iter()
+            .filter(|fact| fact.disposition == lash_core::UsageDisposition::Reconciled)
+            .count();
+        assert_eq!(corrections, 1, "exactly one correction: {:#?}", page.facts);
+        assert_eq!(
+            log.snapshot(),
+            vec!["gen-alpha".to_string()],
+            "the provider is asked about the generation once"
+        );
+        Box::pin(reopened.close()).await?;
         Ok(())
     })
 }

@@ -17,7 +17,9 @@ mod tests {
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-        crate::support::memory_store_set().await.process_registry()
+        crate::support::sqlite_memory_store_set()
+            .await
+            .process_registry()
     }
     use lash_sansio::sync::MutexExt;
 
@@ -791,10 +793,9 @@ mod tests {
         );
     }
 
-    /// FIG-1744 / ADR 0019: CallerDeparted refusal wins over a recorded terminal
-    /// outcome.
+    /// ADR 0016: a retained outcome resolves the wait even after caller departure.
     #[tokio::test]
-    async fn caller_departed_refuses_before_terminal_outcome() {
+    async fn retained_outcome_precedes_caller_departure() {
         let raw = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
         let (registry, hub) = watched_parts(watch_process_registry(
             Arc::clone(&raw) as Arc<dyn ProcessRegistry>
@@ -816,17 +817,11 @@ mod tests {
         record.outcome = Some(success(serde_json::json!("completed-value")));
 
         raw.set_process_read_override(record);
-        let awaiter_err = awaiter
+        let output = awaiter
             .await_terminal(&process_id)
             .await
-            .expect_err("awaiter must refuse CallerDeparted even if outcome is present");
-        assert!(
-            matches!(
-                awaiter_err,
-                PluginError::ProcessCallerDeparted { ref process_id } if process_id == proc_departed_record.id.clone()
-            ),
-            "awaiter expected ProcessCallerDeparted refusal, got: {awaiter_err:?}"
-        );
+            .expect("retained outcome resolves a caller-departed process");
+        assert_eq!(output, success(serde_json::json!("completed-value")));
     }
 
     /// Sim-style race: many waiters attach to one process and completion fires

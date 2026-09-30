@@ -180,6 +180,14 @@ fn runtime_error(message: impl Into<String>) -> lash_core::RuntimeError {
 
 #[async_trait::async_trait]
 impl SessionDriver for RollDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     async fn admit(
         &self,
         controller: ScopedEffectController<'_>,
@@ -320,6 +328,7 @@ impl SessionRoll {
         let registry: Arc<dyn ProcessRegistry> = registry;
         let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
+        host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(&stores));
         let driver = Arc::new(RollDriver::default());
         // One slot for both deployments, installed once: each build's
         // `LashSession`/`LashTurn` finds the same driver, as both builds of

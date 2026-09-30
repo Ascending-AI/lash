@@ -112,7 +112,7 @@ mod tests {
     /// — where an operator's `list_stalled` and re-arm find it.
     #[tokio::test]
     async fn a_failing_start_retries_with_its_last_error_and_stalls_typed_at_the_ceiling() {
-        let stores = crate::support::memory_store_set().await;
+        let stores = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
         let ledger = stores.obligation_ledger(ObligationKind::ProcessStart);
         let clock = Arc::new(TestClock::new(1_000));
@@ -230,7 +230,7 @@ mod tests {
     /// once, settles `delivered`, and is never claimed again.
     #[tokio::test]
     async fn a_delivered_start_settles_and_is_never_claimed_again() {
-        let stores = crate::support::memory_store_set().await;
+        let stores = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
         let ledger = stores.obligation_ledger(ObligationKind::ProcessStart);
         let port = Arc::new(DeliveringStarts {

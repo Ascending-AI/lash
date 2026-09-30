@@ -56,7 +56,7 @@ use lash_core_execution::{
     ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStartOutcome, ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta,
     SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionView, StoreError,
-    StoreMaintenance, TokenLedgerEntry, VacuumReport, facade_support::ProcessStartPlan,
+    StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,
 };
@@ -122,7 +122,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // and recreating pre-11 databases removes both hazards; the old `sessions/` blob
 // prefix is unreachable garbage operators delete manually.
 //
-// Bumped to 12 for claim generation fencing (ADR 0029): `lash_queued_work_batches`
+// Bumped to 12 for claim generation fencing: `lash_queued_work_batches`
 // and `lash_pending_turn_inputs` replace their per-claim claimed-at and expiry
 // columns with a single column pinning the session-execution-lease generation
 // the claim was taken under (since replaced by root admission, FIG-3927). This
@@ -216,7 +216,8 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // lease term to session lease rows. Older stores are rejected and recreated;
 // there is no compatibility read path.
 // Version 48 remains reserved by FIG-1133.
-// Version 51 adds durable runtime-owned tool-intent first-submission rows and
+// Historical, retired in 0417b7f48b: version 51 added runtime-owned
+// tool-intent first-submission rows and
 // process-parent teardown retention. Lash-managed version-50 stores take the
 // explicit 50 -> 51 creation-only migration at open.
 // Version 52 adds the attachment GC fence's per-digest condemnation table.
@@ -515,7 +516,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // whose redrive the session-state generation gate refused, which an older
 // build cannot decode. No relation changes; component-130 catalogs are
 // rejected and recreated.
-// Version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
+// Retired in 4f03596847: version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
 // engine tables (`lash_runtime_effect_group`, `lash_runtime_effect_group_child`,
 // `lash_runtime_effect_replay`, `lash_await_event_meta`,
 // `lash_await_event_waits`, `lash_await_event_revoked_sessions`,
@@ -628,6 +629,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // rows, and `lash migrate` seeds it on every run (FIG-4075, changed in place
 // under the version freeze): an open reads `F` and never records it, so a
 // catalog without the row refuses `fleet_unrecorded` until migrate runs.
+//
+// Version 141 also drops the named process-definition registry (FIG-4178,
+// changed in place under the version freeze): its catalog table is gone and
+// `lash_artifact_referrers` no longer admits a definition-revision kind —
+// definitions are immutable and content-addressed, retained by their
+// referrers rather than by a catalog name. A catalog provisioned before the
+// change fails the open-time shape check and is recreated.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
@@ -678,10 +686,6 @@ pub struct PostgresStore {
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
-    decoded_usage_rows: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
-    decoded_usage_holes: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
     decoded_turn_receipts: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(test)]
@@ -871,6 +875,9 @@ impl PostgresStorage {
     /// exclusively, applies the pending expand migrations this build declares
     /// — or provisions an unprovisioned database outright — and records each
     /// applied step in the `lash_migrations` ledger.
+    /// Each schema advisory-lock acquisition waits up to 30 seconds before
+    /// returning [`StoreError::Contended`]. Migration statements retain the
+    /// deployment's inherited timeouts. See ADR 0106 §5.
     /// [`MigrationPhase::Backfill`] resumes every pending backfill from its
     /// ledger cursor and runs it to completion, and is refused typed before
     /// finalize. [`MigrationPhase::Contract`] is refused typed until finalize
@@ -1295,10 +1302,6 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
-            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -1514,8 +1517,6 @@ mod obligation_ledger;
 #[path = "postgres/pending_turn_inputs.rs"]
 mod pending_turn_inputs;
 mod preflight;
-#[path = "postgres/process_definitions.rs"]
-mod process_definitions;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
 #[cfg(test)]
@@ -1576,6 +1577,8 @@ mod trigger_listing_plan_tests;
 mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
+#[path = "postgres/worker_recovery.rs"]
+mod worker_recovery;
 
 pub use backend::PostgresStoreSet;
 use guarded_tx::begin_guarded;
@@ -1586,7 +1589,6 @@ pub use connection_budget::{
     PostgresConnectionCapacity,
 };
 pub use preflight::PostgresStorePreflight;
-pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::verify_schema_shape;
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
@@ -1642,3 +1644,6 @@ mod acquire_timeout_tests {
         );
     }
 }
+
+#[path = "postgres/usage_accounting.rs"]
+mod usage_accounting;

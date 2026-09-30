@@ -13,6 +13,7 @@
 
 use bytes::Bytes;
 use lash_core_store::compat::CompatRefusal;
+pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits};
 use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::PayloadMetadata;
 use serde::de::DeserializeOwned;
@@ -101,6 +102,7 @@ impl<T> Reply<T> {
 pub enum CallDecodeError {
     Unsupported(VersionRange),
     Json(serde_json::Error),
+    Budget(JsonDecodeError),
 }
 
 impl std::fmt::Debug for CallDecodeError {
@@ -114,6 +116,7 @@ impl std::fmt::Debug for CallDecodeError {
                 .encode(),
             ),
             Self::Json(error) => write!(formatter, "{error}"),
+            Self::Budget(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -124,28 +127,44 @@ impl std::fmt::Display for CallDecodeError {
     }
 }
 
-impl std::error::Error for CallDecodeError {}
+impl std::error::Error for CallDecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Unsupported(_) => None,
+            Self::Json(error) => Some(error),
+            Self::Budget(error) => Some(error),
+        }
+    }
+}
 
-/// The outer shape of a call, read before its body.
-#[derive(serde::Deserialize)]
-struct RawCall {
-    wire: VersionRange,
-    #[serde(default)]
-    body: serde_json::Value,
+impl<T: DeserializeOwned> Call<T> {
+    /// Check structural allowances and the wire before constructing the body.
+    /// The SDK ingress uses the same path with [`JsonDecodeLimits::default`].
+    pub fn decode_json_with_limits(
+        bytes: &[u8],
+        limits: JsonDecodeLimits,
+    ) -> Result<Self, CallDecodeError> {
+        limits.check(bytes).map_err(|error| match error {
+            JsonDecodeError::Json(error) => CallDecodeError::Json(error),
+            error => CallDecodeError::Budget(error),
+        })?;
+        #[derive(serde::Deserialize)]
+        struct WireProbe {
+            wire: VersionRange,
+        }
+        let probe: WireProbe = serde_json::from_slice(bytes).map_err(CallDecodeError::Json)?;
+        if RESTATE_WIRE.select(probe.wire).is_none() {
+            return Err(CallDecodeError::Unsupported(probe.wire));
+        }
+        serde_json::from_slice(bytes).map_err(CallDecodeError::Json)
+    }
 }
 
 impl<T: DeserializeOwned> restate_sdk::serde::Deserialize for Call<T> {
     type Error = CallDecodeError;
 
     fn deserialize(bytes: &mut Bytes) -> Result<Self, Self::Error> {
-        let raw: RawCall = serde_json::from_slice(bytes).map_err(CallDecodeError::Json)?;
-        if RESTATE_WIRE.select(raw.wire).is_none() {
-            return Err(CallDecodeError::Unsupported(raw.wire));
-        }
-        Ok(Call {
-            wire: raw.wire,
-            body: serde_json::from_value(raw.body).map_err(CallDecodeError::Json)?,
-        })
+        Self::decode_json_with_limits(bytes, JsonDecodeLimits::default())
     }
 }
 
@@ -239,6 +258,74 @@ mod tests {
         let mut bytes = Bytes::from_static(br#"{"wire":{"min":1,"max":2},"body":7}"#);
         let call = Call::<u64>::deserialize(&mut bytes).expect("an overlapping range decodes");
         assert_eq!(call.open().expect("selected"), (RESTATE_WIRE.max(), 7));
+    }
+
+    #[test]
+    fn wide_call_refuses_before_dto_decode() {
+        #[derive(Debug)]
+        struct Dto;
+        impl<'de> serde::Deserialize<'de> for Dto {
+            fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+                Err(serde::de::Error::custom("DTO decoder was entered"))
+            }
+        }
+        let body = "0,".repeat(1_000_000) + "0";
+        let mut bytes = Bytes::from(format!(r#"{{"wire":{{"min":1,"max":1}},"body":[{body}]}}"#));
+        let error = Call::<Dto>::deserialize(&mut bytes).expect_err("wide call refuses");
+        assert!(
+            error.to_string().contains("JSON decode nodes limit"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn unsupported_call_never_materializes_numbers_in_its_body() {
+        let mut bytes = Bytes::from_static(br#"{"body":[1e999],"wire":{"min":3,"max":4}}"#);
+        let error = Call::<u64>::deserialize(&mut bytes).expect_err("unsupported wire");
+        assert!(matches!(error, CallDecodeError::Unsupported(_)), "{error}");
+    }
+
+    #[test]
+    fn call_accepts_exact_limits_and_refuses_each_overrun() {
+        let bytes = br#"{"wire":{"min":1,"max":1},"body":[1,2]}"#;
+        let usage = JsonDecodeLimits::default().check(bytes).unwrap();
+        let limits = JsonDecodeLimits {
+            max_bytes: usage.bytes,
+            max_nodes: usage.nodes,
+            max_depth: usage.depth,
+            max_estimated_allocation_bytes: usage.estimated_allocation_bytes,
+        };
+        assert_eq!(
+            Call::<Vec<u64>>::decode_json_with_limits(bytes, limits)
+                .unwrap()
+                .body,
+            vec![1, 2]
+        );
+        for tight in [
+            JsonDecodeLimits {
+                max_bytes: limits.max_bytes - 1,
+                ..limits
+            },
+            JsonDecodeLimits {
+                max_nodes: limits.max_nodes - 1,
+                ..limits
+            },
+            JsonDecodeLimits {
+                max_depth: limits.max_depth - 1,
+                ..limits
+            },
+            JsonDecodeLimits {
+                max_estimated_allocation_bytes: limits.max_estimated_allocation_bytes - 1,
+                ..limits
+            },
+        ] {
+            assert!(matches!(
+                Call::<Vec<u64>>::decode_json_with_limits(bytes, tight),
+                Err(CallDecodeError::Budget(
+                    JsonDecodeError::LimitExceeded { .. }
+                ))
+            ));
+        }
     }
 
     #[test]

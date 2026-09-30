@@ -283,7 +283,11 @@ fn host_root_terminal(
         cause: lash_core::store::RootTerminalCause::Committed {
             commit: lash_core::store::TurnCommitId::new(TurnId::from(root), 0),
             turn: TurnId::from(root),
-            stop: None,
+            outcome: lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         },
         head_revision: None,
         at_ms: world.now_ms(),

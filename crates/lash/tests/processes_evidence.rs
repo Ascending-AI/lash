@@ -868,9 +868,9 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
     // W0286: lash::process::ProcessStartRequest [struct]
     type_witness::<lash::process::ProcessStartRequest>();
-    // W0288: lash::process::ProcessStartRequest::env_spec [field]
+    // W0288: lash::process::ProcessStartRequest::env_ref [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
-        let _ = &value.env_spec;
+        let _ = &value.env_ref;
     });
     // W0289: lash::process::ProcessStartRequest::event_types [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
@@ -910,8 +910,8 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.wake_session_id;
     });
-    // W0300: lash::process::ProcessStartRequest::with_env_spec [function]
-    let _ = lash::process::ProcessStartRequest::with_env_spec;
+    // W0300: lash::process::ProcessStartRequest::with_env_ref [function]
+    let _ = lash::process::ProcessStartRequest::with_env_ref;
     // W0301: lash::process::ProcessStartRequest::with_event_types [function]
     let _ = lash::process::ProcessStartRequest::with_event_types(
         todo!(),

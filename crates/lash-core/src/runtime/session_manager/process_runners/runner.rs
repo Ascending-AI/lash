@@ -170,6 +170,10 @@ impl RuntimeSessionServices {
                 crate::TurnContext::default(),
             )
             .with_execution_env_spec(services.current.execution_env_spec()?)
+            // The process's durable stamps (effect occurrences, its terminal
+            // prelude) follow the `F` its store recorded, never this build's
+            // own epoch: N+1 writes N's formats until finalize (FIG-3805).
+            .with_fleet_format(services.current.fleet_format())
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(
                 process_id_for_runtime.clone(),

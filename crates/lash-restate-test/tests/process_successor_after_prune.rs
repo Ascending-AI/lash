@@ -180,7 +180,11 @@ fn start_request(start_key: &str, payload: serde_json::Value) -> lash_core::Proc
         lash_core::Lifetime::Detached,
     )
     .with_host_start_key(start_key)
-    .with_env_spec(process_env_spec())
+    .with_env_ref(
+        (process_env_spec())
+            .stable_ref()
+            .expect("captured environment digest"),
+    )
 }
 
 /// Starts one process under `start_key` inside a handler — where a
@@ -194,6 +198,10 @@ async fn start_process(
     payload: serde_json::Value,
 ) -> lash_core::ProcessId {
     let admitted = lash_core::AdmittedScope::new(session.turn_scope(lash::TurnId::from(turn_id)));
+    core.host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_env_spec())
+        .await
+        .expect("publish start environment");
     let request = start_request(start_key, payload);
     let started = Arc::new(Mutex::new(None));
     let attempt: HandlerAttempt = {

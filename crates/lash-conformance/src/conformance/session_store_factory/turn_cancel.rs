@@ -160,7 +160,7 @@ pub(super) async fn commit_teardown(
                 crate::TurnBudget::Unbounded,
             ))
         });
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state)
         .deferring_interrupted_turn_inputs(
             turn.clone(),
             settlement.effective_cancellation().cloned(),
@@ -229,7 +229,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
-    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(crate::OperationId::turn(
             &request.session_id,
             &address.turn_id,
@@ -519,13 +519,13 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             .is_empty()
     );
 
-    // Consuming the exact authorization is the durable fence. Lease takeover
-    // alone cannot veto final settlement under ADR 0029.
+    // Consuming the exact authorization is the durable fence. Its authorizing
+    // drive epoch alone cannot veto final settlement under ADR 0039.
     let stale_state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
-    let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+    let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state)
         .with_operation(crate::OperationId::turn(
             &request.session_id,
             &turn,
@@ -1079,7 +1079,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
                 ..crate::RuntimeSessionState::new(request.config.session_policy())
             };
             state.ensure_agent_frame_initialized();
-            let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+            let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state)
                 .with_operation(crate::OperationId::turn(
                     &request.session_id,
                     &turn_id,
@@ -1869,7 +1869,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
-    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(crate::OperationId::turn(
             &request.session_id,
             &turn_id,

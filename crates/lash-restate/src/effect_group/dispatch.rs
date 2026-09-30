@@ -128,7 +128,8 @@ impl EffectGroupDispatchImpl {
                     %refusal,
                     "a drifted tool child whose scope names no turn settles its refusal"
                 );
-                record_child_settlement(ctx, self.route.namespace(), request, outcome.clone()).await
+                record_child_settlement(ctx, self.route.namespace(), request, outcome.clone(), None)
+                    .await
             }
             Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
             Err(error) => Err(std::io::Error::other(format!(
@@ -214,6 +215,7 @@ impl EffectGroupDispatchImpl {
                 EffectGroupChildRunOutcome::Completed {
                     outcome: Err(refusal),
                 },
+                None,
             )
             .await;
         }
@@ -245,6 +247,7 @@ impl EffectGroupDispatchImpl {
                     EffectGroupChildRunOutcome::Completed {
                         outcome: Err(attach_expired_error(request)),
                     },
+                    None,
                 )
                 .await;
             }
@@ -306,6 +309,7 @@ impl EffectGroupDispatchImpl {
                     EffectGroupChildRunOutcome::Completed {
                         outcome: Err(attach_expired_error(request)),
                     },
+                    None,
                 )
                 .await;
             }
@@ -473,11 +477,28 @@ impl EffectGroupDispatchImpl {
                         request.group_key, request.position
                     ))
                     .await?;
+            // The rank the drive's own §4 commit of this child reserved, if
+            // its drive crossed the boundary: the seat publishes it without
+            // committing again (FIG-4308).
+            let receipt = request
+                .envelope
+                .invocation
+                .execution_scope()
+                .journal_identity()
+                .ok()
+                .and_then(|identity| {
+                    controller.group_child_commit_receipt(
+                        &request.group_key,
+                        identity.key(),
+                        request.envelope.invocation.effect_replay_key(),
+                    )
+                });
             return record_child_settlement(
                 controller.context(),
                 self.route.namespace(),
                 request,
                 outcome,
+                receipt,
             )
             .await;
         }
@@ -534,6 +555,7 @@ impl EffectGroupDispatchImpl {
                 self.route.namespace(),
                 request,
                 outcome,
+                None,
             )
             .await;
         }
@@ -605,7 +627,7 @@ impl EffectGroupDispatchImpl {
             }
         };
 
-        record_child_settlement(&ctx, self.route.namespace(), request, outcome).await
+        record_child_settlement(&ctx, self.route.namespace(), request, outcome, None).await
     }
 }
 
@@ -711,13 +733,16 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         //   re-issues this dispatch attaches to the invocation the first
         //   dispatch created rather than starting a fresh, unrelated one.
         //
-        // Eager is load-bearing. `register_children` below is what resolves
+        // Eager is load-bearing. `register_dispatch` below is what resolves
         // READY and releases the opener, so awaiting any child before that
-        // point would deadlock the open. Issue all, record all, register, then
-        // hold.
+        // point would deadlock the open. Issue all, record all and register in
+        // one step, then hold.
         //
         // Every call is issued before any invocation id is awaited, and the
-        // ids are recorded in one `record_dispatch` (FIG-4088). The engine
+        // ids are recorded, and the group made ready, in one
+        // `register_dispatch` (FIG-4088, FIG-4308): the children's own
+        // admissions queue on the same exclusive index, behind one handler
+        // rather than two. The engine
         // mints a call's id when it appends the call, so by the time the first
         // await suspends every id is journaled: the dispatch costs a fixed
         // number of suspensions whatever the width. Awaiting each id and
@@ -755,44 +780,22 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             addresses.insert(*position, invocation_id);
         }
-        let recorded = self
-            .route
-            .namespace()
-            .effect_group_state(&ctx, request.group_key.clone())
-            .record_dispatch(EffectGroupRecordDispatchRequest {
-                dispatched: addresses.clone(),
-            })
-            .call()
-            .await?
-            .into_body();
-        match recorded {
-            EffectGroupRecordDispatchResponse::Recorded
-            | EffectGroupRecordDispatchResponse::Duplicate => {}
-            EffectGroupRecordDispatchResponse::Retired => return Ok(Reply::at(wire, ())),
-            other => {
-                return Err(TerminalError::new(format!(
-                    "record dispatch protocol defect for {}: {other:?}",
-                    request.group_key
-                ))
-                .into());
-            }
-        }
         let registered = self
             .route
             .namespace()
             .effect_group_state(&ctx, request.group_key.clone())
-            .register_children(EffectGroupRegisterRequest { addresses })
+            .register_dispatch(EffectGroupRegisterDispatchRequest { addresses })
             .call()
             .await?
             .into_body();
         match registered {
-            EffectGroupRegisterResponse::Registered
-            | EffectGroupRegisterResponse::AlreadyRegistered
-            | EffectGroupRegisterResponse::AlreadyClosed
-            | EffectGroupRegisterResponse::Retired => {}
+            EffectGroupRegisterDispatchResponse::Registered
+            | EffectGroupRegisterDispatchResponse::AlreadyRegistered
+            | EffectGroupRegisterDispatchResponse::AlreadyClosed => {}
+            EffectGroupRegisterDispatchResponse::Retired => return Ok(Reply::at(wire, ())),
             other => {
                 return Err(TerminalError::new(format!(
-                    "register children protocol defect for {}: {other:?}",
+                    "register dispatch protocol defect for {}: {other:?}",
                     request.group_key
                 ))
                 .into());
@@ -1133,86 +1136,23 @@ fn child_run_outcome(
 /// writes no payload: settlement is the index-serialized arbitration point,
 /// so a loser cancelled before its outcome landed leaves nothing for the
 /// group to read.
+///
+/// `receipt` is the rank this invocation's own journaled §4 commit of this
+/// child reserved, when its drive crossed the boundary (FIG-4308): that
+/// commit already holds the point and the drive already waited at the §5
+/// barrier if the child had intents to drain, so the seat publishes the rank
+/// without re-reading the commit. The receipt is not proof of a drain; it
+/// only says which rank this invocation's commit reserved.
 async fn record_child_settlement(
     ctx: &SharedWorkflowContext<'_>,
     namespace: &crate::RestateNamespace,
     request: &EffectGroupChildRequest,
     outcome: EffectGroupChildRunOutcome,
+    receipt: Option<u64>,
 ) -> HandlerResult<()> {
-    // The §4 boundary: the index decides this child's final before its
-    // payload and settlement exist. A child whose own settle already
-    // committed reads `AlreadyCommitted` back with the same position; one
-    // the cancel disposition beat is refused by name, and its payload
-    // and settlement never write.
-    let committed = namespace
-        .effect_group_state(ctx, request.group_key.clone())
-        .commit_child(EffectGroupCommitChildRequest {
-            replay_key: request.envelope.invocation.effect_replay_key().to_string(),
-        })
-        .call()
-        .await?
-        .into_body();
-    let blocking_positions = match committed {
-        EffectGroupCommitChildResponse::Committed {
-            blocking_positions, ..
-        }
-        | EffectGroupCommitChildResponse::AlreadyCommitted {
-            blocking_positions, ..
-        } => blocking_positions,
-        // A child that settles without admission (a generation refusal, an
-        // expired attach) can meet a group retired meanwhile; retirement
-        // already settled it, as the payload and settlement writes below
-        // treat the same answer.
-        EffectGroupCommitChildResponse::Retired => return Ok(()),
-        EffectGroupCommitChildResponse::CancelDecided { .. } => {
-            let refusal = RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-                format!(
-                    "the final record of effect group {} child {} reached durable \
-                         arbitration after its cancel disposition committed; the refusal \
-                         is the whole record and no payload or settlement journals \
-                         beneath it",
-                    request.group_key, request.position
-                ),
-            );
-            return Err(TerminalError::new(
-                serde_json::to_string(&refusal).unwrap_or(refusal.message),
-            )
-            .into());
-        }
-        other => {
-            return Err(TerminalError::new(format!(
-                "commit child protocol defect for {} child {}: {other:?}",
-                request.group_key, request.position
-            ))
-            .into());
-        }
-    };
-    // The §5 barrier: committed siblings below this child seat their
-    // settlements first. The last blocker's wake is durable, so a redrive
-    // of this handler re-reads the index's answer rather than racing it.
-    for position in blocking_positions {
-        let key = group_wait_key(
-            &request.shape.wait_scope,
-            &request.group_key,
-            EffectGroupWaitKind::Drained(position),
-        )?;
-        let replay_key = key.key_id.clone();
-        let address = RestateDurableWaitAddress::for_key(&key);
-        namespace
-            .durable_wait_workflow(ctx, address.workflow_key)
-            .await_resolution(
-                RestateDurableWaitAwaitRequest {
-                    key,
-                    deadline: None,
-                }
-                .into(),
-            )
-            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-            .call()
-            .await?;
+    if receipt.is_none() {
+        commit_child_final(ctx, namespace, request).await?;
     }
-
     let terminal = match outcome {
         EffectGroupChildRunOutcome::Cancelled => EffectGroupSettlementTerminal::Cancelled,
         EffectGroupChildRunOutcome::Completed {
@@ -1268,6 +1208,96 @@ async fn record_child_settlement(
         ))
         .into()),
     }
+}
+
+/// The §4 boundary for a child whose drive did not commit it in this
+/// invocation — an atomic or wait child, a refusal, or a successor whose
+/// attach expired: the index decides this child's final before its payload
+/// and settlement exist. One the cancel disposition beat is refused by name,
+/// and its payload and settlement never write.
+///
+/// A fresh commit declared no intent, so it has no drain and its seat waits
+/// on no one: its rank is reserved here. An `AlreadyCommitted` answer means an
+/// earlier invocation won the point, and this one cannot know what that commit
+/// declared, so it waits at the §5 barrier — every committed sibling below the
+/// reserved rank seats first, or retirement releases the wait — before it
+/// seats. The waits are issued together, and the last blocker's wake is
+/// durable, so a redrive of this handler re-reads the index's answer rather
+/// than racing it.
+async fn commit_child_final(
+    ctx: &SharedWorkflowContext<'_>,
+    namespace: &crate::RestateNamespace,
+    request: &EffectGroupChildRequest,
+) -> HandlerResult<()> {
+    let committed = namespace
+        .effect_group_state(ctx, request.group_key.clone())
+        .commit_child(EffectGroupCommitChildRequest {
+            replay_key: request.envelope.invocation.effect_replay_key().to_string(),
+        })
+        .call()
+        .await?
+        .into_body();
+    let blocking_positions = match committed {
+        EffectGroupCommitChildResponse::Committed { .. } => return Ok(()),
+        EffectGroupCommitChildResponse::AlreadyCommitted {
+            blocking_positions, ..
+        } => blocking_positions,
+        // A child that settles without admission (a generation refusal, an
+        // expired attach) can meet a group retired meanwhile; retirement
+        // already settled it, as the payload and settlement writes treat the
+        // same answer.
+        EffectGroupCommitChildResponse::Retired => return Ok(()),
+        EffectGroupCommitChildResponse::CancelDecided { .. } => {
+            let refusal = RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+                format!(
+                    "the final record of effect group {} child {} reached durable \
+                         arbitration after its cancel disposition committed; the refusal \
+                         is the whole record and no payload or settlement journals \
+                         beneath it",
+                    request.group_key, request.position
+                ),
+            );
+            return Err(TerminalError::new(
+                serde_json::to_string(&refusal).unwrap_or(refusal.message),
+            )
+            .into());
+        }
+        other => {
+            return Err(TerminalError::new(format!(
+                "commit child protocol defect for {} child {}: {other:?}",
+                request.group_key, request.position
+            ))
+            .into());
+        }
+    };
+    let mut waits = Vec::with_capacity(blocking_positions.len());
+    for position in blocking_positions {
+        let key = group_wait_key(
+            &request.shape.wait_scope,
+            &request.group_key,
+            EffectGroupWaitKind::Drained(position),
+        )?;
+        let replay_key = key.key_id.clone();
+        let address = RestateDurableWaitAddress::for_key(&key);
+        waits.push(
+            namespace
+                .durable_wait_workflow(ctx, address.workflow_key)
+                .await_resolution(
+                    RestateDurableWaitAwaitRequest {
+                        key,
+                        deadline: None,
+                    }
+                    .into(),
+                )
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
+                .call(),
+        );
+    }
+    for wait in waits {
+        wait.await?;
+    }
+    Ok(())
 }
 
 /// A wait child whose admission the index refused for a reason other than a

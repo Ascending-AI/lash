@@ -91,6 +91,38 @@ pub struct RootRef {
     pub root: TurnId,
 }
 
+/// An open logical root as the store's recovery page lists it
+/// ([`DeploymentStore::non_terminal_roots_page`](crate::DeploymentStore::non_terminal_roots_page)),
+/// with the execution its recorded admission names (FIG-4403).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRoot {
+    pub target: RootRef,
+    /// The executor the root's admission recorded; `None` while the root
+    /// has recorded no admission.
+    pub executor: Option<crate::store::RootExecutor>,
+}
+
+/// The engine's evidence that an open root's execution is lost, which
+/// [`DeploymentStore::end_lost_root`](crate::DeploymentStore::end_lost_root)
+/// ends the root on (ADR 0104 O2, O6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RootRunLoss {
+    /// The root's workflow run ended with a failure and recorded no
+    /// outcome: an operator's kill, or a refusal that ended nothing. The
+    /// engine never runs that key again, so the root ends whether or not it
+    /// had recorded its admission.
+    FailedRun,
+    /// No execution holds the root: the engine holds no run of the root's
+    /// key on any generation lane (the run was purged or its history lost),
+    /// and the execution its admission recorded runs nothing more
+    /// ([`RootExecutor`](crate::store::RootExecutor)). A root that recorded its admission
+    /// started, and its effects may have run, so it ends: a fresh execution
+    /// must never run it again (ADR 0105 L-S8). A root that never recorded
+    /// its admission started nothing; its input is still owed by its ingress
+    /// obligation, which drives it, so the store leaves it open.
+    NoRun,
+}
+
 /// What an engine did for a control verb.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -135,10 +167,13 @@ pub trait SessionControlEngine: Send + Sync {
     /// behind a redrive that has since settled is resumed, and one whose
     /// session's next work names no root is released (ADR 0109 §3).
     ///
-    /// Bounded: at most `page.limit` executions after `page.after`, in the
-    /// engine's own order; the report's `next` resumes the listing, and
-    /// `None` means it ran out. Idempotent: a second pass over the same
-    /// stalled execution records nothing new.
+    /// Each recovery catalog inspects at most `page.limit` records under
+    /// `page.budget`. The stalled-work listing resumes after `page.after`
+    /// in the engine's order; the report's `next` continues it, and `None`
+    /// wraps it. An engine that also repairs lost runs keeps independent
+    /// process and root cursors across calls. Failed items advance their
+    /// cursor and are retried when that catalog wraps.
+    /// Idempotent: a second pass over the same execution records nothing new.
     async fn reconcile_parks(
         &self,
         parks: &dyn ParkRecoveryWriter,
@@ -237,6 +272,9 @@ pub struct EnginePage {
     pub after: Option<EngineCursor>,
     /// Read at most this many executions.
     pub limit: NonZeroUsize,
+    /// Time available to each independent recovery page, including its
+    /// store read and engine requests.
+    pub budget: std::time::Duration,
 }
 
 /// The work a park holds, as the engine names it to the park writer.
@@ -340,8 +378,10 @@ pub struct ParkReconcileReport {
     /// finished their current segment's execution without their terminal (an
     /// operator's kill): nothing would ever run them again.
     pub ended_processes: Vec<crate::ProcessId>,
-    /// Roots whose only engine run failed without a Lash terminal. Their
-    /// scope close is now owed by the terminal row.
+    /// Roots this pass ended `SubstrateLost` because the engine lost their
+    /// execution ([`RootRunLoss`]): every run of the root failed without a
+    /// Lash terminal, or the engine holds no run of a root that started.
+    /// Their scope close is now owed by the terminal row.
     pub ended_roots: Vec<RootRef>,
     /// Sessions whose stopped drive this pass resumed: it stopped only behind
     /// a redrive that has since settled (D15). Any other stopped drive is

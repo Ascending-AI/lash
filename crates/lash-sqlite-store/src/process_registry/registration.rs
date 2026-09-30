@@ -18,6 +18,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
         let process_id_mint = self.process_id_mint.clone();
+        let trigger_delivery_bindings = self.trigger_delivery_bindings;
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
@@ -37,6 +38,15 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                             existing,
                         ));
+                    }
+                    // A delivery's key finds its process only while that
+                    // process is retained. A delivery already bound, or gone,
+                    // had its process pruned, and starts nothing: its row is
+                    // read in this transaction, after the key found nothing,
+                    // so a bind and prune that landed since this start's
+                    // ingest are seen here (ADR 0107 §5, FIG-4369).
+                    if let Some(pin) = trigger_delivery_pin.as_ref() {
+                        trigger_delivery_bindings.check_start_conn(tx, pin)?;
                     }
                     let registration = prepare_process_registration(registration)?;
                     // Admission against closure (FIG-3607 R11): a new start is

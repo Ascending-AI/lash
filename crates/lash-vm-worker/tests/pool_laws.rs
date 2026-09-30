@@ -4,9 +4,12 @@
     reason = "integration test helpers fail on broken fixture assumptions"
 )]
 
+use lash_vm_client::*;
 use lash_vm_protocol::*;
-use lash_vm_worker::*;
-use lashlang::{AbilityOp, AbilityOutcome, ExecutionMode};
+use lashlang::testing::ast_builders as b;
+use lashlang::{
+    AbilityOp, AbilityOutcome, ExecutionMode, ResourceOperationBatchLeaf, ResourceOperationOutcome,
+};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -42,9 +45,10 @@ fn start(source: &str, mode: ExecutionMode) -> Start {
             kind: "vm_run".into(),
             name: "context".into(),
             body: EncodedPayload(
-                serde_json::to_vec(&RunContext {
+                rmp_serde::to_vec_named(&RunContext {
                     environment: lashlang::testing::harness::test_environment(),
                     mode,
+                    ..RunContext::default()
                 })
                 .expect("context"),
             ),
@@ -58,22 +62,48 @@ fn answer(request: EffectRequest) -> EffectResponse {
         EffectKind::CancelCheckpoint => EffectOutcome::Checkpoint { cancelled: false },
         EffectKind::ProcessBoundary | EffectKind::ParkDeclined => EffectOutcome::Unit,
         _ => {
-            let op: AbilityOp = serde_json::from_slice(&request.payload.0).expect("operation");
+            let op: AbilityOp = rmp_serde::from_slice(&request.payload.0).expect("operation");
             let result = match op {
                 AbilityOp::ResourceOperation(op) => {
                     lashlang::testing::harness::EchoHost::perform_resource_operation(*op)
                         .map(AbilityOutcome::Value)
                 }
+                AbilityOp::ResourceOperationBatch(batch) => {
+                    let results = batch
+                        .leaves
+                        .iter()
+                        .map(|leaf| match leaf {
+                            ResourceOperationBatchLeaf::Operation(operation) => {
+                                ResourceOperationOutcome::from_result(
+                                    lashlang::testing::harness::EchoHost::perform_resource_operation(
+                                        operation.clone(),
+                                    ),
+                                )
+                            }
+                            ResourceOperationBatchLeaf::Timer(_) => {
+                                ResourceOperationOutcome::Value(lashlang::Value::Undefined)
+                            }
+                        })
+                        .collect();
+                    Ok(AbilityOutcome::ResourceOperationBatch(
+                        batch.answer_in_leaf_order(results),
+                    ))
+                }
+                // The awaited process's terminal: a value that names the
+                // handle, so every leaf of an aggregate is told apart.
+                AbilityOp::Await(handle) => Ok(AbilityOutcome::Value(lashlang::Value::String(
+                    format!("settled {handle:?}").into(),
+                ))),
                 AbilityOp::Finish(v) | AbilityOp::Fail(v) => Ok(AbilityOutcome::Value(v)),
                 AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
                 _ => panic!("unexpected effect"),
             };
             match result {
                 Ok(result) => EffectOutcome::Value(EncodedPayload(
-                    serde_json::to_vec(&result).expect("answer"),
+                    rmp_serde::to_vec_named(&result).expect("answer"),
                 )),
                 Err(error) => EffectOutcome::Failed(EncodedPayload(
-                    serde_json::to_vec(&error).expect("error"),
+                    rmp_serde::to_vec_named(&error).expect("error"),
                 )),
             }
         }
@@ -335,7 +365,7 @@ finish(plantedClosure());
         let mut input = start(probe, ExecutionMode::Foreground);
         input.owner = VmOwner::new("session-B");
         let mut context: RunContext =
-            serde_json::from_slice(&input.contexts[0].body.0).expect("context");
+            rmp_serde::from_slice(&input.contexts[0].body.0).expect("context");
         context.environment = context.environment.with_globals([
             "planted",
             "plantedClosure",
@@ -344,7 +374,7 @@ finish(plantedClosure());
             "plantedEcho",
             "plantedPattern",
         ]);
-        input.contexts[0].body.0 = serde_json::to_vec(&context).expect("context");
+        input.contexts[0].body.0 = rmp_serde::to_vec_named(&context).expect("context");
         let mut reused = checkout(&pool);
         assert_eq!(reused.pid(), pid);
         let message = reused.start(input.clone()).expect("B start");
@@ -585,7 +615,7 @@ fn helper_entry_preserves_effect_values_losslessly() {
     let mut worker = checkout(&pool);
     let (_, outcome) = complete(&mut worker, "finish([undefined, NaN, Infinity, -0]);");
     let ExecutionOutcome::Finished(Value::List(values)) =
-        serde_json::from_slice(&outcome).expect("outcome")
+        rmp_serde::from_slice(&outcome).expect("outcome")
     else {
         panic!("list");
     };
@@ -603,7 +633,8 @@ fn helper_entry_preserves_effect_values_losslessly() {
         vec![Value::Undefined, Value::Number(f64::NEG_INFINITY)].into(),
     ));
     let decoded: AbilityOutcome =
-        serde_json::from_slice(&serde_json::to_vec(&tuple).expect("tuple bytes")).expect("tuple");
+        rmp_serde::from_slice(&rmp_serde::to_vec_named(&tuple).expect("tuple bytes"))
+            .expect("tuple");
     let AbilityOutcome::Value(Value::Tuple(values)) = decoded else {
         panic!("tuple identity lost");
     };
@@ -696,5 +727,404 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
         let replacement = checkout(&pool);
         assert_ne!(replacement.pid(), Some(pid));
         replacement.release().expect("replacement reset");
+    }
+}
+
+#[test]
+fn effect_responses_preserve_the_checkout_kernel_cpu_ceiling() {
+    let pool = WorkerPool::new(config("cpu_ceiling")).expect("pool");
+    let mut worker = checkout(&pool);
+    complete(&mut worker, "print(1); print(2); finish(3);");
+    worker.release().expect("release");
+}
+
+#[test]
+fn expected_abandonments_and_guest_errors_leave_the_pool_available() {
+    let mut cfg = config("");
+    cfg.max_restarts = 2;
+    let pool = WorkerPool::new(cfg).expect("pool");
+    for _ in 0..4 {
+        let mut worker = checkout(&pool);
+        let message = worker
+            .start(start(
+                "finish(await tools.echo({ value: 7 }));",
+                ExecutionMode::Foreground,
+            ))
+            .expect("start");
+        assert!(matches!(message, WorkerMessage::EffectRequest(_)));
+        drop(worker);
+        let mut worker = checkout(&pool);
+        let message = worker
+            .start(start(
+                "throw new Error('guest');",
+                ExecutionMode::Foreground,
+            ))
+            .expect("start guest error");
+        assert!(matches!(
+            drive(&mut worker, message),
+            WorkerMessage::GuestError { .. }
+        ));
+        assert!(!pool.stats().restart_storm);
+    }
+    let mut worker = checkout(&pool);
+    complete(&mut worker, "finish(3);");
+    worker.release().expect("release");
+}
+
+/// A cell that awaits a process parks and gives its slot back, so the one
+/// worker runs the awaited body, and the cell resumes and completes with the
+/// body's terminal (FIG-4275).
+#[test]
+fn one_slot_process_await_releases_worker_for_the_awaited_body() {
+    let process_id = lash_core_execution::ProcessId::fixture("one-slot-awaited-body");
+    let source = format!(
+        "const handle = await tools.echo({{ value: {{ __handle__: 'lash', id: 'p.{}' }} }}); finish(await handle);",
+        process_id.as_str(),
+    );
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut message = worker
+        .start(start(&source, ExecutionMode::Foreground))
+        .expect("start");
+    let mut requests = 0;
+    let awaited = loop {
+        requests += 1;
+        assert!(requests <= 8, "the cell reaches its process await");
+        let WorkerMessage::EffectRequest(request) = message else {
+            panic!("the cell asks for its process await: {message:?}");
+        };
+        if request.kind == EffectKind::Await {
+            break request;
+        }
+        message = worker.effect_result(answer(request)).expect("answer setup");
+    };
+    // The checkout deadline detects the dependency cycle without hanging:
+    // the awaited body needs the slot that its waiting cell still owns.
+    assert!(matches!(
+        pool.checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default()),
+        Err(PoolError::CheckoutTimedOut)
+    ));
+    let state = parked(worker.park().expect("a process await must park"));
+    worker.release().expect("release the waiting cell");
+    let mut body = checkout(&pool);
+    let (_, expected) = complete(&mut body, "finish(42);");
+    body.release().expect("release the awaited body");
+    let mut resumed = checkout(&pool);
+    let mut input = start(&source, ExecutionMode::Foreground);
+    input.state = StartState::Continuation(state);
+    let WorkerMessage::EffectRequest(again) = resumed.start(input).expect("resume") else {
+        panic!("the process await is reissued");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (awaited.kind, &awaited.payload)
+    );
+    let response = EffectResponse {
+        id: again.id,
+        outcome: EffectOutcome::Value(EncodedPayload(
+            rmp_serde::to_vec_named(&AbilityOutcome::Value(lashlang::Value::Number(42.0)))
+                .expect("process result"),
+        )),
+    };
+    let message = resumed
+        .effect_result(response)
+        .expect("answer the process await");
+    let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
+        panic!("the cell completes after its awaited body");
+    };
+    assert_eq!(value.0, expected);
+    resumed.release().expect("release resumed cell");
+}
+
+/// A process handle literal for the fixture process `name`.
+fn process_handle(name: &str) -> lashlang::Expr {
+    b::record(vec![
+        ("__handle__", b::string("lash")),
+        (
+            "id",
+            b::string(&format!(
+                "p.{}",
+                lash_core_execution::ProcessId::fixture(name).as_str()
+            )),
+        ),
+    ])
+}
+
+/// A foreground run of `program`, sent to the worker as a module artifact.
+fn artifact_start(program: lashlang::Program) -> Start {
+    let artifact = lashlang::ModuleArtifact::from_program(program).expect("module artifact");
+    let mut input = start("", ExecutionMode::Foreground);
+    input.program = ProgramSource::Artifact {
+        module_ref: artifact.module_ref().to_string(),
+        entry: ProgramEntry::Main,
+        artifact: artifact.to_store_bytes().expect("artifact bytes"),
+    };
+    input
+}
+
+/// A cell that awaits `awaited`, a container of three process handles.
+fn aggregate_await(awaited: lashlang::Expr) -> Start {
+    artifact_start(b::program(vec![b::finish(b::await_expr(awaited))]))
+}
+
+fn three_handles() -> [lashlang::Expr; 3] {
+    ["aggregate-a", "aggregate-b", "aggregate-c"].map(process_handle)
+}
+
+/// What a run showed its parent: how it ended, and every request it made
+/// that its parent had not already answered, in order.
+#[derive(Debug, PartialEq, Eq)]
+struct Transcript {
+    value: Vec<u8>,
+    requests: Vec<(EffectKind, EncodedPayload)>,
+}
+
+/// The run answered straight through, on one checkout.
+fn straight(pool: &WorkerPool, input: &Start) -> Transcript {
+    let mut worker = checkout(pool);
+    let mut message = worker.start(input.clone()).expect("start");
+    let mut requests = Vec::new();
+    loop {
+        match message {
+            WorkerMessage::EffectRequest(request) => {
+                requests.push((request.kind, request.payload.clone()));
+                message = worker.effect_result(answer(request)).expect("answer");
+            }
+            WorkerMessage::Complete { value, .. } => {
+                worker.release().expect("release");
+                return Transcript {
+                    value: value.0,
+                    requests,
+                };
+            }
+            other => panic!("expected Complete, received {other:?}"),
+        }
+    }
+}
+
+/// Drives `worker`'s run to its end, parking it on every `parks_on` request
+/// the way the broker parks a run whose effect needs a worker of its own:
+/// the one slot is held while the run awaits, the run parks and releases
+/// it, the awaited body runs on it, and the run resumes from its
+/// continuation and issues its request again, which is answered with the
+/// outcome the parent held. Answers the run's requests before the first
+/// park into `transcript`; returns the number of parks.
+fn drive_parking(
+    pool: &WorkerPool,
+    input: &Start,
+    mut worker: Checkout,
+    mut message: WorkerMessage,
+    parks_on: EffectKind,
+    transcript: &mut Transcript,
+) -> usize {
+    let mut held = None::<EffectRequest>;
+    let mut parks = 0;
+    loop {
+        match message {
+            WorkerMessage::EffectRequest(request) => {
+                if let Some(parked_on) = held.take() {
+                    assert_eq!(
+                        (request.kind, &request.payload),
+                        (parked_on.kind, &parked_on.payload),
+                        "the resumed run issues the request it parked on"
+                    );
+                    message = worker
+                        .effect_result(answer(request))
+                        .expect("answer the held outcome");
+                    continue;
+                }
+                transcript
+                    .requests
+                    .push((request.kind, request.payload.clone()));
+                if request.kind != parks_on {
+                    message = worker.effect_result(answer(request)).expect("answer");
+                    continue;
+                }
+                assert!(
+                    matches!(
+                        pool.checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default()),
+                        Err(PoolError::CheckoutTimedOut)
+                    ),
+                    "the one slot is held while the run awaits its {:?}",
+                    request.kind
+                );
+                let state = parked(worker.park().expect("the awaiting run parks"));
+                worker.release().expect("the parked run's slot goes back");
+                let mut body = checkout(pool);
+                complete(&mut body, "finish(42);");
+                body.release().expect("release the awaited body");
+                worker = checkout(pool);
+                let mut resumed = input.clone();
+                resumed.state = StartState::Continuation(state);
+                message = worker.start(resumed).expect("resume the parked run");
+                held = Some(request);
+                parks += 1;
+            }
+            WorkerMessage::Complete { value, .. } => {
+                worker.release().expect("release");
+                transcript.value = value.0;
+                return parks;
+            }
+            other => panic!("expected Complete, received {other:?}"),
+        }
+    }
+}
+
+fn run_parking(pool: &WorkerPool, input: &Start, parks_on: EffectKind) -> (Transcript, usize) {
+    let mut worker = checkout(pool);
+    let message = worker.start(input.clone()).expect("start");
+    let mut transcript = Transcript {
+        value: Vec::new(),
+        requests: Vec::new(),
+    };
+    let parks = drive_parking(pool, input, worker, message, parks_on, &mut transcript);
+    (transcript, parks)
+}
+
+/// A cell awaiting an array or a record of three process handles parks on
+/// each handle still pending, so a pool of one worker runs every awaited body
+/// and the cell ends as it would straight through: the same awaits, each
+/// issued once and in the same order, and the same value (FIG-4275).
+#[test]
+fn one_slot_aggregate_process_await_parks_on_every_pending_handle() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let [a, b_handle, c] = three_handles();
+    let shapes = [
+        (
+            "array",
+            b::list(vec![a.clone(), b_handle.clone(), c.clone()]),
+        ),
+        (
+            "record",
+            b::record(vec![("a", a), ("b", b_handle), ("c", c)]),
+        ),
+    ];
+    for (shape, awaited) in shapes {
+        let input = aggregate_await(awaited);
+        let expected = straight(&pool, &input);
+        assert_eq!(
+            expected
+                .requests
+                .iter()
+                .filter(|(kind, _)| *kind == EffectKind::Await)
+                .count(),
+            3,
+            "{shape}: one await per handle"
+        );
+        let (parked, parks) = run_parking(&pool, &input, EffectKind::Await);
+        assert_eq!(parks, 3, "{shape}: the cell parks on every pending handle");
+        assert_eq!(
+            parked, expected,
+            "{shape}: the parked cell ends as it would straight through"
+        );
+    }
+}
+
+/// A parent that crashes while a cell is parked mid-aggregate loses nothing
+/// the cell needs: a new parent that replays the cell from its start parks
+/// and ends as the lost one would have, and the continuation the lost parent
+/// held resumes on the new parent's worker with the handles it had already
+/// settled, issues only the pending await again, and ends with the same
+/// value (FIG-4275).
+#[test]
+fn a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result() {
+    let [a, b_handle, c] = three_handles();
+    let input = aggregate_await(b::list(vec![a, b_handle, c]));
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let expected = straight(&pool, &input);
+
+    // The first handle's terminal is answered in place; the cell parks on
+    // the second, holding the first's result in its continuation.
+    let mut worker = checkout(&pool);
+    let WorkerMessage::EffectRequest(first) = worker.start(input.clone()).expect("start") else {
+        panic!("the cell awaits its first handle");
+    };
+    assert_eq!(first.kind, EffectKind::Await);
+    let WorkerMessage::EffectRequest(second) = worker
+        .effect_result(answer(first.clone()))
+        .expect("answer the first handle")
+    else {
+        panic!("the cell awaits its second handle");
+    };
+    assert_eq!(second.kind, EffectKind::Await);
+    let state = parked(worker.park().expect("the cell parks on its second handle"));
+
+    // The parent crashes mid-park: its worker and its pool are gone.
+    drop(worker);
+    drop(pool);
+
+    let pool = WorkerPool::new(config("")).expect("the new parent's pool");
+    let (replayed, parks) = run_parking(&pool, &input, EffectKind::Await);
+    assert_eq!(parks, 3, "the replayed cell parks on every pending handle");
+    assert_eq!(
+        replayed, expected,
+        "the replayed cell issues the recorded awaits and ends the same"
+    );
+
+    let mut worker = checkout(&pool);
+    let mut resumed = input.clone();
+    resumed.state = StartState::Continuation(state);
+    let message = worker.start(resumed).expect("resume on the new parent");
+    let WorkerMessage::EffectRequest(again) = &message else {
+        panic!("the resumed cell issues its pending await: {message:?}");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (second.kind, &second.payload),
+        "the resumed cell issues the await it parked on, never the settled one"
+    );
+    let mut transcript = Transcript {
+        value: Vec::new(),
+        requests: vec![
+            (first.kind, first.payload.clone()),
+            (second.kind, second.payload.clone()),
+        ],
+    };
+    let reissued = transcript.requests.len();
+    let message = worker
+        .effect_result(answer(again.clone()))
+        .expect("answer the held outcome");
+    let parks = drive_parking(
+        &pool,
+        &input,
+        worker,
+        message,
+        EffectKind::Await,
+        &mut transcript,
+    );
+    assert_eq!(parks, 1, "only the third handle is still pending");
+    assert!(transcript.requests.len() > reissued);
+    assert_eq!(
+        transcript, expected,
+        "the resumed cell ends as it would straight through"
+    );
+}
+
+/// A `Promise.all` over pending tool calls is one resource-operation batch:
+/// the cell parks on it with one slot, the slot runs other work, and the
+/// resumed cell issues the same batch again and ends as it would straight
+/// through, in both execution modes (FIG-4275).
+#[test]
+fn one_slot_resource_operation_batch_parks_and_resumes() {
+    let source = "const [a, b, c] = await Promise.all([tools.echo({ value: 1 }), tools.echo({ value: 2 }), tools.echo({ value: 3 })]); finish(a + b + c);";
+    let pool = WorkerPool::new(config("")).expect("pool");
+    for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
+        let input = start(source, mode);
+        let expected = straight(&pool, &input);
+        assert_eq!(
+            expected
+                .requests
+                .iter()
+                .filter(|(kind, _)| *kind == EffectKind::ResourceOperationBatch)
+                .count(),
+            1,
+            "{mode:?}: the aggregate is one batch"
+        );
+        let (parked, parks) = run_parking(&pool, &input, EffectKind::ResourceOperationBatch);
+        assert_eq!(parks, 1, "{mode:?}: the cell parks on its batch");
+        assert_eq!(
+            parked, expected,
+            "{mode:?}: the parked cell ends as it would straight through"
+        );
     }
 }

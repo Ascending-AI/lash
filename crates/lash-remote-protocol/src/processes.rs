@@ -960,6 +960,18 @@ pub struct RemoteProcessEventSemantics {
     pub terminal: Option<RemoteProcessTerminalSemantics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<RemoteProcessWake>,
+    /// The wait a signal event resolves, selected by the append that
+    /// admitted the signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_wait: Option<RemoteProcessSignalWaitBinding>,
+}
+
+/// Wire mirror of the wait one signal event resolves: the ordinal of the
+/// process's wait for the signal's name (FIG-4298).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProcessSignalWaitBinding {
+    pub ordinal: u64,
 }
 
 impl RemoteProcessEventSemantics {

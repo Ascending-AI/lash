@@ -12,9 +12,8 @@ use std::sync::Arc;
 use crate::engine::BuildGeneration;
 use crate::{
     AttachmentStore, Backend, Clock, DeploymentStore, EffectEngine, EffectHost,
-    ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
-    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, StoreBindingId, StoreSet,
-    TriggerStore,
+    ModuleArtifactStore, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
+    ProcessWorkWiring, StoreBindingId, StoreSet, TriggerStore,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -37,12 +36,12 @@ pub struct LayeredBackend {
     effect_host: Arc<dyn EffectHost>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    process_definitions: Arc<dyn ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
+    worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
     process_work: ProcessWorkWiring,
     session_work: Arc<dyn crate::SessionWorkEngine>,
 }
@@ -56,12 +55,12 @@ impl LayeredBackend {
             effect_host: inner.effect_host(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
-            process_definitions: inner.process_definition_registry(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
+            worker_recovery: inner.worker_recovery(),
             process_work: inner.process_work(),
             session_work: inner.session_work(),
             inner,
@@ -80,6 +79,17 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn DeploymentStore>) -> Arc<dyn DeploymentStore>,
     ) -> Self {
         self.session_store_factory = layer(self.session_store_factory);
+        self
+    }
+
+    /// Replace the worker recovery store with a fixture's independent counters.
+    pub fn map_worker_recovery(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
+        ) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
+    ) -> Self {
+        self.worker_recovery = layer(self.worker_recovery);
         self
     }
 
@@ -123,15 +133,6 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
     ) -> Self {
         self.trigger_store = layer(self.trigger_store);
-        self
-    }
-
-    /// Replace the process-definition registry with `layer` over it.
-    pub fn map_process_definition_registry(
-        mut self,
-        layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = layer(self.process_definitions);
         self
     }
 
@@ -227,17 +228,18 @@ impl LayeredBackend {
         let inner_stores = self.inner.stores();
         let stores = Arc::new(LayeredStoreSet {
             binding: inner_stores.binding_identity().clone(),
+            attachment_referrers: inner_stores.attachment_referrers(),
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
             process_registry: self.process_registry,
             trigger_store: self.trigger_store,
-            process_definitions: self.process_definitions,
             process_env_store: self.process_env_store,
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
             obligation_ledgers: self.obligation_ledgers,
             artifact_cleanup: self.artifact_cleanup,
+            worker_recovery: self.worker_recovery,
         });
         Backend::new(Arc::new(LayeredEngine {
             stores,
@@ -261,16 +263,17 @@ impl LayeredStores {
     pub fn over(inner: Arc<dyn StoreSet>) -> Self {
         Self(LayeredStoreSet {
             binding: inner.binding_identity().clone(),
+            attachment_referrers: inner.attachment_referrers(),
             clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
-            process_definitions: inner.process_definition_registry(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
+            worker_recovery: inner.worker_recovery(),
             inner,
         })
     }
@@ -308,15 +311,6 @@ impl LayeredStores {
         self
     }
 
-    /// Replace the process-definition registry with `layer` over it.
-    pub fn map_process_definition_registry(
-        mut self,
-        layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.0.process_definitions = layer(self.0.process_definitions);
-        self
-    }
-
     /// Replace the process-execution-environment store with `layer` over it.
     pub fn map_process_env_store(
         mut self,
@@ -332,6 +326,15 @@ impl LayeredStores {
         layer: impl FnOnce(Arc<dyn AttachmentStore>) -> Arc<dyn AttachmentStore>,
     ) -> Self {
         self.0.attachment_store = layer(self.0.attachment_store);
+        self
+    }
+
+    /// Replace the attachment referrers before the engine binds its services.
+    pub fn map_attachment_referrers(
+        mut self,
+        layer: impl FnOnce(Arc<dyn crate::AttachmentReferrers>) -> Arc<dyn crate::AttachmentReferrers>,
+    ) -> Self {
+        self.0.attachment_referrers = layer(self.0.attachment_referrers);
         self
     }
 
@@ -407,15 +410,20 @@ struct LayeredStoreSet {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    process_definitions: Arc<dyn ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
+    attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
+    worker_recovery: Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>,
 }
 
 impl StoreSet for LayeredStoreSet {
+    fn usage_accounting(&self) -> Arc<dyn lash_core_execution::UsageAccountingStore> {
+        self.inner.usage_accounting()
+    }
+
     fn binding_identity(&self) -> &StoreBindingId {
         &self.binding
     }
@@ -428,7 +436,7 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.session_store_factory)
     }
     fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
-        self.inner.attachment_referrers()
+        Arc::clone(&self.attachment_referrers)
     }
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
@@ -443,12 +451,14 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.trigger_store)
     }
 
-    fn process_definition_registry(&self) -> Arc<dyn ProcessDefinitionRegistry> {
-        Arc::clone(&self.process_definitions)
-    }
-
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
         Arc::clone(&self.process_env_store)
+    }
+
+    fn worker_recovery(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
+        Arc::clone(&self.worker_recovery)
     }
 
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
@@ -459,8 +469,8 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.module_artifacts)
     }
 
-    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
-        self.inner.process_definitions()
+    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        self.inner.definition_store()
     }
 
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
@@ -502,7 +512,7 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "map_process_registry cannot decorate")]
     async fn map_process_registry_refuses_an_engine_with_its_own_process_work() {
-        let engine_driven = LayeredBackend::over(crate::testing::memory_backend().await)
+        let engine_driven = LayeredBackend::over(crate::testing::sqlite_recording_backend().await)
             .wire_process_work(crate::testing::process_work_wiring_for_registry)
             .into_backend();
         assert!(

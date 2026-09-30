@@ -24,6 +24,10 @@ macro_rules! obligation_relay_tests {
                 "obligation-stall-page"
             ),
             (a_missing_engine_carry_stalls_the_cleanup_row, "engine-carry-missing"),
+            (
+                a_settled_journal_nudges_only_the_cleanups_awaiting_it,
+                "cleanup-awaited-journal-nudge"
+            ),
             (a_rearm_returns_a_stalled_obligation_to_due, "obligation-rearm"),
             (immediate_delivery_takes_only_a_due_obligation, "obligation-immediate"),
             (

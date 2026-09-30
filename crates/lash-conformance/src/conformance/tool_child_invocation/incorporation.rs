@@ -59,58 +59,20 @@ fn incorporation_group(
     .expect("the incorporation group assembles")
 }
 
-/// The session-ledger stand-in an incorporating context charges into: every
-/// delta the applicator applies lands here, counted by `(source, model)`.
-#[derive(Default)]
-pub(super) struct RecordingCharge {
-    charges: std::sync::Mutex<Vec<(String, String, crate::TokenUsage)>>,
-}
-
-impl crate::session::UsageChargeSink for RecordingCharge {
-    fn charge(
-        &self,
-        source: &str,
-        model: &str,
-        usage: &crate::TokenUsage,
-    ) -> Result<(), crate::PluginError> {
-        self.charges
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push((source.to_string(), model.to_string(), usage.clone()));
-        Ok(())
-    }
-}
-
-impl RecordingCharge {
-    fn snapshot(&self) -> Vec<(String, String, crate::TokenUsage)> {
-        self.charges.lock_recover().clone()
-    }
-
-    pub(super) fn count(&self) -> usize {
-        self.charges
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .len()
-    }
-}
-
-/// The opener's execution context over the controller its handler was lent,
-/// with the charge sink the incorporation's usage deltas land in.
+/// The opener's execution context over the controller its handler was lent.
 fn incorporating_context<'run>(
     scoped: crate::ScopedEffectController<'run>,
     session_id: &crate::SessionId,
-    charge: Arc<RecordingCharge>,
 ) -> crate::RuntimeExecutionContext<'run> {
     crate::testing::TestExecutionContextBuilder::over_controller(scoped)
         .session_id(session_id.clone())
-        .direct_completions(
-            crate::DirectCompletionClient::from_fn(|_request, _source| {
+        .direct_completions(crate::DirectCompletionClient::from_fn(
+            |_request, _source| {
                 Err(crate::PluginError::Invoke(
                     "incorporation law context serves no completions".to_string(),
                 ))
-            })
-            .with_usage_charge_sink(charge),
-        )
+            },
+        ))
         .build()
         .into_runtime()
 }
@@ -119,7 +81,6 @@ fn incorporating_context<'run>(
 #[derive(Debug)]
 struct CrashedOpener {
     incorporated: Vec<crate::runtime::effect::IncorporatedGroupRank>,
-    charged: usize,
 }
 
 /// What the opener's redelivered execution observed, step by step.
@@ -127,8 +88,6 @@ struct CrashedOpener {
 struct RedrivenOpener {
     /// The incorporation replayed at the crashed execution's cursor.
     replayed: Vec<crate::runtime::effect::IncorporatedGroupRank>,
-    /// Charges after the replayed incorporation.
-    replay_charged: usize,
     /// The ledger right after the replayed incorporation.
     replay_ledger: crate::session::IncorporationLedger,
     /// A second incorporation at the same cursor.
@@ -137,9 +96,6 @@ struct RedrivenOpener {
     late_position: usize,
     /// The incorporation that extends the cursor over it.
     extended: Vec<crate::runtime::effect::IncorporatedGroupRank>,
-    /// Charges once the extension landed.
-    final_charged: usize,
-    final_usage: Vec<(String, String, crate::TokenUsage)>,
 }
 
 /// The opener's side of the law, as one handler's work: open the group,
@@ -154,7 +110,6 @@ async fn open_and_incorporate_first_rank<'run>(
     scoped: &crate::ScopedEffectController<'run>,
     group: crate::RuntimeEffectGroup,
     session_id: &crate::SessionId,
-    charge: &Arc<RecordingCharge>,
 ) -> (
     crate::EffectGroupHandle,
     crate::RuntimeExecutionContext<'run>,
@@ -168,7 +123,7 @@ async fn open_and_incorporate_first_rank<'run>(
     // Rank 1 is the usage leaf; the deferred leaf is parked and unsettled.
     let first = next_settlement(scoped, &mut handle, 0).await;
     assert_eq!(first.position, 0, "the usage leaf settles first: {first:?}");
-    let context = incorporating_context(scoped.clone(), session_id, Arc::clone(charge));
+    let context = incorporating_context(scoped.clone(), session_id);
     let incorporated = context
         .incorporate_group_prefix(&handle)
         .await
@@ -184,16 +139,16 @@ async fn open_and_incorporate_first_rank<'run>(
 /// The group is `[usage leaf, spend-then-deferred leaf]`, and the opener runs
 /// where the tier runs a turn — inside a real handler on Restate. It opens
 /// the group, consumes the usage leaf's settlement, and
-/// `incorporate_group_prefix` journals a record covering rank 1 alone and
-/// charges that rank's usage once. The opener then crashes where it stands.
+/// `incorporate_group_prefix` journals a record covering rank 1 alone. The
+/// opener then crashes where it stands. The ranks carry no usage: each leaf's
+/// spend is its own `ToolAttempt` run's (ADR 0125).
 ///
-/// Only then is the parked leaf resolved, so rank 2's settlement — with its
-/// own usage — is durably present before the opener recovers, a fact the
+/// Only then is the parked leaf resolved, so rank 2's settlement is durably
+/// present before the opener recovers, a fact the
 /// record never saw. The tier recovers the opener its own way (Restate
 /// redelivers the invocation, replaying its journal). The replayed
-/// incorporation at the saved cursor names rank 1 only, so rank 1's spend is
-/// charged and rank 2's is not — a settlement that arrived after the record
-/// is not early possession. A repeated call at the same cursor journals
+/// incorporation at the saved cursor names rank 1 only — a settlement that
+/// arrived after the record is not early possession. A repeated call at the same cursor journals
 /// nothing and applies nothing. Consuming the late settlement and extending
 /// the cursor to rank 2 then journals a second record covering exactly that
 /// rank.
@@ -201,7 +156,7 @@ async fn open_and_incorporate_first_rank<'run>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn group_accounting_conserves_each_incorporated_rank(
+pub async fn group_incorporation_replays_exactly_the_recorded_ranks(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
@@ -252,13 +207,9 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
             let crash = crash.clone();
             let crashed = Arc::clone(&crashed);
             Box::pin(async move {
-                let charge = Arc::new(RecordingCharge::default());
                 let (_handle, _context, incorporated) =
-                    open_and_incorporate_first_rank(&scoped, group, &session_id, &charge).await;
-                *crashed.lock_recover() = Some(CrashedOpener {
-                    incorporated,
-                    charged: charge.count(),
-                });
+                    open_and_incorporate_first_rank(&scoped, group, &session_id).await;
+                *crashed.lock_recover() = Some(CrashedOpener { incorporated });
                 crash.fire();
                 std::future::pending().await
             })
@@ -268,10 +219,7 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
         .turn_runner
         .run_turn_until_crash(admitted.clone(), crashing, crash)
         .await;
-    let CrashedOpener {
-        incorporated,
-        charged,
-    } = crashed
+    let CrashedOpener { incorporated } = crashed
         .lock_recover()
         .take()
         .expect("the opener recorded its incorporation before it crashed");
@@ -282,10 +230,6 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
     );
     assert_eq!(incorporated[0].rank, 1);
     assert!(!incorporated[0].child_replay_key.is_empty());
-    assert_eq!(
-        charged, 1,
-        "rank 1's usage was charged exactly once at incorporation"
-    );
 
     // The late settlement: the parked leaf resolves and takes rank 2 — a fact
     // the already-cut record does not name — and is durable before the
@@ -315,10 +259,8 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
             let session_id = session_id.clone();
             let redriven = Arc::clone(&redriven);
             Box::pin(async move {
-                let charge = Arc::new(RecordingCharge::default());
                 let (mut handle, context, replayed) =
-                    open_and_incorporate_first_rank(&scoped, group, &session_id, &charge).await;
-                let replay_charged = charge.count();
+                    open_and_incorporate_first_rank(&scoped, group, &session_id).await;
                 let replay_ledger = context.incorporation_ledger_snapshot();
                 let again = context
                     .incorporate_group_prefix(&handle)
@@ -329,7 +271,6 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
                     .incorporate_group_prefix(&handle)
                     .await
                     .expect("the prefix extension journals");
-                let final_charged = charge.count();
                 scoped
                     .controller()
                     .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
@@ -337,13 +278,10 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
                     .expect("the opener closes the group");
                 *redriven.lock_recover() = Some(RedrivenOpener {
                     replayed,
-                    replay_charged,
                     replay_ledger,
                     again,
                     late_position: late.position,
                     extended,
-                    final_charged,
-                    final_usage: charge.snapshot(),
                 });
                 crate::ConformanceTurnEnd::Settled
             })
@@ -360,10 +298,6 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
     assert_eq!(
         redriven.replayed, incorporated,
         "replay re-incorporates exactly the recorded ranks"
-    );
-    assert_eq!(
-        redriven.replay_charged, 1,
-        "rank 2's late settlement was not incorporated on replay"
     );
     assert!(
         !redriven
@@ -398,26 +332,6 @@ pub async fn group_accounting_conserves_each_incorporated_rank(
         redriven.extended
     );
     assert_eq!(redriven.extended[0].rank, 2);
-    assert_eq!(
-        redriven.final_charged, 2,
-        "rank 2's spend is charged by its own record, once"
-    );
-    assert_eq!(
-        redriven.final_usage,
-        vec![
-            (
-                "law-usage-leaf".to_string(),
-                "law-model".to_string(),
-                law_direct_completion().usage
-            ),
-            (
-                "law-spend-deferred".to_string(),
-                "law-model".to_string(),
-                law_direct_completion().usage
-            ),
-        ],
-        "each incorporated rank conserves its own source, model and complete token usage"
-    );
     assert_eq!(scenario.observation.executions_of("law_usage").len(), 1);
     assert_eq!(
         scenario

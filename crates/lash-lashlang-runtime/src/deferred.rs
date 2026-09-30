@@ -22,7 +22,7 @@ use lash_sansio::sync::MutexExt;
 
 use crate::{
     LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_operation_contract,
-    required_tool_typescript_executable,
+    required_tool_executable,
 };
 
 /// A host-authorized tool capability resolved for a deferred call-path. It
@@ -205,7 +205,9 @@ pub enum DeferredLinkError {
     #[error(transparent)]
     Resolution(#[from] DeferredResolutionError),
     #[error(transparent)]
-    Link(#[from] lashlang::LinkError),
+    Link(#[from] lashlang::ModuleCompileError),
+    #[error("worker compilation failed: {0}")]
+    Worker(String),
 }
 
 /// A handle to the host's deferred resolver, optional because most hosts ship
@@ -279,7 +281,7 @@ fn fold_grant(
     host_environment: &mut LashlangHostEnvironment,
     grant: &ToolGrant,
 ) -> Result<(), ToolBindingError> {
-    let binding = required_tool_typescript_executable(&grant.definition.manifest)?;
+    let binding = required_tool_executable(&grant.definition.manifest)?;
     let contract = lashlang_tool_operation_contract(&grant.definition.contract);
     host_environment.resources.add_module_operation_contract(
         binding.module_path.iter().map(String::as_str),
@@ -429,16 +431,31 @@ pub async fn resolve_and_build_deferred_environment_from_references(
 /// callers that do not maintain their own compile cache. `NotAvailable` (and no
 /// resolver) leaves the symbol unresolved, surfacing a clean model-visible link
 /// error.
-pub async fn link_with_deferred_resolution(
+pub async fn compile_with_deferred_resolution(
+    workers: &lash_vm_client::service::Service,
     program: lashlang::Program,
     host_environment: LashlangHostEnvironment,
     resolver: Option<&SharedDeferredToolResolver>,
     record: &mut DeferredResolutionRecord,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Result<lashlang::LinkedModule, DeferredLinkError> {
+) -> Result<lash_vm_client::service::CompiledModule, DeferredLinkError> {
     let host_environment =
         resolve_and_fold_deferred(&program, host_environment, resolver, record, ctx).await?;
-    Ok(lashlang::LinkedModule::link(program, host_environment)?)
+    match workers
+        .request_accounted(lash_vm_client::service::Request::LinkAst {
+            source: String::new(),
+            program,
+            environment: host_environment,
+        })
+        .await
+        .map_err(|error| DeferredLinkError::Worker(error.to_string()))?
+    {
+        lash_vm_client::service::Response::Module(module) => Ok(*module),
+        lash_vm_client::service::Response::CompileRefused { error, .. } => Err(error.into()),
+        other => Err(DeferredLinkError::Worker(format!(
+            "unexpected compile response: {other:?}"
+        ))),
+    }
 }
 
 mod journal;
@@ -843,7 +860,8 @@ mod tests {
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record).await;
 
-        link_with_deferred_resolution(
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program,
             empty_host_environment(),
             Some(&harness.resolver),
@@ -872,7 +890,8 @@ mod tests {
 
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record).await;
-        link_with_deferred_resolution(
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program.clone(),
             empty_host_environment(),
             Some(&harness.resolver),
@@ -886,7 +905,8 @@ mod tests {
 
         // Re-drive the same link with the recorded resolutions: the resolver is
         // never called again.
-        link_with_deferred_resolution(
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program,
             empty_host_environment(),
             Some(&harness.resolver),
@@ -916,7 +936,8 @@ mod tests {
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record).await;
 
-        let err = link_with_deferred_resolution(
+        let err = compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program.clone(),
             empty_host_environment(),
             Some(&harness.resolver),
@@ -933,7 +954,8 @@ mod tests {
 
         // Replay reuses the recorded NotAvailable without re-resolving.
         let calls_before = harness.calls.load(Ordering::SeqCst);
-        link_with_deferred_resolution(
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program,
             empty_host_environment(),
             Some(&harness.resolver),
@@ -1036,9 +1058,16 @@ mod tests {
         record.record("web.fetch", Resolution::NotAvailable);
         let ctx = link_context(&mut record).await;
 
-        link_with_deferred_resolution(program, ambient, None, &mut record, &ctx)
-            .await
-            .expect_err("the recorded negative outcome must mask the ambient replacement");
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
+            program,
+            ambient,
+            None,
+            &mut record,
+            &ctx,
+        )
+        .await
+        .expect_err("the recorded negative outcome must mask the ambient replacement");
     }
 
     #[tokio::test]
@@ -1483,7 +1512,8 @@ mod tests {
             "exec-code:first",
             fault_journal_host(JournalFault::None).await,
         );
-        link_with_deferred_resolution(
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
             program.clone(),
             empty_host_environment(),
             Some(&harness.resolver),
@@ -1502,9 +1532,16 @@ mod tests {
             "exec-code:second",
             fault_journal_host(JournalFault::None).await,
         );
-        link_with_deferred_resolution(program, ambient, None, &mut second_record, &second_ctx)
-            .await
-            .expect("an independent link may use the new ambient definition");
+        compile_with_deferred_resolution(
+            &lash_vm_client::service::Service::default(),
+            program,
+            ambient,
+            None,
+            &mut second_record,
+            &second_ctx,
+        )
+        .await
+        .expect("an independent link may use the new ambient definition");
         assert!(second_record.get("mystery.run").is_none());
     }
 
@@ -1526,7 +1563,7 @@ mod tests {
             "exec-code:other",
         );
         let mismatched_context = lash_core::testing::code_execution_context_with_invocation(
-            &crate::lib_tests::memory_backend().await,
+            &crate::lib_tests::sqlite_recording_backend().await,
             mismatched_invocation,
         );
 

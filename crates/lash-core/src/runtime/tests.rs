@@ -11,7 +11,7 @@ pub(crate) mod helpers {
 
     #[tokio::test]
     async fn recording_factory_root_set_keeps_committed_blob() {
-        let sqlite = crate::testing::memory_store_set().await;
+        let sqlite = crate::testing::sqlite_memory_store_set().await;
         let factory = RecordingDeploymentStore::over(sqlite.session_store_factory());
         let request = crate::SessionStoreCreateRequest {
             owning_process_id: None,
@@ -76,14 +76,14 @@ pub(crate) mod helpers {
         assert_eq!(report.scanned_blob_count, 1);
         assert_eq!(report.reclaimed_count, 0);
         assert!(report.deleted_while_referenced.is_empty());
-        crate::AttachmentStore::get(&*backend, &attachment.id)
+        crate::AttachmentStore::get(&*backend, &attachment.id, 32 * 1024 * 1024)
             .await
             .expect("committed blob survives");
     }
 
     #[tokio::test]
     async fn test_runtime_process_registry_defaults_and_can_be_disabled() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
             .build()
             .await;

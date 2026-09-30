@@ -1,104 +1,94 @@
 # Facade sessions bind storage and lifecycle owners
 
-## Status
-
-Accepted. Ratified on FIG-2872.
-
-Amended 2026-09-29 (FIG-4112): a session's store comes only from the core's
-catalog. Open resolves an existing store; only `create` writes one. The
-explicit store on `SessionBuilder` no longer exists.
-
 ## Context
 
-The facade previously treated session persistence as optional after open. A
-session could use an explicit store while cancellation, resume, observation,
-or administration later consulted the core's factory and effect host. Those
-independent lookups could address the same session id in different persistence
-or control deployments. The storeless branch also skipped the acceptance,
-lease, cancellation-evidence, and recovery rules required by ADR 0069.
+Per-session storage and lifecycle services must address one backend consistently.
+Resolving them independently during cancellation, observation, or resume can
+apply control to a different deployment from the one that owns the session.
 
 ## Decision
 
-Every successfully opened facade session owns one immutable, privately
-constructed binding to its exact `RuntimePersistence` handle and lifecycle
-services. Per-session reads, queued-input operations, cancellation, park, and
-resume use that binding. Resume carries the binding forward while taking live
-provider, plugin, prompt, tracing, and policy configuration from the receiving
-core. It does not substitute the receiving core's lifecycle services.
+Every opened facade session has one privately constructed, immutable
+`BoundSession`. It retains the exact session store, backend catalog, effect
+host, process/queue ports, attachment and process-environment stores, process
+engines, close services, relay policy, and resident-session registration.
+Per-session operations derive their capabilities from that binding.
 
-Every facade session's store comes from the core's catalog; there is no
-explicit store on `SessionBuilder`. Open resolves an existing store; only
-`create` writes one (FIG-4112), so an open of an id the catalog has never
-created is `UnknownSession`, before admission or execution. Related sessions
-use the same admission and binding model; their relation may inform catalog selection,
-but never permits reusing a parent's exact store or publishing a storeless
-executable runtime. [ADR 0089](0089-parent-relationships-do-not-define-a-second-session-model.md)
-records that broader session-model invariant. An explicitly chosen in-memory
-factory is the ephemeral facade configuration; there is no hidden storeless
-facade mode.
+The store comes from the core's catalog. `SessionBuilder::create(SessionCreation)`
+is the only facade creation verb; it writes the catalog row and initial config
+head atomically. `open` resolves an existing id without creating it. An absent
+id returns `UnknownSession`, and a deleted id returns `SessionDeleted` before
+execution. There is no explicit builder store or storeless facade mode.
 
-Facade turn input contains only data that can cross its mandatory acceptance
-boundary. Replayable `ProtocolTurnOptions` remain available. The old
-`TurnBuilder::with_plugin_input`, `PluginBinding::Input`,
-`PluginBinding::requires_turn_input`, `RlmTurnInputExt::rlm_project`, and
-`rlm_project_tool_results` surfaces carried process-local handles that the
-durable boundary rejected, so they are removed rather than left as public APIs
-that no facade session can execute. Typed plugin configuration remains a
-session-open capability. RLM's session projection extension remains
-process-local configuration for one active runtime, while `RlmSeed` events are
-the replayable way to seed a newly created session. Those two timing and
-durability contracts are deliberately not presented as equivalents.
+Related sessions use the same admission and binding model under ADR 0089. A
+parent relation does not substitute the parent's exact session store or create
+a second facade session model.
 
-Exact-session work drivers accept one session id and one store handle.
-Arbitrary-session drivers accept a catalog and resolve the addressed store once
-after the cancellation gate is known to exist, retaining that handle through
-recording and receipt readback. Unknown or revoked gates return without a
-catalog lookup or cancellation row. An address outside an exact binding is
-refused before touching storage or controls.
+### Resume and control ownership
 
-The binding also carries a stable control-owner identity and terminal-attach
-service. Store-backed admission persists that identity before work and refuses a
-different owner on reopen. Cancellation closure authorization records the same
-identity together with the admitted physical execution scope, so recovery never
-reconstructs authority from a session or turn id. Factory-level lifecycle
-inspection exposes pending closure pins for deletion and Process retirement;
-unsupported inspection fails closed.
+A parked session retains its owner binding across resume. Applying that binding
+to a receiving core environment restores the owning backend, effect host,
+attachment store, process-environment store, and work ports. The receiving core
+supplies live provider resolution, plugin factories, tracing, and live policy.
+The durable session config, including session prompt and generation, remains
+recorded config under ADR 0074; the live core prompt is separate.
 
-Catalog and administration capabilities are separate from an opened session.
-Catalog operations without a catalog return `SessionCatalogUnavailable`.
-Deletion consumes an owner-issued `SessionDeleteContext` containing the
-selected administration services and a controller scoped by the same trusted
-backend adapter. Ordinary callers cannot combine an arbitrary controller with
-another core's catalog. Native and store-replay administration scopes through
-its retained effect host. Restate installs one administration adapter and mints
-the context from the handler-borrowed controller. Restate's process deletion
-keeps its existing direct process-command behavior; this decision does not add
-a new journal command.
+Durable turn input crosses mandatory acceptance. Replayable protocol options
+and durable RLM seeds can cross that boundary. Process-local projection
+configuration belongs to runtime materialization, rather than serialized turn
+input. Exact-session work ports and lifecycle operations retain their binding
+instead of rediscovering storage from a receiving core.
 
-`SessionDeleteExecution` is a trusted backend extension boundary. Rust keeps
-the administration and controller paired after issuance, but it cannot verify
-that an external SDK context is routed to the same physical deployment. The
-host must attest that installation and routing composition. No deployment id,
-global registry, or wire discriminator is added.
+### Park and close
 
-This supersedes ADR 0049's storeless-session paragraph. Its single-use session
-id and tombstone rules continue to apply to every explicitly selected store.
-ADR 0069's unconditional durable acceptance remains the facade rule. ADR
-0011's self-contained process reconstruction remains intact: internal process
-runtime paths may still carry optional store capabilities where their substrate
-contract requires it.
+The bound turn owns the session head, so park and close never commit a
+whole-session snapshot beside the drive. A session whose runtime holds nothing
+unpersisted parks and closes without writing. A dirty one (plugin state, graph
+nodes, or pending usage no commit carried yet) adopts the durable head and then
+flushes. While a root is bound, a follow-on is owed, or a session command is
+open, the store refuses that flush in its own transaction as
+`StoreError::SessionHeadOwned`, naming the owner. The refusal is typed and
+recoverable: `LashSession::park` and `close` answer `SessionParkRefused` and
+the runtime's `park` answers `ParkRefused`. Each names the busy owner and hands
+the session back with its runtime, resident state, and pending usage intact.
+The host keeps using the session, or parks it again once the owner's boundary
+passes. A park refused because another handle still shares the runtime
+(`SessionStillInUse`) leaves that handle in place.
+
+### Administration
+
+Catalog administration is separate from an opened session. Deletion uses the
+backend-issued close and delete services derived from the owning backend.
+`SessionDeleteContext::from_execution` captures that administration and derives
+the exact session-delete scope from the requested id. Callers cannot supply a
+scope for one session alongside another session's administration services.
+Its obligations can complete after permanent session tombstoning. Engine-side
+scope closure and storage-side deletion retain their separate durable duties
+under ADR 0109.
+
+Hosts installing third-party backends own the truthful physical pairing of the
+catalog, lifecycle services, and engine context. Rust ownership can preserve an
+issued pairing; it cannot verify external SDK routing. Lash adds no authentication
+or security-policy decision to that composition.
+
+## Alternatives considered
+
+An optional store after open cannot satisfy unconditional durable acceptance.
+Independent lookups during lifecycle operations can switch backend ownership.
+Rebinding a parked session to the receiving core's storage loses its exact
+continuation owner. One captured binding prevents those substitutions.
 
 ## Consequences
 
-- A facade session cannot execute without a real store, including in memory.
-- Facade turns cannot attach process-local plugin inputs or RLM projection
-  closures; hosts use typed session configuration, replayable protocol options,
-  or durable session seeds according to the lifetime they need.
-- Session relation may influence catalog selection, but every facade session
-  passes through the same admission and binding contract.
-- Parked sessions retain attachment, process-environment, trigger, process,
-  queue, effect, and exact-store ownership across resume.
-- Deletion retries can finish effect-journal retirement after the catalog has
-  already committed the permanent session tombstone.
-- Hosts that compose third-party backends remain responsible for truthful
-  physical pairing of their catalog, lifecycle services, and engine context.
+Every facade execution has a real catalog-backed store. Resume retains lifecycle
+ownership while accepting current live wiring. Session relationships use one
+ordinary session model, and deletion retries use durable obligations. The host
+owns external deployment composition.
+
+## Code references
+
+- `crates/lash/src/session.rs:152-169,247-275,518-541` separates create and existing-session resolution.
+- `crates/lash/src/session_binding.rs:6-63,150-185` captures owner services and applies them on resume.
+- `crates/lash-core/src/runtime/lifecycle.rs` (`park`, `flush_for_park`) and `crates/lash-core/src/runtime/environment.rs` (`ParkRefused`) make a busy park recoverable.
+- `crates/lash-core/src/runtime/session_administration.rs:104-153` issues the paired deletion context.
+- `crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs` pins lifecycle-owner behavior.

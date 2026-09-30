@@ -38,6 +38,7 @@ fn deployment_core(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let models = Arc::clone(models);
@@ -176,27 +177,17 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
         adopted,
         EffectGroupProbeAdoptResponse::Adopted { .. }
     ));
-    let dispatched = addresses.clone();
-    let result: EffectGroupRecordDispatchResponse = object(
+    let registered: EffectGroupRegisterDispatchResponse = object(
         engine,
         "EffectGroupIndex",
         &key,
-        "record_dispatch",
-        EffectGroupRecordDispatchRequest { dispatched },
-    )
-    .await;
-    assert_eq!(result, EffectGroupRecordDispatchResponse::Recorded);
-    let registered: EffectGroupRegisterResponse = object(
-        engine,
-        "EffectGroupIndex",
-        &key,
-        "register_children",
-        EffectGroupRegisterRequest {
+        "register_dispatch",
+        EffectGroupRegisterDispatchRequest {
             addresses: addresses.clone(),
         },
     )
     .await;
-    assert_eq!(registered, EffectGroupRegisterResponse::Registered);
+    assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
     let first: serde_json::Value = object(
         engine,
         "EffectGroupIndex",
@@ -214,13 +205,9 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
     )
     .await;
     assert_eq!(first["type"], "committed");
-    assert_eq!(first["blocking_positions"], json!([]));
     assert_eq!(second["type"], "committed");
-    let second_commit = second["commit_seq"]
-        .as_u64()
-        .expect("recorded commit position");
-    assert!(second_commit > first["commit_seq"].as_u64().unwrap());
-    assert_eq!(second["blocking_positions"], json!([0]));
+    let second_commit = second["rank"].as_u64().expect("reserved rank");
+    assert!(second_commit > first["rank"].as_u64().unwrap());
     let payload = b"recorded payload before the cold rebuild".to_vec();
     let written: EffectGroupPayloadPutResponse = object(
         engine,
@@ -298,7 +285,7 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         "EffectGroupIndex",
         &key,
         "drain_blockers",
-        json!({"commit_seq": second_commit}),
+        json!({"rank": second_commit}),
     )
     .await;
     assert!(
@@ -355,7 +342,7 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         "EffectGroupIndex",
         &key,
         "drain_blockers",
-        json!({"commit_seq": second_commit}),
+        json!({"rank": second_commit}),
     )
     .await;
     assert_eq!(clear, json!({"type": "admitted"}));
@@ -602,7 +589,15 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         )
         .unwrap(),
     });
-    let request = waiting_request(&engine, 32).await.with_env_spec(env);
+    let request = waiting_request(&engine, 32).await.with_env_ref(
+        lash_core::publish_process_execution_env(
+            engine.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(env),
+        )
+        .await
+        .expect("publish captured environment"),
+    );
     let id = start(&engine, &core, request).await;
     record_where(&engine, &id, signal_wait).await;
     let key = promise_key(&engine, "attach-process").await;

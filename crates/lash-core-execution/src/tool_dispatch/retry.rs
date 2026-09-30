@@ -88,15 +88,19 @@ async fn execute_attempt_body(
     prepared: &PreparedToolCall,
     attempt_context: &crate::AttemptContext<'_>,
 ) -> crate::ToolAttemptOutcome {
-    let body = context.tools.execute(crate::ToolCall::new(
-        manifest,
-        &prepared.args,
-        attempt_context,
-    ));
-    std::panic::AssertUnwindSafe(body)
-        .catch_unwind()
-        .await
-        .unwrap_or_else(|payload| tool_panicked(payload).into())
+    std::panic::AssertUnwindSafe(async {
+        context
+            .tools
+            .execute(crate::ToolCall::new(
+                manifest,
+                &prepared.args,
+                attempt_context,
+            ))
+            .await
+    })
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|payload| tool_panicked(payload).into())
 }
 
 async fn build_attempt_context<'run>(
@@ -305,6 +309,12 @@ pub(crate) async fn settle_completed_pending_tool_call(
 
 #[cfg(test)]
 mod panic_tests {
+    use std::sync::Arc;
+
+    use lash_sansio::sync::MutexExt as _;
+
+    static PANIC_MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn process_await_preserves_plugin_retry_evidence_for_retry_policy() {
         let output = crate::ToolCallOutput::failure(crate::ToolFailure {
@@ -350,11 +360,165 @@ mod panic_tests {
 
     #[test]
     fn contained_tool_panic_is_loud_in_test_builds() {
+        let _mode = PANIC_MODE.lock_recover();
         let previous = crate::panic_containment::set_loud(true);
         let panic = std::panic::catch_unwind(|| {
             let _ = super::tool_panicked(Box::new("tool seam remains loud"));
         });
         crate::panic_containment::set_loud(previous);
         assert!(panic.is_err());
+    }
+
+    /// A `ToolProvider` whose `execute` is written the way `async_trait`
+    /// desugars the trait: its body runs when dispatch invokes the method, so
+    /// this panic happens while the call's boxed future is being constructed —
+    /// before any future exists for the unwind catcher's poll to cover.
+    struct ConstructionPanicTool;
+
+    fn construction_panic_tool_definition() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:construction_panic_tool",
+            "construction_panic_tool",
+            "panics before returning its execute future",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "object" }),
+        )
+    }
+
+    impl crate::ToolProvider for ConstructionPanicTool {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![construction_panic_tool_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "construction_panic_tool")
+                .then(|| Arc::new(construction_panic_tool_definition().contract()))
+        }
+
+        fn execute<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            _call: crate::ToolCall<'life1>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = crate::ToolAttemptOutcome> + Send + 'async_trait>,
+        >
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            panic!("tool construction payload")
+        }
+    }
+
+    fn construction_panic_dispatch() -> (
+        Arc<super::ToolDispatchContext<'static>>,
+        crate::PreparedToolCall,
+    ) {
+        let definition = construction_panic_tool_definition();
+        let prepared = crate::PreparedToolCall {
+            call_id: crate::ToolCallId::fixture("construction-panic-call"),
+            provider_call_id: None,
+            tool_id: definition.manifest().id.clone(),
+            tool_name: "construction_panic_tool".to_string(),
+            args: serde_json::json!({}),
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        };
+        let plugins = crate::plugin::PluginHost::empty()
+            .build_session(crate::plugin::PluginSessionRequest::creation(
+                "session",
+                Default::default(),
+            ))
+            .expect("plugin session");
+        let dispatch = Arc::new(super::ToolDispatchContext {
+            plugins,
+            tools: Arc::new(ConstructionPanicTool),
+            tool_registry: None,
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(vec![definition])),
+            sessions: Arc::new(crate::testing::MockSessionManager::default()),
+            session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
+            session_graph: Arc::new(crate::testing::MockSessionManager::default()),
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
+            effect_controller: crate::runtime::ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            observation_call_key: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: crate::SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
+            observer: Arc::new(crate::engine::NullObservationSink),
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: Arc::new(crate::SystemClock),
+            process_lineage: None,
+            process_originator: None,
+        });
+        (dispatch, prepared)
+    }
+
+    #[test]
+    fn tool_execute_construction_panic_is_typed_in_quiet_and_loud_modes() {
+        use futures_util::FutureExt as _;
+
+        let _mode = PANIC_MODE.lock_recover();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("construction panic test runtime");
+        for loud in [false, true] {
+            let previous = crate::panic_containment::set_loud(loud);
+            let (dispatch, prepared) = construction_panic_dispatch();
+            let tool_context =
+                crate::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
+                    .prepared_call(&prepared)
+                    .context;
+            let direct = runtime.block_on(
+                std::panic::AssertUnwindSafe(super::execute_once(
+                    &dispatch,
+                    &prepared,
+                    tool_context,
+                    None,
+                ))
+                .catch_unwind(),
+            );
+            if loud {
+                let payload = direct.expect_err("loud construction panic propagates");
+                assert_eq!(
+                    payload.downcast_ref::<&str>(),
+                    Some(&"tool construction payload")
+                );
+            } else {
+                let crate::ToolAttemptOutcome::Done { result, .. } =
+                    direct.expect("quiet containment does not unwind")
+                else {
+                    panic!("a contained construction panic resolves as a done outcome")
+                };
+                let output = result.into_output();
+                let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+                    panic!("tool construction panic is recorded as a failure")
+                };
+                assert_eq!(failure.class, crate::ToolFailureClass::Internal);
+                assert_eq!(failure.code, "tool_panicked");
+                assert_eq!(failure.message, "tool construction payload");
+                assert_eq!(failure.retry, crate::ToolRetryStatus::Never);
+            }
+            crate::panic_containment::set_loud(previous);
+        }
     }
 }

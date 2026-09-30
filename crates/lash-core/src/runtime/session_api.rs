@@ -1,7 +1,6 @@
 use super::*;
 use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use lash_sansio::sync::MutexExt;
 
 impl LashRuntime {
     pub fn session_id(&self) -> &str {
@@ -278,61 +277,65 @@ impl LashRuntime {
         Ok(state)
     }
 
-    pub fn usage_report(&self) -> SessionUsageReport {
-        let mut totals = self.state.usage.clone();
-        let drained = self.shared_token_ledger.lock_recover();
-        let mut saturated = false;
-        for entry in drained.iter() {
-            saturated |= totals.fold_saturating(&entry.entry);
-        }
-        let mut report = totals.report();
-        report.saturated |= saturated;
-        report
+    /// The session's model usage, read from the engine-owned ledger
+    /// (ADR 0125). A durable read keyed by the session's owner: it covers every
+    /// call made for the session, whichever runtime or engine ran it.
+    pub async fn usage(&self) -> Result<crate::OwnerUsage, SessionError> {
+        let owner = crate::RuntimeOwner::Session(self.state.session_id.clone());
+        self.host
+            .core
+            .usage_accounting()
+            .store
+            .load_owner_usage(&owner)
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to load session usage".to_string(),
+                source,
+            })
     }
 
-    /// Attempts of finished turns whose usage never arrived after an abort or
-    /// failure and have not been reconciled (ADR 0031). The ledger already
-    /// carries them as unreported rows; this is their attribution.
-    pub fn unreported_usage_attempts(&self) -> &[UnreportedUsageAttempt] {
-        &self.unreported_usage_attempts
-    }
-
-    /// Ask the session's provider for the usage of every registered
-    /// unreported attempt and append one `Reconciled` correction row per
-    /// recovered generation (FIG-2765).
+    /// Ask the session's provider for the usage of every unreported attempt the
+    /// ledger holds for this session, and append one correction per recovered
+    /// generation (ADR 0125, FIG-2765).
     ///
     /// Host-invoked and never on the turn hot path: each lookup is bounded by
-    /// the provider (timeout plus one retry). Rows are append-only; the
-    /// unreported row written at turn end is never rewritten, and
-    /// [`UsageTotals::unreported_attempts`] derives the outstanding hole from
-    /// both. Corrections ride the shared pending ledger and persist at the
-    /// next usage-ledger boundary like live usage does. Attempts the provider
-    /// cannot resolve stay registered and come back as `unresolved`.
+    /// the provider (timeout plus one retry). The outstanding attempts are
+    /// read from the store, so any host can reconcile, and a correction is an
+    /// idempotent append: a retried correction is a no-op. An attempt without
+    /// a generation id, one the provider has no record of, one whose lookup
+    /// failed and one whose correction conflicts with a stored one come back
+    /// as `unresolved`.
     pub async fn reconcile_unreported_usage(
         &mut self,
     ) -> Result<UsageReconciliationReport, SessionError> {
         let mut report = UsageReconciliationReport::default();
-        if self.unreported_usage_attempts.is_empty() {
+        let session_id = self.state.session_id.clone();
+        let owner = crate::RuntimeOwner::Session(session_id.clone());
+        let accounting = self.host.core.usage_accounting();
+        let outstanding = accounting
+            .store
+            .load_owner_usage(&owner)
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to load outstanding usage attempts".to_string(),
+                source,
+            })?
+            .outstanding;
+        if outstanding.is_empty() {
             return Ok(report);
         }
-        let session_id = self.state.session_id.clone();
         let policy = self.state.effective_policy().clone();
         let mut provider = self
             .host
             .resolve_session_policy(&session_id, policy)?
             .binding
             .provider;
-        // Cancellation safety (FIG-2765): the registry is NOT drained up front.
-        // Dropping this future mid-lookup must leave every unfinished attempt
-        // registered, so we iterate a snapshot and remove each key only after
-        // its correction is on the shared ledger, with no await in between.
-        let pending = self.unreported_usage_attempts.clone();
-        for attempt in pending {
-            let Some(generation_id) = attempt.generation_id.as_deref() else {
+        for attempt in outstanding {
+            let Some(generation_id) = attempt.generation_id.clone() else {
                 report.unresolved.push(attempt);
                 continue;
             };
-            match provider.reconcile_usage(generation_id).await {
+            match provider.reconcile_usage(&generation_id).await {
                 Ok(Some(reconciled)) => {
                     let crate::llm::types::LlmUsage {
                         input_tokens,
@@ -348,32 +351,51 @@ impl LashRuntime {
                         cache_write_input_tokens,
                         reasoning_output_tokens,
                     };
-                    session_manager::record_reconciled_usage_shared(
-                        &self.shared_token_ledger,
-                        &attempt.source,
-                        &attempt.model,
-                        &usage,
-                        &attempt.call_id,
-                        attempt.attempt_ordinal,
-                    );
-                    // Synchronous with the append above: no await may separate
-                    // recording the correction from retiring the attempt.
-                    self.unreported_usage_attempts.retain(|registered| {
-                        registered.call_id != attempt.call_id
-                            || registered.attempt_ordinal != attempt.attempt_ordinal
-                    });
-                    report.reconciled.push(ReconciledUsageAttempt {
-                        attempt,
-                        usage,
-                        provider_usage: reconciled.provider_usage,
-                    });
+                    let correction = crate::UsageCorrection {
+                        effect: attempt.effect.clone(),
+                        call_ordinal: attempt.call_ordinal,
+                        provider_attempt: attempt.provider_attempt,
+                        usage: usage.clone(),
+                        generation_id: generation_id.clone(),
+                    };
+                    let now_ms = crate::ClockWallTime::timestamp_ms(accounting.clock.as_ref());
+                    match accounting
+                        .store
+                        .append_usage_corrections(&owner, std::slice::from_ref(&correction), now_ms)
+                        .await
+                    {
+                        Ok(_) => report.reconciled.push(ReconciledUsageAttempt {
+                            attempt,
+                            usage,
+                            provider_usage: reconciled.provider_usage,
+                        }),
+                        Err(crate::UsageAppendError::Store(source)) => {
+                            return Err(SessionError::Store {
+                                context: "failed to append a usage correction".to_string(),
+                                source,
+                            });
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                llm_call_id = ?attempt.llm_call_id,
+                                call_ordinal = attempt.call_ordinal,
+                                provider_attempt = attempt.provider_attempt,
+                                generation_id,
+                                error = %error,
+                                "usage correction refused; attempt stays unreported"
+                            );
+                            report.unresolved.push(attempt);
+                        }
+                    }
                 }
                 Ok(None) => report.unresolved.push(attempt),
                 Err(error) => {
                     tracing::warn!(
                         session_id = %session_id,
-                        call_id = %attempt.call_id,
-                        attempt_ordinal = attempt.attempt_ordinal,
+                        llm_call_id = ?attempt.llm_call_id,
+                        call_ordinal = attempt.call_ordinal,
+                        provider_attempt = attempt.provider_attempt,
                         generation_id,
                         error = %error,
                         "usage reconciliation lookup failed; attempt stays unreported"
@@ -554,10 +576,6 @@ impl LashRuntime {
         })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
-        // The adopted head is authoritative for usage too: rebuild the attempts
-        // this session still owes usage for from the durable totals plus the
-        // resident rows that have not been confirmed into them yet.
-        self.rehydrate_unreported_usage_attempts();
         Ok(())
     }
 
@@ -597,18 +615,6 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Rebuild the pending-attempt registry from the durable usage totals and
-    /// the unconfirmed resident rows layered on top. Confirmed resident rows
-    /// are already folded into `state.usage`, and folding holes by identity
-    /// rather than by count means seeing a hole twice cannot double-count it.
-    pub(in crate::runtime) fn rehydrate_unreported_usage_attempts(&mut self) {
-        let mut totals = self.state.usage.clone();
-        for pending in self.shared_token_ledger.lock_recover().iter() {
-            totals.fold_saturating(&pending.entry);
-        }
-        self.unreported_usage_attempts = totals.outstanding;
-    }
-
     pub fn runtime_session_services(
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
@@ -624,7 +630,7 @@ impl LashRuntime {
             }
             ResidentSessionState::Valid => {}
         }
-        Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
+        Ok(Arc::new(RuntimeSessionServices::new(self, None)?))
     }
 
     /// This session's tool-execution context for a group tool child whose
@@ -659,7 +665,6 @@ impl LashRuntime {
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
-            true,
             held_drive_fence,
         )?))
     }
@@ -927,9 +932,9 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
-        self.persist_materialized_protocol_config()
-            .await
-            .map_err(runtime_error_from_session_command_refresh)?;
+        // The options this runtime's open materialized apply first, as a
+        // command of their own (FIG-4202).
+        Box::pin(self.submit_materialized_protocol_config(&store)).await?;
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
@@ -1051,10 +1056,11 @@ impl LashRuntime {
             // no edge that needs the patch re-published residently.
             // Reapplying it here would overwrite a newer settled head
             // with this command's older values, resident-only.
-            Ok(match completion.compact_context_outcome {
-                // An administrative compaction answers what it settled as,
-                // on whichever runtime applied it (FIG-4201).
-                Some(outcome) => crate::runtime::SessionCommandSettlement::Compaction {
+            Ok(match completion.command_outcome {
+                // A command that settles with an outcome answers what it
+                // settled as, on whichever runtime applied it (FIG-4201,
+                // FIG-4202).
+                Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
                     receipt: handle.receipt,
                     outcome,
                 },
@@ -1155,6 +1161,7 @@ impl LashRuntime {
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.drain_next_session_command_fenced(drive_fence, cancellation, effect_controller)
             .await
+            .map_err(CommandDrainStop::into_runtime_error)
     }
 
     /// Apply the session's leading open command run, its commit fenced by
@@ -1164,16 +1171,26 @@ impl LashRuntime {
     /// The command lane takes no binding. The run's rows are read open and
     /// their obligations acknowledged delivered in one fenced write, and the
     /// commit that applies the run settles them, predicated on each row still
-    /// being open. A host withdrawal in between refuses that commit, which
-    /// applies nothing, and the lane is read again.
+    /// being open. The read admits the run (FIG-4202): a host withdrawal
+    /// after it is refused, so the commit's predicate is a backstop, and a
+    /// commit it refuses applies nothing and the lane is read again.
+    ///
+    /// The resident session is reloaded outside any recorded step, so its
+    /// outcome never decides what the root journals (FIG-4346): a reload that
+    /// failed stops the drain [`CommandDrainStop::Headless`] before the next
+    /// recorded read, and the root reads on headless. So does a session that
+    /// retired under a run the root read, whose settlement and commit write
+    /// nothing to the journal.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
         drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+    ) -> Result<Option<crate::SessionCommandReceipt>, CommandDrainStop> {
         loop {
-            self.reload_invalidated_resident_session_state().await?;
+            if let Err(fault) = self.reload_invalidated_resident_session_state().await {
+                return Err(CommandDrainStop::Headless(fault));
+            }
             let Some(store) = self
                 .session
                 .as_ref()
@@ -1181,9 +1198,19 @@ impl LashRuntime {
             else {
                 return Ok(None);
             };
-            let batches = self
-                .read_session_command_run(store.clone(), drive_fence, effect_controller)
-                .await?;
+            let batches = execute_session_command_run_read(
+                effect_controller,
+                &self.state.session_id,
+                crate::RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(ReadSessionCommandRunRunner {
+                        store: store.clone(),
+                        fence: drive_fence.clone(),
+                    }),
+                    None,
+                ),
+            )
+            .await
+            .map_err(CommandDrainStop::Failed)?;
             if batches.is_empty() {
                 return Ok(None);
             }
@@ -1192,14 +1219,14 @@ impl LashRuntime {
                 batches,
             };
             let Some(commands) = run.session_commands() else {
-                return Err(RuntimeError::new(
+                return Err(CommandDrainStop::Failed(RuntimeError::new(
                     crate::RuntimeErrorCode::SessionCommandRun,
                     format!(
                         "session command run {:?} did not contain only single-command control \
                          batches",
                         run.batch_ids()
                     ),
-                ));
+                )));
             };
             let receipts = commands
                 .iter()
@@ -1225,12 +1252,25 @@ impl LashRuntime {
             // its commit published without committing again (FIG-4258). Any
             // other command journals nothing, so a settled run is simply
             // passed.
-            if !matches!(
+            let compaction = matches!(
                 commands.as_slice(),
                 [crate::SessionCommand::CompactContext { .. }]
-            ) && self
-                .session_command_run_settled(&store, &run.completion())
-                .await?
+            );
+            // Only a compaction journals its apply. Any other run settles and
+            // commits off the journal, so a session that retired under it
+            // leaves the root's next recorded step the next read.
+            let off_journal = |error: RuntimeError| {
+                if !compaction && error.is_session_retirement() {
+                    CommandDrainStop::Headless(error)
+                } else {
+                    CommandDrainStop::Failed(error)
+                }
+            };
+            if !compaction
+                && self
+                    .session_command_run_settled(&store, &run.completion())
+                    .await
+                    .map_err(off_journal)?
             {
                 return Ok(receipts.into_iter().next());
             }
@@ -1241,60 +1281,12 @@ impl LashRuntime {
                 cancellation.clone(),
                 effect_controller,
             ))
-            .await?
+            .await
+            .map_err(off_journal)?
             {
                 return Ok(receipts.into_iter().next());
             }
         }
-    }
-
-    /// Read the session's leading open command run as one recorded step
-    /// under `effect_controller`, keyed by the read's ordinal among its
-    /// reads (FIG-4201).
-    ///
-    /// The first execution reads the lane live, acknowledging the run's
-    /// obligations delivered under `drive_fence`. A replay of the root reads
-    /// back the run it recorded, even after the commit that applied it
-    /// settled the lane: an administrative compaction replays the base and
-    /// the summary it journaled and adopts its settled commit, and any other
-    /// settled run is passed. The live lane would skip the settled command
-    /// and run the root's next steps where its journal holds the
-    /// compaction's.
-    async fn read_session_command_run(
-        &self,
-        store: crate::store::SessionStore,
-        drive_fence: &crate::store::DriveFence,
-        effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
-        let ordinal = effect_controller.next_command_run_ordinal();
-        let session_id = self.state.session_id.clone();
-        let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                effect_controller.execution_scope().clone(),
-                format!("session-command-run:{ordinal}"),
-            )?,
-            crate::RuntimeAttribution::for_session(session_id.clone()),
-            format!("session-command-run:{ordinal}"),
-        );
-        effect_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::ReadSessionCommandRun {
-                        session: session_id,
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(ReadSessionCommandRunRunner {
-                        store,
-                        fence: drive_fence.clone(),
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_session_command_run)
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
     }
 
     /// Whether the commit that applies the command run `completion` names
@@ -1326,14 +1318,72 @@ impl LashRuntime {
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
-        if let [crate::SessionCommand::CompactContext { instructions }] = commands.as_slice() {
-            return Box::pin(self.apply_compact_context_command(
-                instructions.clone(),
-                completion,
-                drive_fence,
-                effect_controller,
-            ))
-            .await;
+        // A command that settles with an outcome applies alone, under its
+        // own scope, in the commit that settles it (FIG-4201, FIG-4202).
+        match commands.as_slice() {
+            [crate::SessionCommand::CompactContext { instructions }] => {
+                return Box::pin(self.apply_compact_context_command(
+                    instructions.clone(),
+                    completion,
+                    drive_fence,
+                    effect_controller,
+                ))
+                .await;
+            }
+            [
+                crate::SessionCommand::AppendSessionNodes { .. }
+                | crate::SessionCommand::RunPluginCommand { .. }
+                | crate::SessionCommand::RunPluginTask { .. }
+                | crate::SessionCommand::OpenAgentFrame { .. },
+            ] => {
+                drop(RuntimeNamedPhase::begin(
+                    self.turn_phase_probe.clone(),
+                    super::host_commands::SESSION_COMMAND_APPLYING_PHASE,
+                ));
+                // A host command applies against the boundary's committed
+                // head, whichever runtime committed it last (FIG-4202).
+                self.adopt_committed_head().await?;
+            }
+            _ => {}
+        }
+        match commands.as_slice() {
+            [crate::SessionCommand::AppendSessionNodes { request }] => {
+                return Box::pin(self.apply_append_session_nodes_command(
+                    request.as_ref().clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::RunPluginCommand { name, args }] => {
+                return Box::pin(self.apply_plugin_operation_command(
+                    super::host_commands::HostPluginOperation::Command,
+                    name.clone(),
+                    args.clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::RunPluginTask { name, args }] => {
+                return Box::pin(self.apply_plugin_operation_command(
+                    super::host_commands::HostPluginOperation::Task,
+                    name.clone(),
+                    args.clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::OpenAgentFrame { request }] => {
+                return Box::pin(self.apply_open_agent_frame_command(
+                    request.as_ref().clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            _ => {}
         }
         let effect_controller = effect_controller.controller();
         let has_durable_store = self
@@ -1434,14 +1484,22 @@ impl LashRuntime {
                     crate::SessionCommand::ApplyConfigPatch { .. } => {
                         unreachable!("config commands use the cloned publication path")
                     }
-                    // The drive's command lane applies a persisted compaction
-                    // before this point; only a storeless runtime's inline
-                    // command reaches here, and it compacts directly.
-                    crate::SessionCommand::CompactContext { .. } => {
+                    // The drive's command lane applies a persisted command
+                    // that settles with an outcome before this point; only a
+                    // storeless runtime's inline command reaches here, and a
+                    // storeless runtime writes its head directly.
+                    command @ (crate::SessionCommand::CompactContext { .. }
+                    | crate::SessionCommand::AppendSessionNodes { .. }
+                    | crate::SessionCommand::RunPluginCommand { .. }
+                    | crate::SessionCommand::RunPluginTask { .. }
+                    | crate::SessionCommand::OpenAgentFrame { .. }) => {
                         return Err(RuntimeError::new(
-                            RuntimeErrorCode::ContextCompaction,
-                            "a storeless runtime compacts directly through \
-                             `compact_storeless_context`, not through a session command",
+                            RuntimeErrorCode::SessionCommandRequired,
+                            format!(
+                                "a storeless runtime applies `{}` directly, not through a \
+                                 session command",
+                                command.kind()
+                            ),
                         ));
                     }
                 }
@@ -1484,7 +1542,6 @@ impl LashRuntime {
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 commit_state,
-                &[],
                 operation,
                 self.host.core.durability.commit_budget,
                 fleet_format,
@@ -1553,6 +1610,66 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 
 /// The first execution of one `ReadSessionCommandRun` step: the live read of
 /// the command lane under the root's fence (FIG-4201).
+/// Why a fenced command drain stopped without an answer.
+pub(in crate::runtime) enum CommandDrainStop {
+    /// The drain holds no current head for its next recorded read: the
+    /// resident session could not be reloaded (a deleted session's reload
+    /// among them), or the session retired under a run the root read. The
+    /// root reads on headless from its next read.
+    Headless(RuntimeError),
+    /// Anything else the drain met.
+    Failed(RuntimeError),
+}
+
+impl CommandDrainStop {
+    pub(in crate::runtime) fn into_runtime_error(self) -> RuntimeError {
+        match self {
+            Self::Headless(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
+/// Read the session's leading open command run as one recorded step,
+/// `session-command-run:{ordinal}` on `controller`'s scope, keyed by the
+/// read's ordinal among its reads (FIG-4201), whose first execution runs
+/// `runner`.
+///
+/// The first execution reads the lane live, acknowledging the run's
+/// obligations delivered under the drive fence. A replay of the root reads
+/// back the run it recorded, even after the commit that applied it settled
+/// the lane: an administrative compaction replays the base and the summary
+/// it journaled and adopts its settled commit, and any other settled run is
+/// passed. The live lane would skip the settled command and run the root's
+/// next steps where its journal holds the compaction's.
+pub(in crate::runtime) async fn execute_session_command_run_read(
+    controller: &crate::ScopedEffectController<'_>,
+    session_id: &SessionId,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
+    let ordinal = controller.next_command_run_ordinal();
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            controller.execution_scope().clone(),
+            format!("session-command-run:{ordinal}"),
+        )?,
+        crate::RuntimeAttribution::for_session(session_id.clone()),
+        format!("session-command-run:{ordinal}"),
+    );
+    controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::ReadSessionCommandRun {
+                    session: session_id.clone(),
+                },
+            ),
+            runner,
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_session_command_run)
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
+}
+
 struct ReadSessionCommandRunRunner {
     store: crate::store::SessionStore,
     fence: crate::store::DriveFence,
@@ -1563,6 +1680,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ReadSessionC
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ReadSessionCommandRun { .. } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

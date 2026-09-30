@@ -128,42 +128,62 @@ pub struct EffectGroupSettlementRecord {
 
 /// Which side of the §4 arbitration point committed for one child.
 ///
-/// The durable twin of the SQL stores' `runtime_effect_replay.commit_state`:
 /// `record_settlement` is the child's final record reaching the point and
 /// `close`/`retirement_cancel` are the cancel disposition reaching it, and
 /// whichever wrote first holds it. `CancelDecided` is what turns a late
 /// `record_settlement` into the typed `CancelDecided` refusal rather than an
-/// indistinguishable `Duplicate`. A child absent from the map is `pending` —
-/// the SQL tiers' `pending` spelled as "no row yet" — and `drained` has no
-/// variant because this tier fuses commit and drain.
+/// indistinguishable `Duplicate`. A child absent from the map is `pending`.
 ///
-/// `commit_seq` is the child's durable position in the group's final-commit
-/// order, allocated from `next_commit_seq` at the point. On this tier commit
-/// and rank stay fused — a child's declared intents land inside its journaled
-/// run before `record_settlement` is reached, so there is no post-commit drain
-/// to gate — but the two counters still diverge: a cancel-decided child holds
-/// a rank and no commit position, so commit order is its own recorded fact.
+/// Either side reserves the child's settlement rank at the point (FIG-4308):
+/// `Committed` holds the rank its seat will publish once the child's drain
+/// and projection are done, and a cancel decision seats its rank in the same
+/// step. Rank order is therefore the order of §4 decisions; commit order is
+/// that order restricted to committed children.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupChildCommitState {
-    Committed { commit_seq: u64 },
+    Committed { rank: u64 },
     CancelDecided,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupStateLiveRecord {
     pub(crate) shape: EffectGroupShape,
+    /// The next rank a §4 decision reserves.
     pub(crate) next_rank: u64,
-    /// The final-commit counter: the position `record_settlement` allocates
-    /// from, the `next_seq` twin the settlement rank allocates from.
-    pub(crate) next_commit_seq: u64,
     /// Every child whose §4 point is taken, by either side.
     #[serde(with = "btree_map_as_pairs")]
     pub(crate) commit_states: BTreeMap<usize, EffectGroupChildCommitState>,
+    /// The published settlements by rank: a reserved rank appears here only
+    /// once its child has seated.
     #[serde(with = "btree_map_as_pairs")]
     pub(crate) settlements: BTreeMap<u64, EffectGroupSettlementRecord>,
     #[serde(with = "btree_map_as_pairs")]
     pub(crate) settled_positions: BTreeMap<usize, u64>,
+}
+
+impl EffectGroupStateLiveRecord {
+    /// Reserves the next rank for a §4 decision.
+    pub(crate) fn reserve_rank(&mut self, group_key: &str) -> Result<u64, TerminalError> {
+        let rank = self.next_rank;
+        self.next_rank = self.next_rank.checked_add(1).ok_or_else(|| {
+            TerminalError::new(format!(
+                "effect group {group_key} exhausted settlement ranks"
+            ))
+        })?;
+        Ok(rank)
+    }
+
+    /// The contiguous-seated watermark: the highest rank `r` such that every
+    /// rank `1..=r` is seated, or 0. It is derived from the published
+    /// settlements, so it can never disagree with them. A read is served only
+    /// at or below it (FIG-4308).
+    pub(crate) fn seated_prefix(&self) -> u64 {
+        (1..)
+            .take_while(|rank| self.settlements.contains_key(rank))
+            .last()
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -267,14 +287,9 @@ pub(crate) fn decide_group_child_admission(
     invocation_id: &str,
 ) -> EffectGroupAdmissionResponse {
     match lifecycle {
-        EffectGroupLifecycle::Preparing {
-            dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
-            ..
-        } => match dispatched.get(&position) {
-            None => EffectGroupAdmissionResponse::NotYetRecorded,
-            Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
-            Some(_) => EffectGroupAdmissionResponse::AttachExpired,
-        },
+        // A preparing group records no child id yet: the registration that
+        // records them makes the group ready in the same step (FIG-4308).
+        EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
         EffectGroupLifecycle::Ready { addresses, .. } => match addresses.get(&position) {
             Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
             Some(_) => EffectGroupAdmissionResponse::AttachExpired,
@@ -303,7 +318,6 @@ pub(crate) fn decide_group_child_admission(
                 EffectGroupAdmissionResponse::Refused
             }
         },
-        EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
         EffectGroupLifecycle::Retired { .. } => EffectGroupAdmissionResponse::Retired,
     }
 }
@@ -322,27 +336,22 @@ mod admission_tests {
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             next_rank: 1,
-            next_commit_seq: 1,
             commit_states: BTreeMap::new(),
             settlements: BTreeMap::new(),
             settled_positions: BTreeMap::new(),
         }
     }
 
-    fn adopted_dispatch(dispatched: &[usize]) -> EffectGroupDispatchState {
+    fn adopted_dispatch() -> EffectGroupDispatchState {
         EffectGroupDispatchState::Adopted {
             id: "dispatcher-1".to_owned(),
-            dispatched: dispatched
-                .iter()
-                .map(|position| (*position, format!("child-invocation-{position}")))
-                .collect(),
         }
     }
 
     #[test]
     fn a_retained_child_id_admits_its_own_invocation() {
-        let lifecycle = EffectGroupLifecycle::Preparing {
-            dispatch: adopted_dispatch(&[0]),
+        let lifecycle = EffectGroupLifecycle::Ready {
+            addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
             live: live_record(),
         };
         assert_eq!(
@@ -358,10 +367,6 @@ mod admission_tests {
     #[test]
     fn a_successor_with_an_expired_attachment_is_named_attach_expired() {
         for lifecycle in [
-            EffectGroupLifecycle::Preparing {
-                dispatch: adopted_dispatch(&[0]),
-                live: live_record(),
-            },
             EffectGroupLifecycle::Ready {
                 addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
                 live: live_record(),
@@ -384,7 +389,7 @@ mod admission_tests {
     #[test]
     fn an_unrecorded_position_and_a_cancelled_group_still_refuse() {
         let preparing = EffectGroupLifecycle::Preparing {
-            dispatch: adopted_dispatch(&[]),
+            dispatch: adopted_dispatch(),
             live: live_record(),
         };
         assert_eq!(

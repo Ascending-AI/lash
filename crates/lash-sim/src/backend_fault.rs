@@ -409,7 +409,7 @@ impl GeneratedBackendFaultHarness {
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
-        let (commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+        let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
             .with_operation(OperationId::turn(
                 &session_id,
                 format!("generated-backend-fault-{attempt}"),

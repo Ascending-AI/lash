@@ -188,24 +188,6 @@ impl ModelStore {
                     }
                 }
                 let session = self.ensure_session(event.actor_alias.clone());
-                let provider_kind = event
-                    .payload
-                    .get("provider_kind")
-                    .and_then(Value::as_str)
-                    .unwrap_or("openai-compatible");
-                if provider_kind != "openai-compatible" {
-                    session.usage_ledger_keys.insert(provider_kind.to_string());
-                }
-                if let Some(usage) =
-                    observed.pointer("/runtime_invariant_facts/usage/token_ledger_total")
-                {
-                    for &field in RuntimeUsageTotals::FIELDS {
-                        if let Some(value) = usage.get(field).and_then(Value::as_i64) {
-                            let known_field = session.cumulative_usage.set_field(field, value);
-                            debug_assert!(known_field);
-                        }
-                    }
-                }
                 let text = observed
                     .get("provider_output")
                     .and_then(Value::as_str)
@@ -517,21 +499,6 @@ impl ModelStore {
                             _ => RuntimeUsageTotals::default(),
                         },
                     };
-                let (prior_usage, prior_ledger_keys) =
-                    self.sessions.get(&event.actor_alias).map_or_else(
-                        || (RuntimeUsageTotals::default(), BTreeSet::new()),
-                        |session| {
-                            (
-                                session.cumulative_usage.clone(),
-                                session.usage_ledger_keys.clone(),
-                            )
-                        },
-                    );
-                let total_usage = prior_usage.saturating_add(&turn_usage);
-                let mut ledger_keys = prior_ledger_keys;
-                if turn_usage != RuntimeUsageTotals::default() {
-                    ledger_keys.insert(provider_kind.to_string());
-                }
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
                     .expect("non-empty initial frame material");
                 let frame_node_id = lash_core::facade_support::frame_node_id(
@@ -563,8 +530,6 @@ impl ModelStore {
                 let usage_facts = RuntimeUsageInvariantFacts {
                     turn_usage: turn_usage.clone(),
                     total_usage: turn_usage.clone(),
-                    token_ledger_total: total_usage,
-                    token_ledger_entry_count: Some(ledger_keys.len()),
                     usage_event_count: 1,
                     usage_event_cumulative_totals: vec![turn_usage],
                     non_negative: true,
@@ -1019,8 +984,6 @@ struct ModelSession {
     opened: bool,
     ingress_count: usize,
     provider_turns: Vec<ProviderTurnView>,
-    usage_ledger_keys: BTreeSet<String>,
-    cumulative_usage: RuntimeUsageTotals,
     tool_outputs: Vec<String>,
     exec_code_outputs: Vec<String>,
     observer_turn_indices: Vec<usize>,
@@ -1044,8 +1007,6 @@ impl ModelSession {
             opened: false,
             ingress_count: 0,
             provider_turns: Vec::new(),
-            usage_ledger_keys: BTreeSet::new(),
-            cumulative_usage: RuntimeUsageTotals::default(),
             tool_outputs: Vec::new(),
             exec_code_outputs: Vec::new(),
             observer_turn_indices: Vec::new(),

@@ -179,13 +179,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// A handle written at two positions is one leaf: execution deduplicates,
     /// positions never do (§10 L4, §11 clause 1). Operands were evaluated once,
     /// in source order, before this runs (clause 2).
+    ///
+    /// A host that parks the run on the batch (FIG-4275) settles none of its
+    /// requests: each consumed request is live again, so the batch the resumed
+    /// run issues is the same one.
     pub(super) async fn await_pending_array(
         &mut self,
+        items: &Value,
         consumer: AggregateConsumer,
         instruction_ip: usize,
-    ) -> Result<(), RuntimeError> {
+        reissued: bool,
+    ) -> Result<super::effects::Awaited<Value>, RuntimeError> {
         use super::super::{CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf};
-        let Value::List(items) = self.pop_stack()? else {
+        let Value::List(items) = items else {
             return Err(RuntimeError::PendingTool {
                 problem: "Promise aggregate requires an array".into(),
             });
@@ -247,11 +253,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         }
+        let mut consumed = Vec::with_capacity(seen.len());
         for id in seen.keys() {
             // Consumed, not removed: the entry is what tells a second await of
             // the same handle from a handle this execution never minted.
-            if let Some(entry) = self.pending_tools.get_mut(id) {
-                *entry = None;
+            if let Some(entry) = self.pending_tools.get_mut(id)
+                && let Some(request) = entry.take()
+            {
+                consumed.push((id.clone(), request));
             }
         }
         let batch = CompiledResourceOperationBatch {
@@ -261,8 +270,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: false,
             consumer,
         };
-        self.resolve_batch_spec(&batch, values, instruction_ip)
-            .await
+        let settled = self
+            .resolve_batch_spec(&batch, values, instruction_ip, reissued)
+            .await?;
+        if let super::effects::Awaited::Parked(()) = settled {
+            for (id, request) in consumed {
+                self.pending_tools.insert(id, Some(request));
+            }
+        }
+        Ok(settled)
     }
 }
 

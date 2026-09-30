@@ -16,6 +16,7 @@ mod introspection;
 mod json_schema;
 mod linker;
 mod runtime;
+pub use runtime::effect_value;
 mod span;
 mod tracking;
 mod trigger;
@@ -32,7 +33,8 @@ pub(crate) use artifact::InMemoryLashlangArtifactStore;
 pub use artifact::{
     ContentHash, HostRequirements, HostRequirementsRef, LASHLANG_COMPILER_VERSION,
     LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifacts, ModuleArtifact,
-    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef, host_requirements_for_program,
+    ModuleArtifactBytes, ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
+    host_requirements_for_program,
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BindingVisibility, CatchClause,
@@ -212,14 +214,14 @@ pub use workflow_graph::{
 };
 pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraph,
-    WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError, WorkflowGraphReconcilePair,
-    WorkflowGraphReconcileSide, WorkflowGraphReconciliation, WorkflowGraphStructuralLocation,
-    WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot, WorkflowGraphUnmatchedNode,
-    WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets, WorkflowOwnership,
-    WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClassification,
+    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError,
+    WorkflowGraphReconcilePair, WorkflowGraphReconcileSide, WorkflowGraphReconciliation,
+    WorkflowGraphStructuralLocation, WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot,
+    WorkflowGraphUnmatchedNode, WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId,
+    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
+    WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
     WorkflowTypedVariable, child_path, execution_sites,
 };

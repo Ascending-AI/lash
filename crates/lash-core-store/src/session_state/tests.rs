@@ -35,7 +35,7 @@ fn resident_leaf_body_bytes(state: &RuntimeSessionState) -> usize {
 }
 
 fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommitReceipt {
-    let commit = crate::RuntimeCommit::persisted_state_for_test(state, &[]);
+    let commit = crate::RuntimeCommit::persisted_state_for_test(state);
     crate::store::RuntimeCommitReceipt {
         schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
         head_revision: state.head_revision + 1,
@@ -46,11 +46,10 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
             .expect("project the committed manifest"),
         committed_leaf_node_id: None,
         realized_node_timestamps: Vec::new(),
-        committed_usage_delta_identities: Vec::new(),
         failure_evidence: Vec::new(),
         outcome: None,
         pending_follow_on: None,
-        compact_context_outcome: None,
+        command_outcome: None,
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: Default::default(),
         receipt_replayed: false,
@@ -747,7 +746,6 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
             &state,
             crate::store::GraphAppend::PreserveHead,
-            &[],
             boundary_operation(&state.session_id, "root", "commit"),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::store::FleetFormat::current(),
@@ -766,7 +764,6 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::SessionGraph::default(),
         None,
         None,
-        crate::SessionUsageTotals::default(),
     )
     .expect("head window");
     let live_owned = LiveOwnedSessionFacts::of(&state.policy);
@@ -814,7 +811,6 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
         crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             crate::store::GraphAppend::PreserveHead,
-            &[],
             boundary_operation(&state.session_id, "root", "final"),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::store::FleetFormat::current(),

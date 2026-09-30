@@ -14,8 +14,16 @@ done
 "$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
   --set workers.generation=next --set 'workers.retainedGenerations[0]=initial' \
   --set workers.generationImages.initial=old --set workers.generationImages.next=new > target/loadtest-tools/retained-generations.yaml
+# The rolling-upgrade campaign's rollback (FIG-3805): N returns beside both
+# earlier generations without running its migrate over N+1's expansion.
+"$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
+  --set workers.generation=rollback --set 'workers.retainedGenerations[0]=initial' \
+  --set 'workers.retainedGenerations[1]=next' --set workers.generationImages.initial=old \
+  --set workers.generationImages.next=new --set workers.generationImages.rollback=old \
+  --set workers.migrate=false --set postgres.maxGenerations=3 --set postgres.maxConnections=130 \
+  > target/loadtest-tools/rollback-generations.yaml
 "$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
   --set load.enabled=true > target/loadtest-tools/load-enabled.yaml
 "$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
   --set load.enabled=true --set load.faultCampaign=true --set load.run=smoke-v1-fault > target/loadtest-tools/load-campaign.yaml
-printf 'chart profiles passed: lint=2 template=6\n'
+printf 'chart profiles passed: lint=2 template=7\n'

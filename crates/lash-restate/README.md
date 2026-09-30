@@ -19,6 +19,26 @@ let outcome = handle
     .await?;
 ```
 
+Serve the built endpoint with host-selected incoming message limits:
+
+```rust,ignore
+let limits = lash_restate::RestateEndpointLimits::new(
+    32 * 1024 * 1024,
+    32 * 1024 * 1024 + 8,
+);
+lash_restate::serve_endpoint(listener, endpoint, limits, shutdown).await;
+```
+
+The first limit counts one service-protocol message's payload. The second
+counts its pending framed bytes, including the eight-byte header. The endpoint
+checks each declared length before forwarding payload bytes to the SDK and
+stops a refused input stream. It retains only a fixed header and counters beside
+the SDK's bounded incomplete-message buffer. HTTP/2 flow control also limits
+queued input. A replay may contain arbitrarily many legal messages; there is no
+aggregate request limit. These limits belong to the deployment, as ADR 0025
+requires, and do not impose a core-wide tool-result ceiling. The supplied hosts
+choose 32 MiB per payload and eight additional bytes for framing.
+
 Several deployments share one `restate-server` by namespace (ADR 0111):
 `RestateConfig::with_namespace` prefixes every service name the engine binds or
 calls (`alpha.LashSession`), and `RestateEngine::register_deployment` registers
@@ -112,7 +132,14 @@ off forever with no operator told what is wrong.
 from definitive answers. A process await reattaches after connection failures,
 EOF, timeouts, overload, and ingress-generated 5xx responses, preserving the
 durable process and its wait address. An invocation's terminal error stays
-terminal even with a 5xx code. See ADR 0019's FIG-4260 amendment.
+terminal even with a 5xx code. See ADR 0016.
+
+An await of an already-terminal child journals the registry's full outcome in
+one step, after acquiring the receiver's references to its stored attachments.
+Replay reads that outcome even after retention prunes the child. The controller
+also journals its cancellation and revocation observations. Terminal attachment
+commands return the same observed value, so pending tool calls settle without
+opening a wait. Non-terminal or cancelled children and closed control gates use the attach and durable-wait path.
 
 ## Stuck effect-group dispatcher retirement
 
@@ -166,3 +193,15 @@ Process rows carry the process input plus `ProcessProvenance`: originator
 and optional causal parent. Tool and Lashlang rows also carry a
 captured execution-environment reference, so workers do not parse grant keys or
 rebuild origin sessions to recover execution context.
+
+`Call<T>` also checks JSON structure before the SDK constructs `T`. Its default
+allowances are 32 MiB of encoded bytes, 1,000,000 nodes, depth 64, and 128 MiB of
+estimated allocation bytes. Object keys and values each count as nodes; the
+root has depth one. The estimate charges 64 bytes per node plus each string's
+encoded content length. It estimates JSON storage, not arbitrary allocations a
+custom deserializer may perform. The iterative preflight holds only counters,
+then checks syntax without constructing a value tree. The wire probe skips the
+body, so an unsupported range never materializes it. Direct callers can choose
+all four allowances with `Call::decode_json_with_limits`; SDK ingress uses the
+default allowances. Remote envelopes and turn inputs use the same preflight
+through their `decode_json_with_limits` methods.

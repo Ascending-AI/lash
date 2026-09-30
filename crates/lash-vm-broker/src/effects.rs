@@ -40,6 +40,36 @@ pub struct ParentFault(pub String);
 /// The journaled work behind the broker (see the module docs).
 #[async_trait::async_trait]
 pub trait ParentEffects: Send + Sync {
+    /// Resolve using the parent's admitted routes. Runtime adapters preserve
+    /// their existing full authority checks at the effect-body boundary.
+    fn resolve(
+        &self,
+        context: &crate::AdmittedContext,
+        grants: &std::collections::BTreeMap<String, crate::HandleGrant>,
+        frame: lash_vm_protocol::FrameEpoch,
+        request: &lash_vm_protocol::EffectRequest,
+    ) -> Result<crate::authority::ResolvedRequest, crate::AuthorityRefusal> {
+        crate::authority::resolve(context, grants, frame, request.kind, &request.payload)
+    }
+
+    /// The parent's segment decision after a completed effect.
+    fn boundary(&self) -> bool {
+        false
+    }
+
+    fn projection(
+        &self,
+        _payload: &lash_vm_protocol::EncodedPayload,
+    ) -> Result<lash_vm_protocol::EncodedPayload, ParentFault> {
+        Err(ParentFault("no projected bindings were admitted".into()))
+    }
+
+    fn observe(&self, _payload: &lash_vm_protocol::EncodedPayload) -> Result<(), ParentFault> {
+        Ok(())
+    }
+
+    fn park_declined(&self, _reason: &str) {}
+
     /// Retains `operation`'s request under its identity before anything is
     /// dispatched (ADR 0117 §7), and answers the fingerprint the journal
     /// retains there: this one when it is the first, the recorded one on a

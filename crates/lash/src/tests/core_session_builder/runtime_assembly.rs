@@ -129,7 +129,7 @@ fn peer_core(backend: lash_core::Backend) -> LashCore {
 #[tokio::test]
 async fn sqlite_runtime_assembly_refuses_absent_without_writes() {
     Box::pin(assert_runtime_assembly_refuses_without_writes(
-        memory_store_backend().await,
+        sqlite_memory_store_backend().await,
         false,
     ))
     .await;
@@ -138,7 +138,7 @@ async fn sqlite_runtime_assembly_refuses_absent_without_writes() {
 #[tokio::test]
 async fn sqlite_runtime_assembly_refuses_deleted_without_writes() {
     Box::pin(assert_runtime_assembly_refuses_without_writes(
-        memory_store_backend().await,
+        sqlite_memory_store_backend().await,
         true,
     ))
     .await;

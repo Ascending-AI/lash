@@ -131,6 +131,9 @@ pub struct CrashWorld {
     /// How long [`quiesce`](Self::quiesce) waits in wall time for the server
     /// to settle, in milliseconds.
     quiesce_ms: std::sync::atomic::AtomicU64,
+    /// How long the harness stalls before each tick, in milliseconds
+    /// ([`stall_harness_before_each_tick`](Self::stall_harness_before_each_tick)).
+    harness_stall_ms: std::sync::atomic::AtomicU64,
     /// The drive requests the session work saw.
     drives: Arc<DriveLog>,
     /// The facts the host's own handlers recorded, for the global
@@ -259,6 +262,7 @@ impl CrashWorld {
             interval: tokio::sync::Mutex::new(Interval::fresh(engine_now_ms)),
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
             quiesce_ms: std::sync::atomic::AtomicU64::new(2_000),
+            harness_stall_ms: std::sync::atomic::AtomicU64::new(0),
             drives,
             history: crate::invariants::HistoryRecorder::default(),
         })
@@ -552,6 +556,19 @@ impl CrashWorld {
             .store(budget.as_millis() as u64, Ordering::SeqCst);
     }
 
+    /// From now on the harness stalls `by` before each tick, as a harness
+    /// on a CPU-starved or memory-stalled host does between two ticks: the
+    /// store clock moves on by `by`, as a live world's wall-flowing clock
+    /// would, and the tick then lands no earlier than its cadence allows, so
+    /// it lands late. A detection bound must not charge the stall to the
+    /// recovery (FIG-4309).
+    pub fn stall_harness_before_each_tick(&self, by: Duration) {
+        self.harness_stall_ms.store(
+            u64::try_from(by.as_millis()).unwrap_or(u64::MAX),
+            Ordering::SeqCst,
+        );
+    }
+
     /// One tick of the live deployment's recovery interval: the engine's
     /// clock moves one `T` with ±10 % seeded jitter
     /// ([`Engine::advance_tick`]), then the deployment runs its recovery
@@ -566,6 +583,10 @@ impl CrashWorld {
     pub async fn tick_with_page(&self, page: std::num::NonZeroUsize) -> Result<u64, String> {
         let tick_ms = super::TICK.as_millis() as u64;
         let jittered = tick_ms - tick_ms / 10 + self.draw(0..tick_ms / 5 + 1);
+        let stall_ms = self.harness_stall_ms.load(Ordering::SeqCst);
+        if stall_ms > 0 {
+            self.engine.advance(Duration::from_millis(stall_ms));
+        }
         let ticked_at = {
             let mut interval = self.interval.lock().await;
             interval.last_tick_ms = self

@@ -21,7 +21,7 @@ fn test_cron_trigger_source(expr: &str) -> String {
 
         const handle = await triggers.register({{
           source: cron.Schedule({{ expr: "{expr}", tz: "UTC" }}),
-          target: remember_tick,
+          target: {{ definition: remember_tick }},
           inputs: (tick) => ({{ tick: tick }}),
           name: "cron smoke"
         }});

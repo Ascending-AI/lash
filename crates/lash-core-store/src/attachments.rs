@@ -1,6 +1,8 @@
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 mod file_store;
+mod root_enumeration;
+pub use root_enumeration::{AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots};
 
 pub use file_store::FileAttachmentStore;
 
@@ -97,6 +99,10 @@ pub enum AttachmentStoreError {
         "attachment is {byte_len} bytes, exceeding the configured {max_bytes}-byte attachment limit"
     )]
     SizeLimitExceeded { byte_len: u64, max_bytes: u64 },
+    #[error("attachment read reached {byte_len} bytes, exceeding the {max_bytes}-byte read limit")]
+    ReadLimitExceeded { byte_len: u64, max_bytes: u64 },
+    #[error("attachment materialization exceeds the {max_bytes}-byte request budget")]
+    RequestBudgetExceeded { max_bytes: u64 },
     #[error("attachment store I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -273,7 +279,13 @@ pub trait AttachmentStore: Send + Sync {
     ///
     /// Namespaced-storage implementors must apply the trait-level id-shape
     /// guard before deriving any path or key from `id`.
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError>;
+    /// Enforce `max_bytes` against actual content before allocating retained
+    /// bytes. Metadata may reject early but cannot establish this bound.
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError>;
 
     /// Idempotent: deleting an absent blob is a no-op.
     /// This is the primitive mark-and-sweep GC uses to reclaim unreferenced content;
@@ -317,8 +329,9 @@ pub trait AttachmentStore: Send + Sync {
 /// The deployment-wide attachment roots: every explicit referrer edge and
 /// every pending write. Root enumeration never ends a referrer or uses age
 /// to infer that its writer died.
-/// An in-memory factory answers from its live stores. If
-/// the implementor cannot enumerate its roots, it must return an error from
+/// The collector visits every referrer source and exhausts its pages before
+/// it mints a witness. If the implementor cannot enumerate its roots, it
+/// must return an error from
 /// [`Self::live_attachment_refs`]. The sweep then lists the backend only to
 /// determine whether a deletion-eligible blob exists: it propagates the error
 /// before deleting anything when one does, or returns a report carrying the
@@ -331,7 +344,22 @@ pub trait AttachmentRootSet: Send + Sync {
     /// Every digest held by an edge or a pending write.
     ///
     /// A digest is live exactly while it has an edge or pending write.
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, StoreError>;
+    async fn live_attachment_refs(&self) -> Result<CompleteAttachmentRoots, StoreError> {
+        root_enumeration::enumerate(self).await
+    }
+
+    /// Read one source in digest order, strictly after `after`. An unsupported
+    /// source or an unfinished continuation must return an error, never an
+    /// empty terminal page. The shared collector owns source and page coverage.
+    async fn attachment_root_page(
+        &self,
+        _source: AttachmentRootSource,
+        _after: Option<&AttachmentId>,
+    ) -> Result<AttachmentRootPage, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::attachment_root_page",
+        })
+    }
 
     /// Enumerate the factory's durable condemnation authority in digest order.
     ///
@@ -816,6 +844,59 @@ where
         fence,
         ..AttachmentReclamationReport::default()
     };
+    let now = now_epoch_ms();
+    let live = match root_set.live_attachment_refs().await {
+        Ok(live) => live,
+        Err(err) => {
+            let blobs = backend
+                .list()
+                .await
+                .map_err(AttachmentReclamationFailure::failed_before_any_work)?;
+            report.scanned_blob_count = blobs.len();
+            let failure = format!("failed to enumerate live attachment refs: {err}");
+            // Enumeration failure deliberately splits by destructive scope. An
+            // eligible blob needed the unavailable roots to decide its fate,
+            // so that is a backend failure (`Failed`). Grace-protected blobs
+            // require no destructive step, but their scope remains unwitnessed,
+            // so that is a policy refusal (`Refused(UnwitnessedScope)`).
+            if blobs
+                .iter()
+                .any(|blob| !within_grace(blob.last_modified_epoch_ms, now, grace_period_ms))
+            {
+                return Err(AttachmentReclamationFailure::failed(
+                    AttachmentStoreError::RootSetEnumerationFailed {
+                        source: Box::new(err),
+                    },
+                    report,
+                ));
+            }
+            tracing::warn!(
+                scanned_blob_count = report.scanned_blob_count,
+                grace_period_ms,
+                root_enumeration_failure = %failure,
+                "attachment GC could not enumerate live roots but found no deletion-eligible blobs"
+            );
+            report.root_enumeration_failure = Some(failure);
+            if blobs.is_empty() {
+                // The backend itself enumerated completely and held nothing, so
+                // no blob's fate ever depended on the root set. That is a
+                // witnessed nothing-to-do — the case a fresh deployment or an
+                // operator reset lands in — and the enumeration diagnostic
+                // rides along on a report that is provably empty.
+                return Ok(report);
+            }
+            // Blobs exist and only the grace window spared them. Their liveness
+            // *would* have been decided by a root set nobody could enumerate, so
+            // this sweep refuses rather than reporting itself healthy; the
+            // diagnostic rides in the partial report (ADR 0067 §5).
+            return Err(AttachmentReclamationFailure::refused(
+                crate::store::MaintenanceRefusal::UnwitnessedScope {
+                    scope: "live attachment root set",
+                },
+                report,
+            ));
+        }
+    };
     // (0) Adoption first (ADR 0067 §6). A fenced pass opens its generation and
     // finishes every condemnation a dead predecessor left before it looks at a
     // single new candidate, so a crash between condemn and delete strands
@@ -865,6 +946,7 @@ where
                 root_set,
                 backend,
                 generation,
+                &live,
                 Candidate {
                     id: &condemnation.digest,
                     phase: condemnation.phase,
@@ -877,8 +959,6 @@ where
             .await;
         }
     }
-    let now = now_epoch_ms();
-    let live = root_set.live_attachment_refs().await;
     let blobs = match backend.list().await {
         Ok(blobs) => blobs,
         Err(error) if report.adopted_count == 0 => {
@@ -887,53 +967,6 @@ where
         Err(error) => return Err(AttachmentReclamationFailure::failed(error, report)),
     };
     report.scanned_blob_count = blobs.len();
-    let live = match live {
-        Ok(live) => live,
-        Err(err) => {
-            let failure = format!("failed to enumerate live attachment refs: {err}");
-            // Enumeration failure deliberately splits by destructive scope. An
-            // eligible blob needed the unavailable roots to decide its fate,
-            // so that is a backend failure (`Failed`). Grace-protected blobs
-            // require no destructive step, but their scope remains unwitnessed,
-            // so that is a policy refusal (`Refused(UnwitnessedScope)`).
-            if blobs
-                .iter()
-                .any(|blob| !within_grace(blob.last_modified_epoch_ms, now, grace_period_ms))
-            {
-                return Err(AttachmentReclamationFailure::failed(
-                    AttachmentStoreError::RootSetEnumerationFailed {
-                        source: Box::new(err),
-                    },
-                    report,
-                ));
-            }
-            tracing::warn!(
-                scanned_blob_count = report.scanned_blob_count,
-                grace_period_ms,
-                root_enumeration_failure = %failure,
-                "attachment GC could not enumerate live roots but found no deletion-eligible blobs"
-            );
-            report.root_enumeration_failure = Some(failure);
-            if blobs.is_empty() {
-                // The backend itself enumerated completely and held nothing, so
-                // no blob's fate ever depended on the root set. That is a
-                // witnessed nothing-to-do — the case a fresh deployment or an
-                // operator reset lands in — and the enumeration diagnostic
-                // rides along on a report that is provably empty.
-                return Ok(report);
-            }
-            // Blobs exist and only the grace window spared them. Their liveness
-            // *would* have been decided by a root set nobody could enumerate, so
-            // this sweep refuses rather than reporting itself healthy; the
-            // diagnostic rides in the partial report (ADR 0067 §5).
-            return Err(AttachmentReclamationFailure::refused(
-                crate::store::MaintenanceRefusal::UnwitnessedScope {
-                    scope: "live attachment root set",
-                },
-                report,
-            ));
-        }
-    };
     if fence == AttachmentGcFence::BestEffort {
         tracing::warn!(
             scanned_blob_count = report.scanned_blob_count,
@@ -984,6 +1017,7 @@ where
                         root_set,
                         backend,
                         generation,
+                        &live,
                         Candidate {
                             id: &blob.id,
                             phase: AttachmentCondemnationPhase::Condemned,
@@ -1092,7 +1126,7 @@ where
                 report,
             ));
         }
-        match backend.delete(&blob.id).await {
+        match delete_witnessed_attachment(backend, &live, &blob.id).await {
             Ok(()) => {
                 report.reclaimed_count += 1;
                 detect_deleted_while_referenced(root_set, &blob.id, fence, &mut report).await;
@@ -1103,6 +1137,19 @@ where
         }
     }
     Ok(report)
+}
+
+async fn delete_witnessed_attachment(
+    backend: &dyn AttachmentStore,
+    live: &CompleteAttachmentRoots,
+    id: &AttachmentId,
+) -> Result<(), AttachmentStoreError> {
+    if live.contains(id) {
+        return Err(AttachmentStoreError::Contract(format!(
+            "a rooted attachment {id} reached physical reclamation"
+        )));
+    }
+    backend.delete(id).await
 }
 
 fn record_reclamation_failure(
@@ -1147,6 +1194,7 @@ async fn complete_condemnation<R>(
     root_set: &R,
     backend: &dyn AttachmentStore,
     generation: &AttachmentSweepGeneration,
+    live: &CompleteAttachmentRoots,
     candidate: Candidate<'_>,
     grace_period_ms: u64,
     report: &mut AttachmentReclamationReport,
@@ -1154,6 +1202,16 @@ async fn complete_condemnation<R>(
     R: AttachmentRootSet + ?Sized,
 {
     let id = candidate.id;
+    if live.contains(id) {
+        let _ = root_set
+            .settle_attachment_condemnation(
+                id,
+                generation,
+                AttachmentCondemnationSettlement::Spared,
+            )
+            .await;
+        return;
+    }
     if candidate.phase == AttachmentCondemnationPhase::Condemned {
         // Arm before the final HEAD. Once `Deleting` is recorded, a writer
         // cannot revoke the condemnation between observing absent bytes and
@@ -1220,7 +1278,7 @@ async fn complete_condemnation<R>(
             return;
         }
     }
-    match backend.delete(id).await {
+    match delete_witnessed_attachment(backend, live, id).await {
         Ok(()) => {
             report.reclaimed_count += 1;
             detect_deleted_while_referenced(root_set, id, AttachmentGcFence::Fenced, report).await;
@@ -1383,7 +1441,11 @@ impl AttachmentStore for UnavailableAttachmentStore {
         })
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        _max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(id.clone()))
     }
 
@@ -1461,6 +1523,21 @@ pub enum AttachmentHolder {
     Ephemeral,
     Runtime(crate::runtime_owner::RuntimeOwner),
 }
+/// Read limits, independent of put admission and retained-history policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentReadPolicy {
+    pub max_blob_bytes: u64,
+    /// Unique retained buffer capacity plus provider encoding allowance per occurrence.
+    /// This bounds attachment payload work, not the allocator or the full prompt.
+    pub max_request_bytes: u64,
+}
+impl AttachmentReadPolicy {
+    pub const DEFAULT: Self = Self {
+        max_blob_bytes: 32 * 1024 * 1024,
+        max_request_bytes: 128 * 1024 * 1024,
+    };
+}
+
 /// Attachment bytes held by a session execution, a process record, or one
 /// session upload. Pending writes precede byte publication; completion records
 /// upload evidence. Reads resolve content addresses; deletion releases only
@@ -1470,6 +1547,7 @@ pub struct RuntimeAttachmentStore {
     referrers: Arc<dyn AttachmentReferrers>,
     holder: AttachmentHolder,
     max_attachment_bytes: Option<u64>,
+    read_policy: AttachmentReadPolicy,
     upload_expiry_ms: u64,
     output_retention: lash_sansio::OutputRetentionPolicy,
     execution: Mutex<Option<BoundAttachmentExecution>>,
@@ -1515,6 +1593,7 @@ impl RuntimeAttachmentStore {
             referrers,
             holder: AttachmentHolder::Runtime(owner),
             max_attachment_bytes: None,
+            read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
             execution: Mutex::new(None),
@@ -1527,6 +1606,7 @@ impl RuntimeAttachmentStore {
             referrers: Arc::new(NoopAttachmentReferrers),
             holder: AttachmentHolder::Ephemeral,
             max_attachment_bytes: None,
+            read_policy: AttachmentReadPolicy::DEFAULT,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
             output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
             execution: Mutex::new(None),
@@ -1549,6 +1629,16 @@ impl RuntimeAttachmentStore {
     pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = max_attachment_bytes;
         self
+    }
+    pub fn with_read_policy(mut self, policy: AttachmentReadPolicy) -> Self {
+        self.read_policy = policy;
+        self
+    }
+    pub fn read_policy(&self) -> AttachmentReadPolicy {
+        self.read_policy
+    }
+    pub fn reconfigured_read_policy(&self, policy: AttachmentReadPolicy) -> Self {
+        self.reconfigured().with_read_policy(policy)
     }
     pub fn max_attachment_bytes(&self) -> Option<u64> {
         self.max_attachment_bytes
@@ -1602,6 +1692,7 @@ impl RuntimeAttachmentStore {
             referrers: Arc::clone(&self.referrers),
             holder: self.holder.clone(),
             max_attachment_bytes: self.max_attachment_bytes,
+            read_policy: self.read_policy,
             upload_expiry_ms: self.upload_expiry_ms,
             output_retention: self.output_retention,
             execution: Mutex::new(self.execution.lock_recover().clone()),
@@ -1801,7 +1892,7 @@ impl RuntimeAttachmentStore {
     }
 
     pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.backend.get(id).await
+        self.backend.get(id, self.read_policy.max_blob_bytes).await
     }
     /// The claims whose stored attachment this holder's process record
     /// holds. A process terminal must show this provenance before a value it
@@ -1922,29 +2013,9 @@ impl AttachmentReferrers for PersistenceReferrersAdapter {
     }
 }
 
-pub async fn resolve_llm_request_attachments(
-    mut request: crate::llm::types::LlmRequest,
-    store: &RuntimeAttachmentStore,
-) -> Result<crate::llm::types::LlmRequest, AttachmentStoreError> {
-    for attachment in request
-        .attachments()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>()
-    {
-        let crate::AttachmentSource::Stored { attachment_ref } = attachment else {
-            continue;
-        };
-        if request.resolved_stored.contains_key(&attachment_ref.id) {
-            continue;
-        }
-        let stored = store.get(&attachment_ref.id).await?;
-        request
-            .resolved_stored
-            .insert(attachment_ref.id.clone(), stored.bytes);
-    }
-    Ok(request)
-}
+#[path = "attachments/materialization.rs"]
+mod materialization;
+pub use materialization::resolve_llm_request_attachments;
 
 pub fn attachment_materialization_notice(
     snapshot: &crate::provider::AttachmentCapabilitySnapshot,
@@ -2064,3 +2135,7 @@ mod referrer_failure_tests;
 pub mod test_capability;
 #[cfg(any(test, feature = "testing"))]
 pub use test_capability::attachment_test_capability;
+
+#[cfg(test)]
+#[path = "attachments/read_budget_tests.rs"]
+mod read_budget_tests;

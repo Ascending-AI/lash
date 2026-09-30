@@ -569,6 +569,7 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
+    "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 
@@ -1430,6 +1431,7 @@ def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list
 # test file of their own name.
 SCRIPT_PROOFS = {
     "scripts/check-substrate-boundary.sh": "scripts/test_check_substrate_boundary.py",
+    "scripts/check-dialect-boundary.py": "scripts/test_check_dialect_boundary.py",
     "scripts/check-history-readers.sh": "scripts/test_ci_plan.py",
     "scripts/check-guarded-transactions.py": "scripts/test_check_guarded_transactions.py",
     "scripts/guarded-transaction-readonly.txt": "scripts/test_check_guarded_transactions.py",

@@ -1,60 +1,51 @@
-# Aggregate await shapes and `?` placement
-
-## Status
-
-Accepted.
-
-Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-retired the Lashlang surface that spelled these shapes. The compile-time
-aggregate paths (`ResourceOperationBatch`, `ResourceOperationListBatch`) remain
-in the IR and VM but have no authored spelling, and the RLM prompt teaches only
-TypeScript, so it no longer teaches the comprehension form. The
-source syntax below is historical; `AwaitExpectsHandle` still stands.
+# Aggregate await operates on handles
 
 ## Context
 
-`await` over a literal list, tuple or record of direct module-operation calls
-is an aggregate: the compiler lowers it to one host batch, every leaf starts
-before any is awaited, and `?` on a leaf unwraps that leaf. A list
-comprehension of the same calls was not an aggregate shape. `await [op(x)? for
-x in xs]` therefore ran every `op(x)?` sequentially (each already unwrapped),
-then re-awaited the finished values, and the VM's terminal `await` arm wrapped
-every one of them as a `{ ok, value }` record. The cell "succeeded" with the
-wrong values while the imperative `for` loop returned the right ones; the same
-wrapping turned any `await` of an already-resolved value into a silent
-`{ ok: false }` that read like a host failure. Both defects surfaced as model
-failures in the toolbench (FIG-2764).
+The IR and VM distinguish a pending operation from a resolved value. Re-awaiting
+a resolved value as a process handle must produce a guest diagnostic rather than
+a fabricated host-failure result. Compiled aggregate operations also need an
+explicit shape and leaf-unwrapping rule.
 
 ## Decision
 
-1. **List comprehensions are aggregate-await shapes.** When the element of an
-   awaited comprehension is a direct operation call, with or without `?`, the
-   comprehension evaluates its clauses in source order (filters and nested
-   clauses included), collects one `(receiver, args...)` tuple per accepted
-   element, and starts every call as one host batch after the loop. `?` on
-   the element unwraps every leaf and fails the cell on the first source-order
-   rejection with the same diagnostic a literal aggregate raises; without `?`
-   every element is a result record in comprehension order. `[await op(x)? for
-   x in xs]` is unchanged: it awaits each call before starting the next. A
-   comprehension whose element is not a direct call keeps the plain
-   evaluate-then-await path. The grammar has no record comprehension, so
-   nothing else changes.
-2. **Awaiting a resolved value is a guest error.** `await` accepts a process
-   handle, or a tuple, list or record whose leaves are handles. Any other value
-   raises `AwaitExpectsHandle`, a catchable runtime error whose hint tells the
-   model the value is already resolved, instead of returning a wrapped
-   `{ ok: false }`. Real handle failures inside an aggregate still settle as
-   per-item error records.
+The internal `ResourceOperationBatch` and `ResourceOperationListBatch` paths
+carry compiled aggregate shapes and per-leaf unwrap choices. Literal and
+list-batch compilation evaluate operands and collect their leaf arguments before
+handing the batch to the host. These are IR operations, not an additional
+authored language or a prompt syntax.
 
-The lowering adds a bytecode instruction and changes how identical source
-compiles, so `BYTECODE_FORMAT_VERSION` and `LASHLANG_SEMANTIC_HASH_VERSION`
-move. Workflow-graph node emission is unchanged: comprehension elements were
-never execution sites and still are not.
+The internal process-await path accepts a process handle or a tuple, list, or
+record of handle leaves. An already-resolved leaf raises the catchable
+`AwaitExpectsHandle` error, identifying its type and nested path. Actual handle
+failures return the host failure or result record required by the operation's
+unwrap mode.
+
+TypeScript authoring uses direct awaited calls and Promise aggregates. Its
+runtime-array contract is
+[ADR 0087](0087-typescript-runtime-promise-arrays.md). Promise aggregates retain
+plain array elements and await pending-operation leaves; that is a separate
+path from recursively awaiting a container of process handles. Process controls
+are explicit tools under ADR 0095.
+
+## Alternatives considered
+
+Returning an error-shaped value for an already-resolved operand confuses a
+program error with a host operation failure. Implicitly treating every ordinary
+container as authored aggregate syntax would conflate the IR shape with the
+TypeScript Promise contract. Typed guest errors and distinct operations preserve
+that distinction.
 
 ## Consequences
 
-`await [op(x)? for x in xs]`, `await [op(x) for x in xs]` and `[await op(x)?
-for x in xs]` are pinned by runtime and compiler tests, the RLM prompt teaches
-the comprehension form next to the literal one, and its claim is pinned by a
-prompt-claim test. Test hosts that modelled a started process as a bare value
-now mint handle records, because a bare value is no longer awaitable.
+Internal aggregate compiler and runtime tests pin the IR contract. TypeScript
+prompts teach Promise aggregates. Durable bytecode and continuation readers use
+their own format guards; this decision does not authorize reinterpretation of
+an incompatible compiled program.
+
+## Code references
+
+- `crates/lashlang/src/runtime/compiler/effects.rs` compiles operation batches and list batches.
+- `crates/lashlang/src/runtime/vm/effects.rs:830-961` recursively awaits handle containers and diagnoses resolved leaves.
+- `crates/lashlang/src/runtime/error.rs:490,701` declares and classifies `AwaitExpectsHandle`.
+- `crates/lashlang/src/runtime/vm/pending_tools.rs:168-260` implements the separate Promise-array path.

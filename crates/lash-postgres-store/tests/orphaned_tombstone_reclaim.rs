@@ -120,7 +120,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .expect("root leaf node id");
         factory
             .commit_runtime_state(
-                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state),
             )
             .await
             .expect("commit root node");
@@ -198,10 +198,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .expect("append child node");
         child
             .commit_runtime_state(
-                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
-                    &child_state,
-                    &[],
-                ),
+                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&child_state),
             )
             .await
             .expect("advance forked child");

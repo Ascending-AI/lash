@@ -1,16 +1,11 @@
 # Host originators carry named scopes
 
-`ProcessOriginator::Host` was a single undifferentiated bucket: host-registered trigger
-subscriptions could not be listed or cancelled (lifecycle matching keyed on session ids only),
-so hosts faked per-concern grouping by registering under synthetic session ids that named no
-real session — making provenance lie. We decided the Host originator carries an optional,
-opaque **Host Scope** label (`Host { scope: Option<String> }`, `scope_id()` = `host` or
-`host:{scope}`), and trigger-subscription list/cancel/deactivate match by registrant scope
-uniformly across Host and Session originators.
+## Decision
 
-The label is meaningless to lash — hosts choose their own grouping (a product might scope by
-automation id, a CLI by profile). The alternatives were worse: matching the bare Host bucket
-gives lifecycle over *all* host subscriptions but no grouping, so the fake-session workaround
-survives; blessing synthetic sessions bakes a semantic lie into provenance that every
-downstream consumer must know about. Additive and serde-compatible: an absent scope is
-today's `host`.
+`ProcessOriginator::Host` carries an optional opaque scope: `Host { scope: Option<String> }`. Its projected identity is `host` when absent and `host:{scope}` when present. Trigger subscription listing and lifecycle operations match registrant scope uniformly for Host and Session originators.
+
+## Why and consequences
+
+Hosts choose grouping labels such as automation ids or CLI profiles. Lash assigns no product meaning or security policy to them. A single host bucket is insufficient for independent lifecycle groups. Synthetic session ids are rejected because they misstate provenance and require downstream readers to interpret that fiction.
+
+Absent scope preserves the unscoped host representation. [Originator construction and projection](../../crates/lash-core-execution/src/runtime/process/model.rs) own the identity; [trigger registrants](../../crates/lash-core-execution/src/triggers.rs) use it for scope matching.

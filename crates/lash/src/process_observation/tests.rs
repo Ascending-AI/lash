@@ -161,7 +161,9 @@ impl Fixture {
         } else {
             (
                 None,
-                crate::tests::memory_store_set().await.process_registry(),
+                crate::tests::sqlite_memory_store_set()
+                    .await
+                    .process_registry(),
             )
         };
         let process_id = registry

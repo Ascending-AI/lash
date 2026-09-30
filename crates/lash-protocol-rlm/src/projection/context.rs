@@ -10,8 +10,11 @@ use lash_rlm_types::{
 };
 use lashlang::{
     ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, State as FlowState, Value as FlowValue,
+    ProjectedValue, Value as FlowValue,
 };
+
+#[cfg(test)]
+use lashlang::State as FlowState;
 
 use super::bindings::RlmProjectedBindings;
 use super::transport::json_to_flow_value;
@@ -341,10 +344,12 @@ pub(crate) fn projected_index(index: &FlowValue, len: usize) -> Result<Option<us
     Ok(Some(normalized as usize))
 }
 
+#[cfg(test)]
 pub(crate) fn prune_reserved_projected_bindings(rlm: &mut FlowState) {
     prune_protected_bindings(rlm, &BTreeSet::new());
 }
 
+#[cfg(test)]
 pub(crate) fn prune_protected_bindings(rlm: &mut FlowState, protected_names: &BTreeSet<String>) {
     prune_projected_binding_names(
         rlm,
@@ -356,10 +361,7 @@ pub(crate) fn prune_protected_bindings(rlm: &mut FlowState, protected_names: &BT
 ///
 /// Pruning is one heap copy and one collection for the whole set rather than
 /// one of each per name.
-#[expect(
-    clippy::expect_used,
-    reason = "removing named bindings can only shrink the heap, never exceed its patch bound"
-)]
+#[cfg(test)]
 pub(crate) fn prune_projected_binding_names<'a>(
     rlm: &mut FlowState,
     names: impl IntoIterator<Item = &'a str>,

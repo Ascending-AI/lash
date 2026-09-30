@@ -12,6 +12,9 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod lost_root;
+pub use lost_root::*;
+
 struct Control {
     fail: AtomicBool,
     /// Releases that fail retryably before one succeeds.
@@ -295,6 +298,7 @@ impl Fixture {
                 turn_index: state.turn_index as u64 + 1,
                 generation: None,
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("root-control"),
+                executor: lash_core::store::RootExecutor::Root,
             })
             .await
             .expect("admit the root")
@@ -474,6 +478,17 @@ impl Fixture {
             .await
             .expect("park read")
     }
+    /// Whether queued batch `batch_id` is still open on the session's
+    /// queue: not yet applied, and not withdrawn.
+    async fn command_is_open(&self, batch_id: &crate::BatchId) -> bool {
+        self.parts
+            .store
+            .list_queued_work(&self.parts.session_id)
+            .await
+            .expect("queue read")
+            .iter()
+            .any(|batch| batch.batch_id == *batch_id)
+    }
     async fn intent_state(&self, id: ControlIntentId) -> ControlIntentState {
         self.factory
             .load_intent(id)
@@ -499,17 +514,18 @@ fn root_final_commit(
         .derive_node_ids(&state.session_id, &operation)
         .expect("nodes");
     let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
+        state, graph, operation,
     )
     .expect("commit");
     commit.root_terminal = Some(Box::new(RootTerminalWrite {
         root: root.clone(),
         commit: TurnCommitId::new(root.clone(), ordinal),
         turn: turn.clone(),
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     commit
 }
@@ -520,23 +536,6 @@ async fn drive(
     name: &str,
 ) -> DriveOutcome {
     drive_result(f, runner, name).await.expect("the drive runs")
-}
-
-/// One admission of request `name`, answered as it was answered: a verdict,
-/// or the abort the drive returns when the step refuses the attempt.
-async fn admit_verdict(
-    f: &Fixture,
-    runner: &Arc<dyn crate::ConformanceTurnRunner>,
-    name: &str,
-) -> Result<AdmitVerdict, DriveAbort> {
-    let request = f.parts.request(name);
-    on_tier(runner, &f.parts, move |mut runtime, scope| {
-        let request = request.clone();
-        Box::pin(
-            async move { lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0).await },
-        )
-    })
-    .await
 }
 
 /// One drive of request `name` to a stop, answered with the abort it ended
@@ -718,6 +717,7 @@ pub async fn no_row_stays_bound_after_a_roots_verb_close_or_lost_end(
                 session: lost.parts.session_id.clone(),
                 root: lost.root.clone(),
             },
+            RootRunLoss::FailedRun,
             stores.clock().timestamp_ms(),
         )
         .await
@@ -783,6 +783,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         turn_index: state.turn_index as u64 + 1,
         generation: None,
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
+        executor: lash_core::store::RootExecutor::Root,
     };
     parts
         .store
@@ -797,7 +798,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         "the head moved under the root's commit",
     );
     let at_ms = stores.clock().timestamp_ms();
-    let crate::store::RefusedRootEnd::Ended(terminal) = parts
+    let crate::store::RootEnd::Ended(terminal) = parts
         .store
         .end_refused_root(&fence, &root, &refusal, at_ms)
         .await
@@ -848,7 +849,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
             .end_refused_root(&fence, &root, &refusal, at_ms + 1)
             .await
             .expect("a second end"),
-        crate::store::RefusedRootEnd::AlreadyEnded(terminal.clone()),
+        crate::store::RootEnd::AlreadyEnded(terminal.clone()),
         "a second end writes nothing"
     );
     let factory = stores.session_store_factory();
@@ -859,6 +860,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
                     session: parts.session_id.clone(),
                     root: root.clone(),
                 },
+                RootRunLoss::NoRun,
                 at_ms + 2,
             )
             .await
@@ -902,7 +904,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
                 .end_refused_root(&fence, &next_root, &retirement, at_ms + 3)
                 .await
                 .expect("end the retired root"),
-            crate::store::RefusedRootEnd::Ended(_)
+            crate::store::RootEnd::Ended(_)
         ),
         "the next root had no terminal"
     );
@@ -1875,45 +1877,31 @@ pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligat
 
 /// D15: while a parked root's park names a redrive intent that is not yet
 /// settled, admission of a new turn input answers a typed retryable
-/// refusal — never a recorded verdict, never a failed turn — and the
-/// command lane still drains first. Once the intent settles the parked
-/// root runs once and the send lands behind it.
+/// refusal — never a recorded verdict, never a failed turn. The parked root
+/// owns the session head (FIG-4202), so a session command queued beside the
+/// send waits too: the command lane never drains ahead of an unfinished
+/// root. Once the intent settles the parked root runs once, the command
+/// applies at its boundary, and the send lands behind both.
 pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    // The command lane drains first (ADR 0101 §4): a session command
-    // pending while the redrive is unsettled is admitted ahead of the
-    // send waiting behind it.
-    let lane = Fixture::new(prefix, "redrive-command-lane", &host, &stores).await;
-    lane.parts
-        .enqueue("racing send", Some("lane-send-root"))
-        .await;
-    lane.parts
+    let mut f = Fixture::new(prefix, "send-redrive-race", &host, &stores).await;
+    let send = f.parts.enqueue("racing send", Some("racing-root")).await;
+    let command = f
+        .parts
         .store
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
-            lane.parts.session_id.clone(),
+            f.parts.session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
             crate::SessionCommand::RefreshToolCatalog {
-                reason: "drain while the redrive is unsettled".into(),
+                reason: "queued while the redrive is unsettled".into(),
             },
         ))
         .await
         .expect("command accepted");
-    lane.verb(RootVerb::Redrive).await.expect("redrive");
-    match admit_verdict(&lane, &runner, "command-lane").await {
-        Ok(AdmitVerdict::Admit(admitted)) => assert!(
-            matches!(admitted.work(), AdmittedWork::Commands { .. }),
-            "the command lane drains while the redrive is unsettled: {:?}",
-            admitted.work()
-        ),
-        other => panic!("the command lane drains first: {other:?}"),
-    }
-
-    let mut f = Fixture::new(prefix, "send-redrive-race", &host, &stores).await;
-    let send = f.parts.enqueue("racing send", Some("racing-root")).await;
     let intent = f.verb(RootVerb::Redrive).await.expect("redrive");
     assert!(f.intent_state(intent.id).await.is_open());
     // The send's drive meets the unsettled redrive. In process its typed
@@ -1961,6 +1949,10 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
             "a re-decision interleaved a run with the unsettled redrive"
         );
     }
+    assert!(
+        f.command_is_open(&command.batch_id).await,
+        "the command lane does not drain ahead of the unsettled redrive's root"
+    );
     let answered = if racing.is_finished() {
         Some((&mut racing).await.expect("the racing drive ran"))
     } else {
@@ -2020,6 +2012,10 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         f.parts.calls(),
         2,
         "the parked root runs once and the send's root once"
+    );
+    assert!(
+        !f.command_is_open(&command.batch_id).await,
+        "the command applied at the parked root's boundary"
     );
     assert!(
         f.park().await.is_none(),

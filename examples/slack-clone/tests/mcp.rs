@@ -1074,7 +1074,10 @@ async fn binary_mcp_content_is_attached_for_each_server() {
     .expect("valid stored attachment id");
     let attachment_store = runtime.core.backend().attachment_store();
     let stored_bytes = attachment_store
-        .get(&attachment_id)
+        .get(
+            &attachment_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the backend's attachment store holds the stored attachment")
         .bytes;

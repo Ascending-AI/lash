@@ -12,9 +12,7 @@ use std::fmt::Write as _;
 use lash_core::{PromptContribution, ToolManifest};
 use serde_json::Value;
 
-use crate::{
-    ResolvedToolBinding, TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolBindingResolutionExt,
-};
+use crate::{ResolvedToolBinding, TOOL_BINDING_KEY, ToolBinding, ToolBindingResolutionExt};
 
 pub const DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT: usize = 100;
 pub const DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT: usize = 50;
@@ -70,7 +68,7 @@ impl Default for CataloguePreviewOptions {
     }
 }
 
-/// Each record needs a `name` and a `bindings["typescript.tool"]` value. Extra
+/// Each record needs a `name` and a `bindings["lash.tool"]` value. Extra
 /// fields such as id, description, and compact contract are ignored by the
 /// preview but can still be used by the search index.
 pub fn catalogue_preview_contribution(catalog: &[Value]) -> Option<PromptContribution> {
@@ -196,7 +194,7 @@ pub fn catalogue_preview_entry_from_manifest(
 ) -> Option<CataloguePreviewEntry> {
     let binding = manifest
         .bindings
-        .get(TYPESCRIPT_TOOL_BINDING_KEY)
+        .get(TOOL_BINDING_KEY)
         .cloned()
         .and_then(|value| serde_json::from_value::<ToolBinding>(value).ok())?;
     let executable = binding.executable_for(&manifest.name).ok()?;
@@ -208,7 +206,7 @@ pub fn catalogue_preview_entry_from_catalog_record(raw: &Value) -> Option<Catalo
     let name = obj.get("name")?.as_str()?;
     let binding: ToolBinding = obj
         .get("bindings")
-        .and_then(|bindings| bindings.get(TYPESCRIPT_TOOL_BINDING_KEY))
+        .and_then(|bindings| bindings.get(TOOL_BINDING_KEY))
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok())?;
     let executable = binding.executable_for(name).ok()?;

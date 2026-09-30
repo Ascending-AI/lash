@@ -1,5 +1,5 @@
 //! Unit tests for the process awaiter backoff and the change hub; the tests
-//! that need a registry run over a SQLite memory deployment in
+//! that need a registry run over a SQLite memory store set in
 //! `tests/store_backed` (ADR 0102).
 
 use std::time::Duration;

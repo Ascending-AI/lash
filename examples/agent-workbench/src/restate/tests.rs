@@ -639,6 +639,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

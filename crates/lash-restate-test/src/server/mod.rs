@@ -627,6 +627,16 @@ impl JournalEntryView {
             RunResult::Failure(failure) => Some(Err((failure.code, failure.message))),
         }
     }
+
+    /// The call a `CallCommand` entry issued — its target service, handler,
+    /// key and headers; `None` on every other entry.
+    pub fn call_command(&self) -> Option<crate::protocol::generated::CallCommandMessage> {
+        use prost::Message as _;
+        if self.ty != MessageType::CallCommand {
+            return None;
+        }
+        crate::protocol::generated::CallCommandMessage::decode(self.payload.clone()).ok()
+    }
 }
 
 impl RestateTestServer {

@@ -231,6 +231,7 @@ impl LashlangProcessHost<'_> {
     ) -> Result<lashlang::Value, ExecutionHostError> {
         let mut recorded = None;
         let result = crate::trigger_commands::execute_trigger_operation_recording(
+            &self.workers,
             ctx,
             &self.artifact_store,
             operation,

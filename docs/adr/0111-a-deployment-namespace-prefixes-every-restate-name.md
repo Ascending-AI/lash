@@ -2,120 +2,98 @@
 
 ## Status
 
-Accepted and implemented 2026-09-27 (FIG-3898).
-
-Amends [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-§4: one `restate-server` serves any number of lash deployments, each in a
-namespace of its own. Extends the lane naming of
-[ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) (FIG-3795):
-the stable and generation names carry the namespace. The FIG-3814 ruling
-stands: the registered names `LashDurableWaitIndex` and `EffectGroupIndex`
-keep their base names.
+Accepted.
 
 ## Context
 
-The engine bound lash's services under fixed names (`LashSession`, `LashTurn`,
-`EffectGroupDispatch`, ...). Restate keys a service by its name alone. On the
-pinned server (1.7.12), a second deployment that registers the same names
-takes them over without complaint: the services move to revision 2, and new
-calls go to the new deployment. Two cores on one server therefore sent each
-other's turns, processes and effect groups to whichever deployment
-registered last.
-
-The example hosts worked around this by starting a private server for each
-core: every toolbench run, each of the slack-clone live E2E cores, and the
-agent-workbench valid-empty fixture.
+Restate addresses services by name. Deployments that bind the same names
+share those addresses, so independent Lash cores need distinct names when
+they share a server. The namespace must apply to calls and administration as
+well as registration.
 
 ## Decision
 
 ### 1. The namespace
 
-A deployment's namespace is set on the engine's configuration with
-`RestateConfig::with_namespace(RestateNamespace)`. A namespace is 1 to 63
-bytes of `[a-z0-9-]`, it starts with a lowercase letter, and it does not start
-with `restate`, which Restate reserves for its own names. `RestateNamespace`
-refuses any other value with a typed `RestateNamespaceError`.
+`RestateConfig::with_namespace` sets a `RestateNamespace`. A nonempty
+namespace is 1 to 63 ASCII bytes of lowercase letters, digits and `-`, starts
+with a lowercase letter, and does not start with the reserved `restate`
+prefix. Invalid values return `RestateNamespaceError`.
 
-- `.` is not allowed because it separates the namespace from the name.
-- `_` is not allowed because it starts a generation suffix, and because the
-  admin SQL filters treat it as a `LIKE` wildcard.
+The empty string selects the default namespace and bare service names.
+A dot separates a namespace from a base name. An underscore introduces a
+generation suffix and is a wildcard in admin SQL, so neither belongs in a
+namespace.
 
-The empty string gives the **default namespace**, which keeps the bare names
-of every build before this ADR.
+Evidence: `crates/lash-restate/src/services.rs:150`.
 
 ### 2. Every name carries it
 
-A service is bound as `{namespace}.{Base}`, and a generation lane as
-`{namespace}.{Base}_g{generation}`. In the default namespace both keep their
-bare form. The prefix applies to every name lash **calls** as well as every
-name it binds:
+Stable names are `{namespace}.{Base}` and generation lanes are
+`{namespace}.{Base}_g{generation}`. The default namespace omits the prefix.
+`LashDurableWaitIndex` and `EffectGroupIndex` are base names in this scheme.
 
-- ingress calls from hosts;
-- handler-to-handler calls, made through namespaced request clients, each
-  pinned at compile time to the SDK's typed client for the same handler;
-- the admin-API queries: the `target_service_name` filters over
-  `sys_invocation` (paused session drives, park reconcile, the lost-run scan).
+Host ingress, typed handler clients and admin queries use these qualified
+names. Namespace-aware route parsing and service-lane filters keep queries
+within the configured namespace. [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md)
+and [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
+own generation routing and compatibility.
 
-No namespace reads another namespace's names. The default namespace matches
-only names that contain no `.`.
+Evidence: `crates/lash-restate/src/services.rs:187`,
+`crates/lash-restate/src/services.rs:251`, and
+`crates/lash-restate/src/services.rs:269`.
 
-### 3. Keys stay
+### 3. Keys stay scoped to their services
 
-Object keys, workflow keys, idempotency keys and awakeable ids do not change.
-Restate scopes keys and idempotency keys to their service, so the prefix
-scopes them too. Existing data in the default namespace is untouched.
+Object keys, workflow keys, idempotency keys and awakeable ids retain their
+own spelling. Qualifying the service name separates service-scoped keys.
+Moving to a different namespace addresses different Restate state; it does
+not migrate the state under the source namespace.
 
-Moving a deployment to another namespace makes it a new deployment. Its
-Restate state lives under other names, and nothing migrates it.
+Process start keys are store identities, as specified in ADR 0107 §2.
+Sharing a SQL store shares that key space regardless of Restate namespaces.
 
 ### 4. A colliding registration is refused
 
-Every service lash binds carries the metadata `lash.authority`, set to the
-engine authority's binding id. `RestateEngine::register_deployment(uri)` reads
-each stable name from the admin API before it registers `uri` with
-`force: true`. It lets the registration through when the name is:
+Bound services carry `lash.authority` metadata with the engine authority's
+binding id. `RestateEngine::register_deployment(uri)` checks stable service
+registrations through the admin API. A name is accepted when unregistered,
+when its registration has no authority claim, when the claim matches, or
+when the holding deployment uses the same URI. A different holder returns
+`RestateRegistrationError::NameTaken` before registration.
 
-- unregistered;
-- unclaimed, meaning a build from before this ADR holds it;
-- claimed by the same authority, as in a redeploy or a new build;
-- held by a deployment at the same `uri`.
+The endpoint-generation guard runs first. A fresh URI registers without
+force. A URI serving this build's generation can redeploy with force; a URI
+serving another generation returns `EndpointServesAnotherGeneration`.
+Namespace separation does not bypass this guard.
 
-Any other holder refuses the registration with
-`RestateRegistrationError::NameTaken`, and nothing is registered.
+The checks and registration are separate admin operations. They detect
+misconfiguration and do not serialize racing registrations. They perform
+no authentication or host security policy.
 
-The check and the registration are two admin calls. The guard catches
-misconfiguration; it is not a lock between two registrations that race.
+Evidence: `crates/lash-restate/src/engine.rs:263` and
+`crates/lash-restate/src/engine.rs:308`.
 
 ### 5. Hosts share a server
 
-- **Example hosts** get their server from `LocalRestateServer::shared`. It
-  starts one server for the whole process and stops it when the last core lets
-  go. Each core takes its own namespace with `LocalRestateServer::core(label)`
-  and registers through the guard. This covers toolbench runs and the
-  slack-clone live cores.
-- **The valid-empty fixture** registers on the agent-workbench's own server,
-  in the namespace `agent-workbench-valid-empty`.
-- **Launch-script hosts** (agent-service, the workers runbook, the workbench
-  itself) still register their endpoint from their launch scripts in the
-  default namespace. They can adopt `register_deployment` whenever they need
-  to share a server.
+`LocalRestateServer::shared` supplies a process-wide server. Each core takes
+a namespace through `LocalRestateServer::core(label)` and registers through
+the guard. Toolbench and Slack-clone's live cores use this arrangement.
+The workbench's valid-empty fixture uses `agent-workbench-valid-empty` on
+the workbench's server. Launch-script hosts can register their default
+namespace endpoint through their scripts.
+
+Evidence: `examples/shared/local_restate.rs:196`, `:210`.
+
+Executable evidence is the namespace suite in
+`crates/lash-restate-test/tests/namespaces.rs`, which runs on the Restate
+double and the live backend. It checks independent deployments on one
+server and colliding registration refusals.
 
 ## Consequences
 
-- One `restate-server` serves every core a process runs. The per-core server
-  start (about 0.3 s and 200 MB RSS each, ADR 0104 §4) is gone.
-- The `lash-restate-test` double and the live backend take a namespace too.
-  `RestateTestBackend::beside` registers a second deployment on the same
-  double. The laws in `crates/lash-restate-test/tests/namespaces.rs` run two
-  namespaced cores side by side on one server, and prove that a colliding
-  registration is refused. The `namespaces` Restate suite runs the same laws
-  against a live server.
-- A namespace is part of a deployment's identity, in the same way as its
-  authority. An operator who changes it starts a new deployment.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 6: Registration composes with
-[ADR 0115 §3.5](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)'s
-generation guard. A deployment namespace does not bypass the journal-generation
-check.
+Independent cores can share a Restate server. The namespace is part of the
+deployment's identity; changing it starts a deployment under different
+addresses. A private server per core also separates names, but duplicates
+server resources and startup work. A qualified name makes the separation
+explicit while permitting a shared server.

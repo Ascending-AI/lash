@@ -152,7 +152,7 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, usage deltas: {usage_delta_bytes}, durable turn result: {turn_result_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, durable turn result: {turn_result_bytes})"
     )]
     CommitByteBudgetExceeded {
         session_config_bytes: usize,
@@ -161,7 +161,6 @@ pub enum StoreError {
         attachment_referrer_bytes: usize,
         follow_on_bytes: usize,
         agent_frame_bytes: usize,
-        usage_delta_bytes: usize,
         turn_result_bytes: usize,
         total_bytes: usize,
         max_bytes: usize,
@@ -345,6 +344,11 @@ pub enum StoreError {
         "attachment `{digest}` has no completed upload in this store; put the bytes before committing a reference to them"
     )]
     UnknownAttachment { digest: crate::AttachmentId },
+    #[error("incomplete enumeration of {scope}: {unfinished}")]
+    IncompleteEnumeration {
+        scope: &'static str,
+        unfinished: String,
+    },
     #[error("referrer kind `{kind}` cannot hold {store} bytes")]
     ReferrerKindRefused {
         kind: crate::artifact_referrer::ArtifactReferrerKind,
@@ -544,6 +548,18 @@ pub enum StoreError {
         session_id: SessionId,
         batch_id: BatchId,
     },
+    /// A head write that presented no drive fence found the session head
+    /// owned by a drive (FIG-4202): a bound root, an owed follow-on, or an
+    /// open session command a drive applies at its next boundary. Nothing
+    /// was written. A host moves the head through a session command instead,
+    /// and a dirty park answers busy and keeps its runtime.
+    #[error(
+        "session `{session_id}`'s head is owned by {owner}; a head write outside the drive is refused"
+    )]
+    SessionHeadOwned {
+        session_id: SessionId,
+        owner: super::SessionHeadOwner,
+    },
     /// A storage operation fenced by a drive presented a fence that is not
     /// the session's current drive epoch: a later admission superseded it
     /// (ADR 0105 §2). Nothing was written.
@@ -612,13 +628,6 @@ pub enum StoreError {
         session_id: SessionId,
         kind: &'static str,
         source_key: String,
-    },
-    #[error(
-        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
-    )]
-    UnstagedUsageConfirmation {
-        confirmed_count: usize,
-        staged_count: usize,
     },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
     MonotonicCounterOverflow { counter: &'static str, current: u64 },
@@ -905,6 +914,7 @@ impl StoreError {
             | Self::TurnCancelClosureAuthorizationMismatch { .. }
             | Self::TurnCancelClosureLifecyclePinned { .. }
             | Self::TurnCancelClosureScopeRetired { .. }
+            | Self::IncompleteEnumeration { .. }
             | Self::ReferrerKindRefused { .. }
             | Self::UnknownAttachment { .. }
             | Self::StaleWritePermit { .. }
@@ -932,6 +942,7 @@ impl StoreError {
             | Self::IngressSettlementDuplicate { .. }
             | Self::IngressSettlementUnfenced { .. }
             | Self::SessionCommandWithdrawn { .. }
+            | Self::SessionHeadOwned { .. }
             | Self::StaleDriveFence { .. }
             | Self::RootAlreadyTerminal { .. }
             | Self::RootInputWithdrawn { .. }
@@ -940,7 +951,6 @@ impl StoreError {
             | Self::DriveEpochUnavailable { .. }
             | Self::DriveFenceSessionMismatch { .. }
             | Self::IngressReservedSourceKey { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
@@ -1018,6 +1028,7 @@ impl StoreError {
             }
             Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
             Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
+            Self::IncompleteEnumeration { .. } => "IncompleteEnumeration",
             Self::ReferrerKindRefused { .. } => "ReferrerKindRefused",
             Self::UnknownAttachment { .. } => "UnknownAttachment",
             Self::StaleWritePermit { .. } => "StaleWritePermit",
@@ -1047,6 +1058,7 @@ impl StoreError {
             Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",
             Self::IngressSettlementUnfenced { .. } => "IngressSettlementUnfenced",
             Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
+            Self::SessionHeadOwned { .. } => "SessionHeadOwned",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
             Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
             Self::RootInputWithdrawn { .. } => "RootInputWithdrawn",
@@ -1055,7 +1067,6 @@ impl StoreError {
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
             Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
-            Self::UnstagedUsageConfirmation { .. } => "UnstagedUsageConfirmation",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",

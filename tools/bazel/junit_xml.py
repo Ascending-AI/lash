@@ -17,7 +17,9 @@ stable `test <name> ... ok|FAILED|ignored` lines, and a failing case carries
 its `---- <name> stdout ----` section. A suite whose exit code is non-zero
 without a failed case (a crash, a harness abort, a non-libtest binary) gets
 one error case named after the suite, the same shape `generate-xml.sh`
-writes for every test. The whole log is the suite's `<system-out>`.
+writes for every test. A successful libtest log without outcomes has zero
+cases; successful non-libtest commands retain their one command case. The
+whole log is the suite's `<system-out>`.
 """
 
 import re
@@ -25,6 +27,10 @@ import sys
 import xml.etree.ElementTree as ET
 
 CASE = re.compile(r"^test (.+?) \.\.\. (ok|FAILED|ignored(?:, .*)?)$")
+LIBTEST = re.compile(
+    r"^(?:running \d+ tests?|test result:|test .+ \.\.\. |.+: (?:test|benchmark)$|\d+ tests?, \d+ benchmarks?$)",
+    re.MULTILINE,
+)
 FAILURE_SECTION = re.compile(r"^---- (.+?) stdout ----$")
 # Code points XML 1.0 cannot carry, even escaped.
 NOT_XML = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
@@ -78,7 +84,7 @@ def add_suite(root, name, code, seconds, log_path):
             ET.SubElement(case, "skipped")
 
     exited_badly = code != "0"
-    if not outcomes or (exited_badly and not failures):
+    if (not outcomes and not LIBTEST.search(text)) or (exited_badly and not failures):
         case = ET.SubElement(suite, "testcase", name=name, classname=name, time=seconds)
         if exited_badly:
             errors += 1

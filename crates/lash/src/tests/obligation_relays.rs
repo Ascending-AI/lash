@@ -106,6 +106,14 @@ impl ArtifactCleanupLedger for DuePasses<dyn ArtifactCleanupLedger> {
         self.inner.nudge(referrer, now_ms).await
     }
 
+    async fn nudge_awaiting_journal(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> std::result::Result<u64, StoreError> {
+        self.inner.nudge_awaiting_journal(journal, now_ms).await
+    }
+
     async fn load_cleanup(
         &self,
         id: &ObligationId,
@@ -197,7 +205,11 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
                 "memory_limit": { "bounded": 67_108_864 },
             }))
             .expect("rlm config");
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend);
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            config,
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            &backend,
+        );
         let core = configured(LashCore::rlm_builder(
             backend,
             crate::TurnBudget::Unbounded,

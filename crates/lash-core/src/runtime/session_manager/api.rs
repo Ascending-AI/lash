@@ -122,7 +122,6 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         Box::pin(self.services.current.append_session_nodes(
-            &self.services.usage,
             &self.services.processes,
             session_id,
             request,
@@ -192,16 +191,13 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(None);
+        let registration = request.into_registration();
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new()
-                    .with_initial_observers(observers)
-                    .with_env_spec(env_spec),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
                 scope,
             )
             .await?;
@@ -298,7 +294,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
         self.services
             .processes
             .attach_process_terminal(

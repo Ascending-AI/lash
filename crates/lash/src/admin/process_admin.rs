@@ -3,7 +3,7 @@ use super::*;
 /// Session-scoped view of the global process surface
 /// ([`Processes`](crate::process::Processes)).
 ///
-/// This is thin sugar, not a parallel surface (ADR 0019 grill): every read is
+/// This is thin sugar, not a parallel surface (ADR 0014 grill): every read is
 /// the global observer pre-filtered by this session's observer scope (what the
 /// session may address), and every mutation delegates to the same runtime
 /// process path the global surface uses. It speaks the same

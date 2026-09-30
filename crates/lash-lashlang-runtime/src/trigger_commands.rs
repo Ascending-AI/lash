@@ -3,13 +3,12 @@ use std::collections::BTreeMap;
 use lashlang::{ExecutionHostError, TriggerHostOperation};
 use serde_json::Value;
 
-use crate::{
-    lashlang_process_event_types, lashlang_process_signal_event_types, lashlang_type_expr_schema,
-};
+use crate::{lashlang_process_event_types, lashlang_type_expr_schema};
 
 /// Foreground code and durable processes share this adapter so trigger operations never depend on
 /// tool-catalog membership and keep one implementation of the trigger mutation contract.
 pub async fn execute_trigger_operation(
+    workers: &lash_vm_client::service::Service,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     artifact_store: &lashlang::LashlangArtifacts,
     operation: TriggerHostOperation,
@@ -18,6 +17,7 @@ pub async fn execute_trigger_operation(
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let mut recorded = None;
     execute_trigger_operation_recording(
+        workers,
         ctx,
         artifact_store,
         operation,
@@ -38,6 +38,7 @@ pub(crate) type RecordedTriggerOutcome = Option<(
 /// As [`execute_trigger_operation`], also reporting through `recorded` the
 /// outcome of the trigger effect, when the effect ran and recorded one.
 pub(crate) async fn execute_trigger_operation_recording(
+    workers: &lash_vm_client::service::Service,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     artifact_store: &lashlang::LashlangArtifacts,
     operation: TriggerHostOperation,
@@ -48,7 +49,16 @@ pub(crate) async fn execute_trigger_operation_recording(
     match operation {
         TriggerHostOperation::List => list_triggers(ctx, payload, effect_id, recorded).await,
         TriggerHostOperation::Update => {
-            update_trigger(ctx, artifact_store, payload, effect_id, false, recorded).await
+            update_trigger(
+                workers,
+                ctx,
+                artifact_store,
+                payload,
+                effect_id,
+                false,
+                recorded,
+            )
+            .await
         }
         TriggerHostOperation::Enable => {
             set_trigger_enabled(ctx, payload, effect_id, true, recorded).await
@@ -58,7 +68,16 @@ pub(crate) async fn execute_trigger_operation_recording(
         }
         TriggerHostOperation::Delete => delete_trigger(ctx, payload, effect_id, recorded).await,
         TriggerHostOperation::Revive => {
-            update_trigger(ctx, artifact_store, payload, effect_id, true, recorded).await
+            update_trigger(
+                workers,
+                ctx,
+                artifact_store,
+                payload,
+                effect_id,
+                true,
+                recorded,
+            )
+            .await
         }
         TriggerHostOperation::Prune => prune_triggers(ctx, payload, effect_id, recorded).await,
     }
@@ -119,6 +138,7 @@ impl PreparedTriggerDraft {
 }
 
 pub(crate) async fn prepare_trigger_draft(
+    workers: &lash_vm_client::service::Service,
     artifact_store: &lashlang::LashlangArtifacts,
     engines: &lash_core::ProcessEngineRegistry,
     request: &lashlang::TriggerRegistrationRequest,
@@ -144,8 +164,8 @@ pub(crate) async fn prepare_trigger_draft(
     let mut definition =
         lashlang::ProcessDefinitionIdentity::from_process_value(resolved.draft.value().as_json())
             .map_err(|e| ExecutionHostError::new(e.to_string()))?;
-    let artifact = artifact_store
-        .get_module_artifact(&definition.module_ref)
+    let artifact = workers
+        .inspect_artifact(artifact_store, &definition.module_ref)
         .await
         .map_err(|err| {
             ExecutionHostError::new(format!("failed to load lashlang module artifact: {err}"))
@@ -160,14 +180,26 @@ pub(crate) async fn prepare_trigger_draft(
         .process_name_for_ref(&definition.process_ref)
         .ok_or_else(|| ExecutionHostError::new("definition ProcessRef is not exported"))?
         .to_owned();
-    let compatibility =
-        lashlang::check_trigger_compatibility(lashlang::TriggerCompatibilityRequest {
-            artifact: artifact.as_ref(),
-            definition: &definition,
-            source_type: &request.source.source_type,
-            inputs: &request.inputs,
+    let compatibility = match workers
+        .request_accounted(lash_vm_client::service::Request::TriggerCompatibility {
+            bytes: artifact.bytes().to_vec(),
+            definition: definition.clone(),
+            source_type: request.source.source_type.clone(),
+            inputs: request.inputs.clone(),
         })
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        .await
+        .map_err(|error| ExecutionHostError::new(error.to_string()))?
+    {
+        lash_vm_client::service::Response::TriggerCompatibility(compatibility) => compatibility,
+        lash_vm_client::service::Response::Refused { message, .. } => {
+            return Err(ExecutionHostError::new(message));
+        }
+        _ => {
+            return Err(ExecutionHostError::new(
+                "unexpected worker trigger compatibility response",
+            ));
+        }
+    };
     let source_key = lash_core::facade_support::default_trigger_source_key(
         &request.source.source_type,
         &request.source.value,
@@ -192,18 +224,15 @@ pub(crate) async fn prepare_trigger_draft(
         Some(definition.process_name.clone()),
     );
     target_identity.definition_id = Some(resolved.id().clone());
-    let process = artifact
-        .ir()
-        .process(&definition.process_name)
-        .ok_or_else(|| {
-            ExecutionHostError::new(format!(
-                "trigger target artifact `{}` is missing process `{}`",
-                definition.module_ref, definition.process_name
-            ))
-        })?;
+    let process = artifact.process(&definition.process_name).ok_or_else(|| {
+        ExecutionHostError::new(format!(
+            "trigger target artifact `{}` is missing process `{}`",
+            definition.module_ref, definition.process_name
+        ))
+    })?;
     let event_types = lashlang_process_event_types()
         .into_iter()
-        .chain(lashlang_process_signal_event_types(process))
+        .chain(process.signals.clone())
         .collect::<Vec<_>>();
     Ok(PreparedTriggerDraft {
         subscription_key,
@@ -286,6 +315,7 @@ async fn list_triggers(
 }
 
 async fn update_trigger(
+    workers: &lash_vm_client::service::Service,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     artifact_store: &lashlang::LashlangArtifacts,
     payload: Value,
@@ -301,7 +331,7 @@ async fn update_trigger(
         .ok_or_else(|| ExecutionHostError::new("trigger update requires `subscription_key`"))?;
     let expected_revision = trigger_expected_revision(&payload)?;
     let prepared =
-        prepare_trigger_draft(artifact_store, ctx.definition_engines(), &request).await?;
+        prepare_trigger_draft(workers, artifact_store, ctx.definition_engines(), &request).await?;
     // An environment this execution captures is published under its own
     // execution referrer; the command's journaled effect then holds it, with
     // the target module, under the revision it commits (ADR 0113 §3.4).

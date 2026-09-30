@@ -13,7 +13,7 @@ pub(crate) struct WorkbenchPluginFactory {
 impl WorkbenchPluginFactory {
     #[expect(
         clippy::expect_used,
-        reason = "in-memory stores open a fresh `Connection::open_in_memory` with no on-disk \
+        reason = "SQLite memory stores open a fresh `Connection::open_in_memory` with no on-disk \
                   path to collide, so their open cannot fail here"
     )]
     pub(crate) fn new() -> Self {

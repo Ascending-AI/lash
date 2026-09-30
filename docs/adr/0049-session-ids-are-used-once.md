@@ -4,214 +4,83 @@
 
 Accepted.
 
-Amended 2026-09-24 (FIG-3669), **partly implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: SQL scope retirement of effect, group and
-promise rows and the `effect_scope_retirements` fence. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. B6 removed process leases; the session lease cutover remains separate.
-
 ## Context
 
-Lash previously allowed a host to delete a session and create another session
-with the same id. `IncarnationId` distinguished those lifetimes throughout
-runtime state, history-node preimages, effect-journal identity, turn addresses,
-and lifecycle retirement. Every seam that carried the discriminator was also a
-seam that could omit it. Session-keyed deletion and await-event revocation
-evidence were consequently unsafe when an id recurred.
-
-Lash cannot prove that an arbitrary host string is globally unique. It can
-enforce a narrower and sufficient invariant inside each store: once a
-host-facing id has durably materialized session metadata in that store, the id
-is never reused there. Deleting an id that never materialized is a no-op.
+A session-keyed history node, turn address or revocation must identify one
+lifetime. Lash cannot prove global uniqueness of an arbitrary host string, but
+it can enforce non-reuse within the store that admits it.
 
 ## Decision
 
-A host-facing session id is host-provided, nonempty, NUL-free UTF-8, identifies
-exactly one session lifetime, and is used at most once in a store. Lash otherwise
-treats it as opaque; host transports may impose narrower syntax and
-length rules. Deleting a materialized host-facing id writes a permanent
-tombstone. Creating or forking to a deleted id fails with
-`StoreError::SessionDeleted`, whose message states that the id was used and
-deleted. Retention and vacuum never remove this identity evidence.
+A host-facing session id is host-provided, nonempty, NUL-free UTF-8 and opaque
+to Lash. A transport may impose narrower syntax. Once a store materializes
+session metadata for an id, that id identifies one session lifetime.
+An accepted close first makes it refuse new work. Physical deletion follows
+its owed cleanup and writes permanent deletion evidence. A `Closing` result
+has not yet deleted storage; `LashCore::await_session_deletion` observes the
+permanent tombstone and returns typed stalls that need operator re-arm.
+Creating or forking to that
+id fails with `StoreError::SessionDeleted`. Retention and vacuum cannot remove
+this evidence. Deleting an id that never materializes is a no-op.
 
-Creating an already-live id remains idempotent. Opening an existing id remains
-an explicit operation. `fork_at` already takes the new host-provided session id
-and uses the same permanent-tombstone admission path.
+Catalog admission of the same live id is idempotent when its binding agrees:
+`SessionAdmission::{Created, Rebound}` distinguishes creation from rebind.
+Facade `create` is stricter and refuses an existing id with
+`SessionAlreadyExists`; `open` is the explicit non-creating operation.
+`fork_at` takes a new host id and checks the same permanent deletion fence.
 
-`SessionLifetime`, `EphemeralRunId`, and `IncarnationId` are removed. The old
-durable/ephemeral identity distinction did not describe two identities after
-reuse was forbidden; the meaningful boundary is whether a runtime has been
-bound to a store. `SessionCommitStore::admit_and_bind_session` takes the
-complete `SessionBinding` (id and relation), returns
-`SessionAdmission::{Created, Rebound}`, materializes metadata, and checks both
-the handle binding and permanent deletion fence atomically. The runtime reads
-the materialized identity back before committing, so a loose third-party store
-cannot silently alias another session.
+Binding includes session relation and ownership. Admission materializes and
+checks it atomically. Ordinary history-node ids use session id, operation id
+and ordinal; frame ids use session id and frame key. Turn addresses and
+session-scoped journal identities use that same session id, with no separate
+session-lifetime discriminator. Facade sessions bind explicit storage and
+lifecycle owners (ADR 0088).
 
-Facade storeless execution was superseded by
-[ADR 0088](0088-facade-sessions-bind-storage-and-lifecycle-owners.md): every
-facade session now binds an explicit durable or in-memory store before
-admission. Runtime-internal reconstruction paths remain governed by their own
-substrate contracts. Ordinary history nodes derive from session id, operation
-id, and ordinal. Frame nodes derive from session id and frame key.
-Effect-journal identities and turn addresses likewise use the session id
-without a second discriminator.
+### Scope fences are a permanent-row class with one release rule
 
-SQLite schema 20, SQLite effect schema 6, and PostgreSQL schema 28 are
-reject-and-recreate boundaries. No old shape is migrated or dual-read.
-Await-event promise keys carry an explicit `v2` epoch. Old in-flight Restate
-invocations cannot resume across this cutover: operators must drain them or
-purge the Restate state before upgrading, otherwise their old promises are
-orphaned under the prior key.
+Process and runtime-operation scopes have no session id, so deleting a session
+does not revoke their promises. Scope-exact retirement supplies their own
+revocation boundary. Production journals belong to Restate, not SQL stores
+(ADR 0104). Restate's scope index durably records revocation and refuses later
+promise admission and access under the revoked scope.
 
-### Scope fences are a permanent-row class with one release rule (FIG-2499)
+Retirement requires named reachability proof. An owner-terminal retirement
+can revoke the scope. `WhenQuiescent` refuses while executing effects,
+unsettled group children or indexed unresolved waits remain; its refusal
+leaves the index unfenced. Pending turn-closure participants also prevent
+revocation. A returning operation receipt alone does not prove quiescence.
+Retention and lifecycle cleanup use the host's explicit levers.
 
-Process and runtime-operation scopes carry no session, so session deletion
-never reaches their effect journal or their await-event promises. They are
-reclaimed by scope-exact retirement instead: `EffectJournalRetirement::process`
-and `::runtime_operation` delete the scope's effect rows, group rows, and
-promise rows and write a scope fence (`effect_scope_retirements` /
-`lash_effect_scope_retirements`, keyed by the scope's journal identity) in the
-same transaction, under the same lock every admission path takes. Every
-admission path — journal claim, group open, promise mint, resolve, peek, await,
-and the in-process and Restate hosts' scoped controllers — reads the fence and
-fails closed, so a late redrive can never re-execute under an emptied journal.
-The fence is a permanent row on the same terms as `deleted_sessions`: retention
-and vacuum never remove it, and the retention census lists it as permanently
-exempt.
+Process ids are minted and single-use (ADR 0107), and runtime-operation ids
+are used once. `reinstate_effect_scope` is a process-scope lever only; session
+revocation cannot be lifted by it. The process registry binds its registration
+probe to the effect host. A revoked process index reads that probe to repair
+a committed registration whose reinstatement did not reach the engine;
+ordinary registration never deliberately reuses a pruned process id.
 
-Retirement rests on proven unreachability, and the proof is named on the
-request (`EffectRetirementGate`). A prune is owner-terminal proof: the registry
-has deleted the row, so in-flight rows go too, and the facade fences exactly
-the ids the registry's own eligibility survey returns — never a process the
-registry keeps because of a projection watermark, a pending wake delivery, or
-a parent-end plan. A receipt returning is not proof: the facade retires its
-plugin-command and plugin-task scopes `when_quiescent`, and the store refuses
-(`effect_scope_not_quiescent`) while a child is still in progress, a group
-still waits for one, or a promise under the scope is still awaited and
-unresolved (an `await_event_waits` row without a terminal; an open wait gate
-on the in-process host; an indexed wait or live awakeable on Restate). A
-refused retirement leaves the journal untouched and the facade simply
-returns: it keeps no queue of deferred scopes, because that queue would die
-with the process. The durable owner of deferred retirement is the reclaim
-sweep (`SessionStoreFactory::reclaim_retained_evidence`, ADR 0067): under the
-same fence lock it retires every session-free runtime-operation scope whose
-owning operation has a recorded receipt and that is quiescent at sweep time,
-and leaves any scope without a recorded receipt alone — no receipt, no proof.
-
-A runtime-operation fence is permanent: those ids are used once. A process
-fence is permanent the same way: the id it names is minted, never chosen and
-never reused (ADR 0106), so nothing ever registers the pruned scope again —
-a later start under the same start key mints a new process id whose scope
-was never fenced. Before the cutover a host-named id could be registered
-again and the registry insert lifted the scope's fence in the same
-transaction; under minted ids no registration names a fenced scope, so the
-lift never fires for its original purpose — the mechanism survives only as
-bind-time repair, clearing journal-file fences written before a registry
-bound to them.
-
-Each store has exactly one commit point per registration and one per
-retirement, and the fence row lives where that commit point is. On
-PostgreSQL both live in one database, and the retirement transaction proves
-quiescence, inserts the fence, and deletes the journal rows. On SQLite the
-process registry is its own file, and a multi-database write that modifies
-more than one file commits per file, so a process scope's fence lives in the
-registry file (`effect_scope_retirements` in `PROCESS_SCHEMA`). Retirement
-commits the fence into the registry file first — the quiescence proof and
-the fence insert are one transaction over the attached files under one
-`BEGIN IMMEDIATE` — and only then purges the journal rows in a second
-transaction on the journal file. A crash between the two leaves a fenced
-scope with stale
-journal rows, which is safe: admission reads the fence from the registry file
-(the effect host attaches it for reads once the registry is bound), so a cold
-host over that journal admits nothing under the scope, and the leftover rows
-are idempotent cleanup that the next host bind or reclaim sweep purges
-(`purge_rows_under_fenced_scopes`). Runtime-operation fences, and process
-fences written while no registry is bound, stay in the journal file and retire
-in one transaction with their rows; when a registry binds it repairs the
-journal file's leftovers — rows under any fence, and journal-file process
-fences of ids the registry already holds — before the first admission.
-
-The fence and the registry can also be two different stores. The in-process
-host keeps a fence set, and Restate keeps a per-scope `LashDurableWaitIndex`
-object that is revoked on retirement. Both bind to the registry
-(`ProcessRegistrar::bind_effect_host`, done by `LashCore::build`), and the
-binding runs both ways: the registry reinstates the host's fence from the same
-seam once its insert has committed (`EffectHost::reinstate_effect_scope`
-remains the host-facing lever that seam drives, and nothing else calls it),
-and the host receives a `ProcessRegistryBinding` — the registry's own
-"is this process registered" probe. On Restate that probe makes the index's
-revoked flag a cache of the registry's truth rather than a second source of
-it: a revoked index over a process the registry holds is a registration that
-committed after its reinstate was lost (a crash between the insert and the
-ingress call, or a reopen without the reinstate ever reaching the engine), and
-the host's admission reads through to the registry, reinstates the index, and
-admits — no explicit re-registration, on a SQLite- or PostgreSQL-backed
-registry alike. The read-through was chosen over re-driving every registered
-process's reinstate at bind time because binding is synchronous inside
-`LashCore::build` and a bind-time scan is one ingress call per registered
-process on every open; the read-through costs one registry probe per revoked
-admission and nothing on the hot path.
-
-Keying session-free waits by scope on Restate is a durable-wait identity
-epoch cutover (epoch 5) and a tool-intent journal cutover (corpus v3):
-pre-cutover state and journals refuse loudly before any effect re-executes;
-the in-process host keeps an unbounded fence set for the same reason the
-durable rows are permanent. Retention of these rows is a host lever on the
-terms of ADR 0023.
-
-Quiescence is measured on durable ground: an executing effect and a live
-child of an open effect group count as live on every host, and on Restate
-both are entries of the scope's `LashDurableWaitIndex` (`begin_effect` /
-`end_effect` around every scoped effect the handler-side controller runs,
-`record_group` when a group opens; a recorded group is live while its
-`EffectGroupIndex` reports unsettled children). Memory waits are not durable:
-a wait whose waiter was dropped before resolution stays a live entry in every
-durable index and refuses retirement there, but the in-process host has no
-record of a dropped waiter and retires the scope. That is the one
-memory-versus-durable differential in the quiescence law, and it is stated
-in the shared conformance law rather than papered over.
-
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
+Test-host quiescence has one explicit differential. The in-process simulation
+host has no durable record of a dropped waiter; the Restate index retains
+unresolved wait evidence and can refuse retirement after the local waiter is
+gone. A law over a live waiter holds on both.
 
 ## Consequences
 
-- Deleting a session is final for that id in the store. A host reset creates a
-  new id; it never deletes and reopens the old one.
-- Permanent session-keyed await-event revocation is correct when the deletion
-  tombstone, revocation ledger, effect journal, and Restate state share one
-  lifecycle. They are one trust domain and must reset together. In particular,
-  SQLite's catalog and effect database must not be wiped independently.
-- Session-owned effect rows retire by session id. Process-owner incarnation
-  fencing and replay-stream incarnation ids are separate concepts and remain.
-- Hosts and third-party stores must implement the admission seam and preserve
-  every deletion tombstone permanently, whichever delete path wrote it. The
-  delete arm reads the same set to decide which owners are gone. Lash detects reuse at creation rather than relying on every downstream
-  identity preimage to carry a lifetime discriminator.
-- Process ids are single-use for the store's life. Compaction frees registry
-  rows, never ids: a start key reused after prune mints a new process id
-  (ADR 0106).
-- Fork materialization followed by observer publication spans transaction
-  domains. The fork relation retains the selected process ids as durable apply
-  intent until every retryable observer publication succeeds and the intent
-  clear commits. `Unavailable` retains the unresolved selector, including
-  already-published observers, so replay reasserts it wholesale. `NotFound`
-  and `NoLongerRetained` settle that selection with their typed outcomes and
-  need no retry. A crash burns no visibility choice: opening the single-use fork id replays the pending intent,
-  and that id can never alias a later session lifetime. Replay reasserts the
-  resolved selector wholesale: an observer removed before the intent is
-  cleared can be added again, because clearing the durable host decision is
-  the commit point.
+Deleting a session is final for its id. Reset creates a new id rather than
+reopening a deleted lifetime. Tombstones, retained graph and engine revocation
+must keep a consistent lifecycle; independently wiping identity evidence can
+violate non-reuse. Adding another incarnation field is rejected because every
+session-keyed identity can rely on the same permanent admission fence.
 
-## Amendment (FIG-4125, 2026-09-29)
+Fork creation and observer publication cross transaction domains. A fork
+retains pending observer intent until publication settles and the intent clear
+commits. Opening reconciles an interrupted publication. `Unavailable` retains
+the selection for retry; missing and pruned selections have typed terminal
+outcomes. Reasserting already-published edges is permitted until the intent
+clear. The single-use fork id cannot alias a later lifetime.
 
-Item 7: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
-governs drive-fenced claim supersession. Earlier lease-generation reclaim text
-is historical; session IDs remain single-use.
+## Implementation
 
-## Amendment (FIG-4163, 2026-09-30)
-
-Session ids must be nonempty, NUL-free UTF-8; narrower transport syntax remains host-owned.
-[`validate_session_id`](../../crates/lash-core-store/src/store/mod.rs) enforces
-this shared representability boundary in [SQLite admission](../../crates/lash-sqlite-store/src/catalog.rs)
-and [PostgreSQL admission](../../crates/lash-postgres-store/src/postgres/session_factory/store.rs).
+- [ID validation and closure pins](../../crates/lash-core-store/src/store/mod.rs).
+- [SQLite admission](../../crates/lash-sqlite-store/src/catalog.rs), [PostgreSQL admission](../../crates/lash-postgres-store/src/postgres/session_factory/store.rs) and [facade create/open](../../crates/lash/src/session.rs).
+- [Restate scope retirement](../../crates/lash-restate/src/effect_host.rs) and [durable quiescence](../../crates/lash-restate/src/durable_wait.rs).
+- [Observer intent reconciliation](../../crates/lash-core-execution/src/runtime/process/observer_intent.rs).

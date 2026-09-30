@@ -48,8 +48,9 @@ pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> T
 pub(crate) fn test_config_with_protocol_turn_options(
     termination: lash_core::ProtocolTurnOptions,
 ) -> TurnMachineConfig {
-    let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
-        Arc::new(RlmDriver::default());
+    let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> = Arc::new(
+        RlmDriver::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
+    );
     TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
@@ -661,17 +662,6 @@ impl RlmProtocolScenario {
                 .count(),
             observed.checkpoints.len()
         );
-        assert_eq!(
-            rendered
-                .lines()
-                .filter(|line| line.contains("  commit    "))
-                .count(),
-            rendered
-                .lines()
-                .filter(|line| line.contains("  usage                 entries="))
-                .count(),
-            "every checkpoint line carries typed usage"
-        );
         observed
     }
 }
@@ -1057,6 +1047,7 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &memory_artifact_backend(),
         )
         .with_process_lifecycle(false),

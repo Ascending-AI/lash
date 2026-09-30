@@ -57,7 +57,7 @@ async fn run_task_with_shutdown_witness(
     #[cfg(test)] recorder_origin: Option<String>,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
-    // Every run owns its world, telemetry, provider and in-memory stores. No
+    // Every run owns its world, telemetry, provider and SQLite memory stores. No
     // process environment is mutated; the HTTP recorder owns a task-local listener.
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let safe = |s: &str| {
@@ -485,7 +485,11 @@ fn build_turn_core(
             config.lashlang_language_features.label_annotations = false;
             config.lashlang_abilities.sleep = false;
             config.continue_as_soft_warn_tokens = None;
-            let factory = lash::rlm::RlmProtocolPluginFactory::new(config, &backend);
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(
+                config,
+                std::sync::Arc::new(lash::rlm::TypescriptDialect),
+                &backend,
+            );
             LashCore::rlm_builder(backend, budget, factory)
         }
     };

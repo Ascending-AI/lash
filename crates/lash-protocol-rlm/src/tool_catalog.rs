@@ -1,16 +1,16 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_lashlang_runtime::required_tool_typescript_executable;
+use lash_lashlang_runtime::required_tool_executable;
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
 /// rendered as a full prompt doc under its call-path. RLM contributes
 /// no removals; it validates that each member carries an explicit
-/// `typescript.tool` binding so a cell can call it by module path.
+/// `lash.tool` binding the session's dialect can call by module path.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
-    dialect: &TypescriptDialect,
+    dialect: &SessionDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
     validate_rlm_language_bindings(&ctx.tools, dialect.language())?;
@@ -23,11 +23,11 @@ pub(crate) fn rlm_tool_catalog(
 /// is always available.
 #[expect(
     clippy::expect_used,
-    reason = "catalog registration validates the TypeScript tool binding, so tool_call_path only errs on an unregistered manifest"
+    reason = "catalog registration validates every tool binding against the session's dialect, so tool_call_path only errs on an unregistered manifest"
 )]
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
-    dialect: &crate::dialect::TypescriptDialect,
+    dialect: &crate::dialect::SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
 ) -> String {
     let entries = tool_catalog
@@ -38,14 +38,15 @@ pub(crate) fn rlm_prompt_tool_docs(
             let contract = &tool.contract;
             let call_path = dialect
                 .tool_call_path(&tool.manifest)
-                .expect("RLM tool catalog registration validates the TypeScript binding");
+                .expect("RLM tool catalog registration validates the session dialect's binding");
             let mut compact =
                 contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
-            // Authored examples are Lashlang source; the dialect spells them.
+            // Authored examples are Lashlang source; the dialect spells them,
+            // and leaves out the ones it cannot.
             compact.examples = compact
                 .examples
                 .iter()
-                .map(|example| dialect.render_tool_example(example))
+                .filter_map(|example| dialect.render_tool_example(example))
                 .collect();
             compact.parameters.retain(has_field_description);
             if !schema_nests(contract.output_schema.canonical(), 0) {
@@ -105,19 +106,16 @@ fn validate_rlm_language_bindings(
     language: &dyn crate::dialect::Dialect,
 ) -> Result<(), PluginError> {
     for tool in tools {
-        let typescript = required_tool_typescript_executable(tool)
+        let binding = required_tool_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
-        // Being a catalog member is being advertised, and the TypeScript
-        // execution section advertises the binding's call path as a typed
-        // declaration the model calls verbatim. A path the dialect resolves to
-        // anything but a tool call — a module segment no cell can write, an ECMA
-        // global namespace, a refused method name — can only be advertised as a
-        // callable nothing, so it is refused here instead (FIG-1444).
-        let call_path = typescript.call_path();
-        language.ensure_tool_call_path_addressable(&call_path).map_err(|err| {
+        // Being a catalog member is being advertised under the call path the
+        // dialect spells; a binding the dialect cannot address could only be
+        // advertised as a callable nothing, so it is refused here instead.
+        language.tool_call_path(&binding).map_err(|refusal| {
             PluginError::Registration(format!(
-                "tool `{}` has a `typescript.tool` binding no TypeScript cell can call as `{call_path}`: {err}",
-                tool.name
+                "tool `{}` has a `lash.tool` binding the `{}` dialect cannot call: {refusal}",
+                tool.name,
+                language.language_id()
             ))
         })?;
     }
@@ -319,7 +317,7 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("missing an explicit `typescript.tool` binding"),
+                .contains("missing an explicit `lash.tool` binding"),
             "{err}"
         );
     }
@@ -386,7 +384,7 @@ mod tests {
         let binding = retired_only
             .manifest
             .bindings
-            .remove(lash_lashlang_runtime::TYPESCRIPT_TOOL_BINDING_KEY)
+            .remove(lash_lashlang_runtime::TOOL_BINDING_KEY)
             .expect("with_tool_binding wrote the canonical key");
         retired_only
             .manifest
@@ -408,7 +406,7 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("missing an explicit `typescript.tool` binding"),
+                .contains("missing an explicit `lash.tool` binding"),
             "{err}"
         );
     }
@@ -560,7 +558,7 @@ mod tests {
 pub(crate) fn validate_discovery(
     tools: &[lash_core::ToolManifest],
     discovery: Option<&lash_core::ToolDiscovery>,
-    dialect: &crate::dialect::TypescriptDialect,
+    dialect: &crate::dialect::SessionDialect,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
         && !tools.iter().any(|tool| {
@@ -574,27 +572,6 @@ pub(crate) fn validate_discovery(
         });
     }
     Ok(())
-}
-
-pub(crate) fn with_discovery_sentence(
-    mut execution: String,
-    discovery: Option<&lash_core::ToolDiscovery>,
-    dialect: &crate::dialect::TypescriptDialect,
-) -> String {
-    if let Some(discovery) = discovery {
-        let suffix = if dialect.language_id() == "lashlang" {
-            "?"
-        } else {
-            ""
-        };
-        let sentence = format!(
-            " Other tools exist; find them with `await {}({{ ... }}){suffix}`.",
-            discovery.operation
-        );
-        let at = execution.find("\n\n").unwrap_or(execution.len());
-        execution.insert_str(at, &sentence);
-    }
-    execution
 }
 
 #[cfg(test)]
@@ -645,6 +622,7 @@ mod discovery_tests {
                             &dialect,
                             Default::default(),
                             &visible,
+                            discovery.as_ref(),
                         )
                     } else {
                         dialect
@@ -652,10 +630,11 @@ mod discovery_tests {
                                 Default::default(),
                                 &visible,
                                 crate::plugin::RlmChannel::Cell,
+                                discovery.as_ref(),
                             )
                             .unwrap()
                     };
-                    let text = with_discovery_sentence(execution, discovery.as_ref(), &dialect);
+                    let text = execution;
                     let docs = rlm_prompt_tool_docs(&visible, &dialect, Default::default());
                     assert!(docs.contains("Description for search"));
                     assert!(docs.contains("Description for visible"));

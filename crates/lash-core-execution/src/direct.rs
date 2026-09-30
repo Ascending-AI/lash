@@ -258,7 +258,16 @@ impl DirectLlmClient {
         } else {
             None
         };
-        match self.provider.complete(llm_request).await {
+        // No lash execution owns this call: the host that made it owns its
+        // billing, and lash keeps no ledger row for it (ADR 0125).
+        match self
+            .provider
+            .complete(
+                llm_request,
+                <dyn crate::provider::DispatchAdmission>::host_owned(),
+            )
+            .await
+        {
             Ok(response) => {
                 let result = DirectLlmOutcome {
                     response: response.response,
@@ -684,7 +693,7 @@ mod tests {
         let expected = [
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"ordinal":1,"outcome":"completed","usage_disposition":"unreported_by_provider"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
+                r#"{"attempts":[{"ordinal":1,"outcome":"completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0},"usage_disposition":"reported"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","provider_usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0},"response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
                     .to_string(),
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
@@ -692,7 +701,7 @@ mod tests {
                     .to_string(),
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"ordinal":1,"outcome":"completed","usage_disposition":"unreported_by_provider"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","code_namespace":"lash","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                r#"{"attempts":[{"ordinal":1,"outcome":"completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0},"usage_disposition":"reported"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","code_namespace":"lash","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
                     .to_string(),
             ];
 

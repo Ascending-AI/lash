@@ -614,7 +614,10 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     }));
 
     let completion = handle
-        .complete(request)
+        .complete(
+            request,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("the interrupted Responses generation resumes");
 
@@ -735,14 +738,20 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
     let mut call_a = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
     call_a.messages = vec![LlmMessage::text(LlmRole::User, "call A")];
     handle
-        .complete(call_a)
+        .complete(
+            call_a,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("call A exhausts its retry budget after interruption");
 
     let mut call_b = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
     call_b.messages = vec![LlmMessage::text(LlmRole::User, "call B")];
     let completion = handle
-        .complete(call_b)
+        .complete(
+            call_b,
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("call B starts and completes a fresh generation");
 
@@ -793,9 +802,10 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("a resume event without a sequence number is unsafe");
 
@@ -845,9 +855,10 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("a resume response must be an event stream");
 
@@ -888,9 +899,10 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("output without a response id cannot be reattached");
 
@@ -975,7 +987,10 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let completion = handle
-        .complete(streamed_request(Arc::clone(&events)))
+        .complete(
+            streamed_request(Arc::clone(&events)),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect("the usage-bearing generation resumes");
 

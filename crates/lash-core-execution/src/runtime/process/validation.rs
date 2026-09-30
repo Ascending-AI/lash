@@ -707,12 +707,19 @@ fn repair_lifecycle_projection(
     clippy::too_many_arguments,
     reason = "the append plan carries the journal's own positional facts; fleet format joins them as one more stamped input (FIG-3796)"
 )]
+/// `signal_events_before` is how many events of the request's type the
+/// process's log already holds, counted by the store in the append's own
+/// transaction. A store passes it for a signal append (its event type names a
+/// signal) and `None` for every other: the append selects the wait a new
+/// signal resolves from it and the process's current wait
+/// ([`select_process_signal_wait`]).
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
     sequence: u64,
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
+    signal_events_before: Option<u64>,
     occurred_at_ms: u64,
     wake_session_id: Option<&SessionId>,
     fleet_format: crate::FleetFormat,
@@ -853,6 +860,16 @@ pub fn prepare_process_event_append(
             status: record.status,
         });
     }
+    semantics.signal_wait = super::events::process_signal_name_from_event_type(&request.event_type)
+        .map(|signal_name| {
+            select_process_signal_wait(
+                record,
+                signal_name,
+                &request.event_type,
+                signal_events_before,
+            )
+        })
+        .transpose()?;
     let event = ProcessEvent {
         process_id: process_id.clone(),
         sequence,
@@ -893,6 +910,47 @@ pub fn prepare_process_event_append(
         event,
         projected_record,
         wake_delivery,
+    })
+}
+
+/// The wait a newly admitted signal resolves (FIG-4298): the ordinal of the
+/// wait `record` is parked on for this signal, or, when it is parked on none,
+/// the signal's position among the events of its type, which is the ordinal
+/// the process's next wait for the name declares.
+///
+/// The declared ordinal wins over the count: a process's wait ordinals are
+/// its own, and they need not match how many signals of the name its log
+/// holds.
+fn select_process_signal_wait(
+    record: &ProcessRecord,
+    signal_name: &str,
+    event_type: &str,
+    signal_events_before: Option<u64>,
+) -> Result<super::events::ProcessSignalWaitBinding, PluginError> {
+    if let Some(super::model::WaitState {
+        kind:
+            super::model::WaitKind::Signal {
+                name,
+                event_type: waiting_type,
+                ordinal,
+                ..
+            },
+        ..
+    }) = &record.wait
+        && name == signal_name
+        && waiting_type == event_type
+    {
+        return Ok(super::events::ProcessSignalWaitBinding { ordinal: *ordinal });
+    }
+    let before = signal_events_before.ok_or_else(|| {
+        PluginError::Session(format!(
+            "process `{}` signal `{event_type}` append was prepared without the count of its \
+             prior events the store must supply",
+            record.id
+        ))
+    })?;
+    Ok(super::events::ProcessSignalWaitBinding {
+        ordinal: before.saturating_add(1),
     })
 }
 
@@ -1027,6 +1085,51 @@ pub fn check_retained_start(
         Err(PluginError::StartKeyConflict {
             start_key: start_key.clone(),
         })
+    }
+}
+
+/// What a registrar read of a trigger delivery's row answered, in the
+/// transaction that found no retained process under the delivery's start key
+/// (FIG-4369).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TriggerDeliveryBinding {
+    /// The delivery is reserved and awaits its process.
+    Unbound,
+    /// The delivery is bound to this process.
+    Bound(ProcessId),
+    /// No delivery row remains: retention removed the delivery after its
+    /// bound process was pruned.
+    Absent,
+}
+
+/// Admit a trigger delivery's start whose key found no retained process
+/// against its delivery's row, read in the same transaction (ADR 0107 §5,
+/// FIG-4369).
+///
+/// A delivery starts one process. Its key finds that process only while the
+/// process is retained, and a bind precedes the prune of its process, so a
+/// key that finds nothing while the delivery is bound or gone means the
+/// delivery's process was pruned. That start registers nothing.
+///
+/// # Errors
+///
+/// [`PluginError::TriggerDeliveryBound`] for a bound delivery, and
+/// [`PluginError::TriggerDeliveryRetired`] for one whose row is gone.
+pub fn check_trigger_delivery_start(
+    pin: &crate::TriggerDeliveryPin,
+    binding: TriggerDeliveryBinding,
+) -> Result<(), PluginError> {
+    match binding {
+        TriggerDeliveryBinding::Unbound => Ok(()),
+        TriggerDeliveryBinding::Bound(process_id) => Err(PluginError::TriggerDeliveryBound {
+            occurrence_id: pin.occurrence_id.clone(),
+            subscription_id: pin.subscription_id.clone(),
+            process_id,
+        }),
+        TriggerDeliveryBinding::Absent => Err(PluginError::TriggerDeliveryRetired {
+            occurrence_id: pin.occurrence_id.clone(),
+            subscription_id: pin.subscription_id.clone(),
+        }),
     }
 }
 

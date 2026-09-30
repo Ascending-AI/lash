@@ -111,7 +111,9 @@ pub struct RecoveryPassBudget {
     pub attempt: std::time::Duration,
     /// The longest a recovery tick waits on its kinds' due passes before its
     /// leader-only arms run. A pass still delivering then finishes on its
-    /// kind's lane, and the next tick reports it. Default 1 s.
+    /// kind's lane, and the next tick reports it. Each engine recovery page
+    /// also spends this budget; the leader arms run concurrently under a
+    /// guard of twice this duration. Default 1 s.
     pub tick_wait: std::time::Duration,
 }
 

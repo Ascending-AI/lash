@@ -94,6 +94,10 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => Retryable,
             // the park's redrive settles within a tick; the identical admission then proceeds.
             Self::SessionRedriveUnsettled => Retryable,
+            // the owning drive releases the head at its boundary; the identical write then lands.
+            Self::SessionHeadOwned => Retryable,
+            // the same direct call on a store-backed session is refused the same way.
+            Self::SessionCommandRequired => Terminal,
             // the drive is journaled, so re-running the same turn cedes the same way.
             Self::AcceptedTurnInputCeded => Terminal,
             // the deployment runs no session work; the identical wait is refused identically.
@@ -112,6 +116,8 @@ impl RuntimeErrorCode {
             Self::SessionDeleted => Terminal,
             // a capability fact about the deployment.
             Self::SessionCatalogLookupUnsupported => Terminal,
+            // the granted session is gone or never existed; its admission recorded that.
+            Self::HostSessionNotLive => Terminal,
             // the session's generation marker is older than this build admits; a redrive reads the same marker.
             Self::SessionStateVersionUnsupported => Terminal,
             // the session's generation marker is newer than this build knows; a redrive reads the same marker.
@@ -224,6 +230,10 @@ impl RuntimeErrorCode {
             Self::ProcessStartKeyConflict => Terminal,
             // the key's family is fixed by how it was derived.
             Self::StartKeyFamilyRefused => Terminal,
+            // a delivery's binding is written once.
+            Self::TriggerDeliveryBound => Terminal,
+            // the delivery's row is gone, and only a new reservation starts.
+            Self::TriggerDeliveryRetired => Terminal,
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.
@@ -337,6 +347,10 @@ impl RuntimeErrorCode {
             // the child request names an inconsistent call id.
             // the child request names an inconsistent opener.
             Self::RuntimeEffectToolChildRequestOpener => Terminal,
+            // a dispatch site outside every usage run is wiring, not the attempt.
+            Self::UsageRunMissing => Terminal,
+            // the ledger store faulted; the identical admission succeeds later.
+            Self::UsageAdmissionFault => Retryable,
             // the child request version is unsupported.
             Self::RuntimeEffectToolChildRequestVersion => Terminal,
             // the invocation names an inconsistent subject.

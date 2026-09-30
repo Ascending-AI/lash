@@ -414,7 +414,11 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     let id = lash_core::attachments::content_id(&[4, 2, 4, 2]);
     // The blob lives exactly once in the shared, flat backend...
     assert_eq!(
-        bytes.get(&id).await.expect("child attachment bytes").bytes,
+        bytes
+            .get(&id, lash_core::AttachmentReadPolicy::DEFAULT.max_blob_bytes)
+            .await
+            .expect("child attachment bytes")
+            .bytes,
         vec![4, 2, 4, 2]
     );
     // The committing session holds what its turn wrote (FIG-653), while
@@ -879,7 +883,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
 
     // Child usage is not folded into the parent's report: it holds only the
     // parent's own calls, and no source carries the child's tokens.
-    let usage = runtime.usage_report();
+    let usage = settled_runtime_usage(&runtime).await.report();
     assert_eq!(usage.by_source["turn"].usage.input_tokens, 11);
     assert_eq!(usage.by_source["turn"].usage.output_tokens, 3);
     assert!(
@@ -914,11 +918,10 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
             .all(|evidence| evidence.served_model.as_deref() != Some("child-only"))
     );
 
-    // The child's usage survives on its own durable ledger after the child
-    // session has closed — a cold reopen of the child store reads it back
-    // with no parent involvement.
-    let child_ledger = durable_token_ledger(&runtime, "subagent-child").await;
-    let child_usage = lash_core::facade_support::SessionUsageReport::from_entries(&child_ledger);
+    // The child's usage is its own owner's accounting and survives after the
+    // child session has closed — read straight from storage with no parent
+    // involvement.
+    let child_usage = durable_owner_usage(&runtime, "subagent-child").await;
     let child_totals = child_usage
         .by_source
         .values()
@@ -932,34 +935,25 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
     assert_eq!(child_totals.reasoning_output_tokens, 1);
 }
 
-/// Reads a closed session's durable token ledger straight from the session
-/// store factory — a cold reopen with no resident runtime involved.
-async fn durable_token_ledger(
+/// A closed session's settled usage, read straight from the owner's
+/// accounting — no resident runtime of that session is involved.
+async fn durable_owner_usage(
     runtime: &LashRuntime,
     session_id: &str,
-) -> Vec<lash_core::TokenLedgerEntry> {
-    let store = lash_core::runtime::live_session_view(
-        &runtime.host.core.session_store_factory(),
-        &SessionId::from(session_id),
-    )
-    .await
-    .expect("open child store")
-    .expect("child store exists");
-    let mut entries = Vec::new();
-    let mut after = None;
+) -> lash_core::facade_support::SessionUsageReport {
+    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session_id));
+    let accounting = runtime.host.core.usage_accounting();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let page = store
-            .load_usage_ledger_page(
-                after.as_ref(),
-                std::num::NonZeroU32::new(100).expect("a nonzero page"),
-            )
+        let usage = accounting
+            .store
+            .load_owner_usage(&owner)
             .await
-            .expect("load child usage ledger");
-        entries.extend(page.rows.into_iter().map(|row| row.entry));
-        match page.next {
-            Some(next) => after = Some(next),
-            None => return entries,
+            .expect("load the child's usage");
+        if usage.completeness.is_settled() || std::time::Instant::now() >= deadline {
+            return usage.report();
         }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -1063,7 +1057,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
     handler.close().await.expect("close the scope's handler");
     drop(child_runtime);
 
-    let usage = runtime.usage_report();
+    let usage = settled_runtime_usage(&runtime).await.report();
     assert_eq!(usage.by_source["turn"].usage.input_tokens, 5);
     assert_eq!(usage.by_source["turn"].usage.output_tokens, 1);
     assert!(
@@ -1071,8 +1065,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         "child usage must not fold into the parent report: {usage:?}"
     );
 
-    let child_ledger = durable_token_ledger(&runtime, "subagent-child").await;
-    let child_usage = lash_core::facade_support::SessionUsageReport::from_entries(&child_ledger);
+    let child_usage = durable_owner_usage(&runtime, "subagent-child").await;
     let child_totals = child_usage
         .by_source
         .values()

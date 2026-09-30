@@ -6,6 +6,49 @@
 use crate::support::*;
 use std::collections::HashSet;
 
+/// A message may contain at most this many dense, zero-based content blocks.
+/// This bounds both block slots and stopped-block identities independently
+/// of the transport's byte limits.
+const MAX_STREAM_BLOCKS: usize = 1024;
+
+fn invalid_block_index(raw: &str, detail: impl std::fmt::Display) -> LlmTransportError {
+    LlmTransportError::new(format!("Invalid Anthropic content block index: {detail}"))
+        .with_raw(raw.to_string())
+        .with_kind(ProviderFailureKind::Stream)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+}
+
+fn checked_block_index(event: &Value, raw: &str) -> Result<usize, LlmTransportError> {
+    let wire_index = event
+        .get("index")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_block_index(raw, "expected an unsigned integer"))?;
+    let index = usize::try_from(wire_index)
+        .map_err(|_| invalid_block_index(raw, "index does not fit usize"))?;
+    if index >= MAX_STREAM_BLOCKS {
+        return Err(invalid_block_index(
+            raw,
+            format!("{index} exceeds the {MAX_STREAM_BLOCKS}-block limit"),
+        ));
+    }
+    Ok(index)
+}
+
+fn started_block_index(
+    event: &Value,
+    raw: &str,
+    state: &StreamState,
+) -> Result<usize, LlmTransportError> {
+    let index = checked_block_index(event, raw)?;
+    if index >= state.blocks.len() {
+        return Err(invalid_block_index(
+            raw,
+            format!("block {index} has not started"),
+        ));
+    }
+    Ok(index)
+}
+
 /// One `content_block_*` slot, keyed by the block type announced at
 /// `content_block_start`. Each variant carries only the state its deltas can
 /// legally write; a delta that does not match the slot's kind is a stream
@@ -277,10 +320,17 @@ impl AnthropicProvider {
                 }
             }
             "content_block_start" => {
-                let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                while state.blocks.len() <= index {
-                    state.blocks.push(StreamBlock::Unknown);
+                let index = checked_block_index(&event, raw)?;
+                if index != state.blocks.len() {
+                    return Err(invalid_block_index(
+                        raw,
+                        format!(
+                            "expected the next dense index {}, received {index}",
+                            state.blocks.len()
+                        ),
+                    ));
                 }
+                state.blocks.push(StreamBlock::Unknown);
                 // Anthropic's native block identity is the content-block
                 // index; it is both the block id and the item the block's
                 // replay material belongs to.
@@ -354,10 +404,7 @@ impl AnthropicProvider {
                 }
             }
             "content_block_delta" => {
-                let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                if index >= state.blocks.len() {
-                    return Ok(());
-                }
+                let index = started_block_index(&event, raw, state)?;
                 let delta = event.get("delta").cloned().unwrap_or_default();
                 let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let slot = &mut state.blocks[index];
@@ -439,7 +486,7 @@ impl AnthropicProvider {
                 }
             }
             "content_block_stop" => {
-                let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let index = started_block_index(&event, raw, state)?;
                 if !state.stopped_blocks.insert(index) {
                     return Ok(());
                 }

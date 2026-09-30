@@ -1,362 +1,34 @@
-//! Token usage accounting: ledger entries, usage totals, reports, and diff helpers.
+//! Usage report shapes (ADR 0125).
 //!
-//! Extracted from `runtime/mod.rs` as part of the runtime split. All items
-//! keep their original public paths via `pub use` in `mod.rs` — no API
-//! changes.
+//! The ledger itself is engine-owned accounting in
+//! [`crate::usage_accounting`]; these are the per-`(source, model)` views a
+//! durable read renders, and the reconciliation report a host gets back.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::session_model::TokenUsage;
-
-/// A single row in the token cost ledger. One per unique
-/// `(source, model)` pair — accumulated, not per-call.
-///
-/// Its semantic fields are projected by Lash's versioned usage-payload
-/// identity encoder. Adding or changing a field here or in nested
-/// [`TokenUsage`] requires an encoding version bump and replacement golden
-/// corpus; the serde representation itself is deliberately not the identity
-/// format.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct TokenLedgerEntry {
-    /// Caller-supplied label: `"turn"`, `"subagent"`, `"compaction"`,
-    /// `"observer"`, `"reflector"`, or any plugin-defined
-    /// string. Core treats the value as an opaque grouping key.
-    pub source: String,
-    /// Model identifier used for the LLM call (e.g.
-    /// `"anthropic/claude-haiku-4-5"`).
-    pub model: String,
-    /// Accumulated token counts for this `(source, model)` pair.
-    pub usage: TokenUsage,
-    /// Whether `usage` is provider-reported, a typed hole left by attempts
-    /// whose usage never arrived, or a host-invoked correction. Rows written
-    /// before this field existed decode as
-    /// [`LedgerUsageOutcome::Reported`].
-    #[serde(default, skip_serializing_if = "LedgerUsageOutcome::is_reported")]
-    pub usage_disposition: LedgerUsageOutcome,
-}
-
-impl TokenLedgerEntry {
-    /// A provider-reported row: the ordinary accumulated `(source, model)` pair.
-    pub fn reported(
-        source: impl Into<String>,
-        model: impl Into<String>,
-        usage: TokenUsage,
-    ) -> Self {
-        Self {
-            source: source.into(),
-            model: model.into(),
-            usage,
-            usage_disposition: LedgerUsageOutcome::Reported,
-        }
-    }
-}
-
-/// One interrupted attempt whose usage never arrived, kept runtime-resident
-/// until a host reconciles it (FIG-2765).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct UnreportedUsageAttempt {
-    /// The sealed call the attempt belongs to.
-    pub call_id: String,
-    /// The attempt within that call.
-    pub attempt_ordinal: u32,
-    /// Ledger source the hole was written under (`"turn"`).
-    pub source: String,
-    /// Model the attempt was billed against.
-    pub model: String,
-    /// Provider generation id (the response id the first stream chunk
-    /// carried), when the attempt got far enough to have one. Without it the
-    /// attempt cannot be reconciled.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_id: Option<String>,
-}
+use crate::usage_accounting::OutstandingUsageAttempt;
 
 /// Outcome of one host-invoked `LashRuntime::reconcile_unreported_usage`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UsageReconciliationReport {
     /// Attempts whose usage the provider recovered; each produced one
-    /// `Reconciled` ledger correction row.
+    /// correction fact.
     pub reconciled: Vec<ReconciledUsageAttempt>,
-    /// Attempts still open: no generation id, the provider has no record, or
-    /// the bounded lookup failed. They stay registered for a later call.
-    pub unresolved: Vec<UnreportedUsageAttempt>,
+    /// Attempts still open: no generation id, the provider has no record, the
+    /// bounded lookup failed, or the correction conflicts with a stored one.
+    /// They stay outstanding for a later call.
+    pub unresolved: Vec<OutstandingUsageAttempt>,
 }
 
 /// One attempt whose usage was recovered after the fact.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReconciledUsageAttempt {
-    pub attempt: UnreportedUsageAttempt,
+    pub attempt: OutstandingUsageAttempt,
     /// Recovered counters, as appended to the ledger.
     pub usage: TokenUsage,
     /// The provider's own accounting record for the generation.
     pub provider_usage: serde_json::Value,
-}
-
-/// One interrupted attempt recorded inside an [`LedgerUsageOutcome::Unreported`]
-/// ledger row: the durable identity of a billed-but-uncounted call.
-///
-/// The row's `(source, model)` pair supplies the attribution the descriptor
-/// deliberately omits, so a row can never disagree with its own holes. Identity
-/// is `(session_id, call_id, attempt_ordinal)`; `generation_id` is lookup
-/// attribution, not identity, and its absence is a fact (the attempt never got
-/// far enough to have one) rather than missing data.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct UnreportedLedgerAttempt {
-    /// The sealed call the attempt belongs to.
-    pub call_id: String,
-    /// The attempt within that call.
-    pub attempt_ordinal: u32,
-    /// Provider generation id, when the attempt got far enough to have one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_id: Option<String>,
-}
-
-impl UnreportedLedgerAttempt {
-    /// The durable key of this hole within its session.
-    pub fn key(&self) -> (&str, u32) {
-        (self.call_id.as_str(), self.attempt_ordinal)
-    }
-}
-
-/// A stored usage outcome that does not describe a legal ledger row.
-///
-/// Reads are strict: a malformed persisted outcome is a typed refusal, never
-/// silently downgraded to [`LedgerUsageOutcome::Reported`] — that downgrade
-/// is exactly how a billed call becomes a free one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UsageOutcomeError {
-    /// An `Unreported` row carried no holes: the hole is the row's content.
-    EmptyUnreportedRow,
-    /// Two holes in one row claimed the same `(call_id, attempt_ordinal)`.
-    DuplicateAttempt {
-        /// The call whose attempt appeared twice.
-        call_id: String,
-        /// The attempt ordinal that appeared twice.
-        attempt_ordinal: u32,
-    },
-    /// One `(call_id, attempt_ordinal)` was attributed to two generations.
-    ConflictingAttribution {
-        /// The call whose attribution disagreed.
-        call_id: String,
-        /// The attempt ordinal whose attribution disagreed.
-        attempt_ordinal: u32,
-    },
-}
-
-impl std::fmt::Display for UsageOutcomeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EmptyUnreportedRow => {
-                write!(f, "unreported usage row carries no interrupted attempts")
-            }
-            Self::DuplicateAttempt {
-                call_id,
-                attempt_ordinal,
-            } => write!(
-                f,
-                "unreported usage row repeats attempt `{call_id}`/{attempt_ordinal}"
-            ),
-            Self::ConflictingAttribution {
-                call_id,
-                attempt_ordinal,
-            } => write!(
-                f,
-                "unreported attempt `{call_id}`/{attempt_ordinal} carries conflicting generation attribution"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for UsageOutcomeError {}
-
-/// How one ledger row relates to provider-reported usage.
-///
-/// ADR 0031: absence means unreported and an explicit zero is information. A
-/// turn whose attempt ended before the provider's usage arrived writes an
-/// `Unreported` row — zero counters, one descriptor per billed-but-uncounted
-/// call — so a host summing cost sees the hole *and* can reconcile it after a
-/// restart. A later host-invoked reconciliation appends a `Reconciled`
-/// correction row attributed to the original attempt; rows are never rewritten.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LedgerUsageOutcome {
-    /// Provider-reported usage, accumulated per `(source, model)`.
-    #[default]
-    Reported,
-    /// Attempts that ended without provider usage. `usage` is zero; each
-    /// descriptor names one billed-but-uncounted call, so the outstanding work
-    /// survives a store round trip instead of collapsing to a count.
-    Unreported {
-        /// Interrupted attempts whose usage never arrived, in canonical
-        /// `(call_id, attempt_ordinal)` order.
-        attempts: Vec<UnreportedLedgerAttempt>,
-    },
-    /// Usage recovered after the fact from the provider's generation record
-    /// for one previously unreported attempt. Never merged with other rows.
-    Reconciled {
-        /// The sealed call this correction belongs to.
-        call_id: String,
-        /// The attempt within that call.
-        attempt_ordinal: u32,
-    },
-}
-
-impl LedgerUsageOutcome {
-    /// An unreported row over `attempts`, canonicalised: sorted by
-    /// `(call_id, attempt_ordinal)` so a row's identity does not depend on the
-    /// order holes happened to be merged in.
-    pub fn unreported(attempts: impl IntoIterator<Item = UnreportedLedgerAttempt>) -> Self {
-        let mut attempts = attempts.into_iter().collect::<Vec<_>>();
-        canonicalize_attempts(&mut attempts);
-        Self::Unreported { attempts }
-    }
-
-    pub fn is_reported(&self) -> bool {
-        matches!(self, Self::Reported)
-    }
-
-    /// Reject a row that cannot describe real accounting.
-    pub fn validate(&self) -> Result<(), UsageOutcomeError> {
-        let Self::Unreported { attempts } = self else {
-            return Ok(());
-        };
-        if attempts.is_empty() {
-            return Err(UsageOutcomeError::EmptyUnreportedRow);
-        }
-        for (index, attempt) in attempts.iter().enumerate() {
-            if let Some(previous) = attempts[..index]
-                .iter()
-                .find(|previous| previous.key() == attempt.key())
-            {
-                return Err(if previous.generation_id == attempt.generation_id {
-                    UsageOutcomeError::DuplicateAttempt {
-                        call_id: attempt.call_id.clone(),
-                        attempt_ordinal: attempt.attempt_ordinal,
-                    }
-                } else {
-                    UsageOutcomeError::ConflictingAttribution {
-                        call_id: attempt.call_id.clone(),
-                        attempt_ordinal: attempt.attempt_ordinal,
-                    }
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Reported and unreported rows accumulate with their own kind; reconciled corrections
-    /// stay one row per attempt.
-    pub fn accumulates_with(&self, other: &Self) -> bool {
-        matches!(
-            (self, other),
-            (Self::Reported, Self::Reported) | (Self::Unreported { .. }, Self::Unreported { .. })
-        )
-    }
-
-    /// Interrupted attempts this row stands for that still have no usage.
-    pub fn unreported_attempts(&self) -> u32 {
-        match self {
-            Self::Unreported { attempts } => u32::try_from(attempts.len()).unwrap_or(u32::MAX),
-            Self::Reported | Self::Reconciled { .. } => 0,
-        }
-    }
-
-    /// The holes this row carries, empty for every other outcome.
-    pub fn unreported_attempt_descriptors(&self) -> &[UnreportedLedgerAttempt] {
-        match self {
-            Self::Unreported { attempts } => attempts.as_slice(),
-            Self::Reported | Self::Reconciled { .. } => &[],
-        }
-    }
-
-    /// Corrections this row stands for.
-    pub fn reconciled_attempts(&self) -> u32 {
-        match self {
-            Self::Reconciled { .. } => 1,
-            Self::Reported | Self::Unreported { .. } => 0,
-        }
-    }
-
-    /// A row that carries no usage and stands for no attempt: nothing to
-    /// record. Unreported rows are never empty — the hole is the content.
-    pub(crate) fn row_is_empty(&self, usage: &TokenUsage) -> bool {
-        usage.is_zero() && self.unreported_attempts() == 0 && self.reconciled_attempts() == 0
-    }
-
-    /// Fold `other` into `self` for an accumulating pair. Holes are merged by
-    /// identity: a repeat of a hole already held is idempotent, and a
-    /// disagreeing generation attribution is refused. Returns the conflict for
-    /// the checked path; the saturating path keeps the row it already holds.
-    pub fn absorb_saturating(&mut self, other: &Self) -> Option<UsageOutcomeError> {
-        let (Self::Unreported { attempts }, Self::Unreported { attempts: incoming }) =
-            (self, other)
-        else {
-            return None;
-        };
-        let mut conflict = None;
-        for candidate in incoming {
-            match attempts
-                .iter()
-                .find(|existing| existing.key() == candidate.key())
-            {
-                Some(existing) => {
-                    if existing.generation_id != candidate.generation_id && conflict.is_none() {
-                        conflict = Some(UsageOutcomeError::ConflictingAttribution {
-                            call_id: candidate.call_id.clone(),
-                            attempt_ordinal: candidate.attempt_ordinal,
-                        });
-                    }
-                }
-                None => attempts.push(candidate.clone()),
-            }
-        }
-        canonicalize_attempts(attempts);
-        conflict
-    }
-}
-
-fn canonicalize_attempts(attempts: &mut [UnreportedLedgerAttempt]) {
-    attempts.sort_by(|left, right| left.key().cmp(&right.key()));
-}
-
-/// Rebuild the attempts a session still owes usage for from its ledger rows:
-/// every hole any row carries, minus every hole a `Reconciled` correction has
-/// already filled. Order-independent — corrections may precede their holes in
-/// the durable row order — and the sole way a reopened runtime learns what is
-/// outstanding.
-pub fn outstanding_unreported_attempts(
-    entries: &[TokenLedgerEntry],
-) -> Vec<UnreportedUsageAttempt> {
-    let mut outstanding = Vec::<UnreportedUsageAttempt>::new();
-    let mut reconciled = std::collections::HashSet::<(String, u32)>::new();
-    for entry in entries {
-        if let LedgerUsageOutcome::Reconciled {
-            call_id,
-            attempt_ordinal,
-        } = &entry.usage_disposition
-        {
-            reconciled.insert((call_id.clone(), *attempt_ordinal));
-        }
-        for attempt in entry.usage_disposition.unreported_attempt_descriptors() {
-            let key = (attempt.call_id.clone(), attempt.attempt_ordinal);
-            if outstanding
-                .iter()
-                .any(|held| (held.call_id.clone(), held.attempt_ordinal) == key)
-            {
-                continue;
-            }
-            outstanding.push(UnreportedUsageAttempt {
-                call_id: attempt.call_id.clone(),
-                attempt_ordinal: attempt.attempt_ordinal,
-                source: entry.source.clone(),
-                model: entry.model.clone(),
-                generation_id: attempt.generation_id.clone(),
-            });
-        }
-    }
-    outstanding.retain(|attempt| {
-        !reconciled.contains(&(attempt.call_id.clone(), attempt.attempt_ordinal))
-    });
-    outstanding
 }
 
 /// Aggregated usage for a report row: the canonical [`TokenUsage`] counters
@@ -384,60 +56,8 @@ fn count_is_zero(count: &u32) -> bool {
     *count == 0
 }
 
-/// Per-key accumulator behind a report row: counters plus the attempt counts
-/// that say how complete those counters are.
-#[derive(Clone, Debug, Default)]
-struct UsageAccumulator {
-    usage: TokenUsage,
-    unreported_attempts: u32,
-    reconciled_attempts: u32,
-}
-
-impl UsageAccumulator {
-    fn add(&mut self, entry: &TokenLedgerEntry) -> bool {
-        let saturated = saturating_add_usage(&mut self.usage, &entry.usage);
-        self.unreported_attempts = self
-            .unreported_attempts
-            .saturating_add(entry.usage_disposition.unreported_attempts());
-        self.reconciled_attempts = self
-            .reconciled_attempts
-            .saturating_add(entry.usage_disposition.reconciled_attempts());
-        saturated
-    }
-
-    /// Folds another accumulator in: raw counters, so attempt netting still
-    /// happens once at whatever granularity the caller converts to totals.
-    fn absorb(&mut self, incoming: &UsageAccumulator, saturated: &mut bool) {
-        *saturated |= saturating_add_usage(&mut self.usage, &incoming.usage);
-        self.unreported_attempts = self
-            .unreported_attempts
-            .saturating_add(incoming.unreported_attempts);
-        self.reconciled_attempts = self
-            .reconciled_attempts
-            .saturating_add(incoming.reconciled_attempts);
-    }
-}
-
 impl UsageTotals {
-    fn from_accumulator(accumulator: &UsageAccumulator, saturated: &mut bool) -> Self {
-        let (total_tokens, total_saturated) = saturating_usage_total(&accumulator.usage);
-        *saturated |= total_saturated;
-        Self {
-            usage: accumulator.usage.clone(),
-            total_tokens,
-            // Corrections are append-only rows, so the outstanding hole is
-            // derived: every reconciliation fills exactly one unreported
-            // attempt.
-            unreported_attempts: accumulator
-                .unreported_attempts
-                .saturating_sub(accumulator.reconciled_attempts),
-            reconciled_attempts: accumulator.reconciled_attempts,
-        }
-    }
-
-    /// Fold one already-netted totals row into another, for rebuilding keyed
-    /// reports from wire rows whose raw attempt counters are no longer
-    /// available.
+    /// Fold one netted totals row into another.
     fn absorb(&mut self, incoming: &UsageTotals, saturated: &mut bool) {
         *saturated |= saturating_add_usage(&mut self.usage, &incoming.usage);
         self.total_tokens = match self.total_tokens.checked_add(incoming.total_tokens) {
@@ -467,8 +87,7 @@ pub struct UsageReportRow {
 pub struct SessionUsageReport {
     pub entry_count: usize,
     /// Whether any counter or canonical total was clamped while producing this
-    /// display report. Durable commit and load paths remain strict and return a
-    /// typed error instead; reads saturate so reporting cannot fail a session.
+    /// display report. Reads saturate so reporting cannot fail a session.
     pub saturated: bool,
     pub usage: UsageTotals,
     /// Per-source view, derived from `by_source_model`.
@@ -476,8 +95,7 @@ pub struct SessionUsageReport {
     /// Per-model view, derived from `by_source_model`.
     pub by_model: BTreeMap<String, UsageTotals>,
     /// The report's keyed structure: one folded, netted row per
-    /// `(source, model)` pair. Serialized as the same `UsageReportRow` array
-    /// as before.
+    /// `(source, model)` pair. Serialized as a `UsageReportRow` array.
     #[serde(
         serialize_with = "serialize_by_source_model",
         deserialize_with = "deserialize_by_source_model"
@@ -506,8 +124,8 @@ where
     D: serde::Deserializer<'de>,
 {
     let rows = <Vec<UsageReportRow> as serde::Deserialize>::deserialize(deserializer)?;
-    // Legacy payloads can carry more than one row per key; fold duplicates
-    // instead of dropping them.
+    // A payload can carry more than one row per key; fold duplicates instead
+    // of dropping them.
     let mut saturated = false;
     let mut map = BTreeMap::<(String, String), UsageTotals>::new();
     for row in rows {
@@ -519,60 +137,27 @@ where
 }
 
 impl SessionUsageReport {
-    pub fn from_entries(entries: &[TokenLedgerEntry]) -> Self {
-        Self::from_entries_with_saturation(entries, false)
-    }
-
-    pub fn from_entries_with_saturation(entries: &[TokenLedgerEntry], mut saturated: bool) -> Self {
-        let mut total = UsageAccumulator::default();
-        let mut by_pair = BTreeMap::<(String, String), UsageAccumulator>::new();
-
-        for entry in entries {
-            saturated |= total.add(entry);
-            saturated |= by_pair
-                .entry((entry.source.clone(), entry.model.clone()))
-                .or_default()
-                .add(entry);
-        }
-
-        Self::from_accumulators(entries.len(), total, by_pair, saturated)
-    }
-
-    fn from_accumulators(
+    /// The report over already-netted `(source, model)` totals: the per-source
+    /// and per-model views and the overall total are folded from them.
+    pub fn from_source_model_totals(
         entry_count: usize,
-        total: UsageAccumulator,
-        by_pair: BTreeMap<(String, String), UsageAccumulator>,
-        mut saturated: bool,
+        by_source_model: BTreeMap<(String, String), UsageTotals>,
     ) -> Self {
-        let usage = UsageTotals::from_accumulator(&total, &mut saturated);
-        // The keyed accumulators are the owner; the per-source and per-model
-        // views fold them before netting so attempt counts net exactly as they
-        // did when each view folded the ledger itself.
-        let mut by_source_usage = BTreeMap::<String, UsageAccumulator>::new();
-        let mut by_model_usage = BTreeMap::<String, UsageAccumulator>::new();
-        for ((source, model), accumulator) in &by_pair {
-            by_source_usage
+        let mut saturated = false;
+        let mut usage = UsageTotals::default();
+        let mut by_source = BTreeMap::<String, UsageTotals>::new();
+        let mut by_model = BTreeMap::<String, UsageTotals>::new();
+        for ((source, model), totals) in &by_source_model {
+            usage.absorb(totals, &mut saturated);
+            by_source
                 .entry(source.clone())
                 .or_default()
-                .absorb(accumulator, &mut saturated);
-            by_model_usage
+                .absorb(totals, &mut saturated);
+            by_model
                 .entry(model.clone())
                 .or_default()
-                .absorb(accumulator, &mut saturated);
+                .absorb(totals, &mut saturated);
         }
-        let by_source_model: BTreeMap<(String, String), UsageTotals> = by_pair
-            .into_iter()
-            .map(|(key, usage)| (key, UsageTotals::from_accumulator(&usage, &mut saturated)))
-            .collect();
-        let by_source = by_source_usage
-            .into_iter()
-            .map(|(key, usage)| (key, UsageTotals::from_accumulator(&usage, &mut saturated)))
-            .collect();
-        let by_model = by_model_usage
-            .into_iter()
-            .map(|(key, usage)| (key, UsageTotals::from_accumulator(&usage, &mut saturated)))
-            .collect();
-
         Self {
             entry_count,
             saturated,
@@ -584,343 +169,92 @@ impl SessionUsageReport {
     }
 }
 
-/// A session's usage as totals: what reports and reconciliation need, and
-/// nothing that grows with the number of ledger rows beyond one row per
-/// `(source, model)` and one entry per outstanding hole (ADR 0112 §8).
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionUsageTotals {
-    /// One row per `(source, model)`, sorted and unique.
-    pub rows: Vec<UsageTotalRow>,
-    /// Holes no `Reconciled` row has filled, sorted by
-    /// `(call_id, attempt_ordinal)`.
-    pub outstanding: Vec<UnreportedUsageAttempt>,
-}
-
-/// The folded usage of one `(source, model)` pair.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct UsageTotalRow {
-    pub source: String,
-    pub model: String,
-    /// Reported plus reconciled counters.
-    pub usage: TokenUsage,
-    /// Distinct holes ever recorded.
-    pub unreported_attempts: u64,
-    /// `Reconciled` corrections recorded.
-    pub reconciled_attempts: u64,
-}
-
-impl SessionUsageTotals {
-    /// Folds one staged ledger entry with the checks of the durable ledger
-    /// merge. It validates the disposition, adds counters with
-    /// `TokenUsageAccountingOverflow` on overflow, and merges holes by
-    /// identity, refusing conflicting attribution. A `Reconciled` entry
-    /// removes its hole from `outstanding`.
-    ///
-    /// A refused entry leaves the totals unchanged.
-    ///
-    /// Holes are keyed by `(call_id, attempt_ordinal)` within the session. A
-    /// repeat of an outstanding hole with the same attribution is absorbed
-    /// and not counted again; one with a different generation or
-    /// `(source, model)` is refused as corrupt.
-    pub fn fold_checked(&mut self, entry: &TokenLedgerEntry) -> Result<(), crate::StoreError> {
-        let corrupt = |message: String| crate::StoreError::StoredDataCorrupt {
-            record_kind: "TokenLedgerEntry",
-            message,
-        };
-        let overflow = |overflow: lash_sansio::TokenUsageOverflow| {
-            crate::StoreError::TokenUsageAccountingOverflow {
-                usage_source: entry.source.clone(),
-                model: entry.model.clone(),
-                counter: overflow.counter(),
-            }
-        };
-        entry.usage_disposition.validate().map_err(|error| {
-            corrupt(format!(
-                "usage row ({}, {}) carries an invalid disposition: {error}",
-                entry.source, entry.model
-            ))
-        })?;
-        if entry.usage_disposition.row_is_empty(&entry.usage) {
-            return Ok(());
-        }
-        entry.usage.checked_total().map_err(overflow)?;
-
-        let row_index = self.rows.binary_search_by(|row| {
-            (row.source.as_str(), row.model.as_str())
-                .cmp(&(entry.source.as_str(), entry.model.as_str()))
-        });
-        let current_usage = match row_index {
-            Ok(index) => self.rows[index].usage.clone(),
-            Err(_) => TokenUsage::default(),
-        };
-        let usage = current_usage.checked_add(&entry.usage).map_err(overflow)?;
-
-        let mut new_holes = Vec::new();
-        for attempt in entry.usage_disposition.unreported_attempt_descriptors() {
-            let hole = UnreportedUsageAttempt {
-                call_id: attempt.call_id.clone(),
-                attempt_ordinal: attempt.attempt_ordinal,
-                source: entry.source.clone(),
-                model: entry.model.clone(),
-                generation_id: attempt.generation_id.clone(),
-            };
-            match self.outstanding_index(&hole.call_id, hole.attempt_ordinal) {
-                Ok(index) if self.outstanding[index] == hole => {}
-                Ok(_) => {
-                    return Err(corrupt(format!(
-                        "unreported attempt `{}`/{} carries conflicting attribution",
-                        hole.call_id, hole.attempt_ordinal
-                    )));
-                }
-                Err(_) => new_holes.push(hole),
-            }
-        }
-        let reconciled = match &entry.usage_disposition {
-            LedgerUsageOutcome::Reconciled {
-                call_id,
-                attempt_ordinal,
-            } => Some((call_id.as_str(), *attempt_ordinal)),
-            LedgerUsageOutcome::Reported | LedgerUsageOutcome::Unreported { .. } => None,
-        };
-
-        // Every check has passed: apply.
-        let row = match row_index {
-            Ok(index) => &mut self.rows[index],
-            Err(index) => {
-                self.rows.insert(
-                    index,
-                    UsageTotalRow {
-                        source: entry.source.clone(),
-                        model: entry.model.clone(),
-                        ..UsageTotalRow::default()
-                    },
-                );
-                &mut self.rows[index]
-            }
-        };
-        row.usage = usage;
-        row.unreported_attempts = row
-            .unreported_attempts
-            .saturating_add(new_holes.len() as u64);
-        if reconciled.is_some() {
-            row.reconciled_attempts = row.reconciled_attempts.saturating_add(1);
-        }
-        for hole in new_holes {
-            if let Err(index) = self.outstanding_index(&hole.call_id, hole.attempt_ordinal) {
-                self.outstanding.insert(index, hole);
-            }
-        }
-        if let Some((call_id, attempt_ordinal)) = reconciled
-            && let Ok(index) = self.outstanding_index(call_id, attempt_ordinal)
-        {
-            self.outstanding.remove(index);
-        }
-        Ok(())
-    }
-
-    /// [`Self::fold_checked`] for a display report, which must not fail. An
-    /// entry the checked fold refuses (a counter overflow or a conflicting
-    /// hole attribution) has its counters clamped into its row, keeps the
-    /// holes already held, and marks the fold inexact. Returns whether it
-    /// was inexact.
-    pub fn fold_saturating(&mut self, entry: &TokenLedgerEntry) -> bool {
-        if self.fold_checked(entry).is_ok() {
-            return false;
-        }
-        let index = match self.rows.binary_search_by(|row| {
-            (row.source.as_str(), row.model.as_str())
-                .cmp(&(entry.source.as_str(), entry.model.as_str()))
-        }) {
-            Ok(index) => index,
-            Err(index) => {
-                self.rows.insert(
-                    index,
-                    UsageTotalRow {
-                        source: entry.source.clone(),
-                        model: entry.model.clone(),
-                        ..UsageTotalRow::default()
-                    },
-                );
-                index
-            }
-        };
-        saturating_add_usage(&mut self.rows[index].usage, &entry.usage);
-        true
-    }
-
-    fn outstanding_index(&self, call_id: &str, attempt_ordinal: u32) -> Result<usize, usize> {
-        self.outstanding.binary_search_by(|held| {
-            (held.call_id.as_str(), held.attempt_ordinal).cmp(&(call_id, attempt_ordinal))
-        })
-    }
-
-    /// The display report over these totals. Attempt counts net exactly as
-    /// [`SessionUsageReport::from_entries`] nets them over the rows the
-    /// totals were folded from; `entry_count` counts the `(source, model)`
-    /// rows.
-    pub fn report(&self) -> SessionUsageReport {
-        let mut saturated = false;
-        let mut total = UsageAccumulator::default();
-        let mut by_pair = BTreeMap::<(String, String), UsageAccumulator>::new();
-        for row in &self.rows {
-            let accumulator = UsageAccumulator {
-                usage: row.usage.clone(),
-                unreported_attempts: u32::try_from(row.unreported_attempts).unwrap_or(u32::MAX),
-                reconciled_attempts: u32::try_from(row.reconciled_attempts).unwrap_or(u32::MAX),
-            };
-            total.absorb(&accumulator, &mut saturated);
-            by_pair
-                .entry((row.source.clone(), row.model.clone()))
-                .or_default()
-                .absorb(&accumulator, &mut saturated);
-        }
-        SessionUsageReport::from_accumulators(self.rows.len(), total, by_pair, saturated)
-    }
-}
-
 fn saturating_add_usage(target: &mut TokenUsage, incoming: &TokenUsage) -> bool {
     let (merged, saturated) = target.saturating_add(incoming);
     *target = merged;
     saturated
 }
 
-fn saturating_usage_total(usage: &TokenUsage) -> (i64, bool) {
-    let mut saturated = false;
-    let total = [
+fn usage_total(usage: &TokenUsage) -> Option<i64> {
+    [
         usage.input_tokens,
         usage.output_tokens,
         usage.cache_read_input_tokens,
         usage.cache_write_input_tokens,
     ]
     .into_iter()
-    .fold(0_i64, |total, counter| {
-        total.checked_add(counter).unwrap_or_else(|| {
-            saturated = true;
-            total.saturating_add(counter)
-        })
-    });
-    (total, saturated)
+    .try_fold(0_i64, i64::checked_add)
 }
 
-pub fn diff_token_ledger(
-    before: &[TokenLedgerEntry],
-    after: &[TokenLedgerEntry],
-) -> Result<Vec<TokenLedgerEntry>, String> {
-    // Reconciled corrections share a key with the reported row they fix, so
-    // the diff folds every row of a key before subtracting.
-    let index = |entries: &[TokenLedgerEntry]| {
-        let mut index = HashMap::<(String, String), TokenUsage>::new();
-        for entry in entries {
-            let key = (entry.source.clone(), entry.model.clone());
-            let folded = index.entry(key).or_default();
-            *folded = folded.checked_add(&entry.usage).map_err(|overflow| {
-                format!(
-                    "token ledger {} overflowed for source/model ({}, {})",
-                    overflow.counter(),
-                    entry.source,
-                    entry.model
-                )
-            })?;
-        }
-        Ok::<_, String>(index)
-    };
-    let before_index = index(before)?;
-    let after_index = index(after)?;
-
-    let mut keys = before_index
-        .keys()
-        .chain(after_index.keys())
-        .cloned()
-        .collect::<Vec<_>>();
-    keys.sort_unstable();
-    keys.dedup();
-
-    let mut out = Vec::new();
-    for key in keys {
-        let (source, model) = (key.0.as_str(), key.1.as_str());
-        let before_usage = before_index.get(&key).cloned().unwrap_or_default();
-        let after_usage = after_index.get(&key).cloned().unwrap_or_default();
-        let subtract = |after: i64, before: i64| {
-            after.checked_sub(before).ok_or_else(|| {
-                format!("token ledger delta overflowed for source/model ({source}, {model})")
-            })
-        };
-        let delta = TokenUsage {
-            input_tokens: subtract(after_usage.input_tokens, before_usage.input_tokens)?,
-            output_tokens: subtract(after_usage.output_tokens, before_usage.output_tokens)?,
-            cache_read_input_tokens: subtract(
-                after_usage.cache_read_input_tokens,
-                before_usage.cache_read_input_tokens,
-            )?,
-            cache_write_input_tokens: subtract(
-                after_usage.cache_write_input_tokens,
-                before_usage.cache_write_input_tokens,
-            )?,
-            reasoning_output_tokens: subtract(
-                after_usage.reasoning_output_tokens,
-                before_usage.reasoning_output_tokens,
-            )?,
-        };
-        if delta.input_tokens < 0
-            || delta.output_tokens < 0
-            || delta.cache_read_input_tokens < 0
-            || delta.cache_write_input_tokens < 0
-            || delta.reasoning_output_tokens < 0
-        {
-            return Err(format!(
-                "token ledger decreased for source/model ({source}, {model})"
-            ));
-        }
-        if delta.is_zero() {
-            continue;
-        }
-        out.push(TokenLedgerEntry::reported(source, model, delta));
-    }
-    Ok(out)
-}
-
+/// The usage `after` holds beyond `before`, one row per `(source, model)` key
+/// that grew. Reports only grow, so a key whose counters shrank is an error.
 pub fn diff_usage_reports(
     before: &SessionUsageReport,
     after: &SessionUsageReport,
-) -> Result<Vec<TokenLedgerEntry>, String> {
-    let row_entries = |report: &SessionUsageReport| {
-        report
+) -> Result<SessionUsageReport, String> {
+    let mut rows = BTreeMap::<(String, String), UsageTotals>::new();
+    for ((source, model), after_row) in &after.by_source_model {
+        let before_row = before
             .by_source_model
-            .iter()
-            .map(|((source, model), row)| {
-                TokenLedgerEntry::reported(source.clone(), model.clone(), row.usage.clone())
-            })
-            .collect::<Vec<_>>()
-    };
-    diff_token_ledger(&row_entries(before), &row_entries(after))
-}
-
-pub fn merge_ledger_entry_saturating(
-    ledger: &mut Vec<TokenLedgerEntry>,
-    entry: TokenLedgerEntry,
-) -> bool {
-    if entry.usage_disposition.row_is_empty(&entry.usage) {
-        return false;
+            .get(&(source.clone(), model.clone()))
+            .cloned()
+            .unwrap_or_default();
+        let subtract = |after: i64, before: i64| match after.checked_sub(before) {
+            Some(delta) if delta >= 0 => Ok(delta),
+            _ => Err(format!(
+                "usage decreased for source/model ({source}, {model})"
+            )),
+        };
+        let delta = TokenUsage {
+            input_tokens: subtract(after_row.usage.input_tokens, before_row.usage.input_tokens)?,
+            output_tokens: subtract(
+                after_row.usage.output_tokens,
+                before_row.usage.output_tokens,
+            )?,
+            cache_read_input_tokens: subtract(
+                after_row.usage.cache_read_input_tokens,
+                before_row.usage.cache_read_input_tokens,
+            )?,
+            cache_write_input_tokens: subtract(
+                after_row.usage.cache_write_input_tokens,
+                before_row.usage.cache_write_input_tokens,
+            )?,
+            reasoning_output_tokens: subtract(
+                after_row.usage.reasoning_output_tokens,
+                before_row.usage.reasoning_output_tokens,
+            )?,
+        };
+        let unreported_attempts = after_row
+            .unreported_attempts
+            .saturating_sub(before_row.unreported_attempts);
+        let reconciled_attempts = after_row
+            .reconciled_attempts
+            .saturating_sub(before_row.reconciled_attempts);
+        if delta.is_zero() && unreported_attempts == 0 && reconciled_attempts == 0 {
+            continue;
+        }
+        let total_tokens = usage_total(&delta).ok_or_else(|| {
+            format!("usage delta total overflowed for source/model ({source}, {model})")
+        })?;
+        rows.insert(
+            (source.clone(), model.clone()),
+            UsageTotals {
+                usage: delta,
+                total_tokens,
+                unreported_attempts,
+                reconciled_attempts,
+            },
+        );
     }
-    if let Some(existing) = ledger.iter_mut().find(|e| {
-        e.source == entry.source
-            && e.model == entry.model
-            && e.usage_disposition
-                .accumulates_with(&entry.usage_disposition)
-    }) {
-        let saturated = saturating_add_usage(&mut existing.usage, &entry.usage);
-        // A disagreeing hole attribution cannot be resolved on this infallible
-        // path: keep the attribution already held and mark the report inexact.
-        // The checked commit path refuses the same conflict outright.
-        existing
-            .usage_disposition
-            .absorb_saturating(&entry.usage_disposition)
-            .is_some()
-            | saturated
-    } else {
-        ledger.push(entry);
-        false
+    for key in before.by_source_model.keys() {
+        if !after.by_source_model.contains_key(key) {
+            return Err(format!("usage row ({}, {}) disappeared", key.0, key.1));
+        }
     }
+    Ok(SessionUsageReport::from_source_model_totals(
+        after.entry_count.saturating_sub(before.entry_count),
+        rows,
+    ))
 }
 
 /// The last call's usage, `Some` only when the call reported any nonzero
@@ -931,101 +265,68 @@ pub fn nonzero_usage(usage: TokenUsage) -> Option<TokenUsage> {
 }
 
 #[cfg(test)]
-mod session_usage_totals_tests {
+mod report_tests {
     use super::*;
 
-    fn usage(input_tokens: i64) -> TokenUsage {
-        TokenUsage {
-            input_tokens,
-            ..TokenUsage::default()
-        }
-    }
-
-    fn hole(call_id: &str, generation_id: Option<&str>) -> UnreportedLedgerAttempt {
-        UnreportedLedgerAttempt {
-            call_id: call_id.to_string(),
-            attempt_ordinal: 0,
-            generation_id: generation_id.map(str::to_string),
-        }
-    }
-
-    fn unreported(holes: Vec<UnreportedLedgerAttempt>) -> TokenLedgerEntry {
-        TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "m".to_string(),
-            usage: TokenUsage::default(),
-            usage_disposition: LedgerUsageOutcome::unreported(holes),
-        }
-    }
-
-    fn reconciled(call_id: &str, input_tokens: i64) -> TokenLedgerEntry {
-        TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "m".to_string(),
-            usage: usage(input_tokens),
-            usage_disposition: LedgerUsageOutcome::Reconciled {
-                call_id: call_id.to_string(),
-                attempt_ordinal: 0,
+    fn totals(input_tokens: i64, unreported_attempts: u32) -> UsageTotals {
+        UsageTotals {
+            usage: TokenUsage {
+                input_tokens,
+                ..TokenUsage::default()
             },
+            total_tokens: input_tokens,
+            unreported_attempts,
+            reconciled_attempts: 0,
         }
     }
 
+    fn report(rows: &[(&str, &str, i64, u32)]) -> SessionUsageReport {
+        SessionUsageReport::from_source_model_totals(
+            rows.len(),
+            rows.iter()
+                .map(|(source, model, input, unreported)| {
+                    (
+                        ((*source).to_string(), (*model).to_string()),
+                        totals(*input, *unreported),
+                    )
+                })
+                .collect(),
+        )
+    }
+
     #[test]
-    fn totals_fold_one_sorted_row_per_key_and_report_like_the_ledger() {
-        let entries = vec![
-            TokenLedgerEntry::reported("turn", "z", usage(5)),
-            TokenLedgerEntry::reported("turn", "a", usage(2)),
-            TokenLedgerEntry::reported("turn", "z", usage(1)),
-            unreported(vec![hole("c1", Some("g1"))]),
-            reconciled("c1", 7),
-        ];
-        let mut totals = SessionUsageTotals::default();
-        for entry in &entries {
-            totals.fold_checked(entry).expect("fold");
-        }
-        let keys: Vec<_> = totals
-            .rows
-            .iter()
-            .map(|row| (row.model.as_str(), row.usage.input_tokens))
-            .collect();
-        assert_eq!(keys, vec![("a", 2), ("m", 7), ("z", 6)]);
-        assert!(
-            totals.outstanding.is_empty(),
-            "the correction fills its hole"
+    fn a_report_folds_its_views_from_the_keyed_rows() {
+        let report = report(&[
+            ("turn", "a", 3, 1),
+            ("turn", "b", 4, 0),
+            ("direct", "a", 5, 0),
+        ]);
+        assert_eq!(report.usage.usage.input_tokens, 12);
+        assert_eq!(report.usage.total_tokens, 12);
+        assert_eq!(report.usage.unreported_attempts, 1);
+        assert_eq!(report.by_source["turn"].usage.input_tokens, 7);
+        assert_eq!(report.by_model["a"].usage.input_tokens, 8);
+        assert!(!report.saturated);
+        let encoded = serde_json::to_value(&report).expect("encode report");
+        let decoded: SessionUsageReport = serde_json::from_value(encoded).expect("decode report");
+        assert_eq!(decoded, report);
+    }
+
+    #[test]
+    fn a_diff_keeps_only_the_rows_that_grew_and_refuses_a_shrink() {
+        let before = report(&[("turn", "a", 3, 0), ("turn", "b", 4, 0)]);
+        let after = report(&[
+            ("turn", "a", 3, 0),
+            ("turn", "b", 9, 1),
+            ("direct", "a", 2, 0),
+        ]);
+        let delta = diff_usage_reports(&before, &after).expect("diff");
+        assert_eq!(delta.by_source_model.len(), 2);
+        assert_eq!(
+            delta.by_source_model[&("turn".to_string(), "b".to_string())],
+            totals(5, 1)
         );
-        let from_ledger = SessionUsageReport::from_entries(&entries);
-        let report = totals.report();
-        assert_eq!(report.usage, from_ledger.usage);
-        assert_eq!(report.by_source_model, from_ledger.by_source_model);
-    }
-
-    #[test]
-    fn holes_merge_by_identity_and_conflicts_leave_the_totals_unchanged() {
-        let mut totals = SessionUsageTotals::default();
-        totals
-            .fold_checked(&unreported(vec![hole("c1", Some("g1"))]))
-            .expect("first hole");
-        totals
-            .fold_checked(&unreported(vec![hole("c1", Some("g1"))]))
-            .expect("a repeated hole is absorbed");
-        assert_eq!(totals.outstanding.len(), 1);
-        assert_eq!(totals.rows[0].unreported_attempts, 1);
-
-        let before = totals.clone();
-        assert!(matches!(
-            totals.fold_checked(&unreported(vec![hole("c1", Some("g2"))])),
-            Err(crate::StoreError::StoredDataCorrupt { .. })
-        ));
-        assert_eq!(totals, before);
-
-        totals
-            .fold_checked(&TokenLedgerEntry::reported("turn", "m", usage(i64::MAX)))
-            .expect("fits");
-        let before = totals.clone();
-        assert!(matches!(
-            totals.fold_checked(&TokenLedgerEntry::reported("turn", "m", usage(1))),
-            Err(crate::StoreError::TokenUsageAccountingOverflow { .. })
-        ));
-        assert_eq!(totals, before, "an overflow applies nothing");
+        assert_eq!(delta.usage.usage.input_tokens, 7);
+        assert!(diff_usage_reports(&after, &before).is_err());
     }
 }

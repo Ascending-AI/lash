@@ -3,19 +3,18 @@ use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_c0aa;
 
-/// A layer whose controllers own commit backpressure exactly when `ENGINE`,
-/// the way an engine-backed controller does, over a store-journaled host.
-struct JournaledCommitController<const ENGINE: bool>;
+/// A layer whose controllers own commit backpressure over the Restate server double.
+struct EngineOwnedCommitLayer;
 
-impl<const ENGINE: bool> lash_core::testing::EffectLayer for JournaledCommitController<ENGINE> {
+impl lash_core::testing::EffectLayer for EngineOwnedCommitLayer {
     fn owns_commit_backpressure(&self, _inner: &dyn lash_core::RuntimeEffectController) -> bool {
-        ENGINE
+        true
     }
 }
 
 /// The host an engine-owned controller is lent through.
 fn engine_commit_host(backend: &lash_core::Backend) -> Arc<dyn lash_core::EffectHost> {
-    effect::layered_effect_host(backend, Arc::new(JournaledCommitController::<true>))
+    effect::layered_effect_host(backend, Arc::new(EngineOwnedCommitLayer))
 }
 
 #[tokio::test]
@@ -52,7 +51,7 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
         .expect("open the scope's handler");
     let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
         handler.scoped(),
-        Arc::new(JournaledCommitController::<true>),
+        Arc::new(EngineOwnedCommitLayer),
     )
     .expect("layer the handler's scope");
     runtime
@@ -77,7 +76,7 @@ impl lash_core::testing::EffectLayer for PassThrough {}
 
 #[tokio::test]
 async fn commit_admission_ownership_survives_controller_wrappers() {
-    let backend = memory_backend().await;
+    let backend = sqlite_recording_backend().await;
     let hosts: [(Arc<dyn lash_core::EffectHost>, bool); 2] = [
         (engine_commit_host(&backend), true),
         (backend.effect_host(), false),
@@ -98,7 +97,7 @@ async fn commit_admission_ownership_survives_controller_wrappers() {
 
 #[tokio::test]
 async fn invocation_controller_owns_session_command_admission_with_a_native_host() {
-    let backend = memory_backend().await;
+    let backend = sqlite_recording_backend().await;
     let session_id = "invocation-command-placement";
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
         &backend,
@@ -132,7 +131,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
     .acquired()
     .unwrap();
     let controller =
-        effect::layered_operation_controller(&backend, Arc::new(JournaledCommitController::<true>));
+        effect::layered_operation_controller(&backend, Arc::new(EngineOwnedCommitLayer));
     let controller = lash_core::ScopedEffectController::borrowed(
         controller.as_ref(),
         lash_core::AdmittedScope::queue_drain(SessionId::from(session_id), "session-command"),

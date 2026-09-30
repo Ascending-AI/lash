@@ -58,7 +58,7 @@ fn linked_module_accepts_named_processes_resource_params_and_activations() {
     // source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
     // handle = await triggers.register({
     //   source: source,
-    //   target: from_tick,
+    //   target: { definition: from_tick },
     //   inputs: { tick: trigger.event },
     //   name: "changed"
     // })?
@@ -202,7 +202,7 @@ fn linked_module_allows_trigger_registration_name_to_match_target_process() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: changed,
+    //   target: { definition: changed },
     //   inputs: { tick: trigger.event },
     //   name: "changed"
     // })?
@@ -244,7 +244,7 @@ fn linked_module_resolves_host_named_data_refs_for_fields_and_structural_assigna
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: from_tick,
+    //   target: { definition: from_tick },
     //   inputs: { tick: trigger.event }
     // })?
     let structural_input = builders::module(
@@ -303,7 +303,7 @@ fn host_requirements_ref_tracks_host_named_data_type_shape_changes() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: from_tick,
+    //   target: { definition: from_tick },
     //   inputs: { tick: trigger.event }
     // })?
     let program = builders::module(
@@ -346,12 +346,12 @@ fn linked_module_validates_value_constructors_and_trigger_registry_ops() {
     // source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
     // handle = await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event },
     //   name: "scan",
     //   subscription_key: "scan"
     // })?
-    // registrations = await triggers.list({ target: scan })?
+    // registrations = await triggers.list({ target: { definition: scan } })?
     // disabled = await triggers.disable({
     //   subscription_key: "scan",
     //   expected_revision: registrations[0].revision
@@ -436,7 +436,7 @@ fn linked_module_accepts_explicit_trigger_input_mappings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { a: trigger.event, b: trigger.event }
     // })?
     let repeated_event = builders::module(
@@ -482,7 +482,7 @@ fn linked_module_accepts_explicit_trigger_input_mappings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event, tool: tools }
     // })?
     let fixed_authority = builders::module(
@@ -537,8 +537,8 @@ fn linked_module_leaves_identical_registrations_to_the_host_idempotent_register(
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // first = timer.Schedule({ expr: "0 8 * * *" })
     // second = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: first, target: scan, inputs: { tick: trigger.event } })?
-    // await triggers.register({ source: second, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: first, target: { definition: scan }, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: second, target: { definition: scan }, inputs: { tick: trigger.event } })?
     //
     // Subscriptions are runtime identity (FIG-2997): the host materializes a
     // derived key from the descriptor value and target, and an identical
@@ -564,13 +564,13 @@ fn linked_module_allows_explicit_keys_for_default_key_collision_shape() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event },
     //   subscription_key: "morning-scan-primary"
     // })?
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event },
     //   subscription_key: "morning-scan-secondary"
     // })?
@@ -606,10 +606,10 @@ fn linked_artifact_keeps_explicit_keys_and_leaves_derivation_to_the_runtime() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // morning = timer.Schedule({ expr: "0 8 * * *" })
     // evening = timer.Schedule({ expr: "0 18 * * *" })
-    // await triggers.register({ source: morning, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: morning, target: { definition: scan }, inputs: { tick: trigger.event } })?
     // await triggers.register({
     //   source: evening,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event },
     //   subscription_key: "evening-scan"
     // })?
@@ -773,7 +773,7 @@ fn named_process_signature_survives_parameter_return_container_branch_and_trigge
     //   source = timer.Schedule({ expr: "0 8 * * *" })
     //   await triggers.register({
     //     source: source,
-    //     target: selected,
+    //     target: { definition: selected },
     //     inputs: { event: trigger.event },
     //     subscription_key: "indirect-handler"
     //   })?
@@ -866,7 +866,7 @@ fn zero_parameter_process_is_valid_but_trigger_registration_still_requires_event
 
     // process idle() -> bool { finish true }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: idle, inputs: {} })?
+    // await triggers.register({ source: source, target: { definition: idle }, inputs: {} })?
     let trigger = builders::module(
         vec![idle_process()],
         vec![
@@ -963,7 +963,7 @@ fn omitted_trigger_inputs_bind_the_event_to_a_single_target_parameter() {
 fn linked_module_rejects_bad_trigger_registry_bindings() {
     // process scan(tick: timer.Tick) { finish true }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ target: scan })?
+    // await triggers.register({ target: { definition: scan } })?
     let missing = builders::module(
         vec![tick_process("scan", "tick")],
         vec![
@@ -985,7 +985,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     // process scan(tick: timer.Tick) { finish true }
     // await triggers.register({
     //   source: { expr: "0 8 * * *" },
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event }
     // })?
     let wrong_source = builders::module(
@@ -1012,7 +1012,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 
     // process scan(tick: str) { finish tick }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: scan }, inputs: { tick: trigger.event } })?
     let payload_mismatch = builders::module(
         vec![builders::process(
             "scan",
@@ -1033,7 +1033,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event, extra: "nope" }
     // })?
     let unknown_input = builders::module(
@@ -1068,7 +1068,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event, tick: trigger.event }
     // })?
     let duplicate_input = builders::module(
@@ -1103,7 +1103,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: { fired_at: "static" }, label: "static" }
     // })?
     let no_event_input = builders::module(
@@ -1148,7 +1148,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { fired_at: trigger.event.fired_at }
     // })?
     let event_projection = builders::module(
@@ -1196,7 +1196,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 
     // process scan(tick: timer.Tick, extra: str) { finish extra }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: scan }, inputs: { tick: trigger.event } })?
     let multi_input = builders::module(
         vec![builders::process(
             "scan",
@@ -1218,7 +1218,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 
     // process scan(tick: timer.Tick) { finish true }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: source, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: source }, inputs: { tick: trigger.event } })?
     let target_is_not_process = builders::module(
         vec![tick_process("scan", "tick")],
         vec![
@@ -1241,7 +1241,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 
     // process scan(tick: timer.Tick) { finish true }
     // await triggers.list({
-    //   target: scan,
+    //   target: { definition: scan },
     //   name: "daily",
     //   source_type: "timer.Schedule",
     //   enabled: true
@@ -1265,7 +1265,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 
     // process scan(tick: timer.Tick) { finish true }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.list({ target: source })?
+    // await triggers.list({ target: { definition: source } })?
     let list_target_is_not_process = builders::module(
         vec![tick_process("scan", "tick")],
         vec![

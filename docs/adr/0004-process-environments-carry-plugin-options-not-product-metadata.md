@@ -1,13 +1,13 @@
-# Process Environments Carry Plugin Options, Not Product Metadata
+# Process environments carry plugin options, not product metadata
 
-Runtime Process execution environments are typed and closed: they carry execution settings plus plugin-owned process options that an installed plugin can decode to rebuild providers, Tool Catalog entries, Tool Grants, Tool Execution Bindings, and Lashlang Tool Bindings. Submission admits immutable process identity and the closed recorded-input shape; preparation checks the artifact's process and Host Requirements references while deliberately omitting live host-environment validation. The worker reconstructs the plugin environment and validates it against the linked Host Requirements before compilation or any effect. Product-specific durable tool state belongs in immutable snapshots referenced by Process Plugin Options. The host owns those snapshots, authorization and revocation policy.
+## Decision
 
-Permanent reconstruction failures, such as a missing artifact, corrupt payload, or a host-reported permanent snapshot refusal, are process failures. Transient infrastructure failures, such as the remote executor or secret store being temporarily unavailable, remain worker/runtime failures and follow the existing retry/recovery path instead of terminalizing the process as a logical failure.
+Process execution environments are typed, closed specifications containing plugin options, session policy and recorded rendering configuration. Plugins decode their own options to reconstruct providers, Tool Catalog entries, grants and execution bindings. Product-specific tool state belongs in immutable host-owned snapshots referenced by those options. Hosts own authorization and revocation policy.
 
-## Amendment (FIG-4163, 2026-09-30)
+Submission admits immutable process identity and the closed recorded-input shape. Preparation checks artifact process and Host Requirements references while omitting live host-environment validation. The worker reconstructs the plugin environment and checks it against the linked Host Requirements before compilation or effects.
 
-Submission and worker validation are separate boundaries; the former submission-time rebuilt-snapshot requirement is superseded by this contract.
-[`prepare_lashlang_process_start` and `admit_lashlang_process`](../../crates/lash-lashlang-runtime/src/lib.rs),
-[worker validation](../../crates/lash-lashlang-runtime/src/process.rs), and
-`process_admission_four_shape_table_preserves_codes_and_prepare_omission` in
-[the admission tests](../../crates/lash-lashlang-runtime/src/lib_tests.rs) enforce the distinction.
+## Consequences
+
+Permanent reconstruction refusals produce logical process failure or the typed resume refusal appropriate to an incompatible stored generation. Infrastructure failures remain worker/runtime failures and follow engine recovery. Mutable product metadata in the environment is rejected because replay must reconstruct the captured contract rather than the creator's current state.
+
+[Environment specifications](../../crates/lash-core-store/src/process_identity.rs), [preparation and recorded-input admission](../../crates/lash-lashlang-runtime/src/lib.rs) and [worker validation](../../crates/lash-lashlang-runtime/src/process.rs) implement the boundaries.

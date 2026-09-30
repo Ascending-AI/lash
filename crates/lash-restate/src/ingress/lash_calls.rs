@@ -31,6 +31,31 @@ impl RestateIngressClient {
             .map(Reply::into_body)
     }
 
+    /// [`call_lash_object`](Self::call_lash_object) under an idempotency
+    /// key: a retried call attaches to the invocation the first one started.
+    pub(crate) async fn call_lash_object_idempotent<T, R>(
+        &self,
+        object: &str,
+        object_key: &str,
+        handler: &str,
+        body: &T,
+        idempotency_key: &str,
+    ) -> Result<R, RestateHttpError>
+    where
+        T: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        self.call_object_json_idempotent::<_, Reply<R>>(
+            object,
+            object_key,
+            handler,
+            &Call::new(body),
+            idempotency_key,
+        )
+        .await
+        .map(Reply::into_body)
+    }
+
     /// [`call_lash_object`](Self::call_lash_object) for one of lash's own
     /// workflows.
     pub(crate) async fn call_lash_workflow<T, R>(

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::rlm::lang::{Span, WorkflowNodeNameSource};
+use lash::rlm::lang::{Span, WorkflowDiagnosticClassification, WorkflowNodeNameSource};
 use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -269,6 +269,7 @@ pub struct ExpectedArgumentType {
 pub struct TypeDiagnostic {
     pub node_id: String,
     pub kind: String,
+    pub classification: WorkflowDiagnosticClassification,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<String>,
     pub message: String,

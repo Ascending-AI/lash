@@ -4,7 +4,7 @@ use crate::session_sql::session_sql;
 
 /// End every frame in `left` (the frames the commit leaves) in the commit's
 /// transaction: fence it and upsert its `Ended` cleanup with no carries
-/// (ADR 0113 §3.1, Lane G amendment). A transition first carries its
+/// (ADR 0113 §3.1). A transition first carries its
 /// artifacts out of its `ended` frame, one of `left`, into the successor,
 /// and gates every cleanup on its execution; without one the cleanups are
 /// ungated. The referrer locks of every ended frame and the successor are
@@ -554,6 +554,38 @@ impl PostgresStore {
                 }
             }
         }
+        // The bound turn owns the head (FIG-4202): a write outside every
+        // drive is refused while a root, an owed follow-on or an open command
+        // owns it. The drive epoch's row lock, taken before the head's in the
+        // order a fenced commit takes them, serializes the read with every
+        // admission, which is fenced. A replayed receipt above answered its
+        // first outcome already; the plan's own refusals (a follow-on the
+        // commit would drop, a moved head) answer before the ownership's.
+        let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
+            commit.drive_fence.is_some(),
+            existing.is_some(),
+        ) {
+            match super::drive_epoch::drive_epoch_locked_tx(&mut tx, &commit.session_id).await {
+                Ok(_) | Err(StoreError::DriveEpochUnavailable { .. }) => {}
+                Err(error) => return Err(error),
+            }
+            let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(
+                pending_follow_on_tx(&mut tx, &commit.session_id, false)
+                    .await?
+                    .as_ref(),
+                commit.pending_follow_on.as_ref(),
+            );
+            Some(
+                crate::session_roots::head_ownership_facts_conn(
+                    &mut tx,
+                    &commit.session_id,
+                    owed_follow_on,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         if commit.interrupted_turn_cancel_intent.is_some()
             && commit.turn_cancel_closure_settlement.is_none()
         {
@@ -830,67 +862,14 @@ impl PostgresStore {
             occupied_node_ids,
             existing_pending_follow_on,
         })?;
+        if let Some(facts) = head_ownership {
+            lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
+        }
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",
             plan.actual_head_revision(),
             plan.next_head_revision(),
         )?;
-        for entry in &commit.usage_deltas {
-            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
-                StoreError::Backend(
-                    "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
-                )
-            })?;
-            let (reconciled_call_id, reconciled_attempt_ordinal) =
-                match &entry.entry.usage_disposition {
-                    lash_core_execution::LedgerUsageOutcome::Reconciled {
-                        call_id,
-                        attempt_ordinal,
-                    } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
-                    _ => (None, None),
-                };
-            let inserted_seq: Option<i64> =
-                sqlx::query_scalar(session_sql().usage_postgres.insert.sql())
-                    .bind(commit.session_id.as_str())
-                    .bind(&entry.identity.operation_storage_key)
-                    .bind(entry_ordinal)
-                    .bind(
-                        i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
-                            StoreError::Backend(
-                                "usage payload encoding version does not fit PostgreSQL INTEGER"
-                                    .to_string(),
-                            )
-                        })?,
-                    )
-                    .bind(&entry.identity.payload_hash)
-                    .bind(&entry.entry.source)
-                    .bind(&entry.entry.model)
-                    .bind(entry.entry.usage.input_tokens)
-                    .bind(entry.entry.usage.output_tokens)
-                    .bind(entry.entry.usage.cache_read_input_tokens)
-                    .bind(entry.entry.usage.cache_write_input_tokens)
-                    .bind(entry.entry.usage.reasoning_output_tokens)
-                    .bind(reconciled_call_id)
-                    .bind(reconciled_attempt_ordinal)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-            if let (Some(seq), lash_core_execution::LedgerUsageOutcome::Unreported { attempts }) =
-                (inserted_seq, &entry.entry.usage_disposition)
-            {
-                for attempt in attempts {
-                    sqlx::query(session_sql().usage_holes.insert.sql())
-                        .bind(commit.session_id.as_str())
-                        .bind(seq)
-                        .bind(&attempt.call_id)
-                        .bind(i64::from(attempt.attempt_ordinal))
-                        .bind(attempt.generation_id.as_deref())
-                        .execute(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?;
-                }
-            }
-        }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body(encoded_under).map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))

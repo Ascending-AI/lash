@@ -237,7 +237,7 @@ fn linked_module_captures_concrete_process_body_resources_statically() {
     //   finish text
     // }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: scan }, inputs: { tick: trigger.event } })?
     let read_tick_path = |receiver: Expr| {
         builders::block(vec![
             builders::assign(
@@ -298,7 +298,7 @@ fn linked_module_captures_concrete_process_body_resources_statically() {
     //   finish text
     // }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: scan, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: scan }, inputs: { tick: trigger.event } })?
     let mut shadowed_main = vec![builders::assign("tool", builders::resource(&["tools"]))];
     shadowed_main.extend(registration());
     let shadowed = builders::module(
@@ -319,7 +319,7 @@ fn linked_module_captures_concrete_process_body_resources_statically() {
 fn linked_module_infers_process_output_and_validates_return_annotations() {
     // process done(tick: timer.Tick) { finish true }
     // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: done, inputs: { tick: trigger.event } })?
+    // await triggers.register({ source: source, target: { definition: done }, inputs: { tick: trigger.event } })?
     let inferred = builders::module(
         vec![builders::process(
             "done",

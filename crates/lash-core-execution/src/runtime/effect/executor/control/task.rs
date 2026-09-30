@@ -77,7 +77,7 @@ pub enum EffectControllerTaskRequest {
     },
     AwaitGroupChildDrainAdmission {
         group_key: String,
-        commit_seq: u64,
+        rank: u64,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
     },
     ReadRecordedJournal {
@@ -185,12 +185,12 @@ impl EffectControllerTaskRequest {
             }),
             Self::AwaitGroupChildDrainAdmission {
                 group_key,
-                commit_seq,
+                rank,
                 response,
             } => Box::pin(async move {
                 let _ = response.send(
                     controller
-                        .await_group_child_drain_admission(&group_key, commit_seq)
+                        .await_group_child_drain_admission(&group_key, rank)
                         .await,
                 );
             }),
@@ -203,6 +203,7 @@ impl EffectControllerTaskRequest {
 
 pub(in crate::runtime::effect::executor) struct RemoteLocalExecutionRequest {
     pub(in crate::runtime::effect::executor) envelope: RuntimeEffectEnvelope,
+    pub(in crate::runtime::effect::executor) usage_run: Option<crate::UsageRun>,
     pub(in crate::runtime::effect::executor) response:
         oneshot::Sender<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 }
@@ -422,7 +423,9 @@ impl RuntimeEffectController for EffectTaskController {
                     let Some((executor, _)) = local_execution.take() else {
                         unreachable!("local execution request requires a local executor");
                     };
-                    let result = executor.execute_forwarded(request.envelope).await;
+                    let result = executor
+                        .execute_forwarded(request.envelope, request.usage_run)
+                        .await;
                     let _ = request.response.send(result);
                 }
             }
@@ -577,13 +580,13 @@ impl RuntimeEffectController for EffectTaskController {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.requests
             .send(EffectControllerTaskRequest::AwaitGroupChildDrainAdmission {
                 group_key: group_key.to_string(),
-                commit_seq,
+                rank,
                 response: response_tx,
             })
             .map_err(|_| {

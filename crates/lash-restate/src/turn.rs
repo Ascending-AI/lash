@@ -1,7 +1,11 @@
 //! Foreground-turn attachment.
 //!
 //! One responsibility: let a process outside the turn's handler observe that
-//! turn by attaching to its reserved terminal keyed promise.
+//! turn by attaching to its reserved terminal keyed promise, as an observer
+//! ([`WaitObserver::TurnTerminal`]): an attach reads a published terminal
+//! without registering, and every attach to one terminal shares one
+//! server-side waiter, however often followers attach and drop it
+//! (FIG-4345).
 
 use lash_core::{
     AwaitEventWaitIdentity, Resolution, RuntimeError, facade_support::TurnAddress,
@@ -9,7 +13,7 @@ use lash_core::{
 };
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
+    RestateDurableWaitAwaitRequest, WaitObserver, observe_durable_wait,
     restate_await_event_key_for_authority,
 };
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
@@ -60,47 +64,39 @@ impl TurnAttach for RestateTurnAttach {
             &address.execution_scope(),
             AwaitEventWaitIdentity::TurnTerminal,
         )?;
-        let durable_address = RestateDurableWaitAddress::for_key(&key);
-        let workflow_key = durable_address.workflow_key.clone();
         let service = self
             .namespace
             .stable(crate::LashService::DurableWaitWorkflow)
             .name();
-        let resolution = self
-            .ingress
-            .call_lash_workflow::<_, Resolution>(
-                &service,
-                &workflow_key,
-                "await_resolution",
-                &RestateDurableWaitAwaitRequest {
-                    key,
-                    deadline: None,
-                },
-            )
-            .await
-            .map_err(|err| {
-                let code = if err.is_timeout() {
-                    lash_core::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed
-                } else {
-                    lash_core::RuntimeErrorCode::EngineTurnTerminalAttach
-                };
-                // A shared handler: a deployment that never bound the
-                // durable-wait workflow fails every attach this way, and so
-                // does a promise whose invocation the engine no longer holds.
-                // Name both rather than leaving an operator to read a bare
-                // status out of a transport error — or to be sent after a
-                // deployment that is fine.
-                let message = if err.is_service_unregistered() {
-                    crate::ingress::unresolvable_call_target_message(
-                        &service,
-                        "await_resolution",
-                        &err,
-                    )
-                } else {
-                    err.to_string()
-                };
-                RuntimeError::new(code, message)
-            })?;
+        let resolution = observe_durable_wait(
+            &self.ingress,
+            &service,
+            WaitObserver::TurnTerminal,
+            &RestateDurableWaitAwaitRequest {
+                key,
+                deadline: None,
+            },
+        )
+        .await
+        .map_err(|err| {
+            let code = if err.is_timeout() {
+                lash_core::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed
+            } else {
+                lash_core::RuntimeErrorCode::EngineTurnTerminalAttach
+            };
+            // A shared handler: a deployment that never bound the
+            // durable-wait workflow fails every attach this way, and so
+            // does a promise whose invocation the engine no longer holds.
+            // Name both rather than leaving an operator to read a bare
+            // status out of a transport error — or to be sent after a
+            // deployment that is fine.
+            let message = if err.is_service_unregistered() {
+                crate::ingress::unresolvable_call_target_message(&service, "await_resolution", &err)
+            } else {
+                err.to_string()
+            };
+            RuntimeError::new(code, message)
+        })?;
         match resolution {
             Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
                 RuntimeError::new(

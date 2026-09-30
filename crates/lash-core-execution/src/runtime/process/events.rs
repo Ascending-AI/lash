@@ -59,6 +59,27 @@ pub struct ProcessEventSemantics {
     pub terminal: Option<ProcessTerminalSemantics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<ProcessWake>,
+    /// The wait a signal event resolves, selected once, by the append that
+    /// admitted the signal (FIG-4298). Every signal event carries it; no
+    /// other event does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_wait: Option<ProcessSignalWaitBinding>,
+}
+
+/// The wait one signal event resolves: the ordinal of the process's wait for
+/// the signal's name (FIG-4298).
+///
+/// The append that admits a signal selects it, in the same store transaction
+/// that inserts the event: the ordinal of the wait the process declared for
+/// this name when it is parked on one, or else the signal's own position
+/// among the events of its type, which the process's next wait for the name
+/// will declare. The binding is retained on the event, so a redelivered or
+/// retried signal is served the wait it was admitted to, never whichever
+/// wait the process has advanced to since.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessSignalWaitBinding {
+    pub ordinal: u64,
 }
 
 /// Who wrote an [`ProcessStatus::Abandoned`] terminal (ADR 0110).
@@ -539,6 +560,132 @@ pub fn process_signal_wait_key(
     discriminator: impl std::fmt::Display,
 ) -> String {
     format!("process:{process_id}:signal.{signal_name}:{discriminator}")
+}
+
+/// One signal's identity (FIG-4299): the process it is sent to, its name and
+/// the sender's id for this one signal.
+///
+/// The identity is what makes a signal's append idempotent: its append key
+/// is derived from it, and only from it, so every retry, redelivery or replay
+/// of one signal lands on the one event its first append admitted. There is
+/// no caller-selected key beside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "ProcessSignalIdentityFields")]
+pub struct ProcessSignalIdentity {
+    process_id: ProcessId,
+    signal_name: String,
+    signal_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessSignalIdentityFields {
+    process_id: ProcessId,
+    signal_name: String,
+    signal_id: String,
+}
+
+impl TryFrom<ProcessSignalIdentityFields> for ProcessSignalIdentity {
+    type Error = crate::PluginError;
+
+    fn try_from(fields: ProcessSignalIdentityFields) -> Result<Self, Self::Error> {
+        Self::new(fields.process_id, fields.signal_name, fields.signal_id)
+    }
+}
+
+impl ProcessSignalIdentity {
+    /// The identity of the signal `signal_id` named `signal_name` sent to
+    /// `process_id`.
+    ///
+    /// # Errors
+    ///
+    /// A signal name that is not a valid signal name, or an empty signal id.
+    pub fn new(
+        process_id: ProcessId,
+        signal_name: impl Into<String>,
+        signal_id: impl Into<String>,
+    ) -> Result<Self, crate::PluginError> {
+        let signal_name = signal_name.into();
+        let signal_id = signal_id.into();
+        validate_process_signal_name(&signal_name)?;
+        if signal_id.is_empty() {
+            return Err(crate::PluginError::Session(format!(
+                "process signal `{signal_name}` to `{process_id}` must carry a non-empty signal id"
+            )));
+        }
+        Ok(Self {
+            process_id,
+            signal_name,
+            signal_id,
+        })
+    }
+
+    pub fn process_id(&self) -> &ProcessId {
+        &self.process_id
+    }
+
+    pub fn signal_name(&self) -> &str {
+        &self.signal_name
+    }
+
+    pub fn signal_id(&self) -> &str {
+        &self.signal_id
+    }
+
+    /// The event type the signal appends as.
+    pub fn event_type(&self) -> String {
+        format!("signal.{}", self.signal_name)
+    }
+
+    /// The append key the signal's event is deduplicated by, derived from the
+    /// whole identity.
+    pub fn append_key(&self) -> String {
+        process_signal_wait_key(&self.process_id, &self.signal_name, &self.signal_id)
+    }
+}
+
+/// One signal as it is admitted (FIG-4299, FIG-4301): its identity and the
+/// payload it carries.
+///
+/// This is the whole request a signal command makes. Its append request is
+/// derived from it, and a recorded admission retains it, so a replay can
+/// tell the signal it admitted from a changed one under the same identity.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessSignal {
+    pub identity: ProcessSignalIdentity,
+    pub payload: serde_json::Value,
+}
+
+impl ProcessSignal {
+    pub fn new(identity: ProcessSignalIdentity, payload: serde_json::Value) -> Self {
+        Self { identity, payload }
+    }
+
+    /// The append this signal makes: its event type and payload under the
+    /// append key its identity derives. A signal is news to the process's
+    /// session, so its wake is never suppressed.
+    pub fn append_request(&self) -> ProcessEventAppendRequest {
+        ProcessEventAppendRequest::new(self.identity.event_type(), self.payload.clone())
+            .with_replay_key(self.identity.append_key())
+    }
+}
+
+/// The wait a stored signal event was admitted to resolve (FIG-4298).
+///
+/// # Errors
+///
+/// An event that carries no binding: every signal append retains one, so
+/// this is an event that is not a signal, or a store that did not bind it.
+pub fn admitted_signal_wait(
+    event: &ProcessEvent,
+) -> Result<ProcessSignalWaitBinding, crate::PluginError> {
+    event.semantics.signal_wait.ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "process `{}` event {} (`{}`) carries no admitted signal wait",
+            event.process_id, event.sequence, event.event_type
+        ))
+    })
 }
 
 pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::PluginError> {

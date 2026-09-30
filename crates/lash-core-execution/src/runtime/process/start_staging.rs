@@ -1,13 +1,18 @@
 //! The store half of one process start: stage what the start carries under
 //! the start's referrer, then register the row (ADR 0113 §3.3).
 //!
-//! Staging is an acquisition of `Start(key)`, guarded by `AwaitStart` on the
+//! Engine staging acquires `Start(key)`, guarded by `AwaitStart` on the
 //! starter's journal: the guard row is armed before the first edge, so no
 //! staged byte exists without a durable record that will end it. Nothing
 //! here severs or moves an edge. The cleanup executor resolves the guard:
 //! onto the key's retained record once one is registered, or to nothing once
 //! the starter's journal is settled with no record. A terminal refusal before
 //! any process holds the key ends `Start(key)` at once.
+//!
+//! Input attachments acquire `StartInput(key, starter)` before registration.
+//! Its guard also awaits the retained start or the starter's settled journal;
+//! cleanup holds the retained input before ending staging. The starter makes
+//! this claim independent of earlier uses of a pruned host key.
 //!
 //! Every engine runs this one sequence. The local executor runs it inline; the
 //! Restate controller runs it inside one journaled step, so a replay of the
@@ -32,7 +37,7 @@ use crate::{
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
 /// its guards arm in (ADR 0113 §2.1, §2.4): what a process start, a trigger
-/// revision and a definition revision need to hold every artifact a
+/// revision and a definition publication need to hold every artifact a
 /// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
 /// name points at, whichever store holds it.
 #[derive(Clone)]
@@ -79,7 +84,7 @@ impl ArtifactReferrerPorts {
         Self::new(
             backend.module_artifacts(),
             backend.process_env_store(),
-            backend.process_definitions(),
+            backend.definition_store(),
             backend.attachment_referrers(),
             backend.artifact_cleanup(),
             backend.clock(),
@@ -247,6 +252,10 @@ pub struct ProcessStartStores<'a> {
     /// controller) or registered without staging engine artifacts (the local
     /// executor, whose host may serve engine rows elsewhere).
     pub engines_required: bool,
+    /// The session catalog a root start's host session-lookup grant is
+    /// checked against, inside the recorded admission this registration
+    /// runs in. `None` refuses a host-granted start.
+    pub session_catalog: Option<&'a dyn crate::store::RuntimeStore>,
     /// Names the executor in a refusal, e.g. "Restate process start".
     pub executor: &'static str,
     /// The journal of the scope running the start: the authority of the
@@ -302,7 +311,9 @@ impl RegisteredProcessStart {
 /// Stages and registers one process start.
 ///
 /// A start is addressed by its key (ADR 0107); a start with none is refused.
-/// Everything the start names is staged under `Start(key)` first. A start
+/// Engine artifacts are staged under `Start(key)` first. Input attachments
+/// use `StartInput(key, starter)`, so a later use of a pruned host key gets
+/// its own staging claim. A start
 /// whose key is already fenced — an earlier attempt settled it — stages
 /// nothing there and, once the registrar returns the row, acquires its own
 /// content directly under `ProcessRecord(id)` where the row adopts it.
@@ -311,6 +322,8 @@ impl RegisteredProcessStart {
 /// carries the retained row's content onto `ProcessRecord(id)`. A terminal
 /// refusal while no process holds the key upserts `Start(key)`'s `Ended`
 /// record instead: the authoritative abandonment (ADR 0113 §3.3).
+/// Input staging is nudged too; without a record its guard waits for the
+/// starter to settle, so a refused attempt cannot fence another starter's input.
 ///
 /// # Errors
 ///
@@ -320,7 +333,6 @@ pub async fn register_process_start(
     stores: &ProcessStartStores<'_>,
     registration: ProcessRegistration,
     observers: &[SessionId],
-    env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
@@ -329,20 +341,66 @@ pub async fn register_process_start(
             "a journaled process start must carry its start key",
         ));
     };
-    match stage_and_register(stores, &start_key, registration, observers, env_spec).await {
+    require_host_session_live(stores, &registration).await?;
+    match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
-                ports.nudge(&ArtifactReferrer::Start(start_key)).await;
+                ports
+                    .nudge(&ArtifactReferrer::Start(start_key.clone()))
+                    .await;
+                ports.nudge(&start_input_referrer(stores, &start_key)).await;
             }
             Ok(registered)
         }
         Err(error) => {
             if error.is_terminal() {
-                abandon_start(stores, start_key).await?;
+                abandon_start(stores, start_key.clone()).await?;
+                if let Some(ports) = stores.ports() {
+                    ports.nudge(&start_input_referrer(stores, &start_key)).await;
+                }
             }
             Err(error)
         }
     }
+}
+
+/// Refuse a root start whose host session-lookup grant names a session the
+/// catalog does not hold live.
+///
+/// The check belongs here, inside the start's recorded admission, and never
+/// ahead of the command: a replay after the session was deleted reads the
+/// recorded registration instead of looking the session up again, so it
+/// answers the start its first run made (ADR 0105 §1). The refusal is
+/// terminal, so the admission records it too.
+async fn require_host_session_live(
+    stores: &ProcessStartStores<'_>,
+    registration: &ProcessRegistration,
+) -> Result<(), RuntimeEffectControllerError> {
+    let super::model::LifetimeDecision::Until {
+        scope: super::model::ScopeId::Session(session_id),
+        grant: super::model::ScopeGrant::HostSessionLookup,
+    } = &registration.lifetime
+    else {
+        return Ok(());
+    };
+    let live = match stores.session_catalog {
+        Some(catalog) => crate::runtime::session_is_live(catalog, session_id)
+            .await
+            .map_err(RuntimeEffectControllerError::from)?,
+        None => false,
+    };
+    if live {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::HostSessionNotLive,
+        format!(
+            "{}: {} holds a host session-lookup grant for session `{session_id}`, which the \
+             catalog does not hold live",
+            stores.executor,
+            registration.refusal_name()
+        ),
+    ))
 }
 
 /// End `Start(key)` after a terminal refusal, unless a process already holds
@@ -381,7 +439,6 @@ async fn stage_and_register(
     start_key: &StartKey,
     mut registration: ProcessRegistration,
     observers: &[SessionId],
-    env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let claim = ReferrerClaim::guarded(
         ArtifactReferrer::Start(start_key.clone()),
@@ -390,9 +447,28 @@ async fn stage_and_register(
         },
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let definition = stage_definition(stores, &claim, &mut registration, env_spec).await?;
-    let env = stage_env(stores, &claim, &mut registration, env_spec).await?;
+    let env = stage_env(stores, &claim, &registration).await?;
+    let env_spec = match env.as_ref() {
+        Some(env) => Some(
+            super::load_process_execution_env(
+                stores
+                    .env_store
+                    .ok_or_else(|| {
+                        crate::PluginError::Session(
+                            "process environment store is unavailable".to_string(),
+                        )
+                    })?
+                    .as_ref(),
+                &env.env_ref,
+            )
+            .await
+            .map_err(crate::PluginError::from)?,
+        ),
+        None => None,
+    };
+    let definition = stage_definition(stores, &claim, &mut registration, env_spec.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
+    Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
     let registered = stores
@@ -453,9 +529,9 @@ async fn stage_and_register(
             .acquire(engine.engines, &process_claim, &engine.names)
             .await?;
     }
-    // The start input is held through the row the registration just minted
-    // (ADR 0124 §8.6): record, then acquire. A replay of this step answers
-    // `Existing` and acquires again; an acquisition is idempotent.
+    // StartInput holds the input before registration. Both this step and its
+    // cleanup acquire the retained record before staging's attachment edges
+    // end, so an abandoned caller leaves the handoff to the cleanup relay.
     if let Some(ports) = stores.ports() {
         crate::runtime::attachment_delivery::acquire_start_input(
             ports.attachments().as_ref(),
@@ -468,6 +544,76 @@ async fn stage_and_register(
         disposition,
         env_ref: submitted_env_ref,
     })
+}
+
+fn start_input_referrer(stores: &ProcessStartStores<'_>, start_key: &StartKey) -> ArtifactReferrer {
+    ArtifactReferrer::StartInput {
+        start_key: start_key.clone(),
+        starter: stores.starter.clone(),
+    }
+}
+
+/// Hold input attachments before the registrar publishes a row. A fenced
+/// attempt can only replay a retained row, whose own claim is acquired first.
+async fn stage_input(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+    input: &ProcessInput,
+) -> Result<(), RuntimeEffectControllerError> {
+    let ids = input.stored_attachment_ids();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let ports = stores.ports().ok_or_else(|| {
+        RuntimeEffectControllerError::foreign(
+            "process_start_input_store_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "{} carries stored input attachments but has no attachment stores",
+                stores.executor
+            ),
+        )
+    })?;
+    let claim = ReferrerClaim::guarded(
+        start_input_referrer(stores, start_key),
+        ArtifactCleanupPlan::AwaitStart {
+            starter: stores.starter.clone(),
+        },
+    )
+    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let acquired = ports
+        .attachments()
+        .acquire_attachment_refs(&claim, &ids)
+        .await;
+    match acquired {
+        Ok(()) => return Ok(()),
+        Err(crate::StoreError::ArtifactReferrerEnded { referrer })
+            if &referrer == claim.referrer() => {}
+        Err(crate::StoreError::UnknownAttachment { digest }) => {
+            return Err(RuntimeEffectControllerError::foreign(
+                "process_start_input_attachment_unavailable",
+                TurnFailureCause::Outcome,
+                format!(
+                    "{} start input names attachment `{digest}`, which has no upload evidence",
+                    stores.executor
+                ),
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let retained = stores.registry.get_process_by_start_key(start_key).await?;
+    let Some(retained) = retained else {
+        return Err(crate::StoreError::ArtifactReferrerEnded {
+            referrer: claim.referrer().clone(),
+        }
+        .into());
+    };
+    crate::runtime::attachment_delivery::acquire_start_input(
+        ports.attachments().as_ref(),
+        &retained,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Whether `Start(key)` was fenced after this start staged under it: one
@@ -493,12 +639,7 @@ async fn start_ended_after_staging(
         && env.staged
     {
         // The bytes are stored: acquire the reference, publish nothing.
-        let probe = StagedEnv {
-            env_ref: env.env_ref.clone(),
-            bytes: None,
-            staged: true,
-        };
-        return Ok(!acquire_env(env_store.as_ref(), claim, &probe).await?);
+        return Ok(!acquire_env(env_store.as_ref(), claim, env).await?);
     }
     if let Some(engine) = engine
         && engine.staged
@@ -518,71 +659,29 @@ async fn acquire_env(
     claim: &ReferrerClaim,
     env: &StagedEnv,
 ) -> Result<bool, RuntimeEffectControllerError> {
-    let acquired = match &env.bytes {
-        Some(bytes) => {
-            env_store
-                .publish_process_execution_env(claim, &env.env_ref, bytes)
-                .await
-        }
-        None => {
-            env_store
-                .acquire_process_execution_env(claim, &env.env_ref)
-                .await
-        }
-    };
+    let acquired = env_store
+        .acquire_process_execution_env(claim, &env.env_ref)
+        .await;
     Ok(held_or_ended(claim, acquired.map_err(crate::PluginError::from))?.is_none())
 }
 
 async fn stage_env(
     stores: &ProcessStartStores<'_>,
     claim: &ReferrerClaim,
-    registration: &mut ProcessRegistration,
-    env_spec: Option<&ProcessExecutionEnvSpec>,
+    registration: &ProcessRegistration,
 ) -> Result<Option<StagedEnv>, RuntimeEffectControllerError> {
-    let missing_store = |what: &str| {
-        RuntimeEffectControllerError::foreign(
-            "process_env_store_unavailable",
-            TurnFailureCause::Outcome,
-            format!(
-                "admitted {} {what} an execution environment but the executor has no environment store",
-                stores.executor
-            ),
-        )
-    };
-    let mut env = if let Some(env_spec) = env_spec {
-        let encode_error = |error: serde_json::Error| {
-            crate::PluginError::Session(format!(
-                "failed to encode process execution environment: {error}"
-            ))
-        };
-        let env_ref = env_spec.stable_ref().map_err(encode_error)?;
-        let bytes = env_spec.to_store_bytes().map_err(encode_error)?;
-        *registration = registration
-            .clone()
-            .with_execution_env_ref(Some(env_ref.clone()));
-        StagedEnv {
-            env_ref,
-            bytes: Some(bytes),
-            staged: false,
-        }
-    } else if let Some(env_ref) = registration.env_ref.clone() {
-        // An existing or inherited environment is acquired, never borrowed:
-        // the start's own edge is what keeps it alive (ADR 0113 §3.3).
-        StagedEnv {
-            env_ref,
-            bytes: None,
-            staged: false,
-        }
-    } else {
+    let Some(env_ref) = registration.env_ref.clone() else {
         return Ok(None);
     };
-    let env_store = stores.env_store.ok_or_else(|| {
-        missing_store(if env.bytes.is_some() {
-            "carries"
-        } else {
-            "references"
-        })
-    })?;
+    let env_store = stores.env_store.ok_or_else(|| RuntimeEffectControllerError::foreign(
+        "process_env_store_unavailable",
+        TurnFailureCause::Outcome,
+        format!("admitted {} references an execution environment but the executor has no environment store", stores.executor),
+    ))?;
+    let mut env = StagedEnv {
+        env_ref,
+        staged: false,
+    };
     env.staged = acquire_env(env_store.as_ref(), claim, &env).await?;
     Ok(Some(env))
 }
@@ -741,9 +840,6 @@ struct StagedDefinition<'a> {
 
 struct StagedEnv {
     env_ref: ProcessExecutionEnvRef,
-    /// The bytes a start that carries its spec publishes; `None` for an
-    /// existing or inherited reference, which is acquired.
-    bytes: Option<Vec<u8>>,
     /// Whether the start's own referrer holds it: `false` when `Start(key)`
     /// was already fenced.
     staged: bool,

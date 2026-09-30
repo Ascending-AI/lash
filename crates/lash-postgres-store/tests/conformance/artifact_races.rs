@@ -113,7 +113,7 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         .expect("publish under first frame");
     let mut state = state;
     let successor = append_successor_frame(&mut state);
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, ended, successor));
     session_store(&storage, session_id)
         .await
@@ -164,7 +164,7 @@ async fn postgres_first_commit_rejects_unappended_transition_source() {
     let session_id = state.session_id.clone();
     let successor = append_successor_frame(&mut state);
     let missing = lash_core_execution::FrameNodeId::new("not-appended").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, missing, successor));
     assert!(matches!(
         session_store(&storage, session_id.clone()).await.commit_runtime_state(commit).await,
@@ -183,9 +183,7 @@ async fn postgres_later_commit_rejects_transition_source_other_than_head_frame()
     let session_id = state.session_id.clone();
     let store = session_store(&storage, session_id.clone()).await;
     store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit initial frame");
     let mut state = lash_core_execution::store::load_session_window_state(
@@ -199,7 +197,7 @@ async fn postgres_later_commit_rejects_transition_source_other_than_head_frame()
     let prior_revision = state.head_revision;
     let successor = append_successor_frame(&mut state);
     let wrong = lash_core_execution::FrameNodeId::new("wrong-ended-frame").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, wrong, successor));
     assert!(matches!(
         store.commit_runtime_state(commit).await,
@@ -224,7 +222,7 @@ async fn postgres_first_commit_rejects_transition_successor_other_than_committed
     let ended = state.current_frame_node_id.clone().expect("initial frame");
     append_successor_frame(&mut state);
     let wrong = lash_core_execution::FrameNodeId::new("wrong-successor").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, ended, wrong));
     assert!(matches!(
         session_store(&storage, session_id.clone()).await.commit_runtime_state(commit).await,
@@ -239,7 +237,7 @@ async fn commit_frame_opens(
     state: &mut lash_core_execution::RuntimeSessionState,
     transition: Option<lash_core_execution::store::FrameTransition>,
 ) {
-    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(state, &[]);
+    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(state);
     let appended = commit
         .graph
         .nodes()
@@ -440,7 +438,7 @@ async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed(
             store: lash_core_execution::ArtifactStoreId::LashlangModule,
             artifact_ref: forged.into(),
         }];
-        let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+        let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
             .with_frame_transition(transition);
         let refused = store.commit_runtime_state(commit).await;
         assert!(

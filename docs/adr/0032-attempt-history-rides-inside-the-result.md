@@ -1,28 +1,67 @@
-# Attempt history rides inside the result, not a separate journal
+# Attempt history rides inside the result
 
-Execution evidence (ADR 0031) answers "what did the provider report about the response that was returned." It could not answer "what happened across the retries that produced it" — the retry loop that owns transport attempts collapsed failed tries into a transport error and returned only the successful response, so failed-attempt errors, served-model drift across a fallback, partial evidence observed before a stream died, and per-attempt timing all evaporated. Downstream, hosts had nothing truthful to record about the attempt ladder. We decided attempt history is a first-class typed contract that **rides inside the result**: the retry-owning seam accumulates one sealed immutable `AttemptRecord` per provider transport invocation and returns the whole `LlmCallRecord` attached to both success and failure. Whoever journals the effect result journals the ledger with it — there is **no separate attempt-journal persistence lane**.
+## Context
 
-The consequence, stated plainly: durable attempt history describes the execution that produced the durable result. Attempts from executions that never completed — a crash mid-retry — are live observation and telemetry, not durable evidence; recovery re-executes per Recovery Disposition, and the ledger that survives belongs to the execution that actually produced the committed outcome. This matches lash's recovery philosophy (a crashed execution's true outcome is unknowable) and gives replay determinism for free: the ledger lives inside the already-journaled effect payload, so replay returns identical records without reconstructing anything from logs. A separate append-only journal would buy crash-era billing evidence at the cost of a new lane, dedup on redelivery, retention policy, and a permanent reconcile-against-replay obligation — the machinery other stacks build *around not having* this. We accept losing crashed-mid-retry billing evidence from durable state as the honest trade.
+One successful response does not describe the failed or interrupted transport
+attempts that precede it. Hosts need the attempt history without a second
+persistence protocol beside the effect result.
 
-An **attempt is one provider transport invocation** — not a consumed retry-budget unit (a `Retry-After` courtesy re-invocation performs another attempt without charging budget; both are recorded, distinguished by `retry_budget_consumed`), not a semantic step, not an admission wait (a call-level event, never a fake attempt). Outcome is a small closed set — `Completed | Failed | Aborted | Interrupted` (`interrupted` = evidence ended without a declared cancellation or provider terminal; `aborted` = explicit cancellation won) — with orthogonal fields for retry decision, budget consumption, and `ProtocolPosition` (no response / response observed / output started / terminal observed) rather than one ever-growing enum. Each record carries structured provider-reported facts only, absence preserved (`Some(0) != None`): a normalized error (class, HTTP status, transport request id, `Retry-After`, and a failure code namespaced by who authored its spelling — `provider` spellings are verbatim provider vocabulary, `lash` spellings are the workspace's `TurnFailureCode` vocabulary, and host- or plugin-authored spellings ride their own namespace, never recolored into either), plus whatever `ExecutionEvidence` and usage were observed before the attempt ended. Identity is a lash-minted `LlmCallId` above the retry loop plus a per-attempt ordinal (`(call_id, ordinal)`); provider `request_id`/`response_id` stay separate evidence and are never overloaded as call identity. The "why this call ran" label is call-level, host- and plugin-supplied open vocabulary — core enumerates nothing.
+## Decision
 
-Amended 2026-09-29 (FIG-4087): Lash never persists provider free text. The attempt record carries structured provider-reported facts only; the raw provider message, where lash surfaces it, is live observation for the host's own sinks, and redaction is the host's concern.
+The retry-owning provider boundary seals one immutable `AttemptRecord` per
+transport invocation. `ProviderCompletion` and `ProviderCompletionError` both
+carry the complete `LlmCallRecord`. The runtime effect result journals that
+record with its outcome; there is no separate attempt journal.
 
-FIG-3435 cut the failure code over from the three-column `provider_code`/`adapter_code`/`refusal_code` projection to a single opaque `code` carrying a `{namespace, spelling}` pair serialized as `"<namespace>:<spelling>"`. The `lash` namespace is reserved for workspace-authored `TurnFailureCode` spellings; `provider` holds provider wire vocabulary; hosts and plugins write their own validated namespaces (lowercase ASCII letter, then letters/digits/`_`/`.`/`-`, 63 bytes). Decode is split by trust: `FailureCode::from_wire` is the trusted decode for rows Lash journaled — it resolves legacy bare values (a known `TurnFailureCode` reads as `lash:`, anything else as `provider:`) and preserves every namespaced value's authored namespace, including the pre-cutover `adapter:`/`refusal:` forms, which still read back as Lash vocabulary — while `FailureCode::from_foreign_wire` decodes spellings a foreign author delivered and never grants a reserved namespace: a value claiming `lash`/`provider`/`adapter`/`refusal`, and any bare spelling, lands in the `foreign` namespace with its claim preserved verbatim. Reserved names are unmintable from the outside: `Namespace::host` and `FailureCode::foreign` refuse `lash`, `provider`, and the retired `adapter`/`refusal` spellings, `TurnFailureCode::Other` is `#[non_exhaustive]` so `FailureCode::lash` stays on typed workspace vocabulary, and external-completion deserialization runs the foreign decode so a resolver's `lash:timeout` payload cannot acquire Lash ownership. The cutover bumps `SESSION_NODE_BODY_SCHEMA_VERSION` to 19 and `TURN_CHECKPOINT_SCHEMA_VERSION` to 6 — the durable records above carry the renamed shape — and `REMOTE_PROTOCOL_VERSION` to 85 for the mirror `RemoteNormalizedError`. `TRACE_SCHEMA_VERSION` moves to 25 with them: `TraceError.code` now carries the spelling alone beside a separate `code_namespace`, and `failure_kind` carries the classification OTel `error.type` projects, so a same-named event writes different bytes under the two generations. All sit under the same reject-and-recreate policy: a pre-cutover reader would recolor `lash:` spellings as provider vocabulary, and a post-cutover reader would silently drop the retired columns, so neither direction decodes under the other generation.
+An attempt is a transport invocation, not a retry-budget unit or an admission
+wait. A courtesy retry can produce another attempt without consuming retry
+budget. Each record has an ordinal, `Completed`, `Failed`, `Aborted` or
+`Interrupted` outcome, protocol position, budget-consumption fact and optional
+retry decision. `Aborted` means explicit cancellation; `Interrupted` means
+observation ends without a provider terminal or declared cancellation.
 
-There is **no `replay_safety` field**. Lash re-renders the full Prompt View on every call, and that view remains authoritative through frames, compaction and RLM masking. A provider may reuse a disposable cached response id only after checking the current full request's non-input fingerprint and that its input begins with the cached request plus response prefix. Cache drift declines the optimization; provider state never replaces the full request or becomes durable session authority. Client-carried reasoning and prompt caching remain portable continuity mechanisms.
+A Lash-minted `LlmCallId` identifies the logical call above retries. The pair
+`(call_id, ordinal)` identifies an attempt. Provider request and response ids
+remain evidence, not call identity. Records retain observed evidence and
+usage with absence intact, plus structured errors. A normalized error records
+failure kind, HTTP status, transport request id, retry-after and an opaque
+namespaced failure code. It does not persist the provider's diagnostic prose.
+Raw diagnostic text that Lash exposes is live observation for host sinks.
 
-Implementation lands in steps. Step 1 is the sans-IO contract plus the `ProviderHandle` seam: `complete` returns `ProviderCompletion`/`ProviderCompletionError` (each owning the ledger beside the unchanged response/error and deref-ing to it, so callers are untouched), with OpenAI-compatible/OpenRouter attempt extraction. Step 2 aggregates the per-call ledger onto `TurnReport` (parent-session scope; child calls stay on the child result) and mirrors it on the remote protocol behind a version bump — that is the whole of the runtime-side arc. ADR 0033 supersedes the earlier plan for a lash-computed "tagged final-output provenance": a turn has no single producing model to attribute (subagents, per-turn overrides, transport fallback, and RLM Final Values all make it a multi-model composite whose visible output may map to zero or many model calls), so lash exposes the per-call ledger and the host composes any higher-level view. Figments' chat-message audit is a host product decision derived from that ledger, not a lash contract.
+`FailureCode` preserves the author's namespace. Trusted journal decoding
+uses `from_wire`; foreign input uses `from_foreign_wire` and cannot acquire a
+reserved namespace by spelling one. Host and plugin namespaces are validated.
+These are vocabulary ownership rules, not an authentication policy.
 
-## Amendment (FIG-4125, 2026-09-29)
+The turn report aggregates calls from that session. Child-session calls remain
+on child results. Lash exposes no final-output provenance selector (ADR 0033).
+Durable attempt history belongs to the execution that produces the recorded
+outcome. A crash before recording that outcome can lose its attempt history;
+the engine owns recovery under ADR 0110.
 
-Item 10: [ADR 0110](0110-the-engine-owns-process-recovery.md) governs recovery.
-A failed attempt without a committed result is live observation, while the
-completed result carries its committed attempt history; old engine-specific
-recovery language here is historical.
+The full Prompt View remains authoritative on every call. A provider may reuse
+a disposable cached response id only after validating the current request's
+non-input fingerprint and cached input-plus-response prefix. Drift declines
+reuse. Provider cache state is not durable session authority.
 
-## Amendment (FIG-4163, 2026-09-30)
+## Consequences
 
-The blanket unsupported-continuation wording is historical: disposable cached-prefix reuse is allowed while the full Prompt View remains authoritative.
-[`cached_websocket_body_result`](../../crates/lash-provider-openai/src/codex/continuation.rs)
-checks both the request fingerprint and input prefix before attaching the cached response id.
+Replay returns the recorded ledger with the effect result without rebuilding
+it from telemetry. A separate append-only attempt journal is rejected because
+it needs its own redelivery deduplication, retention and reconciliation with
+replay. The accepted trade is that an unrecorded crash-era attempt is not
+durable billing evidence. Hosts own any supplementary live telemetry archive.
+
+## Implementation
+
+- [Call and attempt types](../../crates/lash-sansio/src/llm/types.rs) and [retry ownership](../../crates/lash-core-llm/src/provider/handle.rs).
+- [Runtime call result](../../crates/lash-core/src/runtime/turn_driver/local_effects.rs) and [turn report vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs).
+- [Failure-code decoding](../../crates/lash-sansio/src/session_model/failure.rs).
+- [Cached-prefix validation](../../crates/lash-provider-openai/src/codex/continuation.rs).
+
+## Model usage accounting
+
+The facts a usage run delivers are projected from the attempt history of each
+call's sealed record, one per attempt the dispatch gate admitted. The recorded
+usage rides beside the effect's outcome in its journal entry, outside the
+outcome, so an `Err` outcome keeps its spend ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

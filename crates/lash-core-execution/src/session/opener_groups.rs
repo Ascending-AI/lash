@@ -412,17 +412,19 @@ impl<'run> RuntimeExecutionContext<'run> {
             remaining.push(group);
         }
         for (group_key, children) in remaining {
-            let past_every_commit = u64::try_from(children)
+            // Past the last rank: every committed child of the closed group
+            // has seated, or retirement released the wait.
+            let past_every_rank = u64::try_from(children)
                 .ok()
                 .and_then(|children| children.checked_add(1))
                 .ok_or_else(|| {
                     RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        format!("effect group {group_key} has more children than commit positions"),
+                        format!("effect group {group_key} has more children than ranks"),
                     )
                 })?;
             controller
-                .await_group_child_drain_admission(&group_key, past_every_commit)
+                .await_group_child_drain_admission(&group_key, past_every_rank)
                 .await?;
         }
         for group_key in &closed.groups {

@@ -460,7 +460,13 @@ pub(super) async fn wait_for_s3(store: &impl lash::persistence::AttachmentStore)
     let mut last_error = None;
     while Instant::now() < deadline {
         match store.put(b"runner-s3-health".to_vec(), meta.clone()).await {
-            Ok(reference) => match store.get(&reference.id).await {
+            Ok(reference) => match store
+                .get(
+                    &reference.id,
+                    lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+                )
+                .await
+            {
                 Ok(stored) if stored.bytes == b"runner-s3-health" => return Ok(()),
                 Ok(_) => last_error = Some("S3 health attachment bytes changed".to_string()),
                 Err(err) => last_error = Some(err.to_string()),

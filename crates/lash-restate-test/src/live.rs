@@ -209,16 +209,24 @@ fn sql_literal(value: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// See the module documentation.
-#[derive(Clone)]
-pub struct LiveRestateBackend {
-    inner: Arc<Inner>,
+pub struct LiveRestateBackend<Stores: StoreSet + ?Sized = lash_sqlite_store::SqliteStoreSet> {
+    inner: Arc<Inner<Stores>>,
 }
 
-struct Inner {
+impl<Stores: StoreSet + ?Sized> Clone for LiveRestateBackend<Stores> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+struct Inner<Stores: StoreSet + ?Sized> {
     config: LiveConfig,
     segment_effect_budget: Option<u64>,
     restate: Arc<RestateEngine>,
-    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    stores: Arc<Stores>,
+    engine_stores: Arc<dyn StoreSet>,
     clock: Arc<LiveClock>,
     connection: RestateConnection,
     admin: RestateAdminClient,
@@ -229,13 +237,13 @@ struct Inner {
 
 /// The last handle gone, the deployment dies: its accept loop holds the
 /// endpoint's address, which the next backend binds.
-impl Drop for Inner {
+impl<Stores: StoreSet + ?Sized> Drop for Inner<Stores> {
     fn drop(&mut self) {
         self.serving.stop(true);
     }
 }
 
-impl std::fmt::Debug for LiveRestateBackend {
+impl<Stores: StoreSet + ?Sized> std::fmt::Debug for LiveRestateBackend<Stores> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LiveRestateBackend")
@@ -313,6 +321,7 @@ impl LiveRestateBackend {
         Self::start_over(
             config,
             segment_effect_budget,
+            Arc::clone(&stores) as Arc<dyn StoreSet>,
             stores,
             clock,
             lash_core::engine::BuildGeneration::for_test("t0"),
@@ -321,7 +330,34 @@ impl LiveRestateBackend {
         )
         .await
     }
+}
 
+impl LiveRestateBackend<dyn StoreSet> {
+    /// Serve the real Restate endpoint over a supplied storage implementation.
+    pub async fn start_with_store_set<StoreFuture>(
+        config: LiveConfig,
+        make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
+    ) -> Result<Self, LiveError>
+    where
+        StoreFuture: Future<Output = Result<Arc<dyn StoreSet>, LiveError>>,
+    {
+        let clock = Arc::new(LiveClock::default());
+        let stores = make_stores(Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await?;
+        Self::start_over(
+            config,
+            None,
+            Arc::clone(&stores),
+            stores,
+            clock,
+            lash_core::engine::BuildGeneration::for_test("t0"),
+            true,
+            Box::new(|builder| builder),
+        )
+        .await
+    }
+}
+
+impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
     /// Replace the deployment with a new engine and endpoint over its durable
     /// stores. Worker slots, handlers, watches and caches are constructed anew.
     /// The caller must install a new process worker and session driver. Test
@@ -344,6 +380,7 @@ impl LiveRestateBackend {
         Self::start_over(
             self.inner.config.clone(),
             self.inner.segment_effect_budget,
+            Arc::clone(&self.inner.engine_stores),
             Arc::clone(&self.inner.stores),
             Arc::clone(&self.inner.clock),
             build_generation.clone(),
@@ -353,10 +390,15 @@ impl LiveRestateBackend {
         .await
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "deployment needs typed stores, erased engine stores and host service bindings"
+    )]
     async fn start_over(
         config: LiveConfig,
         segment_effect_budget: Option<u64>,
-        stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+        engine_stores: Arc<dyn StoreSet>,
+        stores: Arc<Stores>,
         clock: Arc<LiveClock>,
         build_generation: lash_core::engine::BuildGeneration,
         register: bool,
@@ -367,7 +409,7 @@ impl LiveRestateBackend {
         let authority = RestateAuthorityId::new(format!("lash-live-{}", config.run_tag))
             .map_err(|error| LiveError::Authority(error.to_string()))?;
         let restate = Arc::new(RestateEngine::new(
-            Arc::clone(&stores) as Arc<dyn StoreSet>,
+            Arc::clone(&engine_stores),
             RestateConfig::new(
                 connection.clone(),
                 admin_connection.clone(),
@@ -418,6 +460,7 @@ impl LiveRestateBackend {
                 segment_effect_budget,
                 restate,
                 stores,
+                engine_stores,
                 clock,
                 connection,
                 admin: RestateAdminClient::new(admin_connection),
@@ -483,7 +526,7 @@ impl LiveRestateBackend {
     }
 
     /// The store set the engine runs over.
-    pub fn stores(&self) -> &Arc<lash_sqlite_store::SqliteStoreSet> {
+    pub fn stores(&self) -> &Arc<Stores> {
         &self.inner.stores
     }
 
@@ -691,6 +734,55 @@ impl LiveRestateBackend {
                 )
             })
             .collect())
+    }
+
+    /// The journal entries of `id` with their stored bytes: `index:type:name`
+    /// and the entry's raw encoding, as the server keeps it.
+    pub async fn journal_entries(&self, id: &str) -> Result<Vec<(String, Vec<u8>)>, LiveError> {
+        use base64::Engine as _;
+        #[derive(serde::Deserialize)]
+        struct Entry {
+            index: u64,
+            entry_type: String,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            raw: Option<String>,
+        }
+        const RAW: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
+            &base64::alphabet::STANDARD,
+            base64::engine::GeneralPurposeConfig::new()
+                .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
+        );
+        let entries: Vec<Entry> = self
+            .inner
+            .admin
+            .query_json(&format!(
+                "SELECT index, entry_type, name, encode(raw, 'base64') AS raw \
+                 FROM sys_journal WHERE id = {} ORDER BY index",
+                sql_literal(id)
+            ))
+            .await
+            .map_err(|error| LiveError::Admin(error.to_string()))?;
+        entries
+            .into_iter()
+            .map(|entry| {
+                let bytes = RAW
+                    .decode(entry.raw.unwrap_or_default().trim())
+                    .map_err(|error| {
+                        LiveError::Admin(format!("undecodable journal entry: {error}"))
+                    })?;
+                Ok((
+                    format!(
+                        "{}:{}:{}",
+                        entry.index,
+                        entry.entry_type,
+                        entry.name.unwrap_or_default()
+                    ),
+                    bytes,
+                ))
+            })
+            .collect()
     }
 
     /// Kill `id` as an operator does and wait until the server completed it.

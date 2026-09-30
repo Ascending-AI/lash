@@ -94,6 +94,7 @@ impl ProcessLocalExecution {
             process_starts,
             process_env_store,
             process_engines,
+            session_catalog,
             turn_cancellation,
             effect_controller,
             attachments,
@@ -103,7 +104,6 @@ impl ProcessLocalExecution {
             ProcessCommand::Start {
                 registration,
                 observers,
-                env_spec,
                 execution_context,
             } => {
                 let starter = process_start_starter(&registration, &execution_context)?;
@@ -118,12 +118,12 @@ impl ProcessLocalExecution {
                         env_store: process_env_store.as_ref(),
                         engines: process_engines.as_ref(),
                         engines_required: false,
+                        session_catalog: session_catalog.as_deref(),
                         executor: "process start on the local executor",
                         starter: &starter,
                     },
                     registration,
                     &observers,
-                    env_spec.as_ref(),
                 )
                 .await?;
                 let realization = started.realization();
@@ -269,7 +269,7 @@ impl ProcessLocalExecution {
                     await_terminal().await?
                 };
                 // Acquire, then return: the return is what the local executor
-                // records (ADR 0124 §8.3). A direct await holds no consumer
+                // records (ADR 0124 §4). A direct await holds no consumer
                 // hold, so a child pruned mid-wait answers the typed
                 // source-gone failure.
                 let output = delivered_output(attachments.as_ref(), receiver, output).await?;
@@ -315,7 +315,7 @@ impl ProcessLocalExecution {
                         {
                             // Acquire before the key resolves: the waiter's
                             // journal records the value the resolution carries
-                            // (ADR 0124 §8.2).
+                            // (ADR 0124 §4).
                             // A store fault leaves the wait open rather than
                             // recording a failure the fault did not decide:
                             // the redriven turn re-arms and acquires again.
@@ -388,73 +388,35 @@ impl ProcessLocalExecution {
                     realization,
                 ))
             }
-            ProcessCommand::CancelRefused { refusal, .. } => Ok((
-                ProcessEffectOutcome::CancelRefused { refusal },
-                crate::StoreRealization::Realized,
-            )),
-            ProcessCommand::Signal {
-                process_id,
-                signal_name,
-                request,
-                ..
-            } => {
+            ProcessCommand::Signal { signal } => {
                 let effect_controller = effect_controller.ok_or_else(|| {
                     RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                         "local process signal execution requires its effect controller",
                     )
                 })?;
-                let result = registry.append_event(&process_id, request).await?;
+                let process_id = signal.identity.process_id();
+                // The append admits the signal and selects the wait it
+                // resolves in one store transaction; a redelivered signal is
+                // served its admitted event and that same wait (FIG-4298).
+                let result = registry
+                    .append_event(process_id, signal.append_request())
+                    .await?;
                 let realization = result.realization;
-                let waiting_ordinal =
-                    registry
-                        .get_process(&process_id)
-                        .await?
-                        .and_then(|record| match record.wait {
-                            Some(crate::WaitState {
-                                kind:
-                                    crate::WaitKind::Signal {
-                                        name,
-                                        event_type,
-                                        ordinal,
-                                        ..
-                                    },
-                                ..
-                            }) if name == signal_name && event_type == result.event.event_type => {
-                                Some(ordinal)
-                            }
-                            _ => None,
-                        });
-                let ordinal = match waiting_ordinal {
-                    Some(ordinal) => ordinal,
-                    None => {
-                        registry
-                            .count_events_through(
-                                &process_id,
-                                result.event.event_type.as_str(),
-                                result.event.sequence,
-                            )
-                            .await?
-                    }
-                };
-                if ordinal > 0 {
-                    let key = effect_controller
-                        .await_event_key(
-                            &crate::ExecutionScope::process(&process_id),
-                            crate::AwaitEventWaitIdentity::process_signal(
-                                &process_id,
-                                &signal_name,
-                                ordinal,
-                            ),
-                        )
-                        .await?;
-                    let _ = effect_controller
-                        .resolve_await_event(
-                            &key,
-                            crate::Resolution::Ok(result.event.payload.clone()),
-                        )
-                        .await?;
-                }
+                let wait = crate::runtime::process::admitted_signal_wait(&result.event)?;
+                let key = effect_controller
+                    .await_event_key(
+                        &crate::ExecutionScope::process(process_id),
+                        crate::AwaitEventWaitIdentity::process_signal(
+                            process_id,
+                            signal.identity.signal_name(),
+                            wait.ordinal,
+                        ),
+                    )
+                    .await?;
+                let _ = effect_controller
+                    .resolve_await_event(&key, crate::Resolution::Ok(result.event.payload.clone()))
+                    .await?;
                 Ok((
                     ProcessEffectOutcome::Signal {
                         event: Box::new(result.event),
@@ -475,12 +437,12 @@ impl ProcessLocalExecution {
                     result.realization,
                 ))
             }
-            ProcessCommand::PublishDefinition { .. }
-            | ProcessCommand::GetDefinition { .. }
-            | ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "register-definition requires the process-definition registry executor",
-            )),
+            ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. } => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    "publish/get-definition requires the definition executor",
+                ))
+            }
         };
         if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
             observer(outcome, *realization);
@@ -490,91 +452,61 @@ impl ProcessLocalExecution {
 }
 
 impl ProcessDefinitionLocalExecution {
-    /// Runs the journaled definition CAS write (FIG-3470).
-    ///
-    /// `operation_id` is the envelope's replay key: the registry keys the
-    /// idempotent CAS on it, so a redrive of the same admission re-attaches to
-    /// the recorded registration instead of writing a second one.
+    /// Runs the journaled immutable-definition command: `PublishDefinition`
+    /// stores the descriptor and its closure's edges, `GetDefinition`
+    /// acquires the closure under the claim, both through the engine's
+    /// artifact ports.
     pub async fn execute(
         self,
-        operation_id: &str,
         command: ProcessCommand,
     ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
-        let registry = match self {
-            Self::Artifacts { engines, claim } => {
-                let ports = engines.artifact_ports().ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                        "definition artifact ports are unavailable",
-                    )
-                })?;
-                let definition = match command {
-                    ProcessCommand::PublishDefinition { draft, module } => {
-                        if let Some(module) = module {
-                            ports
-                                .modules()
-                                .publish_module_artifact(
-                                    &claim,
-                                    &module.module_ref,
-                                    module.bytes.as_bytes(),
-                                )
-                                .await
-                                .map_err(crate::PluginError::from)?;
-                        }
-                        ports.publish_definition(&engines, &claim, &draft).await?
-                    }
-                    ProcessCommand::GetDefinition { definition_id } => {
-                        match ports
-                            .acquire_definition(&engines, &claim, &definition_id)
-                            .await?
-                        {
-                            crate::DefinitionAcquisition::Held(resolved) => resolved.definition,
-                            crate::DefinitionAcquisition::Ended => {
-                                return Err(crate::PluginError::from(
-                                    crate::ArtifactStoreError::ReferrerEnded {
-                                        referrer: claim.referrer().clone(),
-                                    },
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                            "definition artifacts serve only publish/get",
-                        ));
-                    }
-                };
-                return Ok(ProcessEffectOutcome::Definition {
-                    definition: Box::new(definition),
-                });
-            }
-            Self::Registry { registry } => registry,
-        };
-        let ProcessCommand::RegisterDefinition {
-            owner_scope,
-            name,
-            pinned,
-            expectation,
-        } = command
-        else {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "process-definition registry serves only the register-definition command",
-            ));
-        };
-        let registration = registry
-            .register_definition(
-                operation_id,
-                owner_scope,
-                &name,
-                pinned,
-                expectation.as_ref(),
+        let Self { engines, claim } = self;
+        let ports = engines.artifact_ports().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "definition artifact ports are unavailable",
             )
-            .await?;
-        Ok(ProcessEffectOutcome::RegisterDefinition {
-            registration: Box::new(registration),
+        })?;
+        let definition = match command {
+            ProcessCommand::PublishDefinition { draft, module } => {
+                if let Some(module) = module {
+                    ports
+                        .modules()
+                        .publish_module_artifact(
+                            &claim,
+                            &module.module_ref,
+                            module.bytes.as_bytes(),
+                        )
+                        .await
+                        .map_err(crate::PluginError::from)?;
+                }
+                ports.publish_definition(&engines, &claim, &draft).await?
+            }
+            ProcessCommand::GetDefinition { definition_id } => {
+                match ports
+                    .acquire_definition(&engines, &claim, &definition_id)
+                    .await?
+                {
+                    crate::DefinitionAcquisition::Held(resolved) => resolved.definition,
+                    crate::DefinitionAcquisition::Ended => {
+                        return Err(crate::PluginError::from(
+                            crate::ArtifactStoreError::ReferrerEnded {
+                                referrer: claim.referrer().clone(),
+                            },
+                        )
+                        .into());
+                    }
+                }
+            }
+            _ => {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    "the definition executor serves only publish/get-definition",
+                ));
+            }
+        };
+        Ok(ProcessEffectOutcome::Definition {
+            definition: Box::new(definition),
         })
     }
 }

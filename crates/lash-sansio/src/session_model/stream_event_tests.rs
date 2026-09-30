@@ -73,7 +73,7 @@ macro_rules! message_kinds {
 }
 
 message_kinds! {
-    TypescriptCode => "typescript_code",
+    Code => "code",
     ChildStreamTruncated => "child_stream_truncated",
 }
 
@@ -225,12 +225,12 @@ fn sample_events() -> Vec<(&'static str, SessionStreamEvent, serde_json::Value)>
             }),
         ),
         (
-            "message (typescript_code)",
+            "message (code)",
             SessionStreamEvent::Message {
                 text: "finish(1);".to_string(),
-                kind: StreamMessageKind::TypescriptCode,
+                kind: StreamMessageKind::Code,
             },
-            json!({ "type": "message", "text": "finish(1);", "kind": "typescript_code" }),
+            json!({ "type": "message", "text": "finish(1);", "kind": "code" }),
         ),
         (
             "message (child_stream_truncated)",

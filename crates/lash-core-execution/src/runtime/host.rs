@@ -49,6 +49,9 @@ pub struct RuntimeDurabilityConfig {
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    /// The ledger every spending effect's usage run is admitted to and
+    /// settled in (ADR 0125): the backend's own.
+    pub usage_accounting: Arc<dyn crate::UsageAccountingStore>,
 }
 
 #[derive(Clone)]
@@ -181,7 +184,7 @@ impl RuntimeHostConfig {
     /// There is intentionally no `Default` and no in-memory constructor. The
     /// backend and the commit limits decide a runtime's durability envelope,
     /// so hosts must choose them rather than silently inheriting policy; the
-    /// zero-infra choice is a SQLite memory backend (ADR 0102, D3).
+    /// local durable choice is Restate over SQLite file storage (ADR 0104 §4).
     pub fn new(
         backend: crate::Backend,
         commit_budget: crate::CommitBudget,
@@ -190,6 +193,7 @@ impl RuntimeHostConfig {
         let effect_host = backend.effect_host();
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
+        let usage_accounting = backend.usage_accounting();
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
         let tool_children =
@@ -216,6 +220,7 @@ impl RuntimeHostConfig {
                     attachment_store,
                 )),
                 process_env_store,
+                usage_accounting,
             },
             process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
@@ -267,6 +272,7 @@ impl RuntimeHostConfig {
         self.durability.attachment_store = Arc::new(
             crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
                 .with_max_attachment_bytes(max_attachment_bytes)
+                .with_read_policy(self.durability.attachment_store.read_policy())
                 .with_upload_expiry_ms(upload_expiry_ms)
                 .with_output_retention(output_retention),
         );
@@ -290,11 +296,6 @@ impl RuntimeHostConfig {
     /// The backend's trigger subscriptions and occurrences.
     pub fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
         self.backend.trigger_store()
-    }
-
-    /// The backend's named process-definition registry (FIG-2995).
-    pub fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
-        self.backend.process_definition_registry()
     }
 
     /// Replace the runtime time source. Hosts that need deterministic replay or
@@ -321,6 +322,15 @@ impl RuntimeHostConfig {
             self.durability
                 .attachment_store
                 .reconfigured_max_attachment_bytes(max_attachment_bytes),
+        );
+        self
+    }
+
+    pub fn with_attachment_read_policy(mut self, policy: crate::AttachmentReadPolicy) -> Self {
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_read_policy(policy),
         );
         self
     }
@@ -428,6 +438,17 @@ impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
     ) -> Result<(), crate::PluginError> {
         self.process_engines = self.process_engines.clone().try_with_engine(registration)?;
         Ok(())
+    }
+}
+
+impl RuntimeHostConfig {
+    /// Where this host's spending effects account their provider calls: its
+    /// backend's ledger, stamped by its clock (ADR 0125).
+    pub fn usage_accounting(&self) -> crate::UsageAccountingBinding {
+        crate::UsageAccountingBinding::new(
+            Arc::clone(&self.durability.usage_accounting),
+            Arc::clone(&self.clock),
+        )
     }
 }
 

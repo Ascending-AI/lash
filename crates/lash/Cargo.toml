@@ -23,6 +23,8 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vm-client = { workspace = true, optional = true }
+lash-vm-worker = { workspace = true, optional = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
@@ -60,6 +62,8 @@ tracing = { workspace = true }
 [features]
 default = []
 rlm = [
+    "dep:lash-vm-client",
+    "dep:lash-vm-worker",
     "dep:lash-lashlang-runtime",
     "dep:lash-protocol-rlm",
     "dep:lash-render",
@@ -88,6 +92,7 @@ http-transport = ["dep:lash-http-transport"]
 testing = [
     "lash-core/testing",
     "lash-protocol-rlm?/testing",
+    "lash-vm-worker?/testing",
     "lashlang?/testing",
 ]
 # Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
@@ -131,3 +136,15 @@ tracing-subscriber = { workspace = true }
 # The compile-fail proof that a Restate process segment cannot reach its
 # effects without the committed start marker's proof (FIG-3588).
 lash-restate = { workspace = true }
+
+[[bin]]
+name = "lash-seam-proof-worker"
+path = "tests/seam_proof_dialect/worker.rs"
+required-features = ["rlm", "testing"]
+test = false
+
+[[example]]
+name = "worker_host"
+path = "examples/worker_host.rs"
+required-features = ["rlm", "typescript"]
+test = false

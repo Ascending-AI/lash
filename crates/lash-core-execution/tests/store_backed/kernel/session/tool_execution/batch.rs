@@ -62,7 +62,6 @@ mod tests {
             session_graph: host,
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: scoped,
             direct_completions: crate::DirectCompletionClient::unavailable(
@@ -563,7 +562,6 @@ mod tests {
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::runtime::ScopedEffectController::shared(
                 controller,

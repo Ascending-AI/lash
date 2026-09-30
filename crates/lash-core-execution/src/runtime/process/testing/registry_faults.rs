@@ -37,7 +37,9 @@ type ExternalRefWriteHold =
 
 #[derive(Default)]
 struct ReadFaultPlan {
+    delete_error: Option<crate::PluginError>,
     error: Option<crate::PluginError>,
+    wake_defer_error: Option<crate::PluginError>,
     error_after: Option<(usize, crate::PluginError)>,
     absent: bool,
     record_override: Option<crate::ProcessRecord>,
@@ -129,6 +131,22 @@ impl ProcessRegistryFaults {
             injected_wakes: Arc::default(),
             process_point_reads: Arc::default(),
         }
+    }
+
+    /// The next session cleanup fails before changing process state.
+    pub fn fail_next_session_delete(&self, error: crate::PluginError) {
+        self.faults.lock_recover().delete_error = Some(error);
+    }
+
+    async fn delete_session_faulted(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::ProcessSessionDeleteReport, crate::PluginError> {
+        let error = self.faults.lock_recover().delete_error.take();
+        if let Some(error) = error {
+            return Err(error);
+        }
+        self.inner.delete_session_process_state(session_id).await
     }
 
     /// Every point read fails with `error` until cleared with `None`.
@@ -313,6 +331,16 @@ impl ProcessRegistryFaults {
         delivery.attempts = 1;
         self.injected_wakes.lock_recover().push(delivery);
         Ok(())
+    }
+
+    /// Return a retained claim from a superseded owner in the next page.
+    pub fn inject_claimed_wake(&self, delivery: crate::WakeDelivery) {
+        self.injected_wakes.lock_recover().push(delivery);
+    }
+
+    /// Fail the next wake defer write, without touching its durable claim.
+    pub fn set_wake_defer_error(&self, error: Option<crate::PluginError>) {
+        self.faults.lock_recover().wake_defer_error = error;
     }
 
     fn faulted_read(&self) -> Option<Result<Option<crate::ProcessRecord>, crate::PluginError>> {
@@ -519,7 +547,7 @@ delegate_process_registrar!(
     }
 );
 
-delegate_process_observer_registry!(ProcessRegistryFaults, inner);
+delegate_process_observer_registry!(ProcessRegistryFaults, inner, delete_session_faulted);
 
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {
@@ -852,6 +880,10 @@ impl super::super::registry_concerns::ProcessWakeOutbox for ProcessRegistryFault
         claim_token: &str,
         next_attempt_at_ms: u64,
     ) -> Result<crate::WakeDeliveryClaimOutcome, crate::PluginError> {
+        let injected = self.faults.lock_recover().wake_defer_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner
             .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
             .await

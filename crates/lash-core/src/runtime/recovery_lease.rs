@@ -4,7 +4,7 @@
 //! the parks arm, rate-bounded repair scans, drain hand-over, park-feed
 //! compaction and opt-in retention; on SQLite also the due-obligation claims.
 //! Every other duty runs on every deployment. The lease is load control, never
-//! a fence: every duty stays idempotent when two leaders overlap (ADR 0080).
+//! a fence: every duty stays idempotent when two leaders overlap (ADR 0109 §1.6).
 //!
 //! [`RecoveryLease::step`] makes one acquire-or-renew attempt against the
 //! store; the host repeats it on [`RecoveryLease::next_delay`]'s cadence. The

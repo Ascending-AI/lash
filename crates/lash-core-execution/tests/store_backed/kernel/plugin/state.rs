@@ -6,7 +6,7 @@ mod tests {
 
     /// A memory backend's catalog holding the session the test commits.
     async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimeStore> {
-        let catalog = crate::support::memory_store_set()
+        let catalog = crate::support::sqlite_memory_store_set()
             .await
             .session_store_factory();
         crate::SessionCatalogStore::admit_session(
@@ -56,7 +56,7 @@ mod tests {
         state.refresh_plugin_states(&plugins);
         let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
             &store,
-            crate::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            crate::RuntimeCommit::persisted_state_for_test(&state),
             "generation-gate",
         )
         .await
@@ -64,7 +64,7 @@ mod tests {
         state.apply_persisted_commit_result(receipt);
         state.refresh_plugin_states(&plugins);
         assert!(matches!(
-            crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+            crate::RuntimeCommit::persisted_state_for_test(&state)
                 .checkpoint
                 .components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
             crate::HydratedCheckpointComponent::Unchanged { .. }
@@ -73,7 +73,7 @@ mod tests {
         state.refresh_plugin_states(&plugins);
         assert!(
             matches!(
-                crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+                crate::RuntimeCommit::persisted_state_for_test(&state)
                     .checkpoint
                     .components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
                 crate::HydratedCheckpointComponent::Changed { .. }
@@ -100,7 +100,7 @@ mod tests {
         };
         handle.set("value", serde_json::json!(1)).unwrap();
         state.refresh_plugin_states(&plugins);
-        let captured = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let captured = crate::RuntimeCommit::persisted_state_for_test(&state);
         handle.set("value", serde_json::json!(2)).unwrap();
         let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
             &store,
@@ -116,7 +116,7 @@ mod tests {
             serde_json::json!(1)
         );
         state.refresh_plugin_states(&plugins);
-        let next = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let next = crate::RuntimeCommit::persisted_state_for_test(&state);
         assert!(matches!(
             next.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
             crate::HydratedCheckpointComponent::Changed { .. }

@@ -12,7 +12,7 @@ mod concern_isolation_tests {
         PluginError, ProcessId, ProcessObserverRegistry, ProcessQuery, ProcessRegistry, SessionId,
     };
 
-    use crate::support::memory_store_set;
+    use crate::support::sqlite_memory_store_set;
 
     /// The positive twin of the module's `compile_fail` witness: a decorator
     /// that composes only the observer concern (plus its declared
@@ -149,7 +149,7 @@ mod concern_isolation_tests {
 
     #[tokio::test]
     async fn an_observer_only_wrapper_composes_without_any_other_concern() {
-        let backend = memory_store_set().await;
+        let backend = sqlite_memory_store_set().await;
         let inner = backend.process_registry() as Arc<dyn ProcessRegistry>;
         let proc_observer_isolation_record = inner
             .register_process(ProcessRegistration::new(

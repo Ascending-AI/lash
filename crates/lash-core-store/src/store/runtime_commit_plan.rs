@@ -11,8 +11,8 @@ use std::collections::HashSet;
 
 use super::{
     AppendRequestIdentity, BlobRef, RuntimeCommit, RuntimeCommitReceipt,
-    RuntimeCommitReceiptDecision, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHeadMeta,
-    StoreError, decide_runtime_commit_receipt,
+    RuntimeCommitReceiptDecision, SessionCheckpoint, SessionHeadMeta, StoreError,
+    decide_runtime_commit_receipt,
 };
 
 /// Durable receipt fields read by a backend before attempting a commit.
@@ -132,7 +132,6 @@ pub struct RuntimeCommitPlanner {
     turn_commit_hash: String,
     operation_key: String,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
-    committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
     turn_input_applications: Vec<crate::TurnInputApplication>,
 }
 
@@ -162,11 +161,6 @@ impl RuntimeCommitPlanner {
                 timestamp: node.timestamp.clone(),
             })
             .collect();
-        let committed_usage_delta_identities = commit
-            .usage_deltas
-            .iter()
-            .map(|delta| delta.identity.clone())
-            .collect();
         let turn_input_applications = commit.turn_input_applications();
 
         Ok(Self {
@@ -175,7 +169,6 @@ impl RuntimeCommitPlanner {
             turn_commit_hash,
             operation_key,
             realized_node_timestamps,
-            committed_usage_delta_identities,
             turn_input_applications,
         })
     }
@@ -366,7 +359,6 @@ impl RuntimeCommitPlanner {
             derived_frame_node_id,
             planned_node_facts,
             realized_node_timestamps: self.realized_node_timestamps.clone(),
-            committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
         })
     }
@@ -390,7 +382,6 @@ pub struct RuntimeCommitPlan<'a> {
     derived_frame_node_id: Option<crate::NodeId>,
     planned_node_facts: Vec<PlannedNodeFacts>,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
-    committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
     turn_input_applications: Vec<crate::TurnInputApplication>,
 }
 
@@ -462,11 +453,10 @@ impl<'a> RuntimeCommitPlan<'a> {
             manifest,
             committed_leaf_node_id: self.committed_leaf_node_id.clone(),
             realized_node_timestamps: self.realized_node_timestamps.clone(),
-            committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
             outcome: self.commit.outcome.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
-            compact_context_outcome: self.commit.compact_context_outcome.clone(),
+            command_outcome: self.commit.command_outcome.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
             receipt_replayed: false,
@@ -570,7 +560,7 @@ mod tests {
                 crate::TurnBudget::Unbounded,
             ))
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.interrupted_turn_input_cancellation = Some(crate::TurnCancellationEvidence {
             request_id: "request".to_string(),
             origin: None,
@@ -601,7 +591,7 @@ mod tests {
                 crate::TurnBudget::Unbounded,
             ))
         };
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let commit = RuntimeCommit::persisted_state_for_test(&state);
         let planner = RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current())
             .expect("prepare commit");
         let error = match planner.plan(FreshRuntimeCommitFacts {
@@ -630,7 +620,7 @@ mod tests {
                 crate::TurnBudget::Unbounded,
             ))
         };
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let commit = RuntimeCommit::persisted_state_for_test(&state);
         let planner = RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current())
             .expect("prepare empty commit");
         let result = planner.plan(FreshRuntimeCommitFacts {

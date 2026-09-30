@@ -155,7 +155,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     ));
     let v1_result = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&v1, &[]),
+        RuntimeCommit::persisted_state_for_test(&v1),
         "gc-blobs-v1",
     )
     .await
@@ -172,7 +172,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     ));
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state_for_test(&v2, &[]),
+        RuntimeCommit::persisted_state_for_test(&v2),
         "gc-blobs-v2",
     )
     .await
@@ -322,7 +322,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     ));
     let initial_commit = commit_runtime_state_for_test(
         &factory.open,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         "reopen",
     )
     .await
@@ -375,7 +375,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
         let mut settlement = lash_core::store::IngressSettlement::new(TurnId::from(turn_id));
         settlement.completed_inputs.push(admitted.completion());
         let mut commit = final_commit(
-            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            RuntimeCommit::persisted_state_for_test(&state),
             &application_lease,
             settlement,
         );
@@ -671,7 +671,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         "2026-07-26T10:00:00Z".to_string();
     state.set_execution_state_snapshot(Some(vec![7; 1_024].into()));
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
-    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation.clone())
         .expect("derive and stamp first commit");
     let turn_commit_hash = stamped_commit
@@ -688,7 +688,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let replay_graph_data = replay_state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut replay_graph_data.nodes.make_mut()[0]).timestamp =
         "2026-07-26T10:00:09Z".to_string();
-    let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state, &[])
+    let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state)
         .with_operation(operation.clone())
         .expect("derive and stamp replay");
     let replay_hash = replay_commit
@@ -708,7 +708,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     );
     replay_state.apply_persisted_commit_result(retry.clone());
 
-    let mut retry_from_new_head = RuntimeCommit::persisted_state_for_test(&state, &[])
+    let mut retry_from_new_head = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation.clone())
         .expect("stamp retry from advanced head")
         .0;
@@ -726,7 +726,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         turn_index: 1,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state, &[]);
+    let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state);
     changed.turn_commit =
         RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "provider-turn", "final"));
     let err = store
@@ -768,10 +768,9 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
             },
         }],
     };
-    let (first, node_id_mapping) =
-        RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
-            .with_operation(operation)
-            .expect("stamp guarded commit");
+    let (first, node_id_mapping) = RuntimeCommit::persisted_state_with_graph_commit(&state, graph)
+        .with_operation(operation)
+        .expect("stamp guarded commit");
     assert_eq!(
         node_id_mapping,
         vec![(
@@ -837,7 +836,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
             },
         }],
     };
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
+    let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph);
     commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
     let err = commit_runtime_state_for_test(&store, commit, "node-guard")
         .await
@@ -890,7 +889,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         Some(colliding_id.to_string().into()),
     )
     .expect("collision fixture seed graph is valid");
-    let initial = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let initial = RuntimeCommit::persisted_state_for_test(&state);
     let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
         .await
         .expect("seed colliding durable node");
@@ -911,7 +910,6 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         crate::GraphAppend::Extend {
             nodes: vec![replacement],
         },
-        &[],
     );
     append.expected_head_revision = first.head_revision;
     let err = commit_runtime_state_for_test(&store, append, "collision-append")
@@ -953,7 +951,6 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore
                 sample_session_node(&SessionId::from("root"), "duplicate", None),
             ],
         },
-        &[],
     );
     let err = commit_runtime_state_for_test(&store, commit, "duplicate-batch")
         .await
@@ -1000,7 +997,6 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
         crate::GraphAppend::Extend {
             nodes: vec![first, second],
         },
-        &[],
     );
     let expected_leaf = commit
         .graph
@@ -1037,16 +1033,13 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
     };
     state.ensure_agent_frame_initialized();
     let first = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
     state.apply_persisted_commit_result(first);
-    let preserve = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphAppend::PreserveHead,
-        &[],
-    );
+    let preserve =
+        RuntimeCommit::persisted_state_with_graph_commit(&state, crate::GraphAppend::PreserveHead);
     let receipt = store
         .commit_runtime_state(preserve)
         .await
@@ -1077,16 +1070,13 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
     };
     state.ensure_agent_frame_initialized();
     let first = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
     state.apply_persisted_commit_result(first);
-    let mut move_attempt = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphAppend::PreserveHead,
-        &[],
-    );
+    let mut move_attempt =
+        RuntimeCommit::persisted_state_with_graph_commit(&state, crate::GraphAppend::PreserveHead);
     move_attempt.current_frame_node_id = old_leaf.clone().map(|frame_node_id| {
         crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
     });

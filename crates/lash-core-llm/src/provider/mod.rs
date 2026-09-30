@@ -11,6 +11,7 @@
 
 #[cfg(test)]
 mod charge_safety_tests;
+mod dispatch_admission;
 pub(crate) mod handle;
 mod options;
 mod rate_limit;
@@ -20,6 +21,7 @@ mod support;
 mod tests;
 mod traits;
 
+pub use dispatch_admission::{DispatchAdmission, DispatchRefused, ProviderDispatch};
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
     UnconfiguredProvider,

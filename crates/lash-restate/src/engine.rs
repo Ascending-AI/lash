@@ -138,12 +138,15 @@ impl RestateEngine {
             admin.clone(),
             Arc::clone(&stores),
         ));
+        effect_host.bind_usage_accounting(stores.usage_accounting());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),
             build_generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
+                lost_processes: Default::default(),
+                lost_roots: Default::default(),
                 admin: admin.clone(),
                 ingress: RestateIngressClient::new(connection.clone()),
                 namespace: namespace.clone(),
@@ -178,6 +181,10 @@ impl RestateEngine {
     /// serve a subset of them. A process that only submits work to Restate
     /// and serves no handlers does not call this.
     ///
+    /// It also names this engine's store as the process's fleet epoch for
+    /// lash code the host's own handlers run: the calls they journal state
+    /// the wire the store's recorded `F` selects, as a lash handler's do.
+    ///
     /// Every journal-bearing lash service is bound twice (FIG-3795): under
     /// its stable name, which Restate hands to the newest registered build,
     /// and under this build's generation name (`LashProcessWorkflow_g<G>`),
@@ -200,6 +207,12 @@ impl RestateEngine {
         &self,
         processes: impl Into<RestateProcessServing>,
     ) -> restate_sdk::endpoint::Builder {
+        // The host's own handlers bound on this builder run lash code under
+        // no lash handler: their journaled calls state the wire this
+        // deployment's recorded `F` selects (FIG-3805).
+        crate::compat::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(
+            self.stores.process_registry(),
+        ));
         bind_lash_services(
             restate_sdk::endpoint::Endpoint::builder(),
             LashServiceParts {

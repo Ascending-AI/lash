@@ -161,7 +161,6 @@ fn realistic_commit(
     };
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
         &state,
-        &[],
         CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded),
     );
     commit.current_frame_node_id = Some(frame_node_id);
@@ -314,7 +313,6 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             attachment_referrer_bytes,
             follow_on_bytes,
             agent_frame_bytes,
-            usage_delta_bytes,
             turn_result_bytes,
             total_bytes,
             max_bytes,
@@ -324,7 +322,6 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             && attachment_referrer_bytes == expected.attachment_referrer_bytes
             && follow_on_bytes == expected.follow_on_bytes
             && agent_frame_bytes == expected.agent_frame_bytes
-            && usage_delta_bytes == expected.usage_delta_bytes
             && turn_result_bytes == expected.turn_result_bytes
             && total_bytes == expected.total_bytes
             && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES

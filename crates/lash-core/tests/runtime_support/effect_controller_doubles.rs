@@ -639,11 +639,13 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::AdmitRoot { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }
+            | RuntimeEffectCommand::RecoverFollowOn { .. }
             | RuntimeEffectCommand::AdmitDrive { .. }
             | RuntimeEffectCommand::DrawRootStart { .. }
             | RuntimeEffectCommand::SealDriveAdmission { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::RecordCompactionBase { .. }
+            | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
             | RuntimeEffectCommand::ReadSessionCommandRun { .. }
             | RuntimeEffectCommand::CloseRootScope { .. }
             | RuntimeEffectCommand::BeginSessionClose { .. }) => {

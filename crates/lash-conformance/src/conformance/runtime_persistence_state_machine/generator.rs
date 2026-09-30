@@ -1,6 +1,6 @@
 use super::*;
 
-const GENERATED_PREFIX_OPS: usize = 63;
+const GENERATED_PREFIX_OPS: usize = 53;
 
 pub(super) struct ComponentSelection {
     pub(super) store_tool: bool,
@@ -57,14 +57,6 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
     use RuntimePersistenceOp::*;
     let operations = vec![
         SealFence { owner: 0 },
-        RecordUsage { slot: 0, value: 0 },
-        RecordUsage {
-            slot: 1,
-            value: u8::MAX,
-        },
-        StageUsage {
-            replay_last_commit: false,
-        },
         Commit {
             component_mode: 0,
             value: 0,
@@ -72,13 +64,6 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        StageUsage {
-            replay_last_commit: true,
-        },
-        RecordUsage { slot: 2, value: 3 },
-        ConfirmUsage { selection: 0 },
-        ReplayUsageReceipt,
-        ConfirmUsage { selection: 0 },
         CommitWithAttachmentRefs {
             new_session: true,
             session_selection: 0,
@@ -151,9 +136,6 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         // The worker dies after its admission committed.
         Crash,
         SealFence { owner: 1 },
-        StageUsage {
-            replay_last_commit: false,
-        },
         Commit {
             component_mode: 0,
             value: 0,
@@ -161,7 +143,6 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ConfirmUsage { selection: 0 },
         // The successor resumes the recorded admission; its rows stay bound.
         AdmitWork,
         CancelAdmittedRow,
@@ -266,10 +247,6 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
         1 => Just(AdmitTurnInputsWithStaleFence),
         1 => Just(CancelAdmittedRow),
         2 => any::<u8>().prop_map(|selection| CancelTurnInput { selection }),
-        4 => (0_u8..8, any::<u8>()).prop_map(|(slot, value)| RecordUsage { slot, value }),
-        2 => any::<bool>().prop_map(|replay_last_commit| StageUsage { replay_last_commit }),
-        2 => any::<u8>().prop_map(|selection| ConfirmUsage { selection }),
-        1 => Just(ReplayUsageReceipt),
         4 => (any::<bool>(), any::<u8>(), 0_u8..8, any::<u8>(), any::<bool>())
             .prop_map(|(new_session, session_selection, attachment_slot, value, turn_owned)| CommitWithAttachmentRefs {
                 new_session, session_selection, attachment_slot, value, turn_owned,

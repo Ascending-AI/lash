@@ -32,44 +32,62 @@ pub struct Invocation {
     pub arguments: serde_json::Value,
 }
 
-/// A worker's request, as its effect request's payload carries it. The
-/// payload's shape must match the request's [`EffectKind`].
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum OperationRequest {
-    /// One resource operation ([`EffectKind::ResourceOperation`]).
-    Invoke(Invocation),
-    /// An aggregate of resource operations issued as one command
-    /// ([`EffectKind::ResourceOperationBatch`]); each member is a leaf.
-    Aggregate { members: Vec<Invocation> },
-    /// An await of a handle the parent granted ([`EffectKind::Await`]).
-    Await { handle: String },
-    /// A durable sleep ([`EffectKind::Sleep`]).
-    Sleep { millis: u64 },
-}
+/// The single detached effect request type shared with the VM. The worker
+/// and broker both encode it with MessagePack; no second wire vocabulary exists.
+pub use lashlang::AbilityOp as OperationRequest;
 
-impl OperationRequest {
-    /// The effect kind a request of this shape travels under.
-    pub fn kind(&self) -> EffectKind {
+pub trait OperationRequestCodec {
+    fn kind(&self) -> EffectKind;
+    fn encode(&self) -> EncodedPayload;
+    fn decode(payload: &EncodedPayload) -> Result<Self, AuthorityRefusal>
+    where
+        Self: Sized;
+}
+impl OperationRequestCodec for OperationRequest {
+    fn kind(&self) -> EffectKind {
         match self {
-            Self::Invoke(_) => EffectKind::ResourceOperation,
-            Self::Aggregate { .. } => EffectKind::ResourceOperationBatch,
-            Self::Await { .. } => EffectKind::Await,
-            Self::Sleep { .. } => EffectKind::Sleep,
+            Self::ResourceOperation(_) => EffectKind::ResourceOperation,
+            Self::ResourceOperationBatch(_) => EffectKind::ResourceOperationBatch,
+            Self::Await(_) => EffectKind::Await,
+            Self::Print(_) => EffectKind::Print,
+            Self::Finish(_) => EffectKind::Finish,
+            Self::Fail(_) => EffectKind::Fail,
+            Self::ProcessEvent(_) => EffectKind::ProcessEvent,
+            Self::Sleep(_) => EffectKind::Sleep,
+            Self::WaitSignal { .. } => EffectKind::WaitSignal,
         }
     }
-
-    /// Encodes the request as an effect request's payload.
-    pub fn encode(&self) -> EncodedPayload {
+    fn encode(&self) -> EncodedPayload {
         EncodedPayload(rmp_serde::to_vec_named(self).unwrap_or_default())
     }
-
-    /// Decodes an effect request's payload. The frame codec already bounded
-    /// the bytes; a payload that is not exactly one request is refused.
-    pub fn decode(payload: &EncodedPayload) -> Result<Self, AuthorityRefusal> {
+    fn decode(payload: &EncodedPayload) -> Result<Self, AuthorityRefusal> {
+        lash_vm_protocol::FrameCodec::new(
+            lash_vm_protocol::BuildIdentity::new("embedded-request"),
+            lash_vm_protocol::DecodeLimits::standard(),
+        )
+        .check_payload(&payload.0)
+        .map_err(|error| AuthorityRefusal::Malformed {
+            reason: error.to_string(),
+        })?;
         rmp_serde::from_slice(&payload.0).map_err(|error| AuthorityRefusal::Malformed {
             reason: error.to_string(),
         })
+    }
+}
+
+impl Invocation {
+    /// Builds a detached request for a scripted test worker.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn request(self) -> OperationRequest {
+        OperationRequest::ResourceOperation(Box::new(lashlang::ResourceOperation {
+            receiver: lashlang::Value::Resource(lashlang::ResourceHandle::new(
+                "module",
+                self.binding,
+            )),
+            operation: self.operation,
+            args: vec![lashlang::from_json(self.arguments)],
+            call_site: None,
+        }))
     }
 }
 
@@ -272,8 +290,17 @@ pub struct ResolvedCall {
 pub enum ResolvedRequest {
     Invoke(ResolvedCall),
     Aggregate(Vec<ResolvedCall>),
-    Await { handle: String, grant: HandleGrant },
-    Sleep { millis: u64 },
+    Await {
+        handle: String,
+        grant: HandleGrant,
+    },
+    Sleep {
+        millis: u64,
+    },
+    Control {
+        kind: EffectKind,
+        payload: EncodedPayload,
+    },
 }
 
 /// Resolves a worker's request against the admitted context, the handles
@@ -285,15 +312,6 @@ pub fn resolve(
     kind: EffectKind,
     payload: &EncodedPayload,
 ) -> Result<ResolvedRequest, AuthorityRefusal> {
-    if !matches!(
-        kind,
-        EffectKind::ResourceOperation
-            | EffectKind::ResourceOperationBatch
-            | EffectKind::Await
-            | EffectKind::Sleep
-    ) {
-        return Err(AuthorityRefusal::Unsupported { kind });
-    }
     let request = OperationRequest::decode(payload)?;
     if request.kind() != kind {
         return Err(AuthorityRefusal::KindMismatch {
@@ -320,17 +338,48 @@ pub fn resolve(
             arguments: invocation.arguments,
         })
     };
+    let invocation = |op: lashlang::ResourceOperation| -> Result<ResolvedCall, AuthorityRefusal> {
+        let lashlang::Value::Resource(receiver) = op.receiver else {
+            return Err(AuthorityRefusal::Malformed {
+                reason: "a resource request has no module receiver".into(),
+            });
+        };
+        let arguments = match op.args.as_slice() {
+            [value] => value_json(value)?,
+            [] => serde_json::json!({}),
+            values => {
+                serde_json::Value::Array(values.iter().map(value_json).collect::<Result<_, _>>()?)
+            }
+        };
+        call(Invocation {
+            binding: receiver.alias,
+            operation: op.operation,
+            arguments,
+        })
+    };
     match request {
-        OperationRequest::Invoke(invocation) => Ok(ResolvedRequest::Invoke(call(invocation)?)),
-        OperationRequest::Aggregate { members } => {
-            if members.is_empty() {
+        OperationRequest::ResourceOperation(op) => Ok(ResolvedRequest::Invoke(invocation(*op)?)),
+        OperationRequest::ResourceOperationBatch(batch) => {
+            if batch.leaves.is_empty() {
                 return Err(AuthorityRefusal::EmptyAggregate);
             }
-            Ok(ResolvedRequest::Aggregate(
-                members.into_iter().map(call).collect::<Result<_, _>>()?,
-            ))
+            let mut calls = Vec::new();
+            for leaf in batch.leaves {
+                if let lashlang::ResourceOperationBatchLeaf::Operation(op) = leaf {
+                    calls.push(invocation(op)?);
+                }
+            }
+            Ok(ResolvedRequest::Aggregate(calls))
         }
-        OperationRequest::Await { handle } => {
+        OperationRequest::Await(value) => {
+            let handle = match value {
+                lashlang::Value::String(value) => value.to_string(),
+                _ => {
+                    return Err(AuthorityRefusal::Malformed {
+                        reason: "an await names no granted handle".into(),
+                    });
+                }
+            };
             let grant = grants
                 .get(&handle)
                 .ok_or_else(|| AuthorityRefusal::UnknownHandle {
@@ -340,11 +389,24 @@ pub fn resolve(
                 return Err(AuthorityRefusal::RetiredScope { handle });
             }
             Ok(ResolvedRequest::Await {
-                grant: grant.clone(),
                 handle,
+                grant: grant.clone(),
             })
         }
-        OperationRequest::Sleep { millis } => Ok(ResolvedRequest::Sleep { millis }),
+        OperationRequest::Sleep(sleep) => {
+            let lashlang::Value::Number(millis) = sleep.value else {
+                return Err(AuthorityRefusal::Malformed {
+                    reason: "a sleep duration is not numeric".into(),
+                });
+            };
+            Ok(ResolvedRequest::Sleep {
+                millis: millis as u64,
+            })
+        }
+        _ => Ok(ResolvedRequest::Control {
+            kind,
+            payload: payload.clone(),
+        }),
     }
 }
 
@@ -383,6 +445,9 @@ impl RequestFingerprint {
                 canonical.push_str(&format!("await:{}:{handle}", handle.len()));
             }
             ResolvedRequest::Sleep { millis } => canonical.push_str(&format!("sleep:{millis}")),
+            ResolvedRequest::Control { kind, payload } => {
+                canonical.push_str(&format!("control:{kind:?}:{:?}", payload.0))
+            }
         }
         Self(
             *blake3::Hasher::new_derive_key("lash-vm-broker request fingerprint v1")
@@ -467,3 +532,27 @@ mod hex_digest {
 
 #[cfg(test)]
 mod tests;
+
+fn value_json(value: &lashlang::Value) -> Result<serde_json::Value, AuthorityRefusal> {
+    match value {
+        lashlang::Value::Null | lashlang::Value::Undefined => Ok(serde_json::Value::Null),
+        lashlang::Value::Bool(v) => Ok((*v).into()),
+        lashlang::Value::Number(v) => serde_json::Number::from_f64(*v)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| AuthorityRefusal::Malformed {
+                reason: "non-finite argument".into(),
+            }),
+        lashlang::Value::String(v) => Ok(v.to_string().into()),
+        lashlang::Value::List(v) | lashlang::Value::Tuple(v) => Ok(serde_json::Value::Array(
+            v.iter().map(value_json).collect::<Result<_, _>>()?,
+        )),
+        lashlang::Value::Record(v) => Ok(serde_json::Value::Object(
+            v.iter()
+                .map(|(k, v)| Ok((k.to_string(), value_json(v)?)))
+                .collect::<Result<_, AuthorityRefusal>>()?,
+        )),
+        _ => Err(AuthorityRefusal::Malformed {
+            reason: "arguments have no detached JSON shape".into(),
+        }),
+    }
+}

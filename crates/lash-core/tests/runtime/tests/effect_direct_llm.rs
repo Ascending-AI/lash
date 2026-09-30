@@ -118,16 +118,15 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         1,
         "the same request id is the same durable effect even when request content differs"
     );
-    {
-        let ledger = runtime.shared_token_ledger.lock_recover();
-        assert_eq!(ledger.len(), 1);
-        assert_eq!(ledger[0].source, "direct-llm-test");
-        assert_eq!(ledger[0].model, "mock-model");
-        assert_eq!(
-            ledger[0].usage.input_tokens, 8,
-            "replaying the durable effect still accounts usage for each caller observation"
-        );
-    }
+    // The recording double answers the direct effect itself: no provider was
+    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // a dispatched call is spend (ADR 0125).
+    let usage = settled_runtime_usage(&runtime).await;
+    assert!(
+        usage.rows.is_empty(),
+        "a canned answer is no paid call: {usage:?}"
+    );
+    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
     drop(direct);
     handler
         .close()

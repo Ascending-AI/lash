@@ -962,7 +962,7 @@ fn validate_trigger_compatibility_target(
             process_ref: format!("{:?}", target.process_ref),
         });
     };
-    if exported_process_name != target.process_name {
+    if !target.process_name.is_empty() && exported_process_name != target.process_name {
         return Err(TriggerCompatibilityError::ProcessRefMismatch {
             module_ref: target.module_ref.to_string(),
             process_name: target.process_name.clone(),

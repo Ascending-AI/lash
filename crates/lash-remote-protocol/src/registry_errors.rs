@@ -60,6 +60,8 @@ pub(crate) fn require_non_empty(
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RemoteProtocolError {
+    #[error("{0}")]
+    DecodeBudget(#[source] crate::JsonDecodeError),
     #[error("unsupported remote protocol range {peer}; local range is {local}")]
     Unsupported {
         local: VersionRange,

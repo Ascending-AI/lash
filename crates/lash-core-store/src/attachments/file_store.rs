@@ -151,8 +151,12 @@ impl AttachmentStore for FileAttachmentStore {
         put_at_path(path, bytes, meta)
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        get_at_path(self.path_for_id(id), id)
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        get_at_path(self.path_for_id(id), id, max_bytes)
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -296,8 +300,13 @@ fn head_at_path(
     }
 }
 
-fn get_at_path(path: PathBuf, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-    let bytes = fs::read(&path).map_err(|source| {
+fn get_at_path(
+    path: PathBuf,
+    id: &AttachmentId,
+    max_bytes: u64,
+) -> Result<StoredAttachment, AttachmentStoreError> {
+    use std::io::Read;
+    let io_error = |source: std::io::Error| {
         if source.kind() == std::io::ErrorKind::NotFound {
             AttachmentStoreError::NotFound(id.clone())
         } else {
@@ -306,7 +315,36 @@ fn get_at_path(path: PathBuf, id: &AttachmentId) -> Result<StoredAttachment, Att
                 source,
             }
         }
-    })?;
+    };
+    let mut file = fs::File::open(&path).map_err(io_error)?;
+    let mut bytes = Vec::new();
+    let mut scratch = [0_u8; 8192];
+    loop {
+        let remaining = max_bytes.saturating_sub(bytes.len() as u64);
+        let read_len = remaining.saturating_add(1).min(scratch.len() as u64) as usize;
+        let count = file.read(&mut scratch[..read_len]).map_err(io_error)?;
+        if count == 0 {
+            break;
+        }
+        let byte_len = (bytes.len() as u64).saturating_add(count as u64);
+        if byte_len > max_bytes {
+            return Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len,
+                max_bytes,
+            });
+        }
+        if byte_len > bytes.capacity() as u64 {
+            let capacity = byte_len
+                .max((bytes.capacity() as u64).saturating_mul(2))
+                .min(max_bytes);
+            let additional = usize::try_from(capacity - bytes.len() as u64)
+                .map_err(|error| AttachmentStoreError::Contract(error.to_string()))?;
+            bytes
+                .try_reserve_exact(additional)
+                .map_err(|error| AttachmentStoreError::Contract(error.to_string()))?;
+        }
+        bytes.extend_from_slice(&scratch[..count]);
+    }
     Ok(StoredAttachment { bytes })
 }
 
@@ -322,6 +360,58 @@ fn delete_at_path(path: PathBuf) -> Result<(), AttachmentStoreError> {
 mod tests {
     use super::*;
     use crate::{AttachmentTypeMetadata, MediaType};
+    #[tokio::test]
+    async fn sparse_file_read_stops_at_the_actual_byte_budget() {
+        let dir = tempfile::tempdir().expect("directory");
+        let store = FileAttachmentStore::new(dir.path());
+        let reference = store
+            .put(
+                Vec::new(),
+                AttachmentCreateMeta::new(MediaType::parse("image/png").expect("MIME"), None, None),
+            )
+            .await
+            .expect("seed sparse file");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(store.path_for_id(&reference.id))
+            .expect("open sparse file")
+            .set_len(1 << 40)
+            .expect("sparse length");
+        assert!(matches!(
+            store.get(&reference.id, 4).await,
+            Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len: 5,
+                max_bytes: 4
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn file_read_budget_handles_multiple_chunks_and_exact_boundary() {
+        let dir = tempfile::tempdir().expect("directory");
+        let store = FileAttachmentStore::new(dir.path());
+        let meta =
+            || AttachmentCreateMeta::new(MediaType::parse("image/png").expect("MIME"), None, None);
+        let large = store.put(vec![1; 16385], meta()).await.expect("large blob");
+        assert!(matches!(
+            store.get(&large.id, 16384).await,
+            Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len: 16385,
+                max_bytes: 16384
+            })
+        ));
+        let exact = store.put(vec![2; 16384], meta()).await.expect("exact blob");
+        assert_eq!(
+            store
+                .get(&exact.id, 16384)
+                .await
+                .expect("exact read")
+                .bytes
+                .len(),
+            16384
+        );
+    }
+
     use std::collections::BTreeSet;
 
     fn meta() -> AttachmentCreateMeta {
@@ -337,7 +427,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = FileAttachmentStore::new(temp.path());
         let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
-        let stored = store.get(&reference.id).await.expect("get");
+        let stored = store
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .expect("get");
 
         assert_eq!(stored.bytes, vec![1, 2, 3]);
         assert_eq!(reference.byte_len, 3);
@@ -375,7 +468,10 @@ mod tests {
         );
 
         // The bytes round-trip in full (no truncation from a partial write).
-        let stored = store.get(&reference.id).await.expect("get");
+        let stored = store
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .expect("get");
         assert_eq!(stored.bytes, vec![9, 8, 7, 6]);
     }
 
@@ -457,7 +553,10 @@ mod tests {
             .put(vec![1, 1, 1], meta())
             .await
             .expect("put over stale staging");
-        let stored = store.get(&reference.id).await.expect("get");
+        let stored = store
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .expect("get");
         assert_eq!(stored.bytes, vec![1, 1, 1]);
 
         // The stale staging file is not enumerated as a blob.
@@ -533,8 +632,8 @@ mod tests {
         assert!(listed.contains(&first.id));
     }
 
-    // The same suite runs against the in-memory store, so both backends are held to one
-    // contract.
+    // The shared attachment-store suite also registers on SQLite and S3, so
+    // those implementations and the file store obey the same contract.
 
     /// The escape canary: a traversal id never reaches the store because it
     /// never becomes an `AttachmentId` in the first place. The canary file
@@ -561,7 +660,7 @@ mod tests {
         // those resolve inside the root.
         let inside = AttachmentId::parse("canary").expect("plain id");
         assert!(matches!(
-            store.get(&inside).await,
+            store.get(&inside, 32 * 1024 * 1024).await,
             Err(AttachmentStoreError::NotFound(_))
         ));
         assert_eq!(fs::read(&canary).expect("canary survives"), b"outside");

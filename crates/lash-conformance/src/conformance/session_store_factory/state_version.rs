@@ -44,7 +44,7 @@ pub(super) async fn session_state_version_admission_contract(
     };
     state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed a guarded session head payload");
     factory

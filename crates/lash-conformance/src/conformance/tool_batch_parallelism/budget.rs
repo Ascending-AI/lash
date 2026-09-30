@@ -1,21 +1,33 @@
 use super::{Duration, Rendezvous};
 use std::future::Future;
 
+/// Drives `turn` to its end under the scenario's activation budget. A budget
+/// that expires with planned leaves still unstarted records them and releases
+/// every waiter ([`Rendezvous::expire_if_activation_stalled`]), and the turn
+/// is still driven to its end: the released members drain, and the expiry is
+/// how the scenario ended.
+///
+/// The turn is never cut short at the expiry. On a journaling tier the turn
+/// runs inside a handler that Restate may run again from the top, and a
+/// handler whose journaled path depended on when a wall-clock budget fired
+/// would diverge from its own journal on the next execution: a host stall
+/// that fired the budget before the turn's first command made one execution
+/// return where the next one ran the turn (FIG-4309).
 pub(super) async fn run_with_activation_budget<F: Future>(
     turn: F,
     rendezvous: &Rendezvous,
     budget: Duration,
-) -> Option<F::Output> {
+) -> F::Output {
     tokio::pin!(turn);
     let mut progress = rendezvous.notify.subscribe();
     loop {
         let started = rendezvous.started_count();
         tokio::select! {
-            output = &mut turn => return Some(output),
+            output = &mut turn => return output,
             _ = progress.changed() => {},
             () = tokio::time::sleep(budget) => {
                 if rendezvous.expire_if_activation_stalled(started, budget) {
-                    return None;
+                    return turn.await;
                 }
             }
         }
@@ -50,7 +62,7 @@ mod tests {
         };
         assert_eq!(
             run_with_activation_budget(turn, &rendezvous, BUDGET).await,
-            Some("settled"),
+            "settled",
         );
         assert!(rendezvous.expired().is_none());
         assert_eq!(rendezvous.peak_in_flight(), 2);
@@ -70,7 +82,7 @@ mod tests {
         };
         assert_eq!(
             run_with_activation_budget(turn, &rendezvous, BUDGET).await,
-            Some("settled"),
+            "settled",
         );
         assert!(rendezvous.expired().is_none());
     }
@@ -82,13 +94,10 @@ mod tests {
         let turn = async {
             rendezvous.record_started("first");
             rendezvous.wait_for(&rendezvous.expected).await;
+            tokio::time::Instant::now()
         };
-        assert!(
-            run_with_activation_budget(turn, &rendezvous, BUDGET)
-                .await
-                .is_none()
-        );
-        assert_eq!(started.elapsed(), BUDGET);
+        let released_at = run_with_activation_budget(turn, &rendezvous, BUDGET).await;
+        assert_eq!(released_at - started, BUDGET);
         assert_eq!(rendezvous.never_started(), vec!["second"]);
         rendezvous.wait_for(&rendezvous.expected).await;
     }
@@ -97,12 +106,12 @@ mod tests {
     async fn a_turn_that_never_activates_expires() {
         let rendezvous = rendezvous();
         let started = tokio::time::Instant::now();
-        assert!(
-            run_with_activation_budget(std::future::pending::<()>(), &rendezvous, BUDGET)
-                .await
-                .is_none()
-        );
-        assert_eq!(started.elapsed(), BUDGET);
+        let turn = async {
+            rendezvous.wait_for(&rendezvous.expected).await;
+            tokio::time::Instant::now()
+        };
+        let released_at = run_with_activation_budget(turn, &rendezvous, BUDGET).await;
+        assert_eq!(released_at - started, BUDGET);
         assert_eq!(rendezvous.never_started(), vec!["first", "second"]);
     }
 
@@ -121,9 +130,41 @@ mod tests {
         };
         assert_eq!(
             run_with_activation_budget(turn, &rendezvous, BUDGET).await,
-            Some("drained"),
+            "drained",
         );
         assert_eq!(rendezvous.never_started(), vec!["second"]);
+    }
+
+    /// A host stall that fires the budget before the turn's first step must
+    /// not change which steps the turn takes: the whole turn still runs, as
+    /// it does when the budget never fires. A journaled turn cut short at the
+    /// expiry ends its handler where a later execution of the same handler
+    /// runs the turn, and the two diverge on the journal (FIG-4309).
+    #[tokio::test(start_paused = true)]
+    async fn an_expiry_before_the_first_step_still_drives_the_whole_turn() {
+        let rendezvous = rendezvous();
+        let steps = std::sync::atomic::AtomicUsize::new(0);
+        let turn = async {
+            // The stalled host reaches the turn's first step only after the
+            // budget: nothing has started when it fires.
+            tokio::time::sleep(BUDGET * 2).await;
+            for leaf in ["first", "second"] {
+                rendezvous.record_started(leaf);
+                steps.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            rendezvous.wait_for(&rendezvous.expected).await;
+            for leaf in ["first", "second"] {
+                rendezvous.record_answered(leaf);
+                steps.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        };
+        let _ = run_with_activation_budget(turn, &rendezvous, BUDGET).await;
+        assert_eq!(
+            steps.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "every step of the turn ran, as it does when the budget never fires"
+        );
+        assert_eq!(rendezvous.never_started(), vec!["first", "second"]);
     }
 
     #[tokio::test]

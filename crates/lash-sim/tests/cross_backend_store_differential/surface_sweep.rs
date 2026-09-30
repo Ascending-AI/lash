@@ -14,6 +14,7 @@
 
 use super::*;
 use corrupt_input_cases::CorruptBackup;
+use lash_core::usage_accounting::*;
 
 /// A well-formed but never-sealed drive fence, for the inventory steps that
 /// take a fence in a case that holds no drive. Presenting it is itself a
@@ -125,6 +126,10 @@ pub(super) enum SurfaceMethod {
     /// of the sweep's drain root: its refusal's end, then nothing more
     /// (FIG-4018).
     EndRefusedRoot,
+    /// [`RootStore::end_command_root`](lash_core::store::RootStore::end_command_root)
+    /// of a command root run under the sweep's lease: its end with the
+    /// commands-applied cause, then the recorded end again (FIG-4202).
+    EndCommandRoot,
     /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
     /// of the sweep's next-turn input.
     RootBinding,
@@ -253,6 +258,7 @@ impl SurfaceMethod {
             Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
             Self::EndLostRoot => "surface:end_lost_root",
             Self::EndRefusedRoot => "surface:end_refused_root",
+            Self::EndCommandRoot => "surface:end_command_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
@@ -477,7 +483,6 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                     turn_id: SURFACE_COMMITTED_TURN_ID,
                 }),
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::EnqueueNextTurnInput,
@@ -580,7 +585,6 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
                 ),
                 turn_commit: None,
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::EnqueueAdmittableQueuedWork,
@@ -603,7 +607,7 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
 /// nothing (FIG-4018).
 pub(super) fn refused_root_end_case() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::RefusedRootEnd,
+        name: CaseName::RootEnd,
         operations: vec![
             StoreOperation::Commit {
                 label: "seed_refused_root_graph",
@@ -617,7 +621,6 @@ pub(super) fn refused_root_end_case() -> GeneratedCase {
                 ),
                 turn_commit: None,
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::EnqueueAdmittableQueuedWork,
@@ -633,6 +636,8 @@ pub(super) fn refused_root_end_case() -> GeneratedCase {
             surface(SurfaceMethod::EndRefusedRoot),
             surface(SurfaceMethod::EndLostRoot),
             surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::EndCommandRoot),
+            surface(SurfaceMethod::EndCommandRoot),
             surface(SurfaceMethod::NonTerminalRootsPage),
         ],
     }
@@ -1264,7 +1269,6 @@ impl BackendRunner {
                     None,
                     HydratedSessionCheckpoint::default(),
                     Vec::new(),
-                    Vec::new(),
                 );
                 let (frame, leaf) = head
                     .map(|head| {
@@ -1344,7 +1348,7 @@ impl BackendRunner {
             SurfaceMethod::NonTerminalRootsPage => {
                 let factory = self.factory();
                 let mut after = None;
-                let mut own_roots = 0;
+                let mut own_executors = Vec::new();
                 loop {
                     let page = factory
                         .non_terminal_roots_page(
@@ -1352,23 +1356,31 @@ impl BackendRunner {
                             std::num::NonZeroUsize::MIN.saturating_add(127),
                         )
                         .await?;
-                    own_roots += page
-                        .iter()
-                        .filter(|root| root.session == session_id)
-                        .count();
+                    own_executors.extend(
+                        page.iter()
+                            .filter(|open| open.target.session == session_id)
+                            .map(|open| format!("{:?}", open.executor)),
+                    );
                     if page.len() < 128 {
                         break;
                     }
-                    after = page.last().cloned();
+                    after = page.last().map(|open| open.target.clone());
                 }
-                format!("own_open_roots={own_roots}")
+                format!(
+                    "own_open_roots={} executors={own_executors:?}",
+                    own_executors.len()
+                )
             }
             SurfaceMethod::EndLostRoot => {
                 let root = lash_core::engine::RootRef {
                     session: session_id.clone(),
                     root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
                 };
-                match self.factory().end_lost_root(&root, 1).await? {
+                match self
+                    .factory()
+                    .end_lost_root(&root, lash_core::engine::RootRunLoss::NoRun, 1)
+                    .await?
+                {
                     Some(terminal) => format!("ended={:?}", terminal.kind),
                     None => "ended=none".to_string(),
                 }
@@ -1383,15 +1395,33 @@ impl BackendRunner {
                     .end_refused_root(&lease_fence, &root, &refusal, 1)
                     .await?
                 {
-                    lash_core::store::RefusedRootEnd::Ended(terminal) => {
+                    lash_core::store::RootEnd::Ended(terminal) => {
                         format!("ended={:?}", terminal.kind)
                     }
-                    lash_core::store::RefusedRootEnd::AlreadyEnded(terminal) => {
+                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
                         format!("already_ended={:?}", terminal.kind)
                     }
-                    lash_core::store::RefusedRootEnd::Superseded => "superseded".to_string(),
-                    lash_core::store::RefusedRootEnd::Unknown => "ended=none".to_string(),
+                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
+                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
                 }
+            }
+            SurfaceMethod::EndCommandRoot => {
+                let root = lash_core::TurnId::from(format!("drive-commands:{session_id}-surface"));
+                let end = match store.end_command_root(&lease_fence, &root, 1).await? {
+                    lash_core::store::RootEnd::Ended(terminal) => {
+                        format!("ended={:?}/{:?}", terminal.kind, terminal.cause)
+                    }
+                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
+                        format!("already_ended={:?}/{:?}", terminal.kind, terminal.cause)
+                    }
+                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
+                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
+                };
+                let recorded = store
+                    .root_terminal(&session_id, &root)
+                    .await?
+                    .map(|terminal| format!("{:?}", terminal.kind));
+                format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RootBinding => {
                 let input = lash_core::InputId::from(format!("{session_id}:input"));
@@ -1782,4 +1812,189 @@ impl BackendRunner {
             lash_core::store::ControlIntentId::from_sequence(UNKNOWN_INTENT_SEQUENCE)
         }
     }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the differential names every expected store answer"
+)]
+async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<String> {
+    let accounting = stores.usage_accounting();
+    let owner = lash_core::RuntimeOwner::Session(SessionId::from(format!("{nonce}-accounting")));
+    let effect = UsageEffectKey::for_effect(
+        &EffectAddress::new(
+            ExecutionScope::runtime_operation("accounting-sweep"),
+            "paid-call",
+        )
+        .expect("effect address"),
+    );
+    let run = UsageRunId::try_from("run:00000000000040008000000000000001".to_owned()).expect("run");
+    let admission = UsageRunAdmission {
+        owner: owner.clone(),
+        effect: effect.clone(),
+        run: run.clone(),
+        execution_scope_key: "sweep".into(),
+        source: "turn".into(),
+        model: "model".into(),
+        admitted_at_ms: 10,
+    };
+    let mut out = vec![format!(
+        "admit {:?}",
+        accounting.admit_usage_run(&admission).await.expect("admit")
+    )];
+    out.push(format!(
+        "admit retry {:?}",
+        accounting.admit_usage_run(&admission).await.expect("retry")
+    ));
+    let settlement = UsageSettlement {
+        owner: owner.clone(),
+        effect: effect.clone(),
+        run,
+        facts: vec![UsageAttemptFact {
+            call_ordinal: 0,
+            provider_attempt: 0,
+            llm_call_id: lash_core::LlmCallId("call".into()),
+            source: "turn".into(),
+            model: "model".into(),
+            outcome: AttemptFactOutcome::Unreported {
+                generation_id: Some("generation".into()),
+            },
+        }],
+        accounting: RunAccounting::Complete,
+    };
+    out.push(format!(
+        "settle {:?}",
+        accounting
+            .settle_usage(&settlement, 20)
+            .await
+            .expect("settle")
+    ));
+    let before = accounting
+        .load_owner_usage(&owner)
+        .await
+        .expect("usage before conflict");
+    let mut changed = settlement.clone();
+    changed.facts[0].source = "other".into();
+    let Err(UsageAppendError::Conflict(conflict)) = accounting.settle_usage(&changed, 21).await
+    else {
+        panic!("a changed payload must conflict");
+    };
+    assert_eq!(
+        before,
+        accounting
+            .load_owner_usage(&owner)
+            .await
+            .expect("usage after conflict")
+    );
+    out.push(format!("conflict {conflict:?}"));
+    accounting
+        .mark_usage_settlement_conflicted(&changed, &conflict, 22)
+        .await
+        .expect("mark conflict");
+    let correction = UsageCorrection {
+        effect,
+        call_ordinal: 0,
+        provider_attempt: 0,
+        usage: TokenUsage {
+            input_tokens: 7,
+            ..Default::default()
+        },
+        generation_id: "generation".into(),
+    };
+    out.push(format!(
+        "correct {:?}",
+        accounting
+            .append_usage_corrections(&owner, &[correction], 23)
+            .await
+            .expect("correction")
+    ));
+    out.push(format!(
+        "end execution {}",
+        accounting
+            .retire_usage_execution(&owner, "sweep", 24)
+            .await
+            .expect("retire scope")
+    ));
+    out.push(format!(
+        "retire {:?}",
+        accounting
+            .retire_usage_owner(&owner, 25)
+            .await
+            .expect("retire owner")
+    ));
+    out.push(format!(
+        "usage {:?}",
+        accounting.load_owner_usage(&owner).await.expect("usage")
+    ));
+    let limit = std::num::NonZeroU32::new(1).expect("limit");
+    let mut cursor = None;
+    let mut index = 0;
+    loop {
+        let mut page = accounting
+            .load_usage_fact_page(&owner, cursor.as_ref(), limit)
+            .await
+            .expect("fact page");
+        for fact in &mut page.facts {
+            index += 1;
+            fact.seq = index;
+            out.push(format!("fact {fact:?}"));
+        }
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    out.push(format!(
+        "runs {:?}",
+        accounting
+            .load_usage_run_page(&owner, UsageRunFilter::All, None, limit)
+            .await
+            .expect("run page")
+    ));
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL and compares all three accounting adapters"]
+async fn usage_accounting_differential_agrees() {
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("required PostgreSQL URL");
+    let mut connection = PgConnection::connect(&url).await.expect("connection");
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SHARED_DATABASE_LOCK_KEY)
+        .execute(&mut connection)
+        .await
+        .expect("database lock");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut connection)
+        .await
+        .expect("DDL");
+    let postgres = PostgresStorage::connect(&url).await.expect("PostgreSQL");
+    let root = tempfile::tempdir().expect("SQLite directory");
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("SQLite memory");
+    let file = lash_sqlite_store::SqliteStoreSet::open(root.path())
+        .await
+        .expect("SQLite file");
+    let pg = lash_postgres_store::PostgresStoreSet::new(
+        &postgres,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    );
+    let nonce = run_nonce();
+    let expected = usage_transcript(&memory, &nonce).await;
+    assert_eq!(
+        expected,
+        usage_transcript(&file, &nonce).await,
+        "SQLite file accounting"
+    );
+    assert_eq!(
+        expected,
+        usage_transcript(&pg, &nonce).await,
+        "PostgreSQL accounting"
+    );
+    assert_eq!(expected.len(), 11);
+    eprintln!("PASS usage_accounting: backends=3 steps={}", expected.len());
 }

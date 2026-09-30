@@ -24,7 +24,7 @@ const SMOKE_SEED: u64 = 0x3873_0001;
 /// Epochs of the smoke mode when `LASH_CHAOS_SOAK_EPOCHS` is unset.
 const SMOKE_EPOCHS: usize = 2;
 
-/// The smoke mode's wall-time cap: it starts no epoch past it.
+/// The smoke mode's wall-time budget, including its active epoch.
 const SMOKE_CAP: Duration = Duration::from_secs(4 * 60);
 
 fn assert_green(report: &chaos_soak::SoakReport) {

@@ -348,10 +348,6 @@ pub fn walk_generated_trace_oracles<S, V>(
         runtime_usage_monotonic(events)
     );
     battery!(
-        crate::usage_oracle::RUNTIME_USAGE_CONSERVATION_ORACLE,
-        crate::usage_oracle::checkpoint_usage_conservation(durable_writes)
-    );
-    battery!(
         DURABLE_EFFECT_EXACTLY_ONCE_ORACLE,
         durable_effect_exactly_once(summary)
     );

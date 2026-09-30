@@ -131,6 +131,9 @@
             "type": "string"
           }
         },
+        "migrate": {
+          "type": "boolean"
+        },
         "resources": {
           "type": "object",
           "properties": {

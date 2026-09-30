@@ -202,7 +202,7 @@ async fn commit_frame_opens(
     state: &mut lash_core_execution::RuntimeSessionState,
     transition: Option<lash_core_execution::store::FrameTransition>,
 ) {
-    let mut commit = RuntimeCommit::persisted_state_for_test(state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(state);
     let appended = commit
         .graph
         .nodes()
@@ -293,7 +293,9 @@ fn gate() -> lash_sansio::EffectJournalIdentity {
 /// frame, and neither may keep its edges.
 #[tokio::test]
 async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "resident-frame-switch", &clock).await;
     let session = state.session_id.clone();
@@ -342,7 +344,9 @@ async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
 /// ends anyway.
 #[tokio::test]
 async fn a_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_leaves() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "park-frame-switch", &clock).await;
     let session = state.session_id.clone();
@@ -378,7 +382,9 @@ async fn a_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_
 /// commit may paper over it.
 #[tokio::test]
 async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "forged-carry", &clock).await;
     let session = state.session_id.clone();
@@ -404,7 +410,7 @@ async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
         open_resident_frame(&mut state, "successor", &clock),
     );
     for forged in ["never-stored", "held-by-a-host-pin"] {
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.frame_transition = Some(lash_core_execution::store::FrameTransition {
             ended: first.clone(),
             successor: successor.clone(),

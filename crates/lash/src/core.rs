@@ -16,8 +16,10 @@ pub(crate) mod held_drives;
 mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;
+mod session_deletion;
 pub(crate) mod session_driver;
 mod session_policy;
+pub use session_deletion::SessionDeleteCompletion;
 mod tool_child_context;
 mod work_drivers;
 
@@ -535,7 +537,7 @@ impl LashCore {
         crate::artifacts::HostArtifacts::new(
             self.backend().module_artifacts(),
             Arc::clone(&self.env.core.durability.process_env_store),
-            self.backend().process_definitions(),
+            self.backend().definition_store(),
             self.backend().attachment_referrers(),
             self.backend().artifact_cleanup(),
             Arc::clone(&self.env.core.clock),
@@ -665,14 +667,15 @@ impl LashCore {
     /// an obligation, which this call attempts before it returns.
     ///
     /// The physical delete waits for the close's cleanup — each root's scope
-    /// close, each owned scope's parent-end plan — to be delivered, and for
-    /// the engine to finish the session's work (on Restate, a released root
-    /// often still is, so the delete defers to the reconcile tick). What this
+    /// close, each owned scope's parent-end plan, to be delivered. What this
     /// call could not finish is [`SessionDeletion::Closing`]: the session
     /// stays closed and the recovery relay retries the delete with backoff,
     /// stalling it (surfaced in [`drain_status`](Self::drain_status) and
     /// [`stalled_obligations`](Self::stalled_obligations)) at the attempt
-    /// ceiling. The caller does not retry to finish a deletion.
+    /// ceiling. Await physical completion with [`await_session_deletion`](Self::await_session_deletion).
+    /// A pre-close `TurnCancelClosureLifecyclePinned` refusal can be followed
+    /// with [`await_turn_cancel_closures`](Self::await_turn_cancel_closures)
+    /// before a new close attempt.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeletion> {
@@ -698,9 +701,9 @@ impl LashCore {
                 lash_core::session_delete::SessionDeleteError::Unrecorded {
                     session_id,
                     failure,
-                } => EmbedError::SessionDeleteProcess {
+                } => EmbedError::SessionDeleteCleanup {
                     session_id,
-                    message: failure.to_string(),
+                    failure: Box::new(failure),
                 },
             })
     }
@@ -754,6 +757,7 @@ pub struct LashCoreBuilder {
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
+    attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
@@ -785,6 +789,7 @@ impl LashCoreBuilder {
             commit_budget: None,
             queued_work_batching: None,
             max_attachment_bytes: None,
+            attachment_read_policy: None,
             attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
@@ -840,6 +845,13 @@ impl LashCoreBuilder {
     /// This deployment limit is independent from [`Self::commit_budget`].
     pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = Some(max_attachment_bytes);
+        self
+    }
+
+    /// Bound actual attachment reads and aggregate request materialization,
+    /// including provider encoding. Independent of put and history limits.
+    pub fn attachment_read_policy(mut self, policy: lash_core::AttachmentReadPolicy) -> Self {
+        self.attachment_read_policy = Some(policy);
         self
     }
 
@@ -1298,6 +1310,54 @@ impl LashCore {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.live_replay_store.current_cursor(session_id, revision)
+    }
+
+    /// The model usage of one owner (a session or a process), read from the
+    /// deployment's usage ledger (ADR 0125).
+    ///
+    /// Like [`Self::sessions`], it opens no session and drives nothing, so it
+    /// answers for a live, parked, refused, deleted-but-retained or
+    /// pruned-but-retained owner alike.
+    pub async fn owner_usage(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::OwnerUsage> {
+        self.backend
+            .usage_accounting()
+            .load_owner_usage(owner)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// One page of an owner's usage facts in ledger order. `next` is `Some`
+    /// only when more facts exist.
+    pub async fn usage_fact_page(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        after: Option<&lash_core::UsageFactCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageFactPage> {
+        self.backend
+            .usage_accounting()
+            .load_usage_fact_page(owner, after, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// One page of an owner's usage runs: the admitted dispatch liabilities,
+    /// filtered by `filter`. `next` is `Some` only when more runs exist.
+    pub async fn usage_run_page(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        filter: lash_core::UsageRunFilter,
+        after: Option<&lash_core::UsageRunCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::UsageRunPage> {
+        self.backend
+            .usage_accounting()
+            .load_usage_run_page(owner, filter, after, limit)
+            .await
+            .map_err(Into::into)
     }
 
     /// Enumerate every durable session catalog entry.

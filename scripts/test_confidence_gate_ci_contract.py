@@ -9,7 +9,6 @@ import os
 import pathlib
 import re
 import runpy
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -72,6 +71,11 @@ def _store_tests_stub_bin() -> str:
             f'#!/usr/bin/env bash\nprintf "%s\\n" "{tool} $*"\n', encoding="utf-8"
         )
         stub.chmod(0o755)
+    hermetic = directory / "hermetic-build"
+    hermetic.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "buck2 $*"\n', encoding="utf-8"
+    )
+    hermetic.chmod(0o755)
     python = directory / "python3"
     python.write_text(
         "#!/usr/bin/env bash\n"
@@ -113,6 +117,9 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
             f"{_store_tests_stub_bin()}{os.pathsep}{environment['PATH']}"
         )
         environment["BUCK2_TRUSTED"] = trusted
+        environment["HERMETIC_BUILD"] = str(
+            pathlib.Path(_store_tests_stub_bin()) / "hermetic-build"
+        )
         # `scripts/ci/with-service.sh` exports the slot count to every suite
         # it wraps; the sharded PostgreSQL suite refuses to run without it.
         environment["LASH_POSTGRES_SLOT_COUNT"] = "4"
@@ -124,7 +131,30 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
             text=True,
             check=True,
         )
-        rendered.append(result.stdout)
+        commands = []
+        verifier_prefix = "python3 tools/buck2/libtest_selection.py "
+        for line in result.stdout.splitlines():
+            if line.startswith(verifier_prefix):
+                dialect = "buck2" if trusted == "true" else "cargo"
+                if not commands or not line.startswith(f"{verifier_prefix}{dialect} "):
+                    raise AssertionError(f"unexpected selection verifier: {line}")
+                if dialect == "cargo" and not line.endswith(commands[-1]):
+                    raise AssertionError(f"verifier lost the Cargo selection: {line}")
+                continue
+            if not line.startswith(("buck2 test ", "cargo ")):
+                raise AssertionError(f"unexpected store suite output: {line}")
+            commands.append(line)
+        dialect = "buck2" if trusted == "true" else "cargo"
+        expected_verifiers = len(commands) if trusted == "true" else sum(
+            command.startswith("cargo test ") for command in commands
+        )
+        actual_verifiers = sum(
+            line.startswith(f"{verifier_prefix}{dialect} ")
+            for line in result.stdout.splitlines()
+        )
+        if actual_verifiers != expected_verifiers:
+            raise AssertionError(f"{suite} lost selection verification: {result.stdout}")
+        rendered.append("\n".join(commands) + "\n")
     return rendered[0], rendered[1]
 
 
@@ -183,6 +213,7 @@ def run_isolated_store_suite(
         "BUCK2_TRUSTED": "true",
         "RUNNER_TEMP": str(runner_temp),
         "STORE_TEST_CALLS": str(calls),
+        "LIBTEST_SELECTION_PYTHON": "true",
     } | extra_environment
     subprocess.run(
         ["bash", str(root / "scripts/ci/store-tests.sh"), suite],
@@ -1061,10 +1092,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             def git(*args: str) -> str:
                 return subprocess.run(["git", "-C", str(root), *args], check=True, text=True, capture_output=True).stdout
             self.assertEqual(git("diff"), "")
-            review = (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md").read_text().split("```sh", 1)[1].split("```", 1)[0]
-            command = shlex.split(review.replace("\\\n", " "))
-            flags = [arg for arg in command[1:] if arg == "add" or arg.startswith("-")]
-            git(*flags, str(source.relative_to(root)))
+            script = ROOT / "scripts" / "scenario-review.sh"
+            # The command lives in the checked script; the ADR names it
+            # rather than carrying a second copy for the two to drift.
+            self.assertIn(
+                "scripts/scenario-review.sh",
+                (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md")
+                .read_text(encoding="utf-8"),
+            )
+            for path in re.findall(r"crates/[a-z0-9_/.-]+", script.read_text()):
+                self.assertTrue((ROOT / path).exists(), path)
+            subprocess.run(
+                ["bash", str(script), str(source.relative_to(root))],
+                cwd=root,
+                check=True,
+            )
             self.assertIn("+#[test] fn new_scenario() {}", git("diff"))
             self.assertEqual(git("diff", "--cached"), "")
             source.write_text("#[test] fn new_scenario() { assert!(true); }\n")
@@ -1978,11 +2020,17 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
 
         publish = workflow_job_block(workflow, "publish")
         publish_crates = workflow_job_block(workflow, "publish-crates")
+        worker_artifacts = workflow_job_block(workflow, "worker-artifacts")
         validate_release = workflow_job_block(workflow, "validate-release-ref")
 
         self.assertNotIn("build-release-assets", workflow)
         self.assertNotIn("install_lash.sh", workflow)
-        self.assertIn("needs: [prepare-release, publish-crates]", publish)
+        self.assertIn("needs: [prepare-release, publish-crates, worker-artifacts]", publish)
+        self.assertIn("cargo build --locked --release -p lash-internal-vm-worker", worker_artifacts)
+        self.assertIn("python3 scripts/package_vm_worker.py", worker_artifacts)
+        self.assertIn("pattern: sdk-worker-*", publish)
+        self.assertIn("worker-artifacts/*.tar.gz", publish)
+        self.assertIn("worker-artifacts/*.sha256", publish)
         self.assertIn(
             "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
             publish_crates,
@@ -2731,10 +2779,7 @@ derive_mutation_jobs() {{
                 commands = buck2.splitlines()
                 self.assertTrue(commands, buck2)
                 for command in commands:
-                    self.assertRegex(
-                        command,
-                        r"^python3 .*/tools/buck2/driver\.py test ",
-                    )
+                    self.assertRegex(command, r"^buck2 test ")
                 self.assertIn("cargo ", cargo)
 
         for suite, row in sorted(uniform.items()):

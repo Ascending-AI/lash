@@ -3,7 +3,7 @@
 //!
 //! Contract:
 //! - **History == emission.** A prior executed step renders as an `Assistant`
-//!   message holding the canonical cell `{prose}\n<typescript>\n{code}\n</typescript>`
+//!   message holding the canonical cell `{prose}\n{open}\n{code}\n{close}`
 //!   (`render_cell_text_for_tests`), followed by a `User` message holding that
 //!   step's printed output, images, error, and final value. A plain user turn
 //!   renders its content verbatim as a `User` message. There is no
@@ -51,7 +51,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -66,7 +66,7 @@ use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) images: bool,
-    pub(super) dialect: &'a TypescriptDialect,
+    pub(super) dialect: &'a SessionDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
@@ -81,6 +81,7 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
+    pub(super) dialect: &'a crate::dialect::SessionDialect,
     pub(super) history_type: &'static str,
     pub(super) images: bool,
     pub(super) history_len: usize,
@@ -132,6 +133,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
+            dialect: input.dialect,
             history_type: input.dialect.prompt_vocabulary().history_type,
             images: input.images,
             history_len,
@@ -421,8 +423,12 @@ fn append_current_iteration_message(
     );
     if input.history_has_structure {
         current_prompt.push_str("\n\nSchema:\n");
-        current_prompt
-            .push_str(&crate::rlm_support::history_item_type_definition(input.images).join("\n"));
+        current_prompt.push_str(
+            &input
+                .dialect
+                .history_item_definition(input.images)
+                .join("\n"),
+        );
     }
     if !input.bound_variables.is_empty() {
         current_prompt.push_str("\n\n");

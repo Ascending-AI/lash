@@ -26,6 +26,11 @@ workers:
   generation: initial
   retainedGenerations: []
   generationImages: {}
+  # Whether a replacement generation's own `lashctl migrate` runs as the
+  # pre-upgrade hook before its workers start. The rolling-upgrade campaign
+  # turns it off when it rolls back to N, whose operator only preflights the
+  # store N+1 expanded.
+  migrate: true
   resources:
     requests: {cpu: "2", memory: 2Gi}
     limits: {cpu: "2", memory: 2Gi}

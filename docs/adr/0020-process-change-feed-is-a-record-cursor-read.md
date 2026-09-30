@@ -1,28 +1,15 @@
 # Process change feed is a record-level cursor read
 
-Hosts that project process state into their own stores need a completeness lane: a way to find
-every Runtime Process that changed since a watermark, including terminal transitions, which the
-best-effort `ProcessEventSink` cannot guarantee to deliver (ADR 0017, ADR 0046). We add a **Process Change Feed** to
-`ProcessRegistry`: every process-row mutation (registration, event append, wait, status,
-terminal write) bumps a per-store monotonic change sequence, and a cursor-paged
-`processes_changed_since(cursor, limit)` read returns the changed `ProcessRecord`s in that
-order with the next cursor. Consumers needing event detail page through `event_page` per changed
-process.
+## Decision
 
-We chose a record-level cursor over a store-wide global event sequence: it keeps truth a state
-read (ADR 0017's split stays intact — sink for freshness, state reads for completeness), costs
-one column plus an index per backend instead of a total-order obligation on `process_events`
-forever, and terminal transitions need no special casing because they are ordinary record
-changes. A durable push sink was rejected outright — ADR 0017 already records why that
-re-creates the durable log badly.
+A host projector reads `ProcessRegistry::processes_changed_since(cursor, limit)` for completeness. Process-row mutations advance a per-store monotonic change sequence. Pages return ordered `ProcessChange` values and the next cursor: `Upsert` carries the current record; `Deleted` carries a payload-free pruning tombstone. Event detail is read separately through `event_page`.
+
+The cursor is opaque outside its issuing store. This host-level read does not filter by session observer edges. After tombstone compaction, a cursor behind the compaction horizon returns `ProcessChangeCursorPruned` rather than silently losing deletion evidence.
+
+## Why and alternatives
+
+A record cursor keeps truth in state reads while the sink under ADR 0017 supplies freshness. A store-wide event sequence is rejected because it imposes total ordering on every process event when projectors need changed state. A durable push sink duplicates retained state recovery and is rejected.
 
 ## Consequences
 
-- Every store backend gains a `change_seq` (monotonic per store, not per process) on process
-  rows; the cursor is opaque to consumers and not comparable across stores.
-- The feed is a host-level, unscoped read for trusted projectors. App-facing visibility uses
-  session-scoped observer edges; the feed does not filter by observer.
-- The change cursor is the natural watermark for retention: a host gates
-  `prune_terminal_processes(..., ProjectionWatermark::UpTo(cursor))` on its
-  projector's acknowledged cursor so unprojected history is never pruned. A
-  host without a projector must say `ProjectionWatermark::NoProjector`.
+Projectors acknowledge a cursor and supply `ProjectionWatermark::UpTo(cursor)` when pruning. Hosts with no projector explicitly choose `NoProjector`. Mutation feeds can coalesce repeated changes to a record; they do not replace per-process event history. [Change-read contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs) and [SQL cursor and tombstone projection](../../crates/lash-sqlite-store/src/process_registry_change.rs) implement the feed.

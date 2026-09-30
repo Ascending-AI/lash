@@ -42,7 +42,12 @@ def release_artifact_manifest_contains_only_sdk_and_operator_binary():
     # GitHub release assets are a distinct publication route. SDK crates may
     # contain schema-generator sources; no compiled generator is a release asset.
     release_action = workflow.split("uses: softprops/action-gh-release@", 1)[1]
-    case.assertNotIn("files:", release_action)
+    case.assertIn("worker-artifacts/*.tar.gz", release_action)
+    case.assertIn("worker-artifacts/*.sha256", release_action)
+    case.assertIn("needs: [prepare-release, publish-crates, worker-artifacts]", workflow)
+    case.assertIn("python3 scripts/package_vm_worker.py", workflow)
+    case.assertIn("--bin lash-vm-worker", workflow)
+    case.assertNotIn("--workspace", workflow.split("Build the matching release worker", 1)[1].split("Bundle helper", 1)[0])
     case.assertNotIn("target/release/", release_action)
 
 

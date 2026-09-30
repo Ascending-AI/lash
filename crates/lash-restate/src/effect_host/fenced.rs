@@ -236,10 +236,10 @@ impl RuntimeEffectController for FencedRestateController {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.controller
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 

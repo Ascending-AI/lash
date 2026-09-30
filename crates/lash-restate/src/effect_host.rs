@@ -22,8 +22,8 @@ use lash_core::{
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse,
-    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest,
-    durable_wait_index_key_for_scope, durable_wait_index_object_key,
+    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest, WaitObserver,
+    durable_wait_index_key_for_scope, durable_wait_index_object_key, observe_durable_wait,
     restate_await_event_key_for_authority, restate_await_event_key_is_valid,
     restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
     restate_unknown_or_revoked,
@@ -70,6 +70,10 @@ pub struct RestateEffectHost {
     /// `MayReplay`: the cleanup executor waits rather than sever what a
     /// replay may still read.
     journal_authority: Arc<OnceLock<RestateJournalAuthority>>,
+    /// The ledger the deployment's accounting continuation projects into,
+    /// bound once by the engine that owns the store set (ADR 0125). Unbound,
+    /// a continuation handler fails retryably and waits for it.
+    usage_accounting: Arc<OnceLock<Arc<dyn lash_core::UsageAccountingStore>>>,
 }
 
 impl RestateEffectHost {
@@ -122,7 +126,21 @@ impl RestateEffectHost {
             )),
             turn_control_binding_id,
             journal_authority: Arc::new(OnceLock::new()),
+            usage_accounting: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Bind the ledger this deployment's accounting continuation projects
+    /// into, once; a later binding is ignored.
+    pub fn bind_usage_accounting(&self, store: Arc<dyn lash_core::UsageAccountingStore>) {
+        let _ = self.usage_accounting.set(store);
+    }
+
+    /// The cell the continuation's handlers read the bound ledger from.
+    pub(crate) fn usage_accounting_cell(
+        &self,
+    ) -> Arc<OnceLock<Arc<dyn lash_core::UsageAccountingStore>>> {
+        Arc::clone(&self.usage_accounting)
     }
 
     /// Bind the reads [`EffectHost::journal_replay`] answers from, once; a
@@ -304,6 +322,43 @@ impl AwaitEventResolver for RestateEffectHost {
 impl EffectHost for RestateEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.turn_control_binding_id.to_string()
+    }
+
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
+        let ingress = &self.controller.await_event_ingress;
+        crate::usage_accounting::drain_usage_owner(&ingress.ingress, &ingress.namespace, owner)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::UsageAdmissionFault,
+                    format!("usage accounting drain of {owner} failed: {error}"),
+                )
+            })
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        let key = crate::usage_accounting::execution_scope_key(scope)?;
+        let ingress = &self.controller.await_event_ingress;
+        crate::usage_accounting::retire_usage_execution(
+            &ingress.ingress,
+            &ingress.namespace,
+            owner,
+            &key,
+        )
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::UsageAdmissionFault,
+                format!("usage execution retirement of {owner} failed: {error}"),
+            )
+        })
     }
 
     async fn retire_closed_root_waits(
@@ -617,9 +672,14 @@ impl AwaitEventResolver for RestateEffectHostController {
     ) -> Result<Resolution, RuntimeError> {
         let ingress = &self.await_event_ingress;
         self.ensure_key_access(key).await?;
-        let attach = turn_cancel_watch_attachment(key);
-        await_restate_await_event_via_ingress(ingress, key, cancel, deadline, attach.as_deref())
-            .await
+        await_restate_await_event_via_ingress(
+            ingress,
+            key,
+            cancel,
+            deadline,
+            IngressAwait::of_key(key),
+        )
+        .await
     }
 
     async fn revoke_await_events_for_session(
@@ -1464,25 +1524,18 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
         Ok(match response {
-            crate::effect_group::EffectGroupCommitChildResponse::Committed {
-                commit_seq, ..
-            } => Outcome::Committed {
-                group_key,
-                commit_seq,
-            },
+            crate::effect_group::EffectGroupCommitChildResponse::Committed { rank } => {
+                Outcome::Committed { group_key, rank }
+            }
             crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
-                commit_seq,
-                ..
+                rank, ..
             } => Outcome::AlreadyCommitted {
                 group_key,
-                commit_seq,
+                rank,
                 drain_input: None,
             },
             crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
-                Outcome::CancelDecided {
-                    group_key,
-                    commit_seq: rank,
-                }
+                Outcome::CancelDecided { group_key, rank }
             }
             crate::effect_group::EffectGroupCommitChildResponse::UnknownChild => {
                 return Err(group_shape_error(format!(
@@ -1505,11 +1558,12 @@ impl RuntimeEffectController for RestateEffectHostController {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         // The §5 barrier on the engine's own wake, over ingress: the index
-        // names the last-committed unseated sibling, whose durable drained
-        // wake covers every lower-commit sibling by transitivity.
+        // names every committed sibling ranked below `rank` that has not
+        // seated, and the barrier lifts once each drained wake resolves —
+        // seated, or released by retirement.
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
             .call_lash_object::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
@@ -1518,7 +1572,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     .service(LashService::EffectGroupState),
                 group_key,
                 "drain_blockers",
-                &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },
+                &crate::effect_group::EffectGroupDrainBlockersRequest { rank },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?
@@ -1582,7 +1636,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 key,
                 cancellation,
                 deadline,
-                Some(&effect_replay_key),
+                IngressAwait::Effect(&effect_replay_key),
             )
             .await
             .map_err(RuntimeEffectControllerError::from)?;

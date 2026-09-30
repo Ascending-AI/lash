@@ -78,7 +78,7 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
 }
 
 lash_conformance::trigger_occurrence_listing_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres trigger occurrence-listing corruption law: database is not configured"
         );
@@ -88,5 +88,5 @@ lash_conformance::trigger_occurrence_listing_tests!({
     let pool = storage.pool().clone();
     let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
     let injector = Arc::new(PostgresTriggerOccurrenceListingFaultInjector { pool });
-    (database_lock, store, injector)
+    (database_fixture, store, injector)
 });

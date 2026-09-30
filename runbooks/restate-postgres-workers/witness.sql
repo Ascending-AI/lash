@@ -153,13 +153,16 @@ GRANT INSERT (run_id, subject, operation, phase, observer, detail_json, content_
 -- its intent before each fault, the injection with the busy work it hit,
 -- and the recovery it observed, all on this database's clock, so the load
 -- verifier can place every load event before, during or after each fault.
--- `campaign` rows start and end the fault phase the driver runs under.
+-- `campaign` rows start and end the fault phase the driver runs under. The
+-- rolling-upgrade campaign (FIG-3805 phase B) appends its steps to the same
+-- ledger: the half roll, the rollback, the roll, finalize and the fence.
 CREATE TABLE witness_load_faults (
     fault_event_id BIGSERIAL PRIMARY KEY,
     run_id TEXT NOT NULL,
     fault_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (
-        kind IN ('campaign', 'worker-kill', 'restate-restart', 'rolling-deploy')
+        kind IN ('campaign', 'worker-kill', 'restate-restart', 'rolling-deploy',
+                 'half-roll', 'rollback', 'roll', 'finalize', 'fence')
     ),
     phase TEXT NOT NULL CHECK (
         phase IN ('started', 'intent', 'injected', 'recovered', 'failed', 'complete')

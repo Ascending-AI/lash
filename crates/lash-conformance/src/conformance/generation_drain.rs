@@ -118,6 +118,7 @@ impl AdmittedRoot {
                 turn_index: 1,
                 generation: None,
                 admitted_generation: stamp.clone(),
+                executor: crate::store::RootExecutor::Root,
             })
             .await
             .expect("admit the root")
@@ -142,13 +143,17 @@ impl AdmittedRoot {
         };
         state.ensure_agent_frame_initialized();
         let root = self.root.clone();
-        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.drive_fence = Some(Box::new(self.lease.clone()));
         commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
             commit: crate::store::TurnCommitId::new(root.clone(), 0),
             turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
             root: root.clone(),
-            stop: None,
+            outcome: crate::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         }));
         commit.ingress = Some(super::completing_admission(root.as_str(), &self.admission));
         self.store

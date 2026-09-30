@@ -160,6 +160,23 @@ fn trigger_mutation_record(args: &Record, disposition: &str) -> Value {
     Value::Record(Arc::new(record))
 }
 
+/// A registration's host-facing label is its `name`: the target is an
+/// immutable definition handle, and hosts, not lash, own names.
+fn trigger_registration_name(args: &Record) -> &str {
+    args.get("name").and_then(string_ref).unwrap_or("trigger")
+}
+
+/// The definition id a `{ definition: <process> }` target selects.
+fn trigger_target_definition_id(args: &Record) -> Value {
+    args.get("target")
+        .and_then(Value::as_record)
+        .and_then(|target| target.get("definition"))
+        .and_then(Value::as_record)
+        .and_then(|definition| definition.get("id"))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
 fn trigger_register_record(args: &Record) -> Value {
     let source_type = args
         .get("source")
@@ -168,55 +185,43 @@ fn trigger_register_record(args: &Record) -> Value {
         .and_then(|source| HostDescriptor::decode(&source).ok())
         .map(|source| source.source_type)
         .unwrap_or_else(|| "unknown.Source".to_string());
-    let process_name = args
-        .get("target")
-        .and_then(Value::as_record)
-        .and_then(|target| target.get(LASH_PROCESS_NAME_KEY))
-        .and_then(string_ref)
-        .unwrap_or("target");
+    let name = trigger_registration_name(args);
 
     let mut record = Record::default();
     record.insert("type".to_string(), Value::String("trigger_handle".into()));
     record.insert(
         "id".to_string(),
-        Value::String(format!("trigger:{source_type}:{process_name}").into()),
+        Value::String(format!("trigger:{source_type}:{name}").into()),
     );
     record.insert(
         "source_type".to_string(),
         Value::String(source_type.clone().into()),
     );
-    record.insert(
-        "process_name".to_string(),
-        Value::String(process_name.to_string().into()),
-    );
+    record.insert("name".to_string(), Value::String(name.to_string().into()));
     Value::Record(Arc::new(record))
 }
 
 fn trigger_list_value(args: &Record) -> Value {
-    let process_name = args
-        .get("target")
-        .and_then(Value::as_record)
-        .and_then(|target| target.get(LASH_PROCESS_NAME_KEY))
-        .and_then(string_ref)
-        .unwrap_or("target");
-    let source_type = match process_name {
+    let name = trigger_registration_name(args);
+    let source_type = match name {
         "daily_digest" => "cron.Schedule",
-        "on_button" => "ui.button.pressed",
+        "button watcher" => "ui.button.pressed",
         _ => "unknown.Source",
     };
 
     let mut target = Record::default();
     target.insert(
-        "process_name".to_string(),
-        Value::String(process_name.to_string().into()),
+        "definition_id".to_string(),
+        trigger_target_definition_id(args),
     );
     target.insert("inputs".to_string(), trigger_inputs_value("event"));
 
     let mut route = Record::default();
     route.insert(
         "handle".to_string(),
-        Value::String(format!("trigger:{source_type}:{process_name}").into()),
+        Value::String(format!("trigger:{source_type}:{name}").into()),
     );
+    route.insert("name".to_string(), Value::String(name.to_string().into()));
     route.insert(
         "source_type".to_string(),
         Value::String(source_type.to_string().into()),

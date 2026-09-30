@@ -414,12 +414,6 @@ impl TriggerRouter {
         Arc::clone(&self.store)
     }
 
-    /// The env store a trigger registration intent publishes its draft's env
-    /// through, when this router was wired with one (FIG-3116).
-    pub(crate) fn process_env_store(&self) -> Option<Arc<dyn crate::ProcessExecutionEnvStore>> {
-        self.process_env_store.as_ref().map(Arc::clone)
-    }
-
     /// Emits a recorded [`crate::ToolIntent::EmitTrigger`] declaration and
     /// settles the report so redriving that one declaration returns the same
     /// bytes.
@@ -511,19 +505,37 @@ impl TriggerRouter {
         let mut deliveries = Vec::new();
         for reservation in reservations {
             // A replay finds the occurrence and its reservation already
-            // recorded (FIG-806). It emits the same deterministic process
-            // start, which its journal answers with the process the first
-            // attempt started, so the delivery reports `Started` on every
-            // attempt: the settled outcome, never the live store read
-            // (FIG-4272).
-            let process_id = match self
-                .start_delivery(
-                    &reservation,
-                    Arc::clone(process_work.registry()),
-                    effect_controller,
-                )
+            // recorded, and bound once its first attempt bound it (FIG-806).
+            // The emission journals its admission of the delivery before it
+            // prepares a start, and acts on the recorded admission alone
+            // (FIG-4297): a replay of an emission that found the delivery
+            // unbound consumes the start it journaled, whose journal answers
+            // the process the first attempt started, and an emission that
+            // found it bound answers the bound process and starts nothing,
+            // since after that process is pruned its start key would mint
+            // another. A delivery bound, and its process pruned, after this
+            // emission's ingest is refused at its start's registration, which
+            // [`Self::start_delivery`] answers with the bound process
+            // (FIG-4369). Either way the delivery reports `Started` with its
+            // process on every attempt: the settled outcome, never the live
+            // store read (FIG-4272).
+            let admission = self
+                .admit_delivery(&reservation, effect_controller)
                 .await
-            {
+                .map_err(PluginError::from);
+            let started = match admission {
+                Ok(TriggerDeliveryAdmission::Bound { process_id }) => Ok(process_id),
+                Ok(TriggerDeliveryAdmission::Start) => {
+                    self.start_delivery(
+                        &reservation,
+                        Arc::clone(process_work.registry()),
+                        effect_controller,
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
+            let process_id = match started {
                 Ok(process_id) => process_id,
                 Err(err) => {
                     deliveries.push(reservation.emit_report(
@@ -543,6 +555,110 @@ impl TriggerRouter {
             TriggerEmitReport::new(occurrence.occurrence_id, deliveries),
             realization,
         ))
+    }
+
+    /// Record this emission's admission of `reservation` (FIG-4297): bound
+    /// to the process the store answered it bound to, or admitted to start.
+    ///
+    /// The first execution decides from the reservation this emission's
+    /// ingest answered; every replay serves the recorded decision.
+    async fn admit_delivery(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<TriggerDeliveryAdmission, crate::RuntimeEffectControllerError> {
+        let admission = match reservation.process_id.clone() {
+            Some(process_id) => TriggerDeliveryAdmission::Bound { process_id },
+            None => TriggerDeliveryAdmission::Start,
+        };
+        self.record_admission(
+            reservation,
+            "trigger-admission",
+            Box::new(DeliveryAdmissionRunner { admission }),
+            effect_controller,
+        )
+        .await
+    }
+
+    /// Record the process `reservation`'s delivery is bound to, once its
+    /// start's registration refused as
+    /// [`TriggerDeliveryBound`](crate::RuntimeErrorCode::TriggerDeliveryBound)
+    /// (FIG-4369).
+    ///
+    /// The emission admitted the delivery to start while its ingest answered
+    /// it unbound. Another emission then bound it, and retention pruned the
+    /// bound process, before this start registered. The start's key found
+    /// nothing, and the registrar, reading the binding in the same
+    /// transaction, registered nothing. The first execution reads the
+    /// binding, which a bind writes once; every replay serves the recorded
+    /// admission after the start's recorded refusal.
+    async fn admit_bound_delivery(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<ProcessId, PluginError> {
+        let admission = self
+            .record_admission(
+                reservation,
+                "trigger-bound-admission",
+                Box::new(BoundDeliveryAdmissionRunner {
+                    store: Arc::clone(&self.store),
+                    occurrence_id: reservation.occurrence.occurrence_id.clone(),
+                    subscription_id: reservation.subscription.subscription_id.clone(),
+                }),
+                effect_controller,
+            )
+            .await?;
+        match admission {
+            TriggerDeliveryAdmission::Bound { process_id } => Ok(process_id),
+            TriggerDeliveryAdmission::Start => Err(PluginError::Session(format!(
+                "trigger delivery `{}`/`{}` recorded an admission to start after its start \
+                 was refused as bound",
+                reservation.occurrence.occurrence_id, reservation.subscription.subscription_id
+            ))),
+        }
+    }
+
+    /// Journal one `AdmitTriggerDelivery` step for `reservation` under
+    /// `replay_prefix`, whose first execution is `runner`.
+    async fn record_admission(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+        replay_prefix: &str,
+        runner: Box<dyn crate::runtime::effect::executor::RuntimeEffectLocalRunner>,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<TriggerDeliveryAdmission, crate::RuntimeEffectControllerError> {
+        let subscription = &reservation.subscription;
+        let occurrence = &reservation.occurrence;
+        let replay_key = format!(
+            "{replay_prefix}:{}:{}:{}:{}",
+            occurrence.occurrence_id,
+            subscription.subscription_id,
+            subscription.incarnation,
+            subscription.revision
+        );
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(effect_controller.execution_scope().clone(), replay_key)?,
+            delivery_attribution(subscription),
+            format!(
+                "{replay_prefix}:{}:{}",
+                occurrence.occurrence_id, subscription.subscription_id
+            ),
+        )
+        .with_caused_by(Some(delivery_causal_ref(reservation)));
+        effect_controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::AdmitTriggerDelivery {
+                        occurrence_id: occurrence.occurrence_id.clone(),
+                        subscription_id: subscription.subscription_id.clone(),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::owned_runner(runner, None),
+            )
+            .await?
+            .into_trigger_delivery_admission()
     }
 
     pub async fn start_delivery(
@@ -582,7 +698,7 @@ impl TriggerRouter {
             effect_id.clone(),
         )
         .with_caused_by(Some(causal_ref));
-        let outcome = effect_controller
+        let outcome = match effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -609,7 +725,20 @@ impl TriggerRouter {
                     executor
                 },
             )
-            .await?;
+            .await
+        {
+            Ok(outcome) => outcome,
+            // The delivery was bound, and its process pruned, since this
+            // emission's ingest answered it unbound: the registrar registered
+            // nothing, and the delivery's process is the bound one. Nothing
+            // was pinned, and the binding needs no bind (FIG-4369).
+            Err(refusal) if refusal.code == crate::RuntimeErrorCode::TriggerDeliveryBound => {
+                return self
+                    .admit_bound_delivery(reservation, effect_controller)
+                    .await;
+            }
+            Err(error) => return Err(error.into()),
+        };
         match outcome {
             crate::RuntimeEffectOutcome::Process {
                 result: crate::ProcessEffectOutcome::Start { record, .. },
@@ -682,7 +811,12 @@ impl TriggerRouter {
             })?;
         let process_id = match reservation.process_id.clone() {
             Some(process_id) => process_id,
-            None => self.register_recovered_delivery(&reservation).await?,
+            None => match self.register_recovered_delivery(&reservation).await? {
+                RecoveredDeliveryStart::Registered(process_id) => process_id,
+                RecoveredDeliveryStart::AlreadyBound => {
+                    return self.recovered_binding(occurrence_id, subscription_id).await;
+                }
+            },
         };
         self.store
             .bind_delivery_process(occurrence_id, subscription_id, &process_id)
@@ -692,13 +826,39 @@ impl TriggerRouter {
         Ok(process_id)
     }
 
+    /// The process a delivery whose recovered start was refused as bound is
+    /// bound to (FIG-4369). The bind that refused the start was written once,
+    /// so a reservation that answers unbound is gone or unreadable, and the
+    /// relay tries again.
+    async fn recovered_binding(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+    ) -> Result<ProcessId, TriggerDeliveryRecoveryError> {
+        self.store
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+            .map_err(TriggerDeliveryRecoveryError::classified)?
+            .into_iter()
+            .find(|reservation| reservation.subscription.subscription_id == subscription_id)
+            .and_then(|reservation| reservation.process_id)
+            .ok_or_else(|| {
+                TriggerDeliveryRecoveryError::Retryable(PluginError::Session(format!(
+                    "trigger delivery `{occurrence_id}`/`{subscription_id}` refused its start \
+                     as bound, and holds no binding now"
+                )))
+            })
+    }
+
     /// Register the process `reservation` starts, outside any journal: the
     /// relay has no caller whose journal could record it, and the start key
-    /// makes the registration idempotent on its own.
+    /// makes the registration idempotent on its own. A delivery bound since
+    /// the relay read it, whose process was pruned, registers nothing
+    /// (FIG-4369).
     async fn register_recovered_delivery(
         &self,
         reservation: &TriggerDeliveryReservation,
-    ) -> Result<ProcessId, TriggerDeliveryRecoveryError> {
+    ) -> Result<RecoveredDeliveryStart, TriggerDeliveryRecoveryError> {
         let DeliveryStart { command, .. } = self
             .prepare_delivery_start(reservation)
             .await
@@ -728,6 +888,8 @@ impl TriggerRouter {
             process_work: port,
             process_env_store: self.process_env_store.clone(),
             process_engines: self.process_engines.clone(),
+            // A trigger delivery's start is never a host-granted root.
+            session_catalog: None,
             turn_cancellation: None,
             effect_controller: None,
             attachments: None,
@@ -740,10 +902,15 @@ impl TriggerRouter {
             reservation.occurrence.occurrence_id, reservation.subscription.subscription_id
         ));
         match execution.execute(&receiver, command).await {
-            Ok(crate::ProcessEffectOutcome::Start { record, .. }) => Ok(record.id),
+            Ok(crate::ProcessEffectOutcome::Start { record, .. }) => {
+                Ok(RecoveredDeliveryStart::Registered(record.id))
+            }
             Ok(_) => Err(TriggerDeliveryRecoveryError::Refused(PluginError::Session(
                 "trigger process start returned an outcome other than a start".to_string(),
             ))),
+            Err(refusal) if refusal.code == crate::RuntimeErrorCode::TriggerDeliveryBound => {
+                Ok(RecoveredDeliveryStart::AlreadyBound)
+            }
             Err(error) => Err(TriggerDeliveryRecoveryError::classified(PluginError::from(
                 error,
             ))),
@@ -799,17 +966,8 @@ impl TriggerRouter {
                 .map_err(DeliveryStartRefusal::Refused)?;
         let target = apply_trigger_inputs(subscription.target.clone(), args)
             .map_err(DeliveryStartRefusal::Refused)?;
-        let causal_ref = crate::CausalRef::TriggerOccurrence {
-            occurrence_id: occurrence.occurrence_id.clone(),
-            subscription_id: Some(subscription.subscription_id.clone()),
-            subscription_incarnation: Some(subscription.incarnation.clone()),
-            subscription_revision: Some(subscription.revision),
-        };
-        let attribution = subscription
-            .registrant_session_id()
-            .cloned()
-            .map(crate::RuntimeAttribution::for_session)
-            .unwrap_or_else(crate::RuntimeAttribution::none);
+        let causal_ref = delivery_causal_ref(reservation);
+        let attribution = delivery_attribution(subscription);
         let trigger_occurrence_invocation =
             crate::runtime::causal::trigger_occurrence_invocation(attribution.clone(), &causal_ref);
         // Engine-admission ruling (FIG-1488): this route deliberately stays
@@ -852,11 +1010,116 @@ impl TriggerRouter {
                     .cloned()
                     .into_iter()
                     .collect(),
-                env_spec: None,
                 execution_context: Box::new(execution_context),
             },
             attribution,
             causal_ref,
+        })
+    }
+}
+
+/// The cause a delivery's journaled steps record: its occurrence, through
+/// the subscription it was reserved for.
+fn delivery_causal_ref(reservation: &TriggerDeliveryReservation) -> crate::CausalRef {
+    let subscription = &reservation.subscription;
+    crate::CausalRef::TriggerOccurrence {
+        occurrence_id: reservation.occurrence.occurrence_id.clone(),
+        subscription_id: Some(subscription.subscription_id.clone()),
+        subscription_incarnation: Some(subscription.incarnation.clone()),
+        subscription_revision: Some(subscription.revision),
+    }
+}
+
+/// The attribution a delivery's journaled steps record: the session that
+/// registered its subscription, when one did.
+fn delivery_attribution(subscription: &TriggerSubscriptionRecord) -> crate::RuntimeAttribution {
+    subscription
+        .registrant_session_id()
+        .cloned()
+        .map(crate::RuntimeAttribution::for_session)
+        .unwrap_or_else(crate::RuntimeAttribution::none)
+}
+
+/// The first execution of one `AdmitTriggerDelivery` step: it records the
+/// admission decided from the reservation the emission's ingest answered.
+/// None of it enters the envelope, which names only the delivery.
+struct DeliveryAdmissionRunner {
+    admission: TriggerDeliveryAdmission,
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryAdmissionRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "trigger delivery admission executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        Ok(crate::RuntimeEffectOutcome::AdmitTriggerDelivery {
+            admission: Box::new(self.admission),
+        })
+    }
+}
+
+/// The first execution of the `AdmitTriggerDelivery` step an emission
+/// records once its start was refused as bound (FIG-4369): it reads the
+/// process the store holds the delivery bound to. A store that did not answer
+/// is the attempt's fault, and the step runs again.
+struct BoundDeliveryAdmissionRunner {
+    store: Arc<dyn TriggerStore>,
+    occurrence_id: String,
+    subscription_id: String,
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for BoundDeliveryAdmissionRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "trigger delivery admission executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        let bound = self
+            .store
+            .list_deliveries_by_occurrence_id(&self.occurrence_id)
+            .await
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
+            })?
+            .into_iter()
+            .find(|reservation| reservation.subscription.subscription_id == self.subscription_id)
+            .and_then(|reservation| reservation.process_id);
+        // A bind is written once, so a delivery the registrar found bound is
+        // bound here, unless retention has since removed it.
+        let Some(process_id) = bound else {
+            return Err(crate::RuntimeEffectControllerError::foreign(
+                "trigger_delivery_unbound",
+                crate::TurnFailureCause::Outcome,
+                format!(
+                    "trigger delivery `{}`/`{}` refused its start as bound, and holds no \
+                     binding now",
+                    self.occurrence_id, self.subscription_id
+                ),
+            ));
+        };
+        Ok(crate::RuntimeEffectOutcome::AdmitTriggerDelivery {
+            admission: Box::new(TriggerDeliveryAdmission::Bound { process_id }),
         })
     }
 }
@@ -867,6 +1130,15 @@ struct DeliveryStart {
     command: crate::ProcessCommand,
     attribution: crate::RuntimeAttribution,
     causal_ref: crate::CausalRef,
+}
+
+/// What a relay's registration of an unbound delivery's start answered.
+enum RecoveredDeliveryStart {
+    /// The start's key holds this process, newly registered or retained.
+    Registered(ProcessId),
+    /// The delivery was bound, and its process pruned, since the relay read
+    /// it: the registrar registered nothing (FIG-4369).
+    AlreadyBound,
 }
 
 /// Why a delivery's start could not be prepared.

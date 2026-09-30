@@ -1,18 +1,18 @@
-//! Where a SQLite backend's three databases live, and the one identity they
+//! Where a SQLite store set's three databases live, and the one identity they
 //! answer to (ADR 0102).
 //!
-//! A backend is a directory of three database files or a named in-memory
-//! backend of four `memdb` databases. [`SqliteLocation`] owns both facts
+//! A store set is a directory of three database files or three named
+//! `memdb` databases. [`SqliteLocation`] owns both facts
 //! every component needs from that choice: how to reach each database (a path
-//! or a `file:/lash-<id>/<db>?vfs=memdb` URI) and the identity the turn-control
-//! binding, the settlement notifier and every `ATTACH` are keyed on. No
+//! or a `file:/lash-<id>/<db>?vfs=memdb` URI) and the storage binding identity.
+//! Components also use the location to address databases for `ATTACH`. No
 //! component formats either on its own.
 //!
 //! A `memdb` database is shared by name across every connection in the
-//! process and disappears with its last connection. A memory backend
+//! process and disappears with its last connection. A memory store set
 //! therefore pins each database with one idle anchor connection
 //! ([`MemoryAnchors`]), and every component opened on it holds the anchors, so
-//! the data lives exactly as long as the backend or any handle taken from
+//! the data lives exactly as long as the store set or any handle taken from
 //! it.
 
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::SqliteDatabase;
 
-/// The typed location of one SQLite backend.
+/// The typed location of one SQLite store set.
 ///
 /// The only way to reach a SQLite database in memory: raw `:memory:` and
 /// `file:` strings are refused by every path-taking constructor.
@@ -28,7 +28,7 @@ use crate::SqliteDatabase;
 pub enum SqliteLocation {
     /// Three database files under a canonical directory.
     File { root: PathBuf },
-    /// Three named `memdb` databases, alive while the backend is.
+    /// Three named `memdb` databases, alive while their anchors are held.
     Memory { id: uuid::Uuid },
 }
 
@@ -153,8 +153,8 @@ fn escape_uri_path(path: &str) -> String {
         .replace('#', "%23")
 }
 
-/// One idle connection per `memdb` database of a memory backend. A
-/// `memdb` database disappears with its last connection; these keep all four
+/// One idle connection per `memdb` database of a memory store set. A
+/// `memdb` database disappears with its last connection; these keep all three
 /// alive until the last handle holding them drops.
 pub(crate) struct MemoryAnchors {
     _connections: Mutex<Vec<rusqlite::Connection>>,
@@ -239,7 +239,7 @@ pub(crate) fn validate_file_database_path(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(format!(
                     "{component} requires a file-backed database path, got `{rendered}`; \
-                     use SqliteStoreSet::memory() for an in-memory store set"
+                     use SqliteStoreSet::memory() for a SQLite in-memory store set"
                 )),
             ),
         ));

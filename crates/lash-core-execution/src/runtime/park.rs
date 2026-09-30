@@ -280,7 +280,7 @@ async fn next_admission_root(
 }
 
 /// What the session's turn lane admits next once no session command is open
-/// (ADR 0101 §5, as the FIG-3540 close-out amends it): the host input and
+/// (ADR 0101 §5): the host input and
 /// the queued work pending in the two admission tables take one per-session
 /// `enqueue_seq`, and the earlier of the head next-turn input and the
 /// earliest pending queued turn work goes first. There is no kind priority.

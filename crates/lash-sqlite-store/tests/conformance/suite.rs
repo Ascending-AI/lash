@@ -26,7 +26,7 @@ use lash_core_execution::{
     ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
     SessionCatalogStore, SessionCommitStore, TriggerStore,
 };
-use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
+use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
@@ -75,6 +75,19 @@ impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
                 panic!("the law's crashed turn did not redrive in its handler: {error}")
             });
     }
+
+    /// Process segments run in the double's process workflow: the worker is
+    /// installed there, and the runtime's own port only observes the
+    /// registry that workflow writes terminals into.
+    fn process_work(
+        &self,
+        watched: lash_core_execution::WatchedRegistry,
+        worker: lash_core_worker::DurableProcessWorker,
+    ) -> lash_core_execution::ProcessWorkWiring {
+        self.0.install_process_worker(worker);
+        let port = Arc::new(lash_core_execution::NoProcessWork::new(&watched));
+        lash_core_execution::ProcessWorkWiring::new(watched, port)
+    }
 }
 
 // FIG-4110: every frame open (a context-pressure frame, a pressure frame
@@ -100,6 +113,35 @@ lash_conformance::frame_open_redrive_tests!({
     (
         (backend, double),
         "sqlite-frame-open",
+        effect_host,
+        stores,
+        runner,
+    )
+});
+
+// FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted by
+// a fresh invocation after the bound process was pruned, returns that process
+// and starts nothing, and the original emission's replay still answers it.
+// Every emission runs inside a handler of the Restate double over this
+// substrate's stores, and the delivery's process runs in its process workflow.
+lash_conformance::bound_trigger_duplicate_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4297 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the bound-trigger law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    (
+        (backend, double),
+        "sqlite-bound-trigger",
         effect_host,
         stores,
         runner,
@@ -973,78 +1015,6 @@ lash_conformance::append_tombstone_tests!({
     )
 });
 
-lash_conformance::append_receipt_envelope_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.store().await;
-    store
-        .admit_session(&root_session_request("root"))
-        .await
-        .expect("admit receipt envelope session");
-    (backend, store as Arc<dyn RuntimeStore>)
-});
-
-// The commit-seam pause needs the fault injector, which only the `testing`
-// feature builds.
-#[cfg(feature = "testing")]
-mod cancelled_queued_append {
-    use super::*;
-    use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint};
-
-    lash_conformance::append_usage_cancellation_tests!({
-        let injector = SqliteFaultInjector::default();
-        let backend = TestBackend::open_with(
-            SUBSTRATE,
-            {
-                let injector = injector.clone();
-                move |options| SqliteStoreSetOptions {
-                    fault_injector: Some(injector),
-                    ..options
-                }
-            },
-            crate::backend_fixture::system_clock(),
-        )
-        .await;
-        let store = backend.store().await;
-        store
-            .admit_session(&root_session_request("root"))
-            .await
-            .expect("admit cancellation session");
-        let committed_store = Arc::clone(&store);
-        (backend, store, move || {
-            // The append commit is the first write after the pause is armed.
-            let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
-            async move {
-                pause.wait_until_reached().await;
-                move || {
-                    pause.release();
-                    sync_await(async move {
-                        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                            loop {
-                                match lash_core_execution::SessionHistoryStore::load_session_window(
-                                    committed_store.as_ref(),
-                                    &SessionId::from("root"),
-                                    lash_core_execution::store::WindowSelector::Current,
-                                )
-                                .await
-                                .expect("read cancelled append after release")
-                                {
-                                    Some(_) => break,
-                                    None => {
-                                        tokio::time::sleep(std::time::Duration::from_millis(1))
-                                            .await
-                                    }
-                                }
-                            }
-                        })
-                        .await
-                        .expect("cancelled append commits after seam release");
-                    });
-                }
-            }
-        })
-    });
-}
-
 lash_conformance::append_receipt_rewrite_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend.store().await;
@@ -1233,3 +1203,54 @@ async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms
     let backend = TestBackend::open(SUBSTRATE).await;
     lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
 }
+
+#[path = "wake_delivery.rs"]
+mod wake_delivery;
+
+mod worker_recovery {
+    use super::*;
+    lash_conformance::worker_recovery_tests!({
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let recovery = backend.as_stores().worker_recovery();
+        (backend, recovery)
+    });
+}
+
+lash_conformance::usage_ledger_store_tests!({
+    use lash_core_execution::StoreSet as _;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let snapshot_backend = backend.clone();
+    let snapshot: lash_conformance::UsageLedgerSnapshot = Arc::new(move || {
+        let backend = snapshot_backend.clone();
+        Box::pin(async move {
+            let connection = backend.raw(SqliteDatabase::DurableCore);
+            let tables = connection.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'usage_%' AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap()
+                .query_map([], |row| row.get::<_, String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            let mut snapshot = Vec::new();
+            for table in tables {
+                let mut statement = connection
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
+                    .unwrap();
+                let count = statement.column_count();
+                let mut rows = statement
+                    .query_map([], |row| {
+                        (0..count)
+                            .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect::<Vec<_>>();
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
+            }
+            snapshot
+        })
+    });
+    let fixture = lash_conformance::UsageLedgerStoreFixture {
+        accounting: backend.usage_accounting(),
+        factory: backend.session_store_factory(),
+        snapshot,
+    };
+    (backend, fixture)
+});

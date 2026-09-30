@@ -8,6 +8,7 @@ fn facet_diagnostic_http_json_golden_is_exact() {
     let diagnostic = TypeDiagnostic {
         node_id: "node-1".to_string(),
         kind: "incompatible_expected_literal".to_string(),
+        classification: lash::rlm::lang::WorkflowDiagnosticClassification::Definite,
         slot: Some("arg[0][\"query\"]".to_string()),
         message: "expected enum, got incompatible literal \"bad\"".to_string(),
         span: Some(lash::rlm::lang::Span { start: 4, end: 9 }),
@@ -17,6 +18,7 @@ fn facet_diagnostic_http_json_golden_is_exact() {
         serde_json::json!({
             "nodeId": "node-1",
             "kind": "incompatible_expected_literal",
+            "classification": "definite",
             "slot": "arg[0][\"query\"]",
             "message": "expected enum, got incompatible literal \"bad\"",
             "span": { "start": 4, "end": 9 }
@@ -55,6 +57,16 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         .expect("POST typed source");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let body: Value = response.json().await.expect("typed project JSON");
+    assert_eq!(
+        body["document"]["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .flat_map(|node| node["data"]["diagnostics"].as_array().into_iter().flatten())
+            .find(|diagnostic| diagnostic["kind"] == "unknown_object_field")
+            .expect("projected diagnostic")["classification"],
+        "definite"
+    );
     let mut document: WorkflowDocument =
         serde_json::from_value(body["document"].clone()).expect("typed document");
     assert_eq!(

@@ -89,17 +89,27 @@ use serde::{Deserialize, Serialize};
 /// It changed in place again for FIG-3980: a model call and the decision
 /// before it journal their request's messages, tools and instructions as
 /// digests rather than verbatim.
+/// It changed in place again for FIG-4236: a spending effect's recorded entry
+/// carries its usage run's owner, identity and facts beside its outcome
+/// (`usage`, absent for an effect that dispatched nothing), and the entry is
+/// followed by the run's one-way settle send (ADR 0125).
 pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";
 
-/// A recorded effect: the envelope replay validation matches on, and the
-/// outcome the effect produced.
+/// A recorded effect: the envelope replay validation matches on, the
+/// outcome the effect produced, and what a spending effect's usage run
+/// delivers (ADR 0125).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RecordedRuntimeEffect {
     pub(crate) envelope: Arc<CanonicalRuntimeEffectEnvelope>,
     pub(crate) outcome: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+    /// Outside `outcome`, so an `Err` outcome — a failed call, a poison
+    /// substitute — keeps what the run spent. `None` when the effect
+    /// dispatched nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<lash_core::EffectUsage>,
 }
 
 /// What a journaled effect's `ctx.run` entry carries.

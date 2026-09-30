@@ -1,52 +1,52 @@
 # Stream termination is explicit dialect policy
 
-A clean transport EOF does not prove that an LLM response completed. Chat Completions can
-lose its final `finish_reason`; Responses can lose `response.completed`; Anthropic Messages
-can lose `message_stop`. Lash previously assembled whatever parts had arrived and inferred a
-successful stop or tool use, which made a truncated response indistinguishable from a complete
-one and could make an incomplete tool call executable. Usage observed before the failure also
-fell out of the retry attempt ledger.
+## Context
 
-We decided that **stream completion requires dialect-specific terminal evidence unless the host
-explicitly selects EOF tolerance**. The host-supplied policy is
-`StreamTermination::RequireTerminalEvidence | EofTolerated`. It follows the same ADR 0026/0070
-configuration path as cache capability data: `ModelCapability.stream_termination` is a
-route/model override; OpenAI-compatible endpoint defaults live in
-`OpenAiCompat.stream_termination`; direct Anthropic and Google providers expose the same policy
-on their constructors and serialized config. There is no URL, model-name, payload, or `[DONE]`
-inference.
+A clean transport EOF does not prove a complete model response. A stream can
+lose its terminal event while retaining text, partial tool arguments and usage.
+Treating those fragments as success can execute an incomplete tool call.
 
-The defaults are semantic dialect facts. OpenAI Chat Completions requires a nonempty
-`finish_reason`. OpenAI and Codex Responses require a terminal response event
-(`response.completed`, `response.incomplete`, `response.failed`, or `response.done`). Anthropic
-requires `message_stop` after `message_start`. Google tolerates EOF because its streaming
-dialect legitimately uses that boundary in deployments Lash supports. OpenAI-compatible hosts
-whose endpoints also require EOF tolerance must set it explicitly; `OpenAiCompat::openrouter()`
-selects strict terminal evidence.
+## Decision
 
-Missing required evidence is a retryable `ProviderFailureKind::Stream` failure, never a partial
-success. The transport error carries a partial `LlmResponse` containing accumulated text,
-reasoning, tool-call fragments, normalized usage, raw `provider_usage`, and execution evidence.
-That partial crosses the runtime effect boundary for diagnosis and accounting but is never
-passed to the protocol as a completed response. `ProviderHandle` records its observed usage and
-evidence on the ADR 0032 `Interrupted` attempt. Before a whole-call retry it emits an attempt
-reset, so runtime accumulators discard provisional tool parts and usage from the failed try.
-Explicit user cancellation remains `Cancelled`, non-retryable, and distinct from truncation.
+Completion requires dialect-specific terminal evidence unless the host
+explicitly selects `StreamTermination::EofTolerated`. The alternative is
+`RequireTerminalEvidence`. `ModelCapability.stream_termination` overrides the
+route default. OpenAI-compatible endpoint defaults live in `OpenAiCompat`;
+Anthropic and Google expose the same policy in provider configuration.
 
-This is intentionally breaking for nonconforming OpenAI-compatible embedders. Streams that
-formerly appeared successful at bare EOF now fail. Hosts may opt a known EOF-terminated route
-into `EofTolerated`; doing so is an explicit compatibility contract, not a heuristic fallback.
+Chat Completions requires a nonempty `finish_reason`. Responses requires a
+terminal response event. Anthropic requires `message_stop` after
+`message_start`. Google defaults to EOF tolerance. The OpenRouter-compatible
+preset requires terminal evidence. Neither a URL, a model name nor `[DONE]`
+substitutes for the selected dialect's evidence.
 
-## Amendment (FIG-2765): abort drain grace and post-hoc reconciliation
+Missing required evidence is a `ProviderFailureKind::Stream` failure, subject
+to retry and host charge-safety policy. Its partial response retains accumulated
+output, usage, provider usage, execution evidence and allowlisted metadata.
+That response crosses the effect boundary for accounting and diagnosis; the
+protocol never receives it as completed output. The attempt ledger records the
+observed facts on an `Interrupted` attempt. A whole-call retry resets provisional
+output and usage before collecting the next attempt (ADR 0040).
 
-A stream the runtime itself aborts at a protocol boundary (the RLM cell mask) is neither
-truncated nor complete: the provider may still deliver its usage frame after the abort.
-How long the aborted stream may drain before the attempt is sealed is host policy,
-`RuntimeControlConfig.abort_drain_grace` (`LashCoreBuilder::abort_drain_grace`, default
-2 s), not a literal in the turn driver. Usage that lands inside the grace stays
-provider-reported on the `Aborted` attempt; usage that does not is sealed as
-`UnreportedAfterAbort` per the ADR 0031 amendment. Providers whose backend can account
-for a cancelled generation after the fact implement `Provider::reconcile_usage`
-(OpenRouter's `GET /generation?id=` when `OpenAiCompat.usage_reconciliation` selects it,
-bounded to one retry and a fixed timeout); the runtime never calls it on its own — the
-host invokes `reconcile_unreported_usage` when it wants the ledger settled.
+Explicit cancellation is distinct from truncation. A protocol-owned abort can
+still drain provider usage before sealing its attempt. The host selects
+`abort_drain_grace`, whose default is two seconds. Usage received in that
+interval remains provider-reported; missing usage becomes
+`UnreportedAfterAbort` (ADR 0031).
+
+A provider may implement post-hoc `reconcile_usage`. OpenRouter's configured
+lookup is bounded. The runtime invokes reconciliation only when the host calls
+`reconcile_unreported_usage`, not as an automatic background policy.
+
+## Consequences
+
+A host using an EOF-terminated compatible route must state that policy.
+Heuristic fallback to success is rejected because it hides truncation. Abort
+drain timing and later accounting remain host choices, while evidence records
+what the provider actually reports.
+
+## Implementation
+
+- [OpenAI stream validation](../../crates/lash-provider-openai/src/driver.rs) and [Responses collection](../../crates/lash-provider-openai/src/codex/streaming.rs).
+- [Anthropic completion validation](../../crates/lash-provider-anthropic/src/provider.rs) and [Google defaults](../../crates/lash-provider-google/src/config.rs).
+- [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming.rs) and [usage reconciliation](../../crates/lash-provider-openai/src/openrouter.rs).

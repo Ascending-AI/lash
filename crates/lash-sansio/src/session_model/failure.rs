@@ -188,6 +188,8 @@ pub enum TurnFailureCode {
     InvalidStructuredOutput,
     /// The provider response body could not be read.
     BodyReadFailed,
+    /// A non-SSE HTTP response exceeded the caller-selected raw byte budget.
+    HttpResponseBodyTooLarge,
 
     /// / A token-usage counter overflowed while accumulating turn usage.
     TokenUsageOverflow,
@@ -278,6 +280,11 @@ pub enum TurnFailureCode {
     /// The websocket closed before the response completed.
     WebsocketClosedBeforeCompleted,
 
+    // ─── usage accounting ────────────────────────────────────────────────
+    /// The call's usage owner was drained (its session deleted or its
+    /// process pruned), so no provider attempt may spend under it (ADR 0125).
+    UsageOwnerRetired,
+
     /// A code from a vocabulary this type does not own, retained verbatim:
     /// provider and transport error codes, plugin abort codes, kernel
     /// `RuntimeErrorCode` spellings, and arms authored by a newer build.
@@ -334,6 +341,7 @@ impl TurnFailureCode {
             Self::ChargeSafetyRetryDenied => "charge_safety_retry_denied",
             Self::InvalidStructuredOutput => "invalid_structured_output",
             Self::BodyReadFailed => "body_read_failed",
+            Self::HttpResponseBodyTooLarge => "http_response_body_too_large",
             Self::TokenUsageOverflow => "token_usage_overflow",
             Self::ReconfigureFailed => "reconfigure_failed",
             Self::MissingDone => "missing_done",
@@ -375,6 +383,7 @@ impl TurnFailureCode {
             Self::WebsocketReceive => "websocket_receive",
             Self::WebsocketProtocol => "websocket_protocol",
             Self::WebsocketClosedBeforeCompleted => "websocket_closed_before_completed",
+            Self::UsageOwnerRetired => "usage_owner_retired",
             Self::Other(spelling) => spelling,
         }
     }
@@ -440,6 +449,7 @@ impl TurnFailureCode {
             "charge_safety_retry_denied" => Self::ChargeSafetyRetryDenied,
             "invalid_structured_output" => Self::InvalidStructuredOutput,
             "body_read_failed" => Self::BodyReadFailed,
+            "http_response_body_too_large" => Self::HttpResponseBodyTooLarge,
             "token_usage_overflow" => Self::TokenUsageOverflow,
             "reconfigure_failed" => Self::ReconfigureFailed,
             "missing_done" => Self::MissingDone,
@@ -481,6 +491,7 @@ impl TurnFailureCode {
             "websocket_receive" => Self::WebsocketReceive,
             "websocket_protocol" => Self::WebsocketProtocol,
             "websocket_closed_before_completed" => Self::WebsocketClosedBeforeCompleted,
+            "usage_owner_retired" => Self::UsageOwnerRetired,
             other => Self::Other(other.to_string()),
         }
     }
@@ -525,6 +536,7 @@ impl TurnFailureCode {
         Self::ChargeSafetyRetryDenied,
         Self::InvalidStructuredOutput,
         Self::BodyReadFailed,
+        Self::HttpResponseBodyTooLarge,
         Self::TokenUsageOverflow,
         Self::ReconfigureFailed,
         Self::MissingDone,
@@ -566,6 +578,7 @@ impl TurnFailureCode {
         Self::WebsocketReceive,
         Self::WebsocketProtocol,
         Self::WebsocketClosedBeforeCompleted,
+        Self::UsageOwnerRetired,
     ];
 }
 
@@ -1147,6 +1160,7 @@ mod tests {
             TurnFailureCode::ChargeSafetyRetryDenied,
             TurnFailureCode::InvalidStructuredOutput,
             TurnFailureCode::BodyReadFailed,
+            TurnFailureCode::HttpResponseBodyTooLarge,
             TurnFailureCode::TokenUsageOverflow,
             TurnFailureCode::ReconfigureFailed,
             TurnFailureCode::MissingDone,
@@ -1188,6 +1202,7 @@ mod tests {
             TurnFailureCode::WebsocketReceive,
             TurnFailureCode::WebsocketProtocol,
             TurnFailureCode::WebsocketClosedBeforeCompleted,
+            TurnFailureCode::UsageOwnerRetired,
         ];
         for code in codes {
             assert_eq!(TurnFailureCode::from_wire(code.as_str()), code);
@@ -1341,7 +1356,7 @@ mod tests {
     fn all_named_covers_every_named_arm() {
         assert_eq!(
             TurnFailureCode::ALL_NAMED.len(),
-            75,
+            76,
             "a new named arm must be added to ALL_NAMED"
         );
         for code in TurnFailureCode::ALL_NAMED {

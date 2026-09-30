@@ -2,25 +2,56 @@
 //! The controller's ledger and the load events share the witness database's
 //! clock, so each fault is placed against the operations it hit: they must
 //! have been in flight, reached durable answers, and service must have gone
-//! on after the fault.
+//! on after the fault. The rolling-upgrade campaign (FIG-3805,
+//! `upgrade_verify`) places its steps with the same checks.
 
 use super::verify::{FaultRow, WitnessSnapshot, sent_request};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Which controller campaign a run ran under, from its `campaign` start row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CampaignKind {
+    /// The FIG-4169 fault campaign: a worker kill, a Restate restart and a
+    /// rolling deploy.
+    Faults,
+    /// The FIG-3805 rolling upgrade: half roll, rollback, roll, finalize and
+    /// the stale-writer fence.
+    RollingUpgrade,
+}
+
+/// The campaign `snapshot`'s ledger started, or `None` without a campaign.
+/// A start row that names no known campaign is judged as the fault
+/// campaign, whose classes it then fails.
+pub(super) fn campaign_kind(snapshot: &WitnessSnapshot) -> Option<CampaignKind> {
+    if snapshot.faults.is_empty() {
+        return None;
+    }
+    let started = snapshot
+        .faults
+        .iter()
+        .find(|row| row.kind == "campaign" && row.phase == "started");
+    Some(
+        match started.and_then(|row| row.detail["campaign"].as_str()) {
+            Some("rolling-upgrade") => CampaignKind::RollingUpgrade,
+            _ => CampaignKind::Faults,
+        },
+    )
+}
+
 /// One operation's witnessed life on the witness clock: when the driver
 /// sent it, and when and how it read back its terminal.
-struct Timeline<'a> {
-    operation: &'a str,
-    subject: &'a str,
+pub(super) struct Timeline<'a> {
+    pub(super) operation: &'a str,
+    pub(super) subject: &'a str,
     /// The Restate workflow key the operation ran under.
     workflow_key: Option<String>,
-    sent_at: i64,
+    pub(super) sent_at: i64,
     terminal: Option<(i64, &'a Value)>,
 }
 
 impl Timeline<'_> {
-    fn answered(&self) -> bool {
+    pub(super) fn answered(&self) -> bool {
         self.terminal
             .is_some_and(|(_, detail)| detail.get("response").is_some())
     }
@@ -29,12 +60,12 @@ impl Timeline<'_> {
         self.sent_at < at && self.terminal.is_none_or(|(ended, _)| ended > at)
     }
 
-    fn response(&self) -> Option<&Value> {
+    pub(super) fn response(&self) -> Option<&Value> {
         self.terminal.and_then(|(_, detail)| detail.get("response"))
     }
 }
 
-fn timelines(snapshot: &WitnessSnapshot) -> Vec<Timeline<'_>> {
+pub(super) fn timelines(snapshot: &WitnessSnapshot) -> Vec<Timeline<'_>> {
     let mut index: BTreeMap<(&str, &str), Timeline<'_>> = BTreeMap::new();
     for event in &snapshot.events {
         if event.operation == "attachment" {
@@ -62,47 +93,198 @@ fn timelines(snapshot: &WitnessSnapshot) -> Vec<Timeline<'_>> {
     index.into_values().collect()
 }
 
+/// The first row of `fault_id` in `phase`.
+pub(super) fn fault_row<'a>(
+    snapshot: &'a WitnessSnapshot,
+    fault_id: &str,
+    phase: &str,
+) -> Option<&'a FaultRow> {
+    snapshot
+        .faults
+        .iter()
+        .find(|row| row.fault_id == fault_id && row.phase == phase)
+}
+
+/// The campaign started and completed, and no fault or step failed.
+pub(super) fn campaign_outcome(snapshot: &WitnessSnapshot) -> Result<(), String> {
+    let campaign: Vec<&FaultRow> = snapshot
+        .faults
+        .iter()
+        .filter(|row| row.kind == "campaign")
+        .collect();
+    match (
+        campaign.iter().find(|row| row.phase == "started"),
+        campaign.iter().find(|row| row.phase == "complete"),
+        snapshot.faults.iter().find(|row| row.phase == "failed"),
+    ) {
+        (_, _, Some(failed)) => Err(format!(
+            "{} `{}` failed: {}",
+            failed.kind, failed.fault_id, failed.detail
+        )),
+        (Some(_), Some(_), None) => Ok(()),
+        (started, complete, None) => Err(format!(
+            "the campaign started={} complete={}",
+            started.is_some(),
+            complete.is_some()
+        )),
+    }
+}
+
+/// Whether an operation named `operation`, sent after `at`, read back a
+/// response `accept` takes.
+pub(super) fn answered_after(
+    timelines: &[Timeline<'_>],
+    at: i64,
+    operation: &str,
+    accept: &dyn Fn(&Value) -> bool,
+) -> bool {
+    timelines.iter().any(|timeline| {
+        timeline.operation == operation
+            && timeline.sent_at > at
+            && timeline.response().is_some_and(accept)
+    })
+}
+
+/// Whether a turn sent after `at` was answered by one of `workers` (the
+/// controller's `new_workers`): admission moved to them.
+pub(super) fn moved_to(timelines: &[Timeline<'_>], at: i64, workers: &Value) -> bool {
+    let workers: BTreeSet<&str> = workers
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    answered_after(timelines, at, "turn", &|response| {
+        response["worker_id"]
+            .as_str()
+            .is_some_and(|worker| workers.contains(worker))
+    })
+}
+
+/// What every injected fault or upgrade step must show against the witness:
+/// it was both injected and recovered, in that order; load operations were
+/// in flight at the injection and every one reached a durable answer; the
+/// busy work the controller named was witnessed sent before it and
+/// answered; and service went on after it (a turn, a queued input and a
+/// cron emission). Violations go to `class`. Answers the injected and
+/// recovered rows once both were placed.
+pub(super) fn verify_injection<'a>(
+    class: &'static str,
+    kind: &str,
+    fault_id: &str,
+    snapshot: &'a WitnessSnapshot,
+    timelines: &[Timeline<'_>],
+    note: &mut impl FnMut(&'static str, Result<(), String>),
+) -> Option<(&'a FaultRow, &'a FaultRow)> {
+    let (Some(injected), Some(recovered)) = (
+        fault_row(snapshot, fault_id, "injected"),
+        fault_row(snapshot, fault_id, "recovered"),
+    ) else {
+        note(
+            class,
+            Err(format!(
+                "{kind} `{fault_id}` was not both injected and recovered"
+            )),
+        );
+        return None;
+    };
+    let at = injected.recorded_at_us;
+    if recovered.recorded_at_us < at {
+        note(
+            class,
+            Err(format!(
+                "{kind} `{fault_id}` recovered before it was injected"
+            )),
+        );
+        return None;
+    }
+    let hit: Vec<&Timeline<'_>> = timelines
+        .iter()
+        .filter(|timeline| timeline.in_flight_at(at))
+        .collect();
+    note(
+        class,
+        if hit.is_empty() {
+            Err(format!(
+                "{kind} `{fault_id}` missed active work: no load operation was in flight"
+            ))
+        } else {
+            Ok(())
+        },
+    );
+    for timeline in &hit {
+        if !timeline.answered() {
+            note(
+                class,
+                Err(format!(
+                    "{} `{}` in flight at {kind} `{fault_id}` never reached a durable answer: {:?}",
+                    timeline.operation,
+                    timeline.subject,
+                    timeline.terminal.map(|(_, detail)| detail)
+                )),
+            );
+        }
+    }
+    // The busy work the controller saw on its target, sampled just before
+    // the injection, must be witnessed load work sent before the fault
+    // that then answered. The witness's own in-flight set above is the
+    // independent proof that the fault hit work.
+    for key in injected.detail["active"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        let witnessed = timelines.iter().any(|timeline| {
+            timeline.workflow_key.as_deref() == Some(key)
+                && timeline.sent_at < at
+                && timeline.answered()
+        });
+        if !witnessed {
+            note(
+                class,
+                Err(format!(
+                    "{kind} `{fault_id}` named busy work `{key}` that the witness did not see sent before it and answered"
+                )),
+            );
+        }
+    }
+    let turn_answered = answered_after(timelines, at, "turn", &|response| {
+        response["outcome"]["status"] == "answered"
+    });
+    let queued_answered = answered_after(timelines, at, "turn", &|response| {
+        response["queued"].as_array().is_some_and(|queued| {
+            queued
+                .iter()
+                .any(|input| input["outcome"]["status"] == "answered")
+        })
+    });
+    let cron_ticked = answered_after(timelines, at, "cron-tick", &|response| {
+        response["started_process_ids"]
+            .as_array()
+            .is_some_and(|started| !started.is_empty())
+    });
+    if !(turn_answered && queued_answered && cron_ticked) {
+        note(
+            class,
+            Err(format!(
+                "service did not progress after {kind} `{fault_id}`: turn={turn_answered} queued={queued_answered} cron={cron_ticked}"
+            )),
+        );
+    }
+    Some((injected, recovered))
+}
+
 /// The fault classes of a campaign run. Each fault the controller injected
-/// must have hit load operations in flight, every one of them must have
-/// reached a durable answer, service must have progressed after the fault
-/// (turns, queued inputs and cron emissions), and the controller's own
-/// recovery evidence must hold. A fault kind with no injected fault has no
+/// must pass [`verify_injection`], and the controller's own recovery
+/// evidence must hold. A fault kind with no injected fault has no
 /// evidence, so a campaign that skipped one fails its class.
 pub(super) fn verify_faults(
     snapshot: &WitnessSnapshot,
     note: &mut impl FnMut(&'static str, Result<(), String>),
 ) {
     let timelines = timelines(snapshot);
-    let rows = |fault_id: &str, phase: &str| -> Option<&FaultRow> {
-        snapshot
-            .faults
-            .iter()
-            .find(|row| row.fault_id == fault_id && row.phase == phase)
-    };
-    let campaign: Vec<&FaultRow> = snapshot
-        .faults
-        .iter()
-        .filter(|row| row.kind == "campaign")
-        .collect();
-    note(
-        "fault-campaign",
-        match (
-            campaign.iter().find(|row| row.phase == "started"),
-            campaign.iter().find(|row| row.phase == "complete"),
-            snapshot.faults.iter().find(|row| row.phase == "failed"),
-        ) {
-            (_, _, Some(failed)) => Err(format!(
-                "{} `{}` failed: {}",
-                failed.kind, failed.fault_id, failed.detail
-            )),
-            (Some(_), Some(_), None) => Ok(()),
-            (started, complete, None) => Err(format!(
-                "the campaign started={} complete={}",
-                started.is_some(),
-                complete.is_some()
-            )),
-        },
-    );
+    note("fault-campaign", campaign_outcome(snapshot));
     let mut faults: Vec<(&str, &str)> = Vec::new();
     for row in &snapshot.faults {
         if row.kind != "campaign" && !faults.contains(&(row.kind.as_str(), row.fault_id.as_str())) {
@@ -122,108 +304,12 @@ pub(super) fn verify_faults(
                 continue;
             }
         };
-        let (Some(injected), Some(recovered)) =
-            (rows(fault_id, "injected"), rows(fault_id, "recovered"))
+        let Some((injected, recovered)) =
+            verify_injection(class, kind, fault_id, snapshot, &timelines, note)
         else {
-            note(
-                class,
-                Err(format!(
-                    "{kind} `{fault_id}` was not both injected and recovered"
-                )),
-            );
             continue;
         };
         let at = injected.recorded_at_us;
-        if recovered.recorded_at_us < at {
-            note(
-                class,
-                Err(format!(
-                    "{kind} `{fault_id}` recovered before it was injected"
-                )),
-            );
-            continue;
-        }
-        let hit: Vec<&Timeline<'_>> = timelines
-            .iter()
-            .filter(|timeline| timeline.in_flight_at(at))
-            .collect();
-        note(
-            class,
-            if hit.is_empty() {
-                Err(format!(
-                    "{kind} `{fault_id}` missed active work: no load operation was in flight"
-                ))
-            } else {
-                Ok(())
-            },
-        );
-        for timeline in &hit {
-            if !timeline.answered() {
-                note(
-                    class,
-                    Err(format!(
-                        "{} `{}` in flight at {kind} `{fault_id}` never reached a durable answer: {:?}",
-                        timeline.operation,
-                        timeline.subject,
-                        timeline.terminal.map(|(_, detail)| detail)
-                    )),
-                );
-            }
-        }
-        // The busy work the controller saw on its target, sampled just before
-        // the injection, must be witnessed load work sent before the fault
-        // that then answered. The witness's own in-flight set above is the
-        // independent proof that the fault hit work.
-        for key in injected.detail["active"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-        {
-            let witnessed = timelines.iter().any(|timeline| {
-                timeline.workflow_key.as_deref() == Some(key)
-                    && timeline.sent_at < at
-                    && timeline.answered()
-            });
-            if !witnessed {
-                note(
-                    class,
-                    Err(format!(
-                        "{kind} `{fault_id}` named busy work `{key}` that the witness did not see sent before it and answered"
-                    )),
-                );
-            }
-        }
-        let after = |operation: &str, accept: &dyn Fn(&Value) -> bool| {
-            timelines.iter().any(|timeline| {
-                timeline.operation == operation
-                    && timeline.sent_at > at
-                    && timeline.response().is_some_and(accept)
-            })
-        };
-        let turn_answered = after("turn", &|response| {
-            response["outcome"]["status"] == "answered"
-        });
-        let queued_answered = after("turn", &|response| {
-            response["queued"].as_array().is_some_and(|queued| {
-                queued
-                    .iter()
-                    .any(|input| input["outcome"]["status"] == "answered")
-            })
-        });
-        let cron_ticked = after("cron-tick", &|response| {
-            response["started_process_ids"]
-                .as_array()
-                .is_some_and(|started| !started.is_empty())
-        });
-        if !(turn_answered && queued_answered && cron_ticked) {
-            note(
-                class,
-                Err(format!(
-                    "service did not progress after {kind} `{fault_id}`: turn={turn_answered} queued={queued_answered} cron={cron_ticked}"
-                )),
-            );
-        }
         let recovery = &recovered.detail;
         let held = match kind {
             "worker-kill" => {
@@ -240,22 +326,11 @@ pub(super) fn verify_faults(
                         .is_some_and(|partitions| !partitions.is_empty())
             }
             _ => {
-                let new_workers: BTreeSet<&str> = injected.detail["new_workers"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .collect();
-                let moved = after("turn", &|response| {
-                    response["worker_id"]
-                        .as_str()
-                        .is_some_and(|worker| new_workers.contains(worker))
-                });
                 recovery["drained"] == true
                     && recovery["pinned_unfinished"] == 0
                     && recovery["stalled_total"] == 0
                     && injected.detail["old_generation"] != injected.detail["new_generation"]
-                    && moved
+                    && moved_to(&timelines, at, &injected.detail["new_workers"])
             }
         };
         note(

@@ -57,6 +57,21 @@ impl lash_core::AwaitEventResolver for DefaultBindingHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for DefaultBindingHost {
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, lash_core::RuntimeError> {
+        self.0.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<u64, lash_core::RuntimeError> {
+        self.0.retire_usage_execution(owner, scope).await
+    }
+
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,

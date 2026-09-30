@@ -476,7 +476,7 @@ mod tests {
         assert!(
             manifests[0]
                 .bindings
-                .contains_key(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
+                .contains_key(lash_tool_support::TOOL_BINDING_KEY),
             "llm_query must carry its tool binding: {:?}",
             manifests[0].bindings.keys().collect::<Vec<_>>()
         );

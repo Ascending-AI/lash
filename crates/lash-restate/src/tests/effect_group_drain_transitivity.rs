@@ -1,18 +1,22 @@
-//! The §5 drain barrier is transitive (ADR 0099 §5, FIG-4088).
+//! The §5 drain barrier lifts only once every lower-ranked committed sibling
+//! has seated, or retirement released it (ADR 0099 §5, FIG-4088, FIG-4308).
 //!
-//! The index names a drain only its last-committed unseated blocker, and the
-//! drain parks on that one sibling's drained wake. That is sound only if the
-//! wake resolves when the whole barrier has lifted: that sibling seats after
-//! every lower-committed sibling has seated, or the group retires, which lifts
-//! every barrier. This law drives the index's own protocol — `commit_child`,
-//! `drain_blockers`, the drained wakes, `record_settlement` and retirement —
-//! under seeded random interleavings and fails when a drain is released while
-//! a lower-committed sibling has not begun to seat.
+//! A child's §4 commit reserves its rank. Only a child with intents to drain
+//! reads the barrier; an intent-free child that won its own commit seats
+//! without reading it, so a seat no longer certifies anything about the
+//! siblings below it. The index therefore names a drain every unseated
+//! committed sibling ranked below it, not only the last one. This law drives
+//! the index's own protocol — `commit_child`, `drain_blockers`, the drained
+//! wakes, `record_settlement` and retirement — under seeded random
+//! interleavings and fails when a drain is released while a lower-ranked
+//! sibling, of either kind, has not begun to seat, or when a seat publishes
+//! any rank but the one its commit reserved.
 //!
 //! Each round opens a fresh group and interleaves its children's commits with
-//! their drains. A child seats only once its own drain is released, as the
-//! protocol orders it, after a random delay, so lower blockers are routinely
-//! still in flight when a later one seats. A round may also:
+//! their drains. A child that declared intents seats only once its own drain
+//! is released, and an intent-free one as soon as it committed, each after a
+//! random delay, so lower blockers are routinely still in flight when a later
+//! one seats. A round may also:
 //!
 //! - retire the group with members unseated: every parked drain must be
 //!   released, by the retirement;
@@ -90,7 +94,9 @@ pub(super) fn drain_law_seed() -> u64 {
 /// the seats begun before it.
 #[derive(Default)]
 struct Observed {
-    commit_seqs: BTreeMap<usize, u64>,
+    ranks: BTreeMap<usize, u64>,
+    /// Whether each committed child declared intents, and so drains.
+    declares: BTreeMap<usize, bool>,
     seating: BTreeSet<usize>,
     released: BTreeSet<usize>,
     retiring: bool,
@@ -99,10 +105,11 @@ struct Observed {
 
 impl Observed {
     /// A drain of `position` was released, by drained wakes alone or with a
-    /// retirement among them: every lower-committed sibling must have begun
-    /// to seat, unless a retirement released it.
+    /// retirement among them: every lower-ranked sibling, whether or not it
+    /// declared intents, must have begun to seat, unless a retirement
+    /// released it.
     fn release(&mut self, position: usize, by_retirement: bool) {
-        let seq = self.commit_seqs[&position];
+        let seq = self.ranks[&position];
         if by_retirement && !self.retiring {
             self.violations.push(format!(
                 "child {position} (commit {seq}) was released by a retirement nobody began"
@@ -110,7 +117,7 @@ impl Observed {
         }
         if !by_retirement {
             let unseated = self
-                .commit_seqs
+                .ranks
                 .iter()
                 .filter(|(other, other_seq)| **other_seq < seq && !self.seating.contains(other))
                 .map(|(other, other_seq)| format!("{other} (commit {other_seq})"))
@@ -163,6 +170,7 @@ async fn run_round(
     retire: bool,
 ) -> Observed {
     let width = 3 + rng.below(6) as usize;
+    let declares = (0..width).map(|_| rng.chance(50)).collect::<Vec<_>>();
     let group_key = witness_key(&format!("drain-transitive-{round}"));
     let children = (0..width)
         .map(|position| witness_child(&group_key, position))
@@ -198,11 +206,19 @@ async fn run_round(
         let seq = commit(&ingress, &group_key, &shape, position)
             .await
             .expect("the law's group is live while its children commit");
-        observed
-            .lock()
-            .expect("the law's observations")
-            .commit_seqs
-            .insert(position, seq);
+        {
+            let mut observed = observed.lock().expect("the law's observations");
+            observed.ranks.insert(position, seq);
+            observed.declares.insert(position, declares[position]);
+            // An intent-free child has no drain: it may seat at once.
+            if !declares[position] {
+                observed.released.insert(position);
+            }
+        }
+        if !declares[position] {
+            tokio::time::sleep(rng.pause(15)).await;
+            continue;
+        }
         drains.push(tokio::spawn(drain(
             ingress.clone(),
             group_key.clone(),
@@ -253,13 +269,18 @@ async fn run_round(
             .seating
             .insert(position);
         let recorded = seat(&ingress, &group_key, position).await;
-        assert!(
-            matches!(
-                recorded,
-                EffectGroupRecordSettlementResponse::Recorded { .. }
-            ),
-            "child {position} seats: {recorded:?}"
-        );
+        let EffectGroupRecordSettlementResponse::Recorded { rank } = recorded else {
+            panic!("child {position} seats: {recorded:?}");
+        };
+        {
+            let mut observed = observed.lock().expect("the law's observations");
+            let reserved = observed.ranks[&position];
+            if rank != reserved {
+                observed.violations.push(format!(
+                    "child {position} seated rank {rank}, but its commit reserved rank {reserved}"
+                ));
+            }
+        }
         if rng.chance(25) {
             let redriven = seat(&ingress, &group_key, position).await;
             assert!(
@@ -300,8 +321,8 @@ async fn commit(
         .await
         .expect("a child of the law commits");
     match committed {
-        EffectGroupCommitChildResponse::Committed { commit_seq, .. }
-        | EffectGroupCommitChildResponse::AlreadyCommitted { commit_seq, .. } => Some(commit_seq),
+        EffectGroupCommitChildResponse::Committed { rank }
+        | EffectGroupCommitChildResponse::AlreadyCommitted { rank, .. } => Some(rank),
         EffectGroupCommitChildResponse::Retired => None,
         other => panic!("child {position} of the law commits, got {other:?}"),
     }
@@ -345,7 +366,7 @@ async fn drain(
                 "EffectGroupIndex",
                 &group_key,
                 "drain_blockers",
-                &EffectGroupDrainBlockersRequest { commit_seq: seq },
+                &EffectGroupDrainBlockersRequest { rank: seq },
             )
             .await
             .expect("a drain of the law reads its barrier");

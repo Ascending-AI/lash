@@ -1181,9 +1181,11 @@ class RestateSuiteSelectionTests(unittest.TestCase):
     def test_the_registry_derives_the_suite_owners(self) -> None:
         self.assertEqual(
             {
+                "crates/lash",
                 "crates/lash-restate",
                 "crates/lash-restate-test",
                 "examples/agent-workbench",
+                "runbooks/restate-postgres-workers",
             },
             set(ci_plan.restate_suite_dirs()),
         )
@@ -1211,6 +1213,9 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             "crates/lash-conformance/src/lib.rs",
             # The endpoints and runbooks the suites mount.
             "crates/lash-restate/src/effect_group/dispatch.rs",
+            # The facade crate owns the public-process-command suite
+            # (//crates/lash:integration__test), so it is a suite owner.
+            "crates/lash/tests/integration/public_process_command_replay.rs",
             "examples/agent-service/src/main.rs",
             "examples/agent-workbench/src/main.rs",
             "runbooks/process-operations/docker-compose.yml",

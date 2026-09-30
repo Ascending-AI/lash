@@ -11,7 +11,7 @@ import sys
 root = Path.cwd()
 allowlist = root / "scripts/history-reader-allowlist.txt"
 count_file = root / "scripts/history-reader-allowlist.count"
-read = re.compile(r"\.(load_session_window|load_ancestors|load_usage_ledger_page|load_failure_evidence_page)\s*\(")
+read = re.compile(r"\.(load_session_window|load_ancestors|load_failure_evidence_page)\s*\(")
 deleted = re.compile(
     r"\b(?:load_session|load_session_at|load_node|message_tree|load_session_graph|"
     r"open_unbound_store|select_readable_to_generation|load_whole_graph_tx)\s*\("

@@ -95,7 +95,11 @@ pub(crate) fn root_completes(root: &str) -> RootTerminalWrite {
         commit: TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
         root,
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }
 }
 
@@ -154,7 +158,7 @@ pub(crate) async fn head_commit(
         head_revision: revision,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+    crate::RuntimeCommit::persisted_state_for_test(&state)
 }
 
 /// Land `root`'s final commit settling `settlement` under `fence`, over the

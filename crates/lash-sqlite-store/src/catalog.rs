@@ -415,33 +415,49 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         &self,
         after: Option<&lash_core_execution::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
             return Ok(Vec::new());
         };
         let session = after.map_or_else(String::new, |key| key.session.to_string());
         let root = after.map_or_else(String::new, |key| key.root.to_string());
-        conn.call(move |conn| {
-            let mut stmt = conn.prepare_cached(
-                crate::session_roots::session_roots_sql()
-                    .roots
-                    .select_open_page
-                    .sql(),
-            )?;
-            let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
-                Ok(lash_core_execution::engine::RootRef {
-                    session: SessionId::from(row.get::<_, String>(0)?),
-                    root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+        let rows = conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    crate::session_roots::session_roots_sql()
+                        .roots
+                        .select_open_page
+                        .sql(),
+                )?;
+                let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
+                    Ok((
+                        lash_core_execution::engine::RootRef {
+                            session: SessionId::from(row.get::<_, String>(0)?),
+                            root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+                        },
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        rows.into_iter()
+            .map(|(target, admission)| {
+                Ok(lash_core_execution::engine::OpenRoot {
+                    target,
+                    executor: admission
+                        .as_deref()
+                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
+                        .transpose()?,
                 })
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()
-        })
-        .await
-        .map_err(sqlite_error)
+            })
+            .collect()
     }
     async fn end_lost_root(
         &self,
         target: &lash_core_execution::engine::RootRef,
+        loss: lash_core_execution::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
@@ -450,7 +466,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         let target = target.clone();
         conn.write_flow(move |tx| {
             Ok(
-                match crate::session_roots::end_lost_root_conn(tx, &target, at_ms) {
+                match crate::session_roots::end_lost_root_conn(tx, &target, loss, at_ms) {
                     Ok(terminal) => crate::conn::TxOutcome::Commit(Ok(terminal)),
                     Err(error) => crate::conn::TxOutcome::Rollback(Err(error)),
                 },
@@ -599,19 +615,18 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for SqliteStore {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<
-        std::collections::BTreeSet<lash_core_execution::AttachmentId>,
-        lash_core_execution::StoreError,
-    > {
+        source: lash_core_execution::attachments::AttachmentRootSource,
+        after: Option<&lash_core_execution::AttachmentId>,
+    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
         if !self.location.target().exists() {
             return Err(StoreError::Backend(format!(
                 "attachment catalog {} does not exist",
                 self.location.target()
             )));
         }
-        self.rooted_attachment_ids().await
+        SqliteStore::attachment_root_page(self, source, after).await
     }
     async fn list_condemnations(
         &self,

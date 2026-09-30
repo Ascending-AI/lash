@@ -1,6 +1,6 @@
 //! Every admitted input settles exactly once.
 //!
-//! ADR 0101 and its FIG-3927 amendment: an admitted input is either driven
+//! ADR 0101 §7: an admitted input is either driven
 //! by exactly one root, bound to it in `session_root_inputs`, and settled
 //! when that root ends (completed, or cancelled with it); or it is cancelled
 //! undriven. At the end of a history no input is still open, no completed

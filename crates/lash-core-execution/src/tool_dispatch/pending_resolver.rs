@@ -53,6 +53,11 @@
 pub enum ResolverArming {
     /// The resolver is armed, and the call parks on its completion key.
     Armed(ArmedResolver),
+    /// The boundary recorded a terminal. The call settles without opening a wait.
+    Resolved {
+        resolution: Box<crate::Resolution>,
+        armed: ArmedResolver,
+    },
     /// The call settles now, as `failure`, and never parks: its declared
     /// start was refused, or its resolver could not be armed.
     Settled {
@@ -159,7 +164,7 @@ pub async fn arm_pending_resolver(
                 launch: Some(launch),
             };
             match arm_terminal(site, &process_id, key, armed).await {
-                armed @ ResolverArming::Armed(_) => Ok(armed),
+                armed @ (ResolverArming::Armed(_) | ResolverArming::Resolved { .. }) => Ok(armed),
                 // The call will not wait for the child it launched, so the
                 // child is cancelled rather than left running unobserved.
                 ResolverArming::Settled { failure, armed } => {
@@ -184,7 +189,21 @@ async fn arm_terminal(
         .attach_process_terminal(process_id, key, site.scope.clone())
         .await
     {
-        Ok(()) => ResolverArming::Armed(armed),
+        Ok(None) => ResolverArming::Armed(armed),
+        Ok(Some(output)) => match serde_json::to_value(output) {
+            Ok(value) => ResolverArming::Resolved {
+                resolution: Box::new(crate::Resolution::Ok(value)),
+                armed,
+            },
+            Err(error) => ResolverArming::Settled {
+                failure: Box::new(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "pending_tool_terminal_encoding",
+                    error.to_string(),
+                )),
+                armed,
+            },
+        },
         Err(error) => ResolverArming::Settled {
             failure: Box::new(crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Internal,

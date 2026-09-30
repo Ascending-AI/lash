@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::dialect::ShapeNotation;
 use crate::render::CodeRenderer;
 use lash_core::TokenUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
@@ -29,12 +30,9 @@ pub(crate) fn decode_rlm_termination_options(
 /// Render the "Context Budget" line for the volatile turn-tail message.
 /// The string is intentionally per-turn dynamic; callers must place it AFTER the cache
 /// breakpoint, never inside the cached system prompt.
-/// Public API shape, unchanged: renders the default dialect's wording.
-///
-/// The RLM driver calls [`format_budget_suffix_with_vocabulary`] with the
-/// session's own dialect; this wrapper exists so the crate's public surface
-/// does not have to expose the internal vocabulary type.
+/// It is worded in `dialect`, the session's selected dialect.
 pub fn format_budget_suffix(
+    dialect: &dyn crate::dialect::Dialect,
     turn_index: usize,
     usage: Option<&TokenUsage>,
     max_budget_tokens: Option<usize>,
@@ -43,7 +41,7 @@ pub fn format_budget_suffix(
         turn_index,
         usage,
         max_budget_tokens,
-        crate::dialect::DialectPromptVocabulary::default(),
+        dialect.prompt_vocabulary(),
         true,
     )
 }
@@ -179,6 +177,7 @@ pub(crate) fn render_read_only_variables(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> String {
     docs.sort_by(|left, right| left.name.cmp(&right.name));
+    let notation = vocabulary.shape_notation;
     let shapes = docs
         .iter()
         .map(|doc| (doc.name.clone(), doc.value.as_ref().map(infer_json_shape)))
@@ -193,7 +192,7 @@ pub(crate) fn render_read_only_variables(
     let mut lines = vec![
         format!(
             "These read-only values are already in scope. Access them directly in `{}` {}s; do not recreate them manually.",
-            vocabulary.cell_open_tag, vocabulary.cell_noun
+            vocabulary.cell_tags.open, vocabulary.cell_noun
         ),
         String::new(),
         "Read-only variables:".to_string(),
@@ -202,15 +201,16 @@ pub(crate) fn render_read_only_variables(
         let type_text = shapes
             .get(&doc.name)
             .and_then(Option::as_ref)
-            .map(|shape| render_shape_inline(shape, &registry))
-            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type));
+            .map(|shape| render_shape_inline(shape, &registry, notation))
+            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, notation));
         lines.push(render_read_only_line(
             &doc.name,
             &type_text,
             &doc.descriptor_type,
+            notation,
         ));
     }
-    append_schema_registry(&mut lines, &registry);
+    append_schema_registry(&mut lines, &registry, notation);
     lines.join("\n")
 }
 
@@ -229,17 +229,14 @@ pub(crate) fn render_bound_variables(
     let mut lines = vec![
         format!(
             "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
-            vocabulary.language_name, vocabulary.cell_open_tag, vocabulary.cell_noun
+            vocabulary.language_name, vocabulary.cell_tags.open, vocabulary.cell_noun
         ),
-        // A wrong field name is the one mistake this runtime does not report.
-        // Reading a key that was never there yields `undefined`, which flows
-        // into arithmetic as `NaN` and into totals as nothing at all: the cell
-        // succeeds, the observation looks plausible, and the number is wrong.
         // Every key of every value below is written out — in the row itself
         // where the record is small enough, in the `Schema:` block otherwise —
-        // so there is never a reason to write one from memory.
-        "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.".to_string(),
+        // and the dialect states what its runtime does with a key that is not.
+        vocabulary.field_miss_rule.to_string(),
     ];
+    let notation = vocabulary.shape_notation;
 
     // Drop cache slots for variables that no longer exist.
     cache
@@ -327,13 +324,17 @@ pub(crate) fn render_bound_variables(
         if idx > 0 {
             lines.push(String::new());
         }
-        lines.extend(render_type_definition(name, shape, &registry));
+        lines.extend(render_type_definition(name, shape, &registry, notation));
     }
 
     Arc::from(lines.join("\n"))
 }
 
-fn append_schema_registry(lines: &mut Vec<String>, registry: &SchemaRegistry) {
+fn append_schema_registry(
+    lines: &mut Vec<String>,
+    registry: &SchemaRegistry,
+    notation: ShapeNotation,
+) {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
         lines.push("Schema:".to_string());
@@ -341,29 +342,35 @@ fn append_schema_registry(lines: &mut Vec<String>, registry: &SchemaRegistry) {
             if idx > 0 {
                 lines.push(String::new());
             }
-            lines.extend(render_type_definition(name, shape, registry));
+            lines.extend(render_type_definition(name, shape, registry, notation));
         }
     }
 }
 
-fn render_read_only_line(name: &str, type_text: &str, descriptor_type: &str) -> String {
+fn render_read_only_line(
+    name: &str,
+    type_text: &str,
+    descriptor_type: &str,
+    notation: ShapeNotation,
+) -> String {
     format!(
         "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
-        normalize_descriptor_type(descriptor_type)
+        normalize_descriptor_type(descriptor_type, notation)
     )
 }
 
-fn normalize_descriptor_type(type_name: &str) -> String {
+/// A value descriptor's type in the dialect's shape notation.
+fn normalize_descriptor_type(type_name: &str, notation: ShapeNotation) -> String {
     match type_name {
-        "string" => "str".to_string(),
-        "number" => "float".to_string(),
-        "integer" => "int".to_string(),
-        "boolean" => "bool".to_string(),
-        "object" | "record" => "record".to_string(),
-        "array" | "list" => "list[any]".to_string(),
-        "null" => "null".to_string(),
+        "string" => notation.str.to_string(),
+        "number" => notation.float.to_string(),
+        "integer" => notation.int.to_string(),
+        "boolean" => notation.bool.to_string(),
+        "object" | "record" => notation.record.to_string(),
+        "array" | "list" => notation.list(notation.any),
+        "null" => notation.null.to_string(),
         other if !other.trim().is_empty() => other.to_string(),
-        _ => "any".to_string(),
+        _ => notation.any.to_string(),
     }
 }
 
@@ -385,24 +392,6 @@ fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
     }
 }
 
-pub(crate) fn history_item_type_definition(images: bool) -> Vec<String> {
-    let image_field = if images {
-        ", images?: list[HistoryImage]"
-    } else {
-        ""
-    };
-    let mut lines = vec![
-        "type HistoryItem =".to_string(),
-        "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
-        format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[any]{image_field}, error?: str | null, final_output?: any | null }}"),
-        "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
-    ];
-    if images {
-        lines.push("type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string());
-    }
-    lines
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the inline arm above returns early, so only hinted rows reach this point and every hinted row carries an inferred shape"
@@ -420,7 +409,7 @@ fn render_row_line(
         .shape
         .as_ref()
         .expect("hinted variable has an inferred shape");
-    let type_text = render_shape_inline(shape, registry);
+    let type_text = render_shape_inline(shape, registry, vocabulary.shape_notation);
     let mut line = match &row.size_hint {
         Some(size_hint) => format!("- `{}`: `{type_text}`, {size_hint}", row.name),
         None => format!("- `{}`: `{type_text}`", row.name),
@@ -770,44 +759,60 @@ fn canonical_shape_key(shape: &JsonShape) -> String {
     }
 }
 
-fn render_shape_inline(shape: &JsonShape, registry: &SchemaRegistry) -> String {
+fn render_shape_inline(
+    shape: &JsonShape,
+    registry: &SchemaRegistry,
+    notation: ShapeNotation,
+) -> String {
     match shape {
-        JsonShape::Any => "any".to_string(),
-        JsonShape::Null => "null".to_string(),
-        JsonShape::Bool => "bool".to_string(),
-        JsonShape::Int => "int".to_string(),
-        JsonShape::Float => "float".to_string(),
-        JsonShape::Str => "str".to_string(),
-        JsonShape::List(item) => format!("list[{}]", render_shape_inline(item, registry)),
+        JsonShape::Any => notation.any.to_string(),
+        JsonShape::Null => notation.null.to_string(),
+        JsonShape::Bool => notation.bool.to_string(),
+        JsonShape::Int => notation.int.to_string(),
+        JsonShape::Float => notation.float.to_string(),
+        JsonShape::Str => notation.str.to_string(),
+        JsonShape::List(item) => notation.list(&render_shape_inline(item, registry, notation)),
         JsonShape::Record(_) => registry
             .names_by_key
             .get(&canonical_shape_key(shape))
             .cloned()
-            .unwrap_or_else(|| "record".to_string()),
+            .unwrap_or_else(|| notation.record.to_string()),
         JsonShape::Union(items) => items
             .iter()
-            .map(|item| render_shape_inline(item, registry))
+            .map(|item| render_shape_inline(item, registry, notation))
             .collect::<Vec<_>>()
-            .join(" | "),
+            .join(notation.union_separator),
     }
 }
 
-fn render_type_definition(name: &str, shape: &JsonShape, registry: &SchemaRegistry) -> Vec<String> {
+fn render_type_definition(
+    name: &str,
+    shape: &JsonShape,
+    registry: &SchemaRegistry,
+    notation: ShapeNotation,
+) -> Vec<String> {
+    let head = format!(
+        "{}{name}{}",
+        notation.definition_keyword, notation.definition_assign
+    );
     match shape {
         JsonShape::Record(fields) => {
-            let mut lines = vec![format!("type {name} = {{")];
+            let mut lines = vec![format!("{head}{}", notation.record_open)];
             for (field, shape) in fields {
                 lines.push(format!(
-                    "  {field}: {},",
-                    render_shape_inline(shape, registry)
+                    "{}{field}{}{}{}",
+                    notation.field_indent,
+                    notation.field_separator,
+                    render_shape_inline(shape, registry, notation),
+                    notation.field_terminator,
                 ));
             }
-            lines.push("}".to_string());
+            lines.push(notation.record_close.to_string());
             lines
         }
         _ => vec![format!(
-            "type {name} = {}",
-            render_shape_inline(shape, registry)
+            "{head}{}",
+            render_shape_inline(shape, registry, notation)
         )],
     }
 }
@@ -872,7 +877,7 @@ mod bound_variable_tests {
             cache,
             &globals,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -887,7 +892,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -932,7 +937,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -955,7 +960,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -976,7 +981,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -1082,7 +1087,7 @@ mod bound_variable_tests {
             &mut cache,
             &[("payload".to_string(), value)],
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );

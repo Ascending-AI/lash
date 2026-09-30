@@ -158,6 +158,8 @@ struct Arm {
     remaining: Option<u32>,
     /// Only calls whose detail contains this match.
     matching: Option<String>,
+    /// Record the retry-forever cut on its first failing delivery.
+    retryable_cut: Option<String>,
 }
 
 /// The armed host sites of one world, shared by every decorator.
@@ -192,6 +194,18 @@ impl HostFaults {
         self.arm(site, effect, None, None);
     }
 
+    /// Fail every delivery at `site` retryably and record `cut` on the first.
+    /// The pending handler need not return before the recovery ticks start.
+    pub fn always_retryable_with_cut(&self, site: HostSite, cut: impl Into<String>) {
+        self.arms.lock_recover().push(Arm {
+            site,
+            effect: ArmEffect::FailRetryable,
+            remaining: None,
+            matching: None,
+            retryable_cut: Some(cut.into()),
+        });
+    }
+
     /// Apply `effect` to every call whose detail contains `matching`.
     pub fn always_matching(&self, site: HostSite, effect: ArmEffect, matching: impl Into<String>) {
         self.arm(site, effect, None, Some(matching.into()));
@@ -209,6 +223,7 @@ impl HostFaults {
             effect,
             remaining,
             matching,
+            retryable_cut: None,
         });
     }
 
@@ -249,7 +264,11 @@ impl HostFaults {
             *remaining -= 1;
         }
         let effect = arm.effect;
+        let retryable_cut = arm.retryable_cut.take();
         drop(arms);
+        if let Some(cut) = retryable_cut {
+            self.trip.fire(cut);
+        }
         if effect == ArmEffect::Crash {
             self.trip.fire(format!("host:{site:?}:{detail}"));
         }
@@ -359,6 +378,14 @@ impl SessionDriver for DriverProxy {
             .await
             .close_root(controller, session, root)
             .await
+    }
+
+    async fn root_run_ended(
+        &self,
+        session: &lash_core::SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        self.live().await.root_run_ended(session, root).await
     }
 }
 

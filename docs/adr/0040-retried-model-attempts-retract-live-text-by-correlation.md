@@ -1,53 +1,49 @@
 # Retried model attempts retract live text by correlation
 
-Provider retries restart an LLM request from scratch. Prose and reasoning emitted before a
-retry are therefore superseded preview activity, while the runtime's reset stream accumulator
-already ensures that only the successful attempt reaches the committed transcript. Publishing
-the failed attempt's deltas without publishing that supersession made the host-facing stream
-disagree with runtime truth and caused downstream chat surfaces to render duplicated narration.
+## Context
 
-We decided that `LlmStreamEvent::AttemptReset` emits a replayable
-`TurnEvent::ModelAttemptReset`. The event carries the exact correlation ids of
-`AssistantProseDelta` and `ReasoningDelta` activities emitted by the superseded provider attempt.
-A compliant observer removes text for those correlations and leaves every other activity alone.
-Each attempt starts fresh correlation tracking, so any number of consecutive resets applies the
-same rule without comparing text or inferring retry boundaries.
+A provider retry starts a fresh generation. Text and reasoning emitted by the
+failed attempt are provisional, while the committed transcript contains the
+accepted attempt. Observers need an explicit retraction to render that same
+result without guessing from text.
 
-FIG-1275 further establishes every provider re-generation as a host-visible generation boundary,
-including one that occurs before the superseded attempt emits visible output. Such a reset has
-empty prose and reasoning correlation lists. Observers retain it as boundary evidence, perform no
-retraction, and must never interpret an empty list as "retract all." Retraction remains strictly
-correlation-based.
+## Decision
 
-The reset is appended to the same bounded Live Replay log as the deltas. A live observer sees
-failed deltas followed by their reset. A late observer whose cursor precedes the failed attempt
-replays both and reaches the same state; one whose cursor follows the reset sees neither
-superseded state nor an unexplained retraction. A replay gap continues to recover from the
-committed Session Read View. The reset targets only prose and reasoning because those are the
-in-flight append-only text surfaces; tool activity retains its existing structured collection and
-deduplication semantics.
+`LlmStreamEvent::AttemptReset` produces `TurnEvent::ModelAttemptReset` carrying
+the exact prose and reasoning correlation ids emitted by the abandoned
+attempt. An observer removes text for those correlations and leaves other
+activity alone. Tracking starts fresh after every reset.
 
-`AttemptReset` is also an assistant-stream lifecycle boundary. The runtime notifies stream
-plugins before it accepts retry output, so protocol segmenters discard partial delimiters and
-captured cell bodies from the abandoned attempt along with the runtime accumulator. Otherwise a
-plugin can reconstruct a contaminated final response even when the runtime's text accumulator is
-clean.
+Every re-generation is a visible generation boundary, including a reset before
+any visible output. Empty correlation lists mean no retraction; they never
+mean retract-all.
 
-RLM keeps per-iteration assistant reasoning and prose as protocol-owned `RlmAssistantContent`
-events paired with trajectory entries, not as conversation messages. The RLM history projector
-still folds that content into later provider requests, while the host commits the final product
-transcript exactly once. This separation prevents protocol bookkeeping and the host transcript
-from becoming duplicate durable chat messages, including after reload.
+The reset shares the session observation activity path with deltas. Retained
+replay re-applies both; a cursor after the reset needs no old retraction. A gap
+recovers from the committed Session Read View. The host supplies observation
+retention policy. Retractions target append-only text; structured tool
+activity retains its own identity and collection rules.
 
-The remote observation mirror adds `model_attempt_reset` with string correlation-id lists and
-bumps `REMOTE_PROTOCOL_VERSION` from 11 to 12. Remote protocol validation requires an exact
-version match, so older hosts are rejected at negotiation instead of being asked to deserialize
-and silently ignore a semantic event they do not understand. In-workspace `TurnEvent` consumers
-remain compiler-guarded by exhaustive matches.
+The runtime notifies assistant-stream plugins of `AttemptReset` before
+accepting retry output. Plugins discard partial delimiters and captured cell
+bodies, and the runtime resets provisional output, usage and evidence. RLM
+stores per-iteration assistant content as protocol history paired with its
+trajectory, while the final product transcript is committed once.
 
-We rejected keying every prose and reasoning delta by a new attempt identity and later marking
-the attempt aborted. That model can represent the same truth, but it expands all hot-path delta
-payloads, requires every observer to retain attempt lifecycle state, and duplicates the existing
-correlation identity that already names the renderable blocks. We also reject identical-text
-deduplication: legitimate repeated output is valid model output, and content heuristics cannot
-distinguish it from a retry.
+The remote mirror carries `model_attempt_reset` and its correlation-id lists.
+Remote negotiation follows the protocol's supported version contract.
+
+## Consequences
+
+Live and reconnecting hosts can remove failed preview text without content
+heuristics. Adding attempt identity to every delta is rejected because existing
+correlations already identify renderable blocks. Identical-text deduplication
+is rejected because legitimate repeated output cannot be distinguished from
+a retry by content.
+
+## Implementation
+
+[Reset collection and emission](../../crates/lash-core/src/runtime/turn_driver/streaming/support.rs),
+[plugin reset and accumulator lifecycle](../../crates/lash-core/src/runtime/turn_driver/streaming.rs)
+and [observation vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs)
+define the boundary.

@@ -86,9 +86,13 @@ impl AttachmentStore for CountingAttachments {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         self.gets.fetch_add(1, Ordering::SeqCst);
-        self.inner.get(id).await
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

@@ -178,6 +178,8 @@ pub enum WakeDiscardReason {
     TargetGone,
     Retargeted,
     SequenceRewound,
+    /// The source cannot be read without repairing durable state or configuration.
+    SourceUnreadable,
 }
 
 /// State-specific evidence travels with the state that requires it, so an enqueuing delivery
@@ -251,11 +253,12 @@ impl WakeDiscardReason {
             Self::TargetGone => "target_gone",
             Self::Retargeted => "retargeted",
             Self::SequenceRewound => "sequence_rewound",
+            Self::SourceUnreadable => "source_unreadable",
         }
     }
 
     define_wake_discard_ordering_group_rule! {
-        blocking: [Expired, TargetGone, Retargeted],
+        blocking: [Expired, TargetGone, Retargeted, SourceUnreadable],
         non_blocking: [SequenceRewound],
     }
 }
@@ -405,6 +408,7 @@ pub struct WakeDeliveryReport {
     pub target_gone: usize,
     pub retargeted: usize,
     pub sequence_rewound: usize,
+    pub source_unreadable: usize,
     /// Ordering groups stopped by a discarded head while later work remains.
     pub blocked_groups: Vec<WakeDeliveryBlockedGroup>,
 }
@@ -431,6 +435,7 @@ impl WakeDeliveryReport {
                         WakeDiscardReason::TargetGone => report.target_gone += 1,
                         WakeDiscardReason::Retargeted => report.retargeted += 1,
                         WakeDiscardReason::SequenceRewound => report.sequence_rewound += 1,
+                        WakeDiscardReason::SourceUnreadable => report.source_unreadable += 1,
                     }
                 }
                 WakeDeliveryLifecycle::DiscardedUnattributed => report.discarded += 1,

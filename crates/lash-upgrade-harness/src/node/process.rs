@@ -123,7 +123,7 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
         let build = BuildLabel::current();
         match op {
             HarnessOp::Start { start_key } => {
-                let request = start_request(&self.artifacts, &self.model, &start_key)
+                let request = start_request(&self.artifacts, &self.core, &self.model, &start_key)
                     .await
                     .map_err(terminal)?;
                 let receipt = self
@@ -144,18 +144,15 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
                 payload,
             } => {
                 let process_id = lash_core::ProcessId::parse(&process_id).map_err(terminal)?;
-                let event_type = lash_core::facade_support::process_signal_event_type(SIGNAL)
-                    .map_err(terminal)?;
-                let request = lash_core::ProcessEventAppendRequest::new(event_type, payload)
-                    .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                        &process_id,
-                        SIGNAL,
-                        &signal_id,
-                    ));
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(process_id, SIGNAL, signal_id)
+                        .map_err(terminal)?,
+                    payload,
+                );
                 let event = self
                     .core
                     .processes()
-                    .signal(&process_id, SIGNAL, signal_id, request, scoped)
+                    .signal(signal, scoped)
                     .await
                     .map_err(terminal)?;
                 Ok(Json(HarnessReply::Signalled {
@@ -190,6 +187,7 @@ pub(crate) fn bind(
 /// The process's module: linked, and published to the store's artifacts.
 async fn start_request(
     artifacts: &lashlang::LashlangArtifacts,
+    core: &lash::LashCore,
     model: &lash::ModelSpec,
     start_key: &str,
 ) -> Result<lash_core::ProcessStartRequest> {
@@ -197,8 +195,17 @@ async fn start_request(
         lashlang::LashlangHostCatalog::new(),
         lashlang::LashlangAbilities::all(),
     );
-    let linked = lash::typescript::link(SIGNAL_WAITING_PROCESS, &environment)
-        .map_err(|error| anyhow!("link the signal-waiting process: {error:?}"))?;
+    let linked = match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: SIGNAL_WAITING_PROCESS.into(),
+            environment,
+            cell: false,
+        })
+        .map_err(|error| anyhow!("compile the signal-waiting process: {error}"))?
+    {
+        lash_vm_client::service::Response::Module(module) => module,
+        response => bail!("compile the signal-waiting process: {response:?}"),
+    };
     // A host pin keeps the module alive for the process (ADR 0113).
     let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
         lash_core::HostArtifactPin::mint(),
@@ -210,13 +217,11 @@ async fn start_request(
         .map_err(|error| anyhow!("publish the process module: {error}"))?;
     let process_name = linked
         .artifact
-        .ir()
-        .declarations
-        .iter()
-        .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
-            _ => None,
-        })
+        .exports()
+        .processes
+        .keys()
+        .next()
+        .cloned()
         .context("the linked module declares no process")?;
     let input = lash_lashlang_runtime::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),
@@ -244,7 +249,11 @@ async fn start_request(
         lash_core::Lifetime::Detached,
     )
     .with_host_start_key(start_key)
-    .with_env_spec(env)
+    .with_env_ref(
+        core.host_artifacts()
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+            .await?,
+    )
     .with_extra_event_types(
         lash_lashlang_runtime::lashlang_process_event_types()
             .into_iter()
@@ -259,7 +268,10 @@ async fn start_request(
 
 /// Contributes the Lashlang process engine to a node's core, as the RLM
 /// protocol does for a host that runs it.
-pub(crate) struct ProcessEnginePlugin(pub(crate) lashlang::LashlangArtifacts);
+pub(crate) struct ProcessEnginePlugin(
+    pub(crate) lashlang::LashlangArtifacts,
+    pub(crate) std::sync::Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
+);
 
 struct NoSessionPlugin;
 
@@ -290,6 +302,7 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     self.0.clone(),
                     lash_lashlang_runtime::LashlangSurface::default(),
+                    self.1.clone(),
                 ),
             ),
         ])

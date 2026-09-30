@@ -146,6 +146,7 @@ impl<'module> Linker<'module> {
         let mut analysis = analysis.borrow_mut();
         let facts = analysis.nodes.entry(path.clone()).or_default();
         facts.diagnostics.push(WorkflowLinkDiagnostic {
+            classification: crate::WorkflowDiagnosticKind::from_link_error(&error).classification(),
             error,
             span,
             path: error_path,
@@ -185,6 +186,8 @@ impl<'module> Linker<'module> {
             .or_default()
             .diagnostics
             .push(WorkflowLinkDiagnostic {
+                classification: crate::WorkflowDiagnosticKind::from_link_error(&error)
+                    .classification(),
                 error,
                 span,
                 path: error_path,

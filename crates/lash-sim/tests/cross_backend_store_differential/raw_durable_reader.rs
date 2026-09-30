@@ -1,5 +1,4 @@
 use super::*;
-use sqlx::Row as _;
 
 type PendingTurnInputRow = (String, String, Option<String>, Option<String>);
 
@@ -279,35 +278,6 @@ impl RawDurableReader {
                         },
                     )
                     .collect();
-                let usage_rows = sqlx::query(
-                    "SELECT source, model, input_tokens, output_tokens,
-                                cache_read_input_tokens, cache_write_input_tokens,
-                                reasoning_output_tokens
-                         FROM lash_usage_deltas
-                         WHERE session_id = $1
-                         ORDER BY seq ASC",
-                )
-                .bind(session_id.as_str())
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres usage deltas");
-                let usage_deltas = usage_rows
-                    .into_iter()
-                    .map(|row| {
-                        usage_delta_observation(TokenLedgerEntry {
-                            source: row.get(0),
-                            model: row.get(1),
-                            usage: TokenUsage {
-                                input_tokens: row.get(2),
-                                output_tokens: row.get(3),
-                                cache_read_input_tokens: row.get(4),
-                                cache_write_input_tokens: row.get(5),
-                                reasoning_output_tokens: row.get(6),
-                            },
-                            usage_disposition: Default::default(),
-                        })
-                    })
-                    .collect();
                 let session_meta = store
                     .load_session_meta(session_id)
                     .await
@@ -383,7 +353,6 @@ impl RawDurableReader {
                     runtime_turn_commits,
                     attachment_referrers,
                     node_anchors,
-                    usage_deltas,
                     session_meta,
                     pending_turn_inputs,
                     queued_work,
@@ -569,35 +538,6 @@ pub(super) async fn read_sqlite_durable_state(
             .collect::<Result<Vec<_>, _>>()
             .expect("decode SQLite node anchors")
     };
-    let usage_deltas = {
-        let mut statement = connection
-            .prepare(
-                "SELECT source, model, input_tokens, output_tokens,
-                        cache_read_input_tokens, cache_write_input_tokens,
-                        reasoning_output_tokens
-                 FROM usage_deltas
-                 WHERE session_id = ?1
-                 ORDER BY seq ASC",
-            )
-            .expect("prepare SQLite usage-delta read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok(UsageDeltaObservation {
-                    source: row.get(0)?,
-                    model: row.get(1)?,
-                    usage: TokenUsage {
-                        input_tokens: row.get(2)?,
-                        output_tokens: row.get(3)?,
-                        cache_read_input_tokens: row.get(4)?,
-                        cache_write_input_tokens: row.get(5)?,
-                        reasoning_output_tokens: row.get(6)?,
-                    },
-                })
-            })
-            .expect("read SQLite usage deltas")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite usage deltas")
-    };
     let session_meta = store
         .load_session_meta(session_id)
         .await
@@ -723,7 +663,6 @@ pub(super) async fn read_sqlite_durable_state(
         runtime_turn_commits,
         attachment_referrers,
         node_anchors,
-        usage_deltas,
         session_meta,
         pending_turn_inputs,
         queued_work,

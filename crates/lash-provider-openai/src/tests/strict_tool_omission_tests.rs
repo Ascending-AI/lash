@@ -707,13 +707,19 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                     .execute_effect(
                         envelope,
                         RuntimeEffectLocalExecutor::testing(move |_| async move {
-                            let completion = selected.complete(request).await.map_err(|error| {
-                                RuntimeEffectControllerError::foreign(
-                                    "provider_call_failed",
-                                    lash_core::TurnFailureCause::Outcome,
-                                    error.to_string(),
+                            let completion = selected
+                                .complete(
+                                    request,
+                                    <dyn lash_core::provider::DispatchAdmission>::host_owned(),
                                 )
-                            })?;
+                                .await
+                                .map_err(|error| {
+                                    RuntimeEffectControllerError::foreign(
+                                        "provider_call_failed",
+                                        lash_core::TurnFailureCause::Outcome,
+                                        error.to_string(),
+                                    )
+                                })?;
                             Ok(RuntimeEffectOutcome::LlmCall {
                                 result: Box::new(Ok(completion.response)),
                                 text_streamed: false,

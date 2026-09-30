@@ -1,5 +1,6 @@
-//! The commit phase: finalize the assembled turn, stage its usage, and drive
-//! the head-advancing commit that makes the turn durable.
+//! The commit phase: finalize the assembled turn and drive the head-advancing
+//! commit that makes the turn durable. The commit carries no usage: every
+//! model call the turn made was delivered by its own usage run (ADR 0125).
 //!
 //! The phase types are consumed in sequence and each transition takes the
 //! previous one by value, so a committed turn cannot be adopted twice and
@@ -7,33 +8,6 @@
 
 use super::*;
 use crate::TurnId;
-
-/// The attempts of a finished turn whose usage never arrived after an abort
-/// or failure, in call order, for the unreported ledger row and later
-/// host-invoked reconciliation.
-fn unreported_usage_attempts(
-    llm_calls: &[crate::LlmCallRecord],
-    model: &str,
-) -> Vec<crate::runtime::UnreportedUsageAttempt> {
-    llm_calls
-        .iter()
-        .flat_map(|call| {
-            call.attempts
-                .iter()
-                .filter(|attempt| attempt.usage_disposition.is_unreported_after_interruption())
-                .map(move |attempt| crate::runtime::UnreportedUsageAttempt {
-                    call_id: call.call_id.0.clone(),
-                    attempt_ordinal: attempt.ordinal,
-                    source: "turn".to_string(),
-                    model: model.to_string(),
-                    generation_id: attempt
-                        .evidence
-                        .as_ref()
-                        .and_then(|evidence| evidence.provider_response_id.clone()),
-                })
-        })
-        .collect()
-}
 
 /// Trace a final commit whose head compare-and-set the store rejected,
 /// naming the runtime that attempted it.
@@ -93,7 +67,6 @@ pub(super) struct TurnFinishInput {
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) recorded_assembly: RecordedTurnAssembly,
     pub(super) new_messages: crate::MessageSequence,
-    pub(super) policy: SessionPolicy,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
 }
@@ -104,11 +77,10 @@ struct PreparedTurn {
     events: Vec<SessionStreamEvent>,
 }
 
-/// What the final commit writes: the session it advances, the usage it stages,
-/// and the ingress settlement it carries under its root's drive fence.
+/// What the final commit writes: the session it advances and the ingress
+/// settlement it carries under its root's drive fence.
 struct TurnCommitRequest<'commit> {
     session: Option<&'commit mut Session>,
-    staged_usage: session_manager::StagedTokenLedger,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
@@ -128,10 +100,6 @@ struct TurnCommitAdmission<'admission> {
 impl PreparedTurn {
     fn outcome(&self) -> &TurnOutcome {
         &self.turn.outcome
-    }
-
-    fn final_operation(&self) -> crate::OperationId {
-        self.turn_pipeline.final_operation()
     }
 
     async fn commit(
@@ -185,7 +153,6 @@ impl PreparedTurn {
     ) -> Result<CommittedTurn, crate::StoreError> {
         let TurnCommitRequest {
             session,
-            staged_usage,
             commit_effects,
             trace_turn_id,
             recorded_attachment_intent_ids,
@@ -194,15 +161,9 @@ impl PreparedTurn {
             turn_cancel_closure_settlement,
             turn_control_resolver,
         } = request;
-        // The staged usage deltas ride the same atomic commit as the turn's
-        // final operation, so `turn_is_committed` also proves whether those
-        // deltas are durable. The store is captured before `final_commit`
-        // consumes the session borrow, for the lost-reply branch below.
-        let history_store = session.as_deref().and_then(Session::history_store);
-        let accepted = Box::pin(self.turn_pipeline.final_commit(
+        Box::pin(self.turn_pipeline.final_commit(
             &mut self.turn,
             session,
-            staged_usage.deltas(),
             commit_effects.ingress_settlement,
             commit_effects.pending_follow_on,
             // Any active-turn input that missed the turn's final
@@ -214,42 +175,11 @@ impl PreparedTurn {
             Some(turn_control_resolver),
             recorded_attachment_intent_ids,
         ))
-        .await;
-        let accepted = match accepted {
-            Ok(accepted) => accepted,
-            Err(error) => {
-                // A reply lost after the store applied the commit leaves the
-                // staged usage already durable: keeping the pending rows would
-                // count this turn's usage twice once the resident ledger
-                // reloads. Discard them only on a confirmed landing — on a
-                // clean failure, or when the probe cannot answer, they stay
-                // pending for the next boundary.
-                if let Some(store) = history_store.as_ref() {
-                    let operation = self.turn_pipeline.final_operation();
-                    if let (Some(session_id), Some(turn_id)) =
-                        (operation.scope.session_id(), operation.scope.turn_id())
-                        && matches!(
-                            store
-                                .turn_is_committed(&crate::TurnAddress::new(
-                                    session_id.clone(),
-                                    turn_id.clone(),
-                                ))
-                                .await,
-                            Ok(true)
-                        )
-                    {
-                        staged_usage.discard_staged();
-                    }
-                }
-                return Err(error);
-            }
-        };
+        .await?;
         Ok(CommittedTurn {
             turn: self.turn,
             events: self.events,
             resident_state: self.turn_pipeline.into_final_state(),
-            accepted,
-            staged_usage,
         })
     }
 }
@@ -262,8 +192,6 @@ struct CommittedTurn {
     turn: AssembledTurn,
     events: Vec<SessionStreamEvent>,
     resident_state: RuntimeSessionState,
-    accepted: AcceptedTurnCommit,
-    staged_usage: session_manager::StagedTokenLedger,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -274,24 +202,18 @@ impl CommittedTurn {
     /// Synchronize the accepted durable commit into the resident runtime.
     /// This transition intentionally cannot await; consuming `self` is the
     /// only way to obtain the post-commit delivery phase.
-    fn adopt(
-        self,
-        runtime: &mut LashRuntime,
-        trace_turn_id: &TurnId,
-    ) -> Result<PostCommitDelivery, crate::StoreError> {
-        let confirmed_usage = self.accepted.into_confirmed_usage();
-        self.staged_usage.confirm_identities(&confirmed_usage)?;
+    fn adopt(self, runtime: &mut LashRuntime, trace_turn_id: &TurnId) -> PostCommitDelivery {
         runtime.install_resident_state(self.resident_state);
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);
         runtime
             .resident_session
             .record_committed_observation_turn(observation_revision.as_u64(), trace_turn_id);
-        Ok(PostCommitDelivery {
+        PostCommitDelivery {
             turn: self.turn,
             events: self.events,
             post_commit_delivery_failed: false,
-        })
+        }
     }
 }
 
@@ -380,54 +302,11 @@ impl LashRuntime {
             mut turn_pipeline,
             recorded_assembly: assembly,
             new_messages,
-            policy,
             turn_index,
             trace_turn_id,
         } = finish;
         turn_pipeline.state_mut().policy = self.state.effective_policy().clone();
         turn_pipeline.state_mut().turn_index = turn_index;
-
-        if !assembly.token_usage.is_zero() {
-            session_manager::record_token_usage_shared(
-                &self.shared_token_ledger,
-                "turn",
-                &policy.model.id,
-                &assembly.token_usage,
-            );
-        }
-        // The cumulative row above covers only counted responses. Every other
-        // attempt that reported usage — a billed failed attempt, or every
-        // attempt of a call that never completed — still gets its own delta.
-        session_manager::record_attempt_usage_shared(
-            &self.shared_token_ledger,
-            "turn",
-            &policy.model.id,
-            &assembly.llm_calls,
-            assembly.usage_counted_calls,
-        );
-        // ADR 0031: an attempt the host aborted or that failed before the
-        // provider's usage arrived was still billed. Write the hole as a typed
-        // unreported row (even at zero usage) and remember the attempt so a
-        // host can reconcile it later; a turn with no interruption and no
-        // usage still writes nothing.
-        let unreported = unreported_usage_attempts(&assembly.llm_calls, &policy.model.id);
-        if !unreported.is_empty() {
-            let descriptors = unreported
-                .iter()
-                .map(|attempt| crate::UnreportedLedgerAttempt {
-                    call_id: attempt.call_id.clone(),
-                    attempt_ordinal: attempt.attempt_ordinal,
-                    generation_id: attempt.generation_id.clone(),
-                })
-                .collect::<Vec<_>>();
-            session_manager::record_unreported_attempts_shared(
-                &self.shared_token_ledger,
-                "turn",
-                &policy.model.id,
-                &descriptors,
-            );
-            self.unreported_usage_attempts.extend(unreported);
-        }
 
         // The evidence the executed turn already named travels into the gate,
         // so the request id a host saw on the streamed outcome is the one the
@@ -584,6 +463,11 @@ impl LashRuntime {
                 self.drive_root
                     .as_ref()
                     .map_or(&trace_turn_id, |run| run.root()),
+                self.host
+                    .core
+                    .durability
+                    .queued_work_batching
+                    .max_follow_on_recoveries(),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -658,6 +542,11 @@ impl LashRuntime {
             self.drive_root
                 .as_ref()
                 .map_or(&trace_turn_id, |run| run.root()),
+            self.host
+                .core
+                .durability
+                .queued_work_batching
+                .max_follow_on_recoveries(),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {
@@ -666,14 +555,6 @@ impl LashRuntime {
             }
         };
         let commit_effects = admissions.commit_effects(prepared.outcome(), pending_follow_on);
-        // A physical turn the logical run continues after — a frame switch,
-        // or withheld work a follow-on turn drives — keeps its drive for the
-        // observers of its commit; a final one leaves them drive-less.
-        let continues_run = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. })
-            || admissions.carries_follow_on_work(matches!(
-                prepared.outcome(),
-                TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-            ));
         let settlement_trace = self.drive_root.as_ref().map(|root| {
             commit_effects.ingress_settlement.clone().into_ingress(
                 root.root().clone(),
@@ -706,21 +587,10 @@ impl LashRuntime {
             scoped_effect_controller.execution_scope().logical_root(),
             &trace_turn_id,
         ));
-        let staged_usage = match session_manager::stage_token_ledger_shared(
-            &self.shared_token_ledger,
-            &prepared.final_operation(),
-        ) {
-            Ok(staged_usage) => staged_usage,
-            Err(err) => {
-                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
-                return Err(runtime_error_from_store_commit(err));
-            }
-        };
         let committed = match Box::pin(
             prepared.commit(
                 TurnCommitRequest {
                     session: self.session.as_mut(),
-                    staged_usage,
                     commit_effects,
                     trace_turn_id: &trace_turn_id,
                     recorded_attachment_intent_ids: self
@@ -779,9 +649,7 @@ impl LashRuntime {
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
-        let mut delivery = committed
-            .adopt(self, &trace_turn_id)
-            .map_err(runtime_error_from_store_commit)?;
+        let mut delivery = committed.adopt(self, &trace_turn_id);
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
@@ -823,13 +691,18 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        let post_commit_drive_fence = drive_fence.filter(|_| continues_run);
+        // The commit's observers write under its drive's fence, a final
+        // commit's included (FIG-4202): they run at the root's boundary, so a
+        // write they make is the owner's own, never one outside the drive
+        // that waits on the drive's settlement and deadlocks it. A later
+        // admission that sealed since refuses such a write typed, with
+        // nothing written.
         match self
             .emit_turn_persisted_event(
                 &delivery.turn,
                 scoped_effect_controller,
                 &trace_turn_id,
-                post_commit_drive_fence,
+                drive_fence,
             )
             .await
         {
@@ -879,7 +752,6 @@ impl LashRuntime {
             observer,
         } = context;
         let TurnDriverRemainder {
-            policy,
             mut recorded_assembly,
             turn_pipeline,
             pending_queued,
@@ -917,7 +789,6 @@ impl LashRuntime {
                 turn_pipeline,
                 recorded_assembly,
                 new_messages: cancellation_messages,
-                policy: policy.policy,
                 turn_index,
                 trace_turn_id,
             },
@@ -972,6 +843,9 @@ impl LashRuntime {
             admissions,
             drive_fence,
         } = context;
+        // A recovered follow-on's terminal commits at the index its root's
+        // decision recorded, on the head it adopted (FIG-4380).
+        let admitted_turn_index = self.admitted_turn_index.take();
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
@@ -1035,9 +909,8 @@ impl LashRuntime {
                 turn_pipeline,
                 recorded_assembly,
                 new_messages: messages,
-                policy: self.state.effective_policy().clone(),
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                turn_index: self.state.turn_index + 1,
+                turn_index: admitted_turn_index.unwrap_or(self.state.turn_index + 1),
                 trace_turn_id,
             },
             admissions: &admissions,

@@ -9,12 +9,8 @@ pub mod behavior_transcript;
 
 #[test]
 fn transcript_module_has_no_runtime_dependencies() {
-    use behavior_transcript::{Actor, Entry, Transcript, Usage};
+    use behavior_transcript::{Actor, Entry, Transcript};
     let mut transcript = Transcript::new();
-    transcript.record(Entry::commit(Actor::session("root"), 0, 1, Usage::none()));
-    assert!(
-        transcript
-            .render()
-            .contains("usage                 entries=0")
-    );
+    transcript.record(Entry::commit(Actor::session("root"), 0, 1));
+    assert!(transcript.render().contains("checkpoint.commit"));
 }

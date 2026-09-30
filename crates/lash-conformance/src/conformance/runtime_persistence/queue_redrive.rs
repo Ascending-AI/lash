@@ -593,8 +593,9 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
-    let mut base_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut base_commit = RuntimeCommit::persisted_state_for_test(&state);
     base_commit.pending_follow_on = Some(follow_on.clone());
     let turn_commit =
         RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "turn-atomic", "final"));

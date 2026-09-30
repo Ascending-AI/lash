@@ -132,8 +132,31 @@ impl SqliteStore {
         tx: &Transaction<'_>,
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<GcReport, StoreError> {
+        use lash_core_execution::store::{
+            EnumerationProgress, ReclamationEnumeration, SqliteBlobRootSource,
+        };
+        let mut enumeration = ReclamationEnumeration::<SqliteBlobRootSource, String>::new();
         let mut roots = Self::live_checkpoint_roots(tx)?;
-        roots.extend(Self::artifact_ref_roots(tx)?);
+        enumeration.page(
+            SqliteBlobRootSource::Checkpoints,
+            0,
+            roots.iter().map(|root| match root {
+                GcRoot::CheckpointManifest(blob_ref) => blob_ref.0.clone(),
+                GcRoot::ArtifactRef { blob_ref, .. } => blob_ref.0.clone(),
+            }),
+            EnumerationProgress::Exhausted,
+        )?;
+        let artifacts = Self::artifact_ref_roots(tx)?;
+        enumeration.page(
+            SqliteBlobRootSource::ArtifactPointers,
+            0,
+            artifacts.iter().map(|root| match root {
+                GcRoot::CheckpointManifest(blob_ref) => blob_ref.0.clone(),
+                GcRoot::ArtifactRef { blob_ref, .. } => blob_ref.0.clone(),
+            }),
+            EnumerationProgress::Exhausted,
+        )?;
+        roots.extend(artifacts);
         let root_count = roots.len();
         let mut retained = std::collections::BTreeMap::<String, PersistedArtifactKind>::new();
         let mut stack: Vec<RetainedArtifactRef> =
@@ -176,6 +199,28 @@ impl SqliteStore {
             // codec so an older binary cannot turn incompatibility into loss.
             stack.extend(retained_artifact_refs(&checkpoint));
         }
+        enumeration.page(
+            SqliteBlobRootSource::CheckpointComponents,
+            0,
+            retained.keys().cloned(),
+            EnumerationProgress::Exhausted,
+        )?;
+        let retained = enumeration.finish()?;
+        let deleted_blob_count = Self::reclaim_unretained_blobs_tx(tx, &retained)?;
+        Ok(GcReport {
+            root_count,
+            retained_blob_count: retained.len(),
+            deleted_blob_count,
+        })
+    }
+
+    fn reclaim_unretained_blobs_tx(
+        tx: &Transaction<'_>,
+        retained: &lash_core_execution::store::CompleteEnumeration<
+            lash_core_execution::store::SqliteBlobRootSource,
+            String,
+        >,
+    ) -> Result<usize, StoreError> {
         // Match PostgreSQL's strict ordering even though SQLite's component
         // side is not FK-enforced: every dead root loses its complete outgoing
         // edge set before any hash-ordered blob delete can reach a component.
@@ -197,7 +242,7 @@ impl SqliteStore {
         };
         let mut deleted_blob_count = 0usize;
         for hash in &all_hashes {
-            if retained.contains_key(hash) {
+            if retained.contains(hash) {
                 continue;
             }
             crate::conn::cached_execute(
@@ -211,11 +256,7 @@ impl SqliteStore {
             .map_err(sqlite_error)?;
             deleted_blob_count += 1;
         }
-        Ok(GcReport {
-            root_count,
-            retained_blob_count: retained.len(),
-            deleted_blob_count,
-        })
+        Ok(deleted_blob_count)
     }
 }
 
@@ -228,7 +269,7 @@ mod tests {
     /// a non-manifest namespace cannot inherit the module label (FIG-1949).
     #[tokio::test]
     async fn pointer_table_roots_derive_labels_from_their_namespace() {
-        let store = crate::test_support::memory_store()
+        let store = crate::test_support::sqlite_memory_store()
             .await
             .expect("open store");
         store
@@ -271,7 +312,7 @@ mod tests {
     /// with a sibling namespace's kind.
     #[tokio::test]
     async fn pointer_table_root_with_unknown_namespace_fails_closed() {
-        let store = crate::test_support::memory_store()
+        let store = crate::test_support::sqlite_memory_store()
             .await
             .expect("open store");
         store

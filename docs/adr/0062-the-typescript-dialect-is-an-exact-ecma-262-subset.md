@@ -4,653 +4,244 @@
 
 Accepted.
 
-Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) removes `defineProcess`, `start`,
-`wake`, `registerTrigger` and the `signals` block from this dialect. Durable
-work is a `Process` value, process controls are leaf tools, and an inline
-async arrow in argument position lifts when the expected catalogue type says
-`Process`, so static extractability of a top-level definition object is
-replaced by an engine-resolvable definition reference. The aggregate rule in
-"Promise aggregates settle on journaled order" loses its process/tool phase
-split: one batch, one recorded settlement order. `waitSignal`, `sleep` and
-cell-only `finish` are unchanged, as is the `return`/`throw`/`finally`
-contract for a process body.
-
-Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) makes this the only RLM
-dialect shipped today. The IR and VM admit future dialects with independent
-semantics and evidence (FIG-4276). Every reference to
-"Lashlang" below names the IR and VM that this dialect lowers into, never a
-second authored language.
-
-Amended 2026-09-21 (FIG-3392): two **host lifetime contracts** are recorded —
-opener-close cancellation of an unfinished tool call, and an await that nothing
-can resolve — with a Node oracle that keeps the host alive after an async
-function returns. Neither is a deviation-register entry. See
-["Two host lifetime contracts"](#two-host-lifetime-contracts-fig-3392) below.
-Decided, not yet implemented; the full contract is
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
-
-Amended 2026-09-23 (FIG-3599): conformance reaches beyond one script. A
-**Node session oracle** runs multi-cell sessions against the pinned Node, a
-**print → reparse → admit round-trip law** and **structural artifact
-invariants** run over every corpus, and the corpus rule extends to all three.
-The cell-to-Script mapping, register entries 17–21 and retired entry 14 are
-recorded below, in ["Beyond one script"](#beyond-one-script-fig-3599).
-
-Amended 2026-09-24 (FIG-3604): register entry 5's read path is implemented —
-until then only captured *writes* were refused, and a closure reading a `let`
-reassigned after it was created answered a stale value — and every register
-entry that promises a refusal now carries an executable probe that must fire
-it, checked against the text of this register. See entry 5 and "Conformance
-evidence" below.
-
-Amended 2026-09-24 (FIG-3700, decision 42): **function receivers are exact.**
-The dialect already admitted object-literal methods and `this` inside function
-bodies, and lowered that `this` to `undefined`, a silent divergence in accepted
-code. A non-arrow function's `this` is now its call's receiver, as ECMA-262's
-OrdinaryCallBindThis gives it in strict code: the object a member call reads
-the callee from (`o.f()`, `o[k]()`, optional chains, parenthesized members,
-spread arguments), a builtin callback's `thisArg`, the holder of a JSON
-replacer or `toJSON` call, and `undefined` for a plain call. An arrow's `this`
-is lexical: it is its enclosing function's. Top-level `this` still rejects
-(`TS_THIS_UNSUPPORTED`), and so does `this` in an arrow outside every function,
-which reads the same top-level value. A member call on a name that is not a
-built-in prototype method calls the receiver's own property, and an own
-property wins over a built-in method of the same name. The IR carries the
-receiver as data — `FunctionExpr.receiver`, `Expr::MethodCall` and
-`Expr::ThisCall` — and the VM binds it into an ordinary frame slot, only in a
-function that reads it, so roots, collection, suspension and snapshots carry it
-unchanged. The bytecode, VM ABI, VM continuation and semantic-hash versions move
-together; a continuation from before receivers is refused by its format
-version.
-
-Amended 2026-09-24 (FIG-3706, decision 43): classic `for` is ECMA-262's
-ForStatement in every form. The head may be `let`, `const`, `var`, an
-expression or empty; the condition and the update may be any expression or
-absent. A head `let` is copied per iteration exactly as
-CreatePerIterationEnvironment copies it, so a closure keeps its iteration's
-binding. The "non-canonical classic `for` forms" rejection class below is
-overruled: `TS_FOR_UNSUPPORTED` now names only register entry 23.
-
-Amended 2026-09-25 (FIG-3652): **ToPrimitive runs guest hooks.** Every
-coercion the VM performs — operators, property keys, template substitutions,
-`String()`, and the arguments the built-ins convert — calls an object's own
-`valueOf`/`toString` in ECMA hint order, with the object as the receiver,
-through the same call path as any other call, under the same frame and
-instruction limits. A hook is a builtin callback and cannot perform an
-effect (entry 2). The instruction that needed the hook reruns once it has
-answered, replaying each answer in order, so a coercion is deterministic on
-replay. Register entry 13's refusal of string coercion for a plain object, a
-`Map` or a `Set` is retired: those answer their ECMA type tags. A function
-has no primitive the runtime can give (its source text), so converting one
-refuses as `TS_FUNCTION_STRING_COERCION`; see ADR 0064.
-
-Amended 2026-09-25 (FIG-3707, decision 44): **captures are exact.** A closure
-shares every binding it closes over, as ECMA-262 environments do: it reads the
-binding's current value, and an assignment inside it writes the one binding
-the enclosing frame and every other closure over it read. Register entry 5 is
-retired and `TS_MUTABLE_CAPTURE_UNSUPPORTED` is deleted. A capture nothing can
-assign after the closure copied it stays a plain copy, which is exact; the
-capture ledger names every other slot (an assignment after the closure, in a
-later iteration of a loop the binding outlives, inside a closure, or through
-`globalThis` inside a function), and that slot holds a **binding cell**: one
-heap object the owning frame and every closure over the binding reference. Each
-binding instance is its own cell: a declaration, a hoisted `var` on frame
-entry, a parameter, a `catch` binding, each `for...of`/`for...in` iteration and
-each classic-`for` per-iteration copy (CreatePerIterationEnvironment) mints a
-fresh one. A top-level binding that stays a session global is never a cell: it
-is the session slot, which a closure reads and writes live, as it already reads
-`globalThis.name` (FIG-3620). The IR spells cells with three front-end
-intrinsics (`__typescript_cell_new`, `__typescript_cell_get`,
-`__typescript_cell_set`); the heap holds a cell like any other object, so
-roots, collection, suspension and snapshots carry it, and the continuation and
-snapshot wires encode it canonically (`cell { value }`). **The cell boundary:**
-a cell never crosses a session cell boundary, by construction rather than by a
-refusal. Cells live in function frames, in block-private top-level slots (which
-end with their cell) and in closure captures (a closure ends with its cell,
-`closure-boundary`); a top-level binding a closure writes is the session slot
-itself, so the boundary persists its current value like any global's. The
-bytecode, VM ABI, VM continuation, snapshot and semantic-hash versions move
-together; a continuation or snapshot from before cells is refused by its
-format version.
-
-Amended 2026-09-25 (FIG-3708): `arguments` outside a non-arrow function
-refuses under its own code, `TS_ARGUMENTS_UNSUPPORTED`; it previously
-borrowed `TS_THIS_UNSUPPORTED`. Inside a non-arrow function the arguments
-object is materialized as before — no behavior moved. The "v1 rejection
-classes" enumeration below is corrected in the same change: `var`,
-destructuring, `for...in`, `switch`, `do`/`while`, spread, optional chaining,
-enums, object methods, regular expressions, computed properties,
-array-literal elisions, parameter defaults and rest, compound assignment and
-every classic `for` form are accepted now, and the census and crate README
-are named as the executable source of truth over the prose list.
-
 ## Context
 
-Lash accepts model-authored code, and a model's prior on TypeScript is far
-stronger than its prior on any bespoke language. That is the reason for the
-dialect, and it is also the trap. A language the model believes it already knows
-punishes approximation much harder than one it has to read the prompt for: if a
-construct looks like TypeScript and runs like something else, nothing in the
-loop notices. The model has no signal that it guessed wrong, the author reading
-the diff has none either, and the divergence surfaces as wrong output in
-production rather than as an error.
-
-The substrate is not the constraint. ADR 0060 settled that the VM is
-reference-semantic and that a dialect is a lowering, and it supplies what this
-dialect needs: heap objects with deterministic identity, stackless frames and
-closures, exceptions with a three-layer catchability taxonomy, and durable error
-origins. ADR 0096 retains this dialect today and the extension seam for future
-dialects, each with independent semantics. What remains is a contract question — which slice of ECMA-262 is
-implemented, what happens at the edge of that slice, and what an agent writes.
+Models write familiar TypeScript constructs. Accepting a construct with an
+approximate meaning can produce wrong output without a diagnostic. A named
+refusal makes the unsupported operation visible. The shared heap VM supplies
+identity, frames, closures, exceptions and durable state; this decision defines
+the source-language fidelity contract.
 
 ## Decision
 
 ### Fidelity: exact, or rejected by name
 
-Every construct the dialect accepts behaves exactly as ECMA-262 specifies.
-Everything else is rejected with a stable `TS_*` diagnostic. Nothing is accepted
-with a nearby meaning.
+Accepted operations follow ECMA-262 except for the closed deviation register
+below and the explicit host extensions. An unsupported construct receives a
+stable `TS_*` diagnostic. The front end rejects statically when it can identify
+the unsupported shape; shape-dependent runtime refusals have executable probes.
+ADR 0064 owns the accepted language inventory and explicit gap rulings.
 
-The asymmetry is deliberate: a rejection is cheap and visible, while a near-miss
-is a silent defect, so the dialect refuses where it cannot be exact. Rejection is
-static wherever the shape can be seen at parse or lowering time, and the
-deviation register below names every shape-dependent runtime rejection that
-remains. The register is small and closed — outside it, no semantic deviation is
-intentionally accepted for an operation in the accepted surface.
+The dialect accepts declarations, functions and arrows, mutable lexical
+captures, blocks, conditionals, loops, exceptions, arrays, records, calls,
+operators and its declared standard library. Type annotations, aliases and
+interfaces are erased after parsing. The crate README, lowerer allowlists,
+rejection tests and Test262 census specify the detailed accepted inventory.
+The standard-library test compares the documented and accepted sets in both
+directions.
 
-The accepted v1 surface is `let`/`const`, functions and arrows with exact
-captures (amended by FIG-3707), blocks, `if`, `while`, classic `for` in every head, condition and
-update form (amended by FIG-3706), `for...of`, `break`, `continue`, `try`/`catch`/`finally`, `throw`,
-`return`, arrays, records, field and index access and assignment, calls, the
-primitive unary, arithmetic, comparison, equality and logical operators,
-conditionals, templates, `.length`, a fixed standard-library inventory, and free
-`console.log`. TypeScript type annotations, aliases and interfaces are erased
-after parsing.
+A non-arrow function's `this` is its strict-mode call receiver; a plain call
+receives `undefined`. Arrows retain lexical `this`. Member calls use the
+receiver's own property before a built-in method of the same name. Function
+receivers live in frame slots and survive suspension as ordinary rooted values.
+`arguments` belongs to a non-arrow function. References outside that context
+receive the corresponding named diagnostic.
 
-The executable inventories are the source of truth, not this ADR:
-`crates/lash-typescript/README.md` carries the register and the standard-library
-inventory, and `tests/rejections.rs`, `tests/structural_contract.rs` and the
-checked-in Node differential suite carry the behavior. The inventory pin asserts
-set equality in **both** directions against the lowerer's allowlist, so the
-register cannot fall behind the code — a one-directional pin is what previously
-let the register understate the surface by nine methods for a full round.
+Mutable lexical captures share binding cells. A local assignment is visible to
+every closure over that binding. Each binding instance has its own cell,
+including per-iteration `let` environments. A top-level session binding stays a
+session slot, read and written live by a closure. Closures and their local cells
+end at the cell boundary; durable session roots preserve the current global
+values. The boundary for function-valued globals is register entry 17.
 
-### The v1 rejection classes
+Classic `for` accepts declaration, expression or empty heads and arbitrary or
+absent conditions and updates. Head `let` bindings follow per-iteration
+copying. The loop-epilogue/`finally` refusal is precisely register entry 23.
 
-Rejected with a stable code, statically: classes and private names,
-generators, modules and imports in every form, JSX, namespaces, decorators,
-`eval` and `Function`, prototype access and mutation, accessors, BigInt,
-`with`, `debugger`, labels, `super` and the meta-properties (`new.target`,
-`import.meta`), `this` and `arguments` outside a function, `new` outside the
-constructor exception list, `instanceof` outside the heap kinds, `delete` of
-a non-reference or an array index, sequence (comma) expressions, tagged
-templates, `using` declarations, `for await`, mutable captures, function
-redeclaration, and unresolvable references. The first version of this list
-named constructs the dialect has since accepted — `var`, destructuring,
-`for...in`, `switch`, `do`/`while`, spread, optional chaining, enums, object
-methods, regular expressions, computed properties, array-literal elisions,
-parameter defaults and rest, compound assignment, and classic `for` in every
-form — so it is a map, not the source of truth: the census
-(`tests/test262/census/`) and the crate README carry the executable list,
-and the refusals the pinned `tsc --strict` shares are ADR 0064's strictness
-table. Identifiers beginning with `__typescript_` are reserved for the
-lowerer's generated bindings.
+Coercions run an object's own `valueOf` and `toString` in hint order through the
+ordinary guest call path, with the object as receiver and normal VM limits.
+The requesting instruction resumes with the hook answers. A coercion hook
+cannot perform an effect, following register entry 2. Function source-string
+coercion receives `TS_FUNCTION_STRING_COERCION` rather than fabricated source.
 
-Three rejections are dialect-specific enough to state their reasons here.
+### The rejection classes
 
-**General async functions.** The one authored async function is the `run` field
-of a static `defineProcess` definition; cells otherwise use top-level `await`.
-Async authoring beyond that would require suspension points the durable
-machinery does not yet place.
+The detailed rejection list lives in `tests/rejections.rs`, the diagnostic
+inventory and `tests/test262/census/`. Rejections include unsupported modules,
+classes, generators, dynamic code and unsupported object operations.
+Identifiers beginning with `__typescript_` belong to generated lowering slots.
 
-**Mutually recursive function declarations** reject, naming the cycle
-(`cycle: isEven -> isOdd -> isEven`). A declaration copies its captures when it
-is created, so a declaration cycle has no emission order, and routing it through
-shared binding cells would build a heap cycle reachable from a durable root — which the durable graph
-encoding cannot hold. The program would run and then fail to suspend or
-snapshot, so failing closed at compile time is the honest form of the same
-deferral. Self-recursion, named self-recursive function *expressions*, nested
-declarations and acyclic chains are unaffected.
+General async functions are outside the accepted callable-function model.
+An uncalled async arrow represents durable process work, including catalogue
+argument positions that expect `Process`; cells use top-level `await`.
 
-**Mutable lexical captures** *(retired by FIG-3707: captures are exact; see the
-amendment above).* They rejected, on both captured reads and captured writes,
-until durable lexical cells existed.
+Mutually recursive declarations receive a named cycle diagnostic. Shared cells
+for those declarations would create a cycle that the durable heap cannot
+capture. Self-recursion and acyclic declaration chains use the supported
+function machinery. Mutable captures themselves are accepted.
 
 ### The agent surface
 
-**Cells are scripts.** A foreground cell is ordinary top-level TypeScript, and
-may use top-level `await` for tools, process handles, `sleep`, `Promise.all`
-and `Promise.allSettled`. Tool calls must be awaited directly or consumed as pending handles before the execution ends ([ADR 0087](0087-typescript-runtime-promise-arrays.md)); the pending-tool runtime error (`TS_PENDING_TOOL`) is `Catchable`, so a `try/catch` in the cell observes it. Tool calls use explicit
-`typescript.tool` module paths; their rendered signatures return `Promise<T>`,
-and unknown module paths enter the executor's deferred tool-resolution path.
+A foreground cell is top-level TypeScript with `await` for tool calls, process
+control tools, timers and promise aggregates. Tool paths are declared under the
+TypeScript tool modules and return promise handles. Unknown module paths use
+the deferred tool-resolution path. ADR 0087 owns runtime promise arrays.
 
-**Amendment (FIG-2999, 2026-09-15): `defineProcess`, `start`, `wake` and
-`registerTrigger` are deleted.** A process is an ordinary uncalled `async` arrow
-bound at top level or passed to a tool whose slot expects one, its signals are
-inferred from the `waitSignal` calls in its body, and starting, signalling,
-yielding and registering a trigger are leaf tools the catalogue declares
-([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)). The
-rest of this section records the design those forms had, and no longer describes
-the dialect.
+Durable work is a `Process` value. A top-level const-bound uncalled async arrow
+or an inline arrow in a catalogue slot typed as `Process` lifts to an admitted
+process body. Its signals come from `waitSignal` calls. Starting, signalling,
+yielding and trigger registration are catalogue tools under ADR 0095.
+`waitSignal` is process-scoped; `sleep` is available in a cell too. Tools return
+declared work for runtime realization under ADR 0116.
 
-**Durable work was a static definition object**, in exactly the shape
-`const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`,
-declared at top level. `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`
-and cell-only `finish` lower to the shared process and effect machinery;
-`wake(value)` emits progress from a run, and `wake(handle, "signal", payload)`
-sends a declared signal to another run. `waitSignal` is the one primitive scoped
-to a process body — outside one it is refused, while `sleep` is equally valid in
-a cell — and the refusal names the keyword in the dialect the author actually
-wrote, rather than leaking the Lashlang spelling of the same primitive into a
-TypeScript program. The keys of `start`'s second argument are the `run`
-function's own parameter names rather than a fixed input field, and
-`registerTrigger`'s inputs work the same way.
-
-**Amendment (FIG-2986, 2026-09-13): the fired trigger event is a parameter, not
-a global.** `registerTrigger` used to bind it through `trigger.event`, an
-identifier bound nowhere in the program — the one place the dialect stopped
-being TypeScript, and the place a model's natural guess (`source.event`, on the
-descriptor it just built) failed with a diagnostic that only said what was
-forbidden. It is now the parameter of an `inputs` arrow,
-`inputs: (event) => ({ tick: event })`, on `triggers.register`, `update` and
-`revive` as well. The arrow is a *template erased at lowering*, not a callback:
-exactly one plain identifier parameter, synchronous, an object-expression body
-with static unique keys, and the parameter admitted only as a whole, direct
-property value. It lowers to the same `$lash.trigger.event` IR marker the
-record form produced, so an artifact, semantic hash, process identity, bytecode
-and registration payload built from the arrow are byte-identical to the ones
-built from the record it replaces; no callback exists to run at fire time, and
-replay is untouched. Every other `inputs` value keeps its old contract: an
-ordinary expression, evaluated in the enclosing scope when the registration
-runs and frozen as a fixed input. `inputs` may be omitted when the target's
-authoritative signature ([ADR 0090](0090-named-process-signatures-are-authoritative.md))
-has exactly one parameter and the event type is assignable to it; a
-zero-parameter target stays refused and is told to take an event parameter,
-because no `inputs` record could make it valid. The retired spelling, `.event`
-on a source descriptor, and an object-valued `inputs` are three named
-diagnostics rather than a binding error.
-
-Static extractability is the point of the shape, not a stylistic preference: the
-host registers a process definition from the artifact without executing it, so
-the name, the declared signals and the `run` literal must be readable from the
-source. Dynamic definitions, dynamic process targets, non-literal config, and
-definitions below top level each reject with their own `TS_PROCESS_*`
-diagnostic rather than being resolved at run time.
-
-**`return` finishes, `throw` fails, and cleanups run.** A `return` from `run` is
-a real function return: every enclosing `finally` block executes, and only then
-does the generated wrapper finish the process with the returned value. An
-uncaught `throw` fails it. This discharges the constraint FIG-1303 recorded —
-that a TypeScript `return` must never lower to `Expr::Finish`, which is a
-process terminal that deliberately skips pending `finally` blocks. `finish`
-inside `run` is statically rejected for the same reason, so authored process
-code has no way to bypass a cleanup.
+A process-body `return` runs every enclosing `finally` before the wrapper
+finishes the process with the value. An uncaught `throw` fails the process.
+Cell-only `finish` is rejected inside a process body, because an execution
+terminal cannot stand in for a function return that owes cleanups.
 
 ### Errors
 
-The dialect adopts the substrate's three-layer catchability taxonomy unchanged.
-Tool and effect failures throw real `Error` objects; ordinary runtime errors are
-catchable per specification; instruction, deadline, memory and frame-depth
-exhaustion are uncatchable terminals; and host cancellation is uncatchable in
-v1. Catchability is a single exhaustive match on the error variant, so a new
-variant does not compile until it declares its class.
+The VM classifies errors as catchable faults, uncatchable terminals or host
+cancellation. Instruction, memory and frame-depth exhaustion are terminals.
+Catchability is an exhaustive match on the error variant.
 
-**A delivered rejection is an `Error`, not a record shaped like one.** A caught
-tool or effect failure satisfies `error instanceof Error`, renders as
-`EffectError: <host text>` under `String(error)`, and carries the host's own text
-as `message`; a catchable runtime fault with no ECMA-262 counterpart is the
-same value branded `RuntimeError`. A fault in an operation ECMA-262 specifies
-to throw is not branded: it is that operation's own error, a `TypeError` for
-reading a member of `null` or calling a non-function and each built-in's own
-`TypeError`, `RangeError` or `SyntaxError`, with Node's message and no
-`cause` (FIG-3653). One mapping on the error variant decides it, and the VM's
-error routing throws the error object in the fault's place, so a `catch`, an
-uncaught exception and `instanceof TypeError` all see what Node shows. The
-typed payload rides on `cause`, the one ECMA-documented slot
-an error carries for exactly this. Branded runtime faults expose `code` and `details`;
-tool failures additionally expose their stable `class`, `source`, and full
-`retry` disposition while the tool's message remains the Error's `message`.
-The brand is what a
-JavaScript library would write as `class EffectError extends Error`: the value
-model has no prototype to subclass and no own slot to write `name` into, so
-`name` is a property of the error object itself and `instanceof` answers `Error`
-and nothing narrower. Only the substrate mints those two brands —
-`new EffectError(...)` is not in the dialect. This was FIG-1477: the delivered
-record failed `instanceof Error`, stringified as `[object Object]`, and sent a
-frontier model's standard try/catch discrimination down its fallback branch.
+Tool and effect failures throw heap `Error` objects branded `EffectError`.
+Catchable faults without an ECMA counterpart use `RuntimeError`. An operation
+with a specified ECMA error throws its corresponding `TypeError`, `RangeError`
+or `SyntaxError`. A branded error's `message` is the host text; its `cause`
+carries code and details, and tool errors also carry class, source and retry
+disposition. `allSettled` rejection reasons use the same error values.
 
-An `Error` is therefore also the one JavaScript exotic that crosses the host
-boundary, detaching into `{ name, message, cause?, errors? }`. Its only
-mutable surface is its own data properties (`message`, `cause`, `errors`; any
-other name has no slot and refuses as `TS_EXOTIC_PROPERTY_UNSUPPORTED`), and it
-has no internal slot the guest cannot already read, so nothing is destroyed or exposed by detaching
-it, and a caught rejection is returnable whenever its `cause` is data — which is
-how a cell reports a tool failure. A `cause` holding another exotic (a `Map`, a
-`Date`) still refuses at the child export. `Map`, `Set`, `Date`, `RegExp`, `URL`
-and `URLSearchParams` refuse outright.
-
-The detachment is the host boundary's own operation, closer to `structuredClone`
-than to anything the guest can write: inside a cell an error's properties are not
-own data, so `Object.keys(error)` is `[]`, `JSON.stringify(error)` is `{}`, and
-`{ ...error }` copies nothing — exactly as in ECMA. The conversion is also
-one-way. Only a host handing back the identical exported value hits the boundary
-cache and resolves to the same error object; a host that rebuilds the record —
-anything that round-trips through JSON — hands back a plain record, and the guest
-sees `instanceof Error` false and an ordinary mutable object. Nothing re-brands a
-record as an error.
-
-An `allSettled` rejection reason is that same `Error`. `ExecutionHostError`
-still accepts message-only failures from general hosts, which retain their
-generic runtime code. A tool bridge instead attaches the tool failure's stable
-classification to the host error, so a leaf that is never unwrapped keeps the
-same discriminable code, source, and retry disposition without requiring every
-unrelated host to fabricate them.
-
-Without reference semantics Lashlang has no way to construct a JavaScript error
-object, so its `catch` clause keeps the flat record it has always been handed.
-For tool failures that record adds direct `class`, `source`, and `retry` fields
-to `{ name, message, code, details }`. (The heap
-itself is shared machinery, not a per-dialect one: the error-family branch that
-answers an assignment to an exotic with a heap `TypeError` sits above this
-choice and is reachable wherever such a receiver exists.) One seam decides which
-shape is delivered — the VM's error routing — and it reads the
-reference-semantics flag, the same predicate that gates every other JavaScript
-heap constructor: the question being asked is "can this run allocate a
-JavaScript error object at all". In production that flag is set from
-`program.dialect == Typescript` and nothing else, so the two questions do
-coincide; the pairing is a convention the runtime does not enforce, and this
-rule is deliberately written against the heap-ownership meaning rather than
-against the dialect, which is what the aggregate rule records at lowering
-instead.
+Host export detaches a supported error into data containing its name, message,
+optional cause and optional aggregate errors. Unsupported exotics inside that
+data still fail export. Other exotics such as `Map`, `Set`, `Date`, `RegExp`,
+`URL` and `URLSearchParams` cannot detach as ordinary host data. Inside the VM,
+error enumeration and JSON rendering follow their guest property contract.
+A host returning an identical exported value can reuse the boundary cache;
+a rebuilt JSON record is an ordinary record and does not become a heap error.
 
 ### Promise aggregates settle on journaled order
 
-As revised by [ADR 0087](0087-typescript-runtime-promise-arrays.md) and
-replaced in part by [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md),
-`Promise.all` and `Promise.allSettled` evaluate arbitrary array-valued
-expressions at runtime. Tool-handle elements are awaited and settled values
-pass through; mixed arrays and arrays stored in bindings are accepted. Direct
-async maps retain the existing callback driver. Non-array values fail with a
-typed runtime error.
+`Promise.all`, `allSettled`, `race` and `any` consume runtime array expressions.
+Tool handles are awaited, settled values pass through, and mixed arrays are
+accepted. A raw process handle in an aggregate operand is refused with a repair
+naming `processes.await(handle)`. Direct async maps have the separately
+registered callback discipline. Non-arrays receive a typed runtime failure.
 
-ADR 0087's two-phase tool-then-process rule is **gone** (FIG-2996, landed
-2026-09-14). A mixed aggregate is one resource-operation batch settling on one
-recorded order: a parked `processes.await` leaf takes its place in that order at
-the moment its completion arrives, so `Promise.all([tools.x.op(),
-processes.await(h)])` reports whichever failure the batch recorded first, and a
-tool rejection has no precedence over a process rejection. A **raw** process
-handle at an element position is refused, with a repair naming
-`processes.await(handle)`; a handle carried inside a value bound to a name is
-passed through untouched.
+A mixed aggregate is one resource-operation batch. Durable effect groups record
+settlement ranks. `all` rejects at the first consumed rejection; `allSettled`
+returns outcomes in input order. `race` returns the first settlement; `any`
+returns the first fulfilment or an `AggregateError` with reasons in input order.
+Replay reads the durable decision rather than reconstructing it from a clock.
+A host answer incompatible with the requested consumer mode fails closed.
 
-`Promise.all` rejects with the reason of the leaf that settled **first**, as
-ECMA specifies, and `allSettled` keeps results in input order. Since FIG-3397
-the aggregate is a durable effect group whose settlement order is durable
-rank, and the host answers the VM with the one settlement that decided it — or
-with every result — under the aggregate's consumer mode (ADR 0099 §10). The
-answer is not re-derived at replay: the group's ranks are durable facts. A host
-answer that does not fit the consumer mode that asked for it fails closed with a
-typed error rather than being repaired — a repair that produces a plausible
-answer is indistinguishable downstream from a real one, which is exactly how an
-earlier defect read as delivered in three places while being false in one.
+Lowering records the aggregate consumer mode explicitly. The VM does not infer
+that mode from the heap's stored forest/graph form. An unawaited `sleep(ms)` is
+a timer handle; `await Promise.race([call, sleep(ms)])` returns `undefined` if
+the timer wins. A plain operand answers ahead of dispatched settlements, after
+the aggregate admits its pending operands.
 
-The consumer mode is recorded per aggregate at lowering, where the compiler
-already knows the dialect, rather than read from the VM's reference-semantics
-flag at run time. That flag answers a heap-ownership question, and one predicate
-answering two questions is the defect shape that cost an earlier layer three
-rounds.
+### Two host lifetime contracts
 
-`Promise.race` and `Promise.any` join them (FIG-3397). `race` resolves with the
-first settlement and `any` with the first fulfilment, or rejects with an
-`AggregateError` whose `errors` hold one rejection per input position, in input
-order. An unawaited `sleep(ms)` is a pending timer — one handle like a pending
-tool call — so `await Promise.race([call, sleep(ms)])` is the dialect's timeout,
-resolving `undefined` when the timer wins. A plain value in the operand array
-answers ahead of any dispatched settlement, and every pending operand is
-admitted first.
-
-### Two host lifetime contracts (FIG-3392)
-
-**Implemented by FIG-3397.** `Promise.race` and `Promise.any` are accepted. The
-full contract is
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md);
-[ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
-carries the matching group-side amendment.
-
-A **host lifetime contract** is not a deviation. The deviation register below
-covers operations whose *meaning* departs from ECMA-262. Both rules here keep the
-program's meaning exactly and describe what happens to the host that was running
-it — a subject ECMA-262 does not address at all, since it has neither a `finish`,
-nor a host shutdown, nor a process. Neither becomes a register entry.
+ADR 0099 owns the group and tool-child lifecycle. These rules describe the
+execution host's lifetime rather than alternate ECMA promise meanings.
 
 #### 1. Opener close cancels an unfinished arm
 
-**Selection never cancels.** While the opener lives, `all`, `race` and `any`
-leave every losing arm running, which is ECMA-262's meaning.
+Selection leaves losing arms running while their opener lives. At opener end,
+Lash cancels unfinished arms and fences further unprotected semantic writes.
+It does not guarantee that external I/O already issued stops. The Node lifetime
+oracle keeps its host alive after the async function returns so that it can
+observe writes from remaining arms.
 
-**At opener end an unfinished arm is cancelled.** The comparison cannot be made
-against the specification, and it must not be made against Node *process death*
-either — a process that exits kills its pending work, which would flatter lash by
-hiding the difference. **The Node oracle therefore keeps the host alive after the
-function returns:** in a still-running Node process, returning from an async
-function does not cancel a losing timer or socket, and that arm's later write can
-land after the caller returned. Lash suppresses that write at opener close.
+An attempt with an already-committed final result realizes its protected
+intents before opener settlement. Cancellation does not retract a side effect
+already performed. A losing `processes.await` releases the wait at opener close
+without cancelling the separately named durable process.
 
-This statement concerns **cancellation only**. It claims no general Node
-scheduling or lifetime equivalence — the registered sequential async-map
-deviation still produces observable ordering differences while the opener is live
-— and opener close fences further unprotected Lash semantic writes without
-guaranteeing that external I/O already issued stops.
-
-One ordering divergence that exists today is **removed** rather than accepted.
-Every terminal leaf of a batch currently drains its declarations in *source*
-order, whether or not it declared any, so an aggregate resolves in source order
-and a hung source-first tool blocks every later sibling. Under ADR 0099 §5 the
-order becomes the durable **final-commit** order, which is what a host does with
-`Promise.all([a(), b()])`: each call's side effects happen as it settles, not in
-argument order. The observable consequence is that intent realization order for
-`Promise.all` moves from argument order to completion order.
-
-**An attempt whose final result already committed is exempt.** Its declared
-intents are realized before the opener settles and survive a crash in that window
-(ADR 0099 §4). Cancellation stops delivery of a *result*, never a side effect
-already performed — [ADR 0042](0042-tool-attempts-are-atomic.md) already makes
-in-attempt effects at-least-once.
-
-**Work that must outlive the opener is a process the program named.** A losing
-`processes.await` stays admitted while the opener lives; opener close releases
-the wait without cancelling the process
-([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)).
+Declarations drain in durable final-commit order under ADR 0099. They do not
+wait for an unsettled earlier operand merely because it appears first in source.
 
 #### 2. An await that nothing can resolve ends the cell
 
-`Promise.race([])` returns a forever-pending promise in ECMA-262, and **the
-dialect keeps exactly that meaning**: there is no exception to catch, no
-synthesized rejection, and no registered deviation. Because the dialect awaits
-aggregates in place, zero operands open no group at all — ADR 0065 already
-refuses empty groups — so the host detects an await nothing can resolve and
-**fails the cell with a typed host-level unsettled-await error**:
-`RuntimeErrorCode::AggregateAwaitUnsettled` (`aggregate_await_unsettled`), raised
-by the VM as the uncatchable `AggregateAwaitUnsettled` terminal.
+`Promise.race([])` is forever pending. With no operand there is no durable group
+to open and nothing can resolve the await. The host ends the cell with the
+uncatchable `AggregateAwaitUnsettled` terminal, whose code is
+`aggregate_await_unsettled`; it does not synthesize a catchable rejection.
 
-That is the analogue of Node exiting with code 13 on an unsettled top-level
-await: the program's semantics are ECMA's, and the host's lifetime ends rather
-than parking a durable execution forever.
-
-The other empty aggregates need no host rule: `Promise.all([])` and
-`Promise.allSettled([])` return `[]`, and `Promise.any([])` rejects with an
-`AggregateError` whose `errors` is empty, all as ECMA-262 specifies.
-
-#### Register bookkeeping
-
-Neither contract above enters the numbered register. Register entry 15
-(aggregate rejection timing) retired with FIG-3397: every aggregate is on
-first-settlement wake, so a rejected `Promise.all` answers as soon as its first
-rejection is consumed — as ADR 0065's consequences anticipated.
+`all([])` and `allSettled([])` return `[]`. `any([])` rejects with an
+`AggregateError` whose `errors` is empty. These need no extra lifetime rule.
 
 ### Parser: SWC, pinned, behind a lash-owned adapter
 
-Parsing uses SWC, pinned exactly — `swc_common 25.0.0`, `swc_ecma_ast 28.0.0`,
-`swc_ecma_parser 44.0.0` — and confined to `src/adapter/`, which produces a
-lash-owned normalized tree that lowers into `lashlang::Program`. No SWC type
-appears in a public API, a durable format, or the lowering. oxc is not rejected
-on the merits; it is deferred to a bounded spike against this same seam, and the
-seam is what keeps that spike bounded.
+SWC is pinned exactly at `swc_common 25.0.0`, `swc_ecma_ast 28.0.0` and
+`swc_ecma_parser 44.0.0`. The adapter converts SWC nodes into a Lash-owned
+normalized tree; lowering produces `lashlang::Program`. Public APIs and durable
+formats contain no SWC types. An alternative parser can target the same adapter
+boundary without changing the language contract.
 
-SWC parses by recursive descent and **aborts the process** on stack exhaustion
-rather than returning an error, so the safety argument cannot rest on a
-pre-parse guard: five review rounds showed a hand-written scan cannot be relied
-on to agree with SWC about every shape, each round's guard being right about the
-axis it modelled while the next abort sat just outside it. The bound is
-therefore arithmetic and proportional. A nesting level can cost as little as one
-source byte, the measured worst requirement is about 22,500 bytes of stack per
-source byte, and the parse runs on a thread reserving 8 MiB plus 40,000 bytes
-per source byte — roughly 1.8x the worst measurement — over a source that cannot
-exceed the cap. The reservation is address space, not memory. A guard test keeps
-the margin honest by disabling the nesting preflight entirely and running every
-shape that aborted in any round through what remains.
+A cell is a strict Script extended with top-level `await`. The adapter first
+parses under the Module goal to admit that await, then retries under strict
+Script when needed for a Script identifier spelled `await`. Module authoring
+itself remains outside the dialect.
 
-The 28-unit source nesting budget therefore exists for the diagnostic and for
-cost, not for safety: a source-level `TS_SOURCE_NESTING_LIMIT` beats a
-parser-depth error, and rejecting before the parse keeps a pathological cell at
-17 MB instead of 1.2 GB. The budget binds before the shared AST's own nesting
-limit (ADR 0060) for every shape the grammar accepts, so the dialect's front end
-lands inside the substrate's cap by construction rather than by coincidence.
+Recursive parsing runs on a thread reserving 8 MiB plus 40,000 stack bytes per
+source byte. The source cap is 64 KiB. This proportional reservation supports
+the no-abort argument independently of the preflight. The 28-unit source
+nesting preflight provides the earlier diagnostic and limits parsing cost;
+the lowered AST also stays within the shared structural bound of ADR 0060.
 
-### Conformance evidence: two mechanisms, deliberately different
+A cap-sized source needs more than 2 GiB of virtual address space. Failure to
+reserve it returns `TS_PARSE_RESOURCES_UNAVAILABLE`. Preflight is also part of
+the parse-allocation bound; stack reservation alone does not limit heap work.
+A parser subprocess with an overall resource limit is a separate option.
 
-**A Node differential oracle** is the primary gate. A checked-in expectation
-table carries 345 rows — 272 of them distinct expressions — generated against
-Node v25.2.1 and regenerated byte-identically, covering coercion,
-UTF-16-sensitive behavior, key ordering, replacement tokens, JSON number
-formatting, numeric edge cases, optional arguments, and the method inventory.
-Rows are retained per review lane, so duplicates across lanes are deliberate
-and the effective corner coverage is that of the distinct rows; both counts are
-pinned against the table by a test, so neither the register's prose nor a lane
-can drift from the corpus in silence. The standing rule is that every fixed
-dialect case the oracle can express lands in the corpus: the hand-written test
-is the diagnosis, the corpus row is the permanent guard.
+### Conformance evidence
 
-**Every refusal the register promises is executable.** An entry below that
-says it rejects, refuses or fails closed carries at least one probe — a source
-that must be refused with the named diagnostic, or fail at run time with the
-named error — and every `TS_*` code the entry names is fired by one of them;
-the crate README's register is held to the same rule for the codes it names.
-The check (`crates/lash-typescript/tests/deviation_register.rs`) reads this
-register's own text, so a new refusing entry without a probe fails it, as does
-a probe whose refusal stops firing. Entry 5 is why: it promised a read-path
-refusal no code produced, and nothing connected the promise to the code.
+Checked-in Node differential answers exercise accepted operations. The corpus
+records the pinned Node and regenerates its answers deliberately. Inventory
+checks compare the full documented and accepted standard-library sets.
+Every fixed case expressible by a corpus belongs in that corpus.
 
-**Test262** carries the specification's own cases. Every test at a pinned
-test262 commit whose census rows (directory, flags, feature tags) are all
-accepted is vendored and run through the real lower → link → compile → heap VM
-path, with the upstream harness rendered in-dialect (FIG-3646). Each selected
-test has exactly one ratcheted outcome: pass, refused by a named `TS_*` code a
-census row backs, fail owned by a ticket, or a named harness capability the
-dialect lacks. The selection is derived rather than curated, so the pass rate
-it reports is the dialect's, not a sample's. The complementary rule matters
-more: **a test262 case is never admitted by weakening the dialect.** A test
-whose constructs fall outside the accepted set is a named refusal until the
-construct is implemented exactly.
+Every register refusal has an executable probe. The probe must produce the
+entry's named refusal, and every named `TS_*` diagnostic has a matching probe.
+`tests/deviation_register.rs` reads this ADR and the crate README to check that
+contract. Reserved numbers carry no active deviation and are never reused.
 
-### Beyond one script (FIG-3599)
+The Test262 census derives its selected tests from directory, flag and feature
+rows. Accepted tests run through lowering, linking, compilation and the heap
+VM with the in-dialect harness. A selected outcome is a pass, a backed named
+refusal, an owned defect or a named unsupported harness capability. Expanding
+the selection requires implementing the admitted construct exactly.
 
-The two mechanisms above check one script, run once. Four FIG-3571 defects
-passed them for that reason — block and generated bindings leaking into the
-next cell, printer faults, a lifted literal declared twice, a draft carrying
-an artifact's identity — so three more mechanisms join them. All three run in
-the cacheable Buck2 test partition, with no network.
+### Beyond one script
 
-**The Node session oracle** (`crates/lash-typescript/tests/differential/sessions/`)
-holds sessions: ordered cells. Its reference answer is the pinned Node v25.2.1
-running each cell as a successive classic Script in one realm
-(`vm.createContext` plus `vm.Script`), so top-level `let`/`const`/`class` live
-in the realm's global lexical environment and `var` and functions on its global
-object, as ECMA-262's GlobalDeclarationInstantiation specifies. Regeneration is
-the same deliberate, byte-identical step as the expression table's. The lash
-side runs each session through the production RLM executor twice: with one
-live state, and restarting through the durable snapshot path between every
-pair of cells. The mapping from a cell to its Script is stated here once:
+The Node session oracle runs ordered cells as successive classic Scripts in one
+realm. The Lash side runs each session live and with durable reloads between
+cells. Its cell mapping observes printed lines, termination and binding probes.
+`finish(value)` ends the cell; Script completion values are not observed.
+Static unknown-binding diagnostics correspond to reference failures in probes.
+The classic-Script corpus contains no top-level-await cell.
 
-- A cell's observation is its printed lines, how it ended, and one
-  binding-visibility probe per binder name of its session, each run after the
-  cell as its own Script: `console.log(typeof NAME, JSON.stringify(NAME))`.
-- `console.*` is the host printer of register entry 13. `finish(value)` ends
-  the cell with that value; a cell never catches it. An uncaught error is
-  observed by its class; a VM fault's class is its `RuntimeError` brand
-  (entry 20). A Script's completion value is not observed, since a cell
-  surfaces none.
-- A `ReferenceError` from a probe answers `unbound` (`tdz` when the binding is
-  uninitialized); the dialect's static `TS_UNKNOWN_BINDING` is its exact
-  counterpart. A cell the dialect rejects statically never enters the realm.
-- Top-level `await` has no classic-Script meaning (ECMA-262 admits it only in
-  a Module, whose declarations are not global), so the session corpus holds no
-  await cell.
-- A divergence is never a special case: a cell names its register entry and
-  states the lash answer, which must differ from Node's and which ends its
-  session; a session-wide probe rule (entry 17) names its entry too. A defect
-  the oracle found but the change could not fix is a *defect* cell naming the
-  crate README's open-defect list, ratcheted the same way.
+A known divergence names its register entry and expected Lash answer. A pinned
+open defect names the README defect entry. Unnecessary deviation or defect
+answers fail the corpus rather than silently persisting.
 
-**The round-trip law** holds every program of every corpus — the expression
-table, the Test262 selection, every session cell and the workflow-graph goldens —
-to: lower, admit, project, print through the lens, reparse and admit again,
-reaching the same `module_ref` and `source_identity`. A program the printer
-cannot spell is refused with a typed `TypeScriptSourceError`, and every
-refusal is a row of an explicit allowlist with its reason
-(`tests/corpus_laws/refusals/<shard>.tsv`, one file per shard so lanes never
-share one); a row whose program now round-trips fails until it is deleted.
+The round-trip law lowers and admits each corpus program, projects and prints
+it, reparses and admits it again, and compares module and source identity.
+Typed printer refusals have explicit rows with reasons; a row fails when the
+program can round-trip. Artifact laws check declaration uniqueness, lifted
+literal ownership, trace-map coverage, session-visible exports, process origins,
+draft/admitted identity and standalone reload.
 
-**The artifact invariants** hold every admitted artifact of every corpus to:
-unique declarations, each lifted literal declared once; every compiled
-execution site in the trace map with the same kind, owner path and branch
-memberships, and nothing else in the map; only session-visible bindings
-exported, no generated slot among them; each `ProcessOrigin` derived from the
-literal at its site; no identity on a draft, and the admitted identity and
-structure on a host's view; and a stored artifact that reloads, alone, to the
-same module.
+### Generated sessions and snapshot laws
 
-The corpus rule extends to all three: every fixed session, round-trip or
-invariant case lands in its corpus, and each harness fails when a row goes red
-or an allowlist entry, deviation answer or defect answer becomes unnecessary.
+Seeded differential sessions draw from accepted census constructs and the URL
+contract. They compare pinned Node answers with live and reloaded Lash runs.
+Checked-in seeds and answers run without network access; longer investigations
+can draw fresh seeds. A discovered divergence becomes a minimized corpus case,
+with either a fix or an owned defect disposition.
 
-### Divergences nobody wrote down (FIG-3608)
+Snapshot laws cover primitives and heap kinds. A global value used after reload
+must behave like the equivalent value without a cell boundary, subject to the
+register's named restrictions. Exhaustive heap-kind coverage requires evidence
+when a new kind enters the heap.
 
-A corpus checks the divergences someone thought of. Two more mechanisms look
-for the rest.
-
-**Generated differential sessions.** A seeded generator draws multi-cell
-sessions from the census's accepted grammar — every construct names the
-accepted census row, or the WHATWG URL surface, it draws from, and every cell
-is plain JavaScript so Node runs it as written — and each runs on the pinned
-Node under the session mapping above and on lash, live and reloading between
-every pair of cells. A bounded set of seeds, with Node's answers checked in
-and regenerated by the same deliberate byte-identical step, runs in the
-cacheable partition; the test regenerates each session from its seed, so a
-generator change is a corpus change. Longer runs draw fresh seeds against the
-pinned Node live. Every divergence found is minimized into a session corpus
-row: a small defect is fixed with its row; a larger one becomes an open
-defect with its row and a ticket, and the generator stops drawing its shape,
-naming the entry, until it is fixed.
-
-**The snapshot round-trip law.** For every value type the dialect accepts, a
-value created in one cell, stored in a session global, reloaded from the
-durable snapshot and used in the next behaves exactly as the same code in one
-cell, where it is never stored — and that single-cell answer is Node's. The
-rows cover every heap object kind (an exhaustive match names them, so a new
-kind cannot enter the heap without a row) and the primitives. A type that
-cannot round-trip is refused with a named diagnostic, never silently
-degraded; a row the law fails today is pinned by the open defect or registered
-deviation that breaks it and fails once that is fixed.
-
-RegExp's `lastIndex` is one raw `Value` in the heap. Snapshots and durable
-fragments carry it as `CanonicalValue`; continuations carry it as `ValueWire`.
-Reads preserve fractions, non-finite numbers, negative zero, strings and
-supported references. RegExp operations derive ToLength when they use the
-property. The execution-index cap does not constrain the raw property, so a
-number such as `1e16` can be captured and restored. Property-held references
-participate in collection, memory charging and fragment mutation tracking;
-unsupported durable values fail through the existing named boundary.
+RegExp `lastIndex` is a raw `Value`, represented by `CanonicalValue` in snapshots
+and fragments and `ValueWire` in continuations. RegExp operations derive
+ToLength when they use it. Fractional, non-finite, negative-zero, string and
+supported reference values survive the property boundary. References held by
+the property participate in collection, charging and mutation tracking.
 
 ## Deviation register
 
@@ -660,7 +251,7 @@ alternate language semantics. `crates/lash-typescript/README.md` holds the
 executable register; this list is the decision that the register is closed and
 that each entry is a limit taken knowingly.
 
-1. **Runtime limits.** Instruction, wall-clock, logical-memory and call-frame
+1. **Runtime limits.** Instruction, logical-memory and call-frame
    bounds may terminate execution with the substrate's typed VM bound errors.
 2. **Effects in builtin callbacks.** A `map` callback runs inside the VM and
    cannot perform effects; one that tries terminates with the typed
@@ -674,24 +265,19 @@ that each entry is a limit taken knowingly.
    state is captured; shared *acyclic* object identity is preserved
    byte-for-byte. Cycle-capable durable graph encoding is deferred, and the
    front end never silently copies a cycle to avoid the question.
-5. **Mutable captures** — *retired by FIG-3707.* A closure copied what it
-   captured, so an assignment that could reach a capture after the copy was
-   refused as `TS_MUTABLE_CAPTURE_UNSUPPORTED`, on the read and the write path.
-   Such a binding now lives in a binding cell every closure over it shares, and
-   a top-level one is reached live through its session slot (see the FIG-3707
-   amendment). The number stays reserved.
+5. Reserved.
 6. **Mutual recursion.** Rejected, for the durable-cycle reason above.
 7. **The JSON-shaped host boundary.** Object properties whose value is
    `undefined` are omitted and array elements become `null`; incoming JSON
    cannot manufacture `undefined`. `undefined` and `null` remain distinct inside
    the VM, as ECMA-262 requires — the erasure is at the boundary only, and it is
    the erasure the specification itself defines.
-8. **Lone surrogates.** Not representable in the v1 UTF-8 value model. Literals
+8. **Lone surrogates.** Not representable in the UTF-8 value model. Literals
    reject statically. At runtime, on an astral receiver, four paths reject
    rather than diverge: indexing at one UTF-16 unit, string-backed
    `Object.values` and `Object.entries`, and the two empty-separator expansions
    `split('')` and `replaceAll('', …)`, both of which ECMA defines per UTF-16
-   code unit where the v1 value model can only advance per code point. BMP
+   code unit where the value model can only advance per code point. BMP
    receivers are unaffected, and other methods whose result is unavoidably a
    lone surrogate are absent from the surface. The register carries no silent
    divergence in this family: every case where the UTF-8 model cannot reproduce
@@ -701,69 +287,33 @@ that each entry is a limit taken knowingly.
    to hand out more than 2 GiB of address space for a cap-sized cell, and under
    a tighter `RLIMIT_AS` or `vm.overcommit_memory=2` a large cell fails closed
    with `TS_PARSE_RESOURCES_UNAVAILABLE` — a resource diagnostic deliberately
-   distinct from any diagnostic describing the program — while small cells keep
-   working.
-10. **Parse-time allocation is bounded by the preflight, not by arithmetic.**
-    The stack argument above does not cover memory: SWC's duplicate-label check
-    is quadratic, and with the preflight disabled a 64 KiB cell of one repeated
-    label peaks near 37 GB. No shape reaches that on the shipping path — the
-    preflight rejects them all and the worst measured peak across 164
-    adversarial shapes is 17 MB — but this is a bound the preflight carries
-    rather than one the arithmetic provides. Parsing in a subprocess is the
-    change that would bring both axes under one limit.
+   distinct from any diagnostic describing the program. Required reservation scales with source size.
+10. **Parse-time allocation depends on preflight.** Stack reservation does
+    not bound SWC's heap allocation. The source and nesting preflights reject
+    pathological shapes before parsing. A parser subprocess would provide a
+    separate process resource bound.
 11. **Nesting budget.** 28 budget units, cumulative across delimiters and
     operators, pinned on a 2 MiB stack.
 12. **Dense arrays.** Appending at exactly `array.length` is supported; a write
     that would skip an index rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`, and a
     negative or non-index write rejects as
     `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`. Neither path mutates an element.
-    Array literal elisions are deliberately admitted under FIG-3656
-    (`1553112a94`, #2200), superseding FIG-3702's static-refusal ruling.
-    `Lash.SparseArray` records holes in the heap's side table, distinct from
-    explicit `undefined`, so `in` and `hasOwnProperty` answer as Node does.
-    This includes trailing elisions such as `[1, , ]`; a single trailing
-    comma is not an elision. The gap-write and non-index-write refusals above
-    remain.
-13. **`console.log` is host-defined**, not ECMA-262. *(Superseded on the
-    coercion point by FIG-2767: this ruling originally said the arguments are
-    printed as their ECMA `ToString`, so `console.log({a: 1})` printed
-    `[object Object]`. Rendering the value is the whole purpose of the call —
-    it is the observation the model reads back — and a host-defined method is
-    free to render it.)* It joins its arguments with a space and renders each
-    one for the observation: plain objects and arrays as the compact JSON the
-    host's print projector already produces, so `console.log({a: 1})` prints
-    `{"a":1}`, and every other value as its ECMA `ToString`, which is the
-    informative answer for numbers, booleans, `null`, `undefined`, dates,
-    regexps and errors. The observation is bounded by the same byte and depth
-    limits as any other string this dialect builds. Node's inspector formatting
-    is still not reproduced.
+    Array literal elisions are admitted. `Lash.SparseArray` records holes in
+    the heap's side table, distinct from explicit `undefined`, so `in` and
+    `hasOwnProperty` distinguish them. This includes trailing elisions such as
+    `[1, , ]`; a single trailing comma is not an elision. Gap and non-index
+    writes retain the refusals above.
+13. **`console.log` is host-defined**, outside ECMA-262. It joins arguments
+    with a space and renders plain objects and arrays as compact JSON for the
+    host observation. Other values use their ECMA string representation. Byte
+    and depth bounds apply. Node inspector formatting is outside this contract.
 
-    String coercion elsewhere is ECMA-262's (FIG-3652). `"" + {a: 1}`,
-    `` `${{a: 1}}` `` and `String({a: 1})` once stopped a cell for a plain
-    object, a `Map` or a `Set` (FIG-3166); they are supported constructs, so
-    they now answer what Node answers: ToPrimitive runs an object's own
-    `valueOf`/`toString` in hint order, and an object with no string of its
-    own answers `[object Object]`, `[object Map]` or `[object Set]`.
-14. **Shadowing residual** — *retired by FIG-3571.* A block binding that
-    shadows a name in scope still lowers to a generated slot, but a generated
-    slot is private: the VM neither imports nor exports it, so none reaches
-    session state. The session oracle pins that no generated slot is a session
-    global (FIG-3599). The number stays reserved.
-15. **Aggregate rejection timing** — *retired by FIG-3397.* A rejected
-    `Promise.all` used to wait for every leaf to settle before it reported. It
-    now answers at its first consumed rejection, and the leaves still in
-    flight run on as losers under their opener (ADR 0099 §0, §10). The number
-    stays reserved so later entries keep their names.
-16. **`for...of` snapshots** — *retired by FIG-3625.* `for...of` used to walk
-    a snapshot and refuse, by the iterable's name, a body that might mutate
-    it. That check was unsound both ways: it refused a shadowing binding that
-    never touched the iterable, and it missed an alias made before the loop,
-    whose writes the snapshot then hid. The loop now follows its iterable live,
-    as ECMA-262's iterators do: an array or a `URLSearchParams` is read at the
-    iterator's index on every step, and a `Map` or a `Set` visits entries added
-    during the loop and skips ones deleted before their turn. The number stays
-    reserved. The classic-loop `continue` refusal it also carried is entry 23.
-
+    Other coercions use ToPrimitive, including an object's own
+    `valueOf`/`toString` in hint order. Objects without their own string method
+    have the corresponding ECMA type tag.
+14. Reserved.
+15. Reserved.
+16. Reserved.
 17. **Closure boundary** (`closure-boundary`). A binding whose value reaches a
     function does not survive its cell
     ([ADR 0076](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
@@ -771,7 +321,7 @@ that each entry is a limit taken knowingly.
     it. Where Node still holds the function, a later cell's reference to the
     name is refused as `TS_FUNCTION_NOT_PERSISTED`: the session keeps the
     names it dropped, across a durable reload too, until one is bound again,
-    so the value never degrades to an unknown or undefined name (FIG-3608).
+    so the value never degrades to an unknown or undefined name.
 18. **Cross-cell redeclaration** (`cross-cell-redeclaration`). A cell's
     top-level declaration may rebind a name an earlier cell declared, where
     GlobalDeclarationInstantiation throws a `SyntaxError`; the dialect follows
@@ -783,12 +333,12 @@ that each entry is a limit taken knowingly.
     with no ECMA-262 counterpart (a host-boundary, tool or process-control
     failure) is an `Error` branded `RuntimeError`. A fault in an operation
     ECMA-262 specifies to throw is that operation's own class, as in Node
-    (FIG-3653); see "Errors" above.
+    See "Errors" above.
 21. **Process literal as a value** (`process-literal-is-a-process-value`). A
     top-level `const`-bound uncalled `async` arrow is a `Process` value
     ([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)),
     so `typeof` answers `"object"`.
-22. **Closed-shape field guard** (`closed-shape-field-guard`, FIG-3626). A
+22. **Closed-shape field guard** (`closed-shape-field-guard`). A
     read or write of a field that a statically closed object literal lacks is
     refused at link with `TS_LINK_ERROR`, naming the field and the literal's
     fields, where Node answers `undefined` or adds the field. `tsc` refuses the
@@ -802,39 +352,33 @@ that each entry is a limit taken knowingly.
     a host schema declares closed (`additionalProperties: false`) is guarded
     the same way.
 23. **Classic-loop `continue` across `finally`.** A `continue` in a classic
-    `for` loop with an update expression that crosses a `finally` rejects with
-    `TS_FOR_UNSUPPORTED` rather than running the update before the `finally`
-    body, which is the order the lowering would otherwise produce. A loop
-    with no update has nothing to run before the `finally`, so its `continue`
-    is accepted.
+    `for` loop that crosses a `finally` rejects with `TS_FOR_UNSUPPORTED` when
+    the loop has an update expression or emits per-iteration binding-cell
+    copies. The lowering would otherwise run that epilogue before the
+    `finally` body. A loop with neither an update nor binding-cell copies has
+    no epilogue, so its `continue` is accepted.
 
 ## Consequences
 
-- Model output that uses a construct outside the surface fails at parse or link
-  with a named code, early and visibly, rather than running with an
-  approximated meaning.
-- The register is a maintained artifact with mechanical guards: the
-  standard-library pin asserts equality in both directions, so growing the
-  lowerer without documenting the growth fails the build, and every refusal
-  the register promises has a probe that must fire it.
-- Two conformance mechanisms must both stay green, and they fail differently —
-  the Node oracle catches real-engine divergence in accepted operations, the
-  Test262 selection catches specification divergence the oracle's corpus never
-  thought to express.
-- The SWC pin is an exact-version dependency. Upgrading it re-opens the
-  parse-stack measurement and the AST-classification coverage test, both of
-  which are written to fail rather than drift when SWC gains a node kind.
-- Host operators inherit a deployment requirement: more than 2 GiB of address
-  space must be available for a cap-sized cell, or large cells fail closed with
-  a resource diagnostic.
-- Cycle-capable durable graph encoding remains owed work; several rejections
-  above stand in for it.
+- Unsupported constructs fail visibly with stable diagnostics.
+- Refusal probes, inventory checks, differential corpora and specification
+  tests describe distinct parts of the fidelity contract.
+- Parser upgrades require renewed stack evidence and AST classification checks.
+- Hosts supply enough address space for the largest accepted source or receive
+  a resource refusal.
+- Shared acyclic heap state persists; cyclic durable capture remains refused.
 
-## Amendment (FIG-4163, 2026-09-30)
+## Code evidence
 
-FIG-3656 supersedes FIG-3702 for array literal elisions only: holes are admitted and tracked by `Lash.SparseArray`, while gap and non-index writes retain their named refusals.
-[Array lowering](../../crates/lash-typescript/src/adapter/mod.rs),
-[the sparse constructor](../../crates/lashlang/src/runtime/vm/javascript_stdlib.rs),
-and [the heap hole table](../../crates/lashlang/src/runtime/heap/javascript_exotics.rs)
-implement this contract; `array_literal_elisions_admit_and_commas_and_pattern_holes_do_not`
-in [the admission tests](../../crates/lash-typescript/tests/rejections.rs) pins it.
+- [Parser and lowering boundary](../../crates/lash-typescript/src/lib.rs#L70),
+  [parse goals](../../crates/lash-typescript/src/adapter/goal.rs#L14), and
+  [resource limits](../../crates/lash-typescript/src/adapter/mod.rs#L405).
+- [Error taxonomy](../../crates/lashlang/src/runtime/error.rs#L570) and
+  [guest coercion](../../crates/lashlang/src/runtime/vm/guest_coercion.rs).
+- [Aggregate and call lowering](../../crates/lash-typescript/src/lower/calls.rs).
+- [Refusal probes and register reader](../../crates/lash-typescript/tests/deviation_register.rs#L375).
+- [Session corpus laws](../../crates/lash-typescript/tests/corpus_laws/sessions.rs),
+  [generated differential sessions](../../crates/lash-typescript/tests/differential/sessions/),
+  and [Test262 census](../../crates/lash-typescript/tests/test262/census/).
+- [Durable shared heap](../../crates/lashlang/src/runtime/state.rs#L699) and
+  [fragment partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).

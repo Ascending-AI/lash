@@ -12,8 +12,6 @@ mod graph_sequence_cutover;
 mod parent_end_payload;
 #[path = "parent_end_registration_race.rs"]
 mod parent_end_registration_race;
-#[path = "process_definitions_registry.rs"]
-mod process_definitions_registry;
 #[path = "release_stamp.rs"]
 mod release_stamp;
 #[path = "storage_fixes.rs"]

@@ -132,7 +132,6 @@ mod tests {
         for (key, operation) in [
             ("record-config", SemanticBoundaryOperation::RecordConfig),
             ("create-session", SemanticBoundaryOperation::CreateSession),
-            ("usage-ledger", SemanticBoundaryOperation::UsageLedger),
         ] {
             assert!(matches!(
                 decode_append_request_identity(key, Some("hash".to_string()), Some(1), None)

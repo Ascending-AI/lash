@@ -12,7 +12,7 @@ struct StoreHardeningPhaseNames {
     complete_queued_work: &'static str,
     attachment_intent: &'static str,
     attachment_adopt: &'static str,
-    append_receipt_usage_fresh: &'static str,
+    append_receipt_fresh: &'static str,
     append_receipt_replay: &'static str,
     history_head_page: &'static str,
     history_cursor_page: &'static str,
@@ -26,7 +26,7 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
     complete_queued_work: "store_hardening.memory.complete_queued_work",
     attachment_intent: "store_hardening.memory.attachment_intent",
     attachment_adopt: "store_hardening.memory.attachment_adopt",
-    append_receipt_usage_fresh: "store_hardening.memory.append_receipt_usage_fresh",
+    append_receipt_fresh: "store_hardening.memory.append_receipt_fresh",
     append_receipt_replay: "store_hardening.memory.append_receipt_replay",
     history_head_page: "store_hardening.memory.history_head_page",
     history_cursor_page: "store_hardening.memory.history_cursor_page",
@@ -40,7 +40,7 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
     complete_queued_work: "store_hardening.sqlite.complete_queued_work",
     attachment_intent: "store_hardening.sqlite.attachment_intent",
     attachment_adopt: "store_hardening.sqlite.attachment_adopt",
-    append_receipt_usage_fresh: "store_hardening.sqlite.append_receipt_usage_fresh",
+    append_receipt_fresh: "store_hardening.sqlite.append_receipt_fresh",
     append_receipt_replay: "store_hardening.sqlite.append_receipt_replay",
     history_head_page: "store_hardening.sqlite.history_head_page",
     history_cursor_page: "store_hardening.sqlite.history_cursor_page",
@@ -54,7 +54,7 @@ const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseN
     complete_queued_work: "store_hardening.postgres.complete_queued_work",
     attachment_intent: "store_hardening.postgres.attachment_intent",
     attachment_adopt: "store_hardening.postgres.attachment_adopt",
-    append_receipt_usage_fresh: "store_hardening.postgres.append_receipt_usage_fresh",
+    append_receipt_fresh: "store_hardening.postgres.append_receipt_fresh",
     append_receipt_replay: "store_hardening.postgres.append_receipt_replay",
     history_head_page: "store_hardening.postgres.history_head_page",
     history_cursor_page: "store_hardening.postgres.history_cursor_page",
@@ -75,7 +75,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     let (
         _sqlite_root,
         postgres,
-        memory_store,
+        sqlite_memory_store,
         sqlite_store,
         postgres_store,
         memory_registry,
@@ -86,8 +86,8 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
         postgres_session_id,
     ) = run
         .build(async {
-            let memory_stores = memory_stores().await?;
-            let memory_factory = memory_stores.session_store_factory();
+            let sqlite_memory_stores = sqlite_memory_stores().await?;
+            let memory_factory = sqlite_memory_stores.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
             let sqlite_factory = lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
                 .await?
@@ -115,12 +115,12 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             postgres_factory
                 .admit_session(&runtime_perf_session_create_request(&postgres_session_id))
                 .await?;
-            let memory_store: Arc<dyn lash_core::RuntimeStore> = memory_factory;
+            let sqlite_memory_store: Arc<dyn lash_core::RuntimeStore> = memory_factory;
             let sqlite_store: Arc<dyn lash_core::RuntimeStore> = sqlite_factory;
             let postgres_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(postgres_factory);
 
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
-                memory_stores.process_registry();
+                sqlite_memory_stores.process_registry();
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
                     &sqlite_root.join("process-registry.sqlite"),
@@ -132,7 +132,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             Ok((
                 sqlite_root,
                 postgres,
-                memory_store,
+                sqlite_memory_store,
                 sqlite_store,
                 postgres_store,
                 memory_registry,
@@ -204,7 +204,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
 
                 phase_profile.extend(
                     measure_store_hardening_backend_turn(
-                        &memory_store,
+                        &sqlite_memory_store,
                         &memory_session_id,
                         turn_index,
                         &mut memory_history_fork,
@@ -338,18 +338,6 @@ fn measure_hardening_identity_phases(
         })?;
     phase_profile.insert(phase.0, phase.1);
 
-    let usage = store_hardening_usage(turn_index);
-    let (_, phase) = measure_runtime_perf_phase("store_hardening.identity.usage_delta", || {
-        for ordinal in 0..HARDENING_IDENTITY_ITERATIONS {
-            std::hint::black_box(lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
-                format!("perf-operation-{turn_index}"),
-                ordinal as u64,
-                &usage,
-            ));
-        }
-        Ok(())
-    })?;
-    phase_profile.insert(phase.0, phase.1);
     Ok(())
 }
 
@@ -400,7 +388,7 @@ async fn measure_store_hardening_backend_turn(
 
     let mut state = load_store_hardening_state(store, session_id).await?;
     let (_, phase) = measure_runtime_perf_async_phase(names.complete_queued_work, async {
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.drive_fence = Some(Box::new(lease.clone()));
         let commit = super::queued_work::finishing_perf_root(commit, &root, &admission);
         let result = store.commit_runtime_state(commit).await?;
@@ -439,24 +427,14 @@ async fn measure_store_hardening_backend_turn(
         "perf-hardening",
         serde_json::json!({"turn": turn_index, "payload": [1, 2, 3, 4]}),
     )];
-    let mut commit = lash_core::store::append_request_commit_for_testing(
+    let commit = lash_core::store::append_request_commit_for_testing(
         &mut state,
         &operation_id,
         &nodes,
         None,
     )?;
-    let usage = store_hardening_usage(turn_index);
-    let operation_storage_key = lash_core::OperationId::storage_key(&commit.turn_commit.operation)?;
-    commit.usage_deltas = vec![lash_core::store::RuntimeUsageDelta {
-        identity: lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
-            operation_storage_key,
-            0,
-            &usage,
-        ),
-        entry: usage,
-    }];
     let replay_commit = commit.clone();
-    let (_, phase) = measure_runtime_perf_async_phase(names.append_receipt_usage_fresh, async {
+    let (_, phase) = measure_runtime_perf_async_phase(names.append_receipt_fresh, async {
         let result = store.commit_runtime_state(commit).await?;
         if result.receipt_replayed {
             anyhow::bail!("fresh hardening append unexpectedly replayed");
@@ -478,7 +456,7 @@ async fn measure_store_hardening_backend_turn(
 
     state = load_store_hardening_state(store, session_id).await?;
     let (_, phase) = measure_runtime_perf_async_phase(names.attachment_adopt, async {
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
+        let commit = RuntimeCommit::persisted_state_for_test(&state)
             .with_committed_attachments([attachment_id]);
         let result = store.commit_runtime_state(commit).await?;
         state.apply_persisted_commit_result(result);
@@ -689,21 +667,6 @@ pub(super) fn runtime_perf_session_create_request(
     }
 }
 
-fn store_hardening_usage(turn_index: usize) -> lash_core::TokenLedgerEntry {
-    lash_core::TokenLedgerEntry {
-        source: "store-hardening".to_string(),
-        model: "perf-model".to_string(),
-        usage: TokenUsage {
-            input_tokens: turn_index as i64 + 1,
-            output_tokens: 2,
-            cache_read_input_tokens: 3,
-            cache_write_input_tokens: 4,
-            reasoning_output_tokens: 5,
-        },
-        usage_disposition: Default::default(),
-    }
-}
-
 #[cfg(test)]
 mod store_hardening_tests {
     use super::*;
@@ -711,7 +674,7 @@ mod store_hardening_tests {
 
     #[tokio::test]
     async fn process_prune_is_scoped_to_the_hardening_batch() {
-        let registry = memory_stores()
+        let registry = sqlite_memory_stores()
             .await
             .expect("open a SQLite memory store set")
             .process_registry();

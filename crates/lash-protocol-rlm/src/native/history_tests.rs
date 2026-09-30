@@ -43,7 +43,8 @@ fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
     ]
 }
 fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
-    let dialect = crate::dialect::TypescriptDialect::prompt_only(
+    let dialect = crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     let turn_messages = lash_core::facade_support::MessageSequence::default();
@@ -372,7 +373,8 @@ fn unbound_malformed_envelopes_degrade_at_their_chronological_positions() {
 
 #[test]
 fn many_step_projection_matches_bytes_with_one_transport_pass_and_decode() {
-    let dialect = crate::dialect::TypescriptDialect::prompt_only(
+    let dialect = crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     for count in [128, 16, 1] {

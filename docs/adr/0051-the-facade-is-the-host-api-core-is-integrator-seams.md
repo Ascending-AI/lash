@@ -1,383 +1,122 @@
-# 0051. The facade is the host API; lash-core's public surface is its integrator seams
+# 0051. The facade is the host API; core exposes integrator seams
 
-Date: 2026-08-03
-Status: accepted, superseded in part by [ADR 0079](0079-one-promised-package-facade-owns-the-api.md)
+## Status
 
-ADR 0079 is authoritative for the single promised package and for replacing the
-hand-maintained API example-coverage ledger. Its successor doctrine is:
-
-> Every facade API should be exercised by a compiled example or doctest. This
-> is review doctrine, not a universal compiler-derived coverage gate; it does
-> not require a handwritten prose ledger.
-
-The generated facade snapshot diff, semver baseline, external-type allowlist,
-missing-docs enforcement and compiler scraping are historical gates removed
-under FIG-2933 (`8698820631`). Current enforcement is facade-only import
-scanning, the feature-plan check and compile-fail fixtures. The old inventory
-and its checker below are historical, not current enforcement.
+Accepted.
 
 ## Decision
 
-The `lash` crate is the supported host API, in full. `lash-core` keeps a public
-item exactly when a named integrator class needs it, and for no other reason.
-Everything else in `lash-core` is crate-private or reachable only through
-internal seams the facade consumes. Public surface is a promise we test and
-keep; anything we are not prepared to promise is not public.
+The `lash` crate is the promised package API. Hosts and plugin authors compile
+against the facade, including the integrator contracts they implement. ADR 0079
+owns the package promise. The core crates expose the contracts required by
+integrators and the cross-crate support needed to implement that facade.
 
-The named integrator classes, each seeded by the interfaces an implementor must
-write against, are:
+The named integrator classes are:
 
-1. **Store and durable-substrate implementors** — the store traits
-   (`RuntimePersistence`, `SessionStoreFactory`, `ProcessRegistry`,
-   `TriggerStore`, `AttachmentStore`, `LiveReplayStore`,
-   `ProcessExecutionEnvStore`, `ProcessContinuationStore`, and their sibling
-   store contracts) and every type their signatures reach.
-2. **Effect-host implementors** — `EffectHost`, `RuntimeEffectController`,
-   `AwaitEventResolver`, and their signature closure.
-3. **Protocol and process-engine implementors** — `ProtocolSessionPlugin`,
-   `ProtocolDriverPlugin`, `CodeExecutorPlugin`, `ProcessEngine`, and the other
-   engine extension points, with their closure. Tool hosts implement one required
-   `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome` leaf route. Internal
-   process bodies use the explicit `InternalProcessToolImplementation` class;
-   orchestrating bodies use `OrchestratingToolImplementation`. These are three
-   explicit execution capability classes — leaf, internal, orchestrating — and
-   they are distinct registry sources that are never selected by a serialized
-   activation hint or a name/ID fallback. `ToolCall` carries one immutable manifest, preserving ID/name
-   coherence, and completed versus pending outcomes remain structurally exclusive.
-4. **Conformance-suite embedders** — everything
-   `lash::testing::conformance` exposes, closed over its signatures, so an
-   integrator can hold a custom backend to the same executable contract the
-   built-in backends answer to. *(Superseded on this point on 2026-09-23: the
-   store laws are reached through `lash-internal-conformance` directly, not
-   through the facade.)*
+### 1. Store implementors
 
-Membership is decided by **transitive signature closure**, not by direct-use
-scanning. A type that appears only in a public trait method's parameters or
-return type is integrator surface, whether or not any repository code names it
-today: `ExecRequest` exists because `CodeExecutorPlugin::execute_code` exists.
-The narrowing measurement found 683 items that a direct-use scan classified as
-removable but that the closure proves are load-bearing for implementors; the
-closure rule is therefore normative, and any future tooling that classifies
-surface must apply it.
+Store implementors provide persistence, deployment-store, process, trigger,
+attachment and artifact contracts and need their signature types.
 
-The closure decides **members**, not only types. A type enters the closure in a
-direction: an implementor either *produces* it (it appears in return position,
-so the implementor must construct one) or *consumes* it (it appears in argument
-position, so the implementor must read one), and a type reached through a field
-inherits its owner's direction. A member of a closure type is integrator
-surface exactly when the direction it serves makes it load-bearing:
+### 2. Effect-host implementors
 
-- **Produce-side** — the constructors and builders an implementor needs to
-  return a value of the type, including on types with public fields, because a
-  struct literal is not a promise we can extend. Direction is per class, not per
-  type: `RuntimeCommit` is consume-side for a store, which is handed one by
-  `SessionCommitStore::commit_runtime_state`, and produce-side for a conformance
-  embedder, which assembles one to hold that store to the contract — so its
-  builders are integrator surface.
-- **Consume-side** — the accessors an implementor needs to read the value it
-  was handed. On an opaque type they are the *only* interface, so every one of
-  them is load-bearing: `ProcessEngineRunContext` is what
-  `ProcessEngine::run` receives, so its accessors are the engine contract.
-- **Neither** — a member that only projects a value the implementor produces,
-  or only mutates state the runtime owns, serves no direction. It is not
-  integrator surface even when it sits on a closure type.
+Effect-host implementors provide effect-controller and event-resolution
+contracts and need their signature types.
 
-Direct-use scanning is as non-normative here as it is for types, and more
-dangerous: a member can have no caller in this repository and still be the one
-thing an implementor must call. `TurnContextTransform::transform` receives and
-returns a `PreparedContext` and never sees `&mut TurnContext`. `TurnContext`
-holds only runtime correlation. Its retired prompt mutators and facade seam
-are deleted; per-send prompts live in durable `RunSpec` overrides (FIG-4226).
+### 3. Protocol, process-engine and tool implementors
 
-Members that are not integrator surface get one of two homes, chosen by who
-holds the receiver:
+These integrators implement `ProtocolSessionPlugin`, `ProtocolDriverPlugin`,
+`CodeExecutorPlugin`, `ProcessEngine` or `ToolProvider`. Every executable tool
+registers through `ToolProvider`, whose required leaf route is
+`execute(ToolCall<'_>) -> ToolAttemptOutcome`. A `ToolCall` holds an immutable
+manifest and exposes its coherent name and ID. Completed and pending outcomes
+are structurally distinct. ADR 0116 owns tool execution and declared work; a
+provider describes a related session turn through a pending outcome and a
+`DeclaredStart`, which the runtime launches.
 
-- `pub(crate)`, or a seam trait re-exported through `lash_core::facade_support`
-  when the facade needs it across the crate boundary, for receivers only the
-  runtime and the facade ever hold.
-- A public `lash::<domain>::<Type>Ext` extension trait, example-covered from
-  birth, for receivers a *host* holds where the behavior is host convenience
-  the core contract does not need. Same-named trait methods keep existing call
-  sites compiling, so the migration is an import, not a rewrite.
+### 4. Conformance-suite embedders
 
-The package-version constants (`lash_core::VERSION`, `SANSIO_VERSION`) are not
-integrator surface. Compatibility between an integrator and the runtime is
-expressed through trait contracts, data shapes, and the schema-version
-machinery — never by gating on a package version.
+Conformance embedders exercise custom stores through
+`lash-internal-conformance` directly. Conformance is an internal test package,
+independent of the facade's host testing helpers.
 
-## Amendment: plugin authoring is facade surface (2026-08-23, FIG-1921)
+### Signature closure
 
-Writing a plugin is not one of the four integrator classes, so a plugin crate
-must be able to compile against `lash` alone. The dividing rule inside
-`lash_core::plugin` is the closure rule applied to the plugin author as the
-implementor: **an item is authoring surface, and therefore has a
-`lash::plugins` home, when an in-tree example plugin or a downstream host
-plugin names it to compile** — in a trait it implements, in a handler signature
-it writes, or in a value it constructs or reads. Everything else in that module
-serves the runtime embedding path and stays core-only under the classes above.
+Integrator membership follows transitive signature closure. A type needed to
+implement a public trait belongs to the contract even if no repository consumer
+names it directly. The same rule applies to members:
 
-The re-exports are flat on `lash::plugins`, matching every other domain module
-(`tools`, `persistence`, `observe`). The facade has exactly one prelude,
-`lash::prelude`, for the daily core/session/turn vocabulary; a second,
-domain-scoped prelude would give plugin authoring two obvious ways in.
+- An implementor producing a value needs its constructors and builders.
+- An implementor consuming an opaque value needs its accessors.
+- A member used only by the runtime or facade implementation belongs in a
+  private implementation or an explicit cross-crate support module.
 
-FIG-1921 moved the plugin-operations vocabulary (`PluginOperation`,
-`PluginQuery`, `PluginCommand`, `PluginTask`, `SessionParam`,
-`PluginQueryContext`, `PluginCommandContext`, `PluginTaskContext`,
-`SessionReadService`, `ProcessReadService`, `PluginOperationOutcome`,
-`PluginRuntimeDirective`, `PluginOperationFailure`, `PluginOperationReceipt`,
-`PluginOwned`, `PluginOperationInvokeError`) and the plugin snapshot seam
-(`SnapshotWriter`, `SnapshotReader`, `PluginSnapshotMeta`,
-`SessionReadyContext`) to `lash::plugins`. `PluginOperationReceipt` and
-`PluginOperationInvokeError` were already in `lash`'s own signatures — on
-`PluginOperations` and on `EmbedError::Control` — with no path a host could
-name, which is the sharpest form the gap took.
+Direction belongs to an integrator class, not to the type alone. Stores consume
+`RuntimeCommit`; a conformance harness constructs it. Engines consume
+`ProcessEngineRunContext` through its accessors. Direct-use scanning cannot
+replace this reasoning, because an external implementor can depend on a member
+with no in-repository caller.
 
-One home each: `lash::admin` used to re-export `PluginQuery`, `PluginCommand`
-and `PluginTask` so its operation runners' bounds were nameable. Those traits
-are authoring surface, so `lash::plugins` is now their only home and `admin`
-re-exports them no longer — a host satisfies the bound with its own type and
-never writes the trait name to invoke an operation.
+`lash_core::facade_support` contains implementation seams the facade needs.
+Host convenience can live on facade types or extension traits. Package version
+constants do not arbitrate durable compatibility; trait contracts, data shapes
+and the registered format contracts do.
 
-These plugin-namespace items are **integrator seams and stay core-only**:
+## Plugin authoring
 
-- **Protocol and process-engine extension points** (class 3):
-  `ProtocolSessionPlugin`, `ProtocolDriverPlugin`, `CodeExecutorPlugin`,
-  `AssistantProseProjectorPlugin`, `ProtocolRuntimeContext`,
-  `ProtocolSessionContext`, `ProtocolBeforeLlmCallContext`,
-  `ProtocolLlmCallAction`, `ProtocolSessionMaterialization`,
-  `ExecutionStateSnapshot`, `ExecutionStateComponentSnapshot`,
-  `HydratedExecutionState`, `ProcessEngineContributionContext`.
-- **Runtime embedding**: `RuntimeServices`, `SessionAuthorityContext`. A plugin
-  is handed services; it never assembles the set.
-- **Catalog assembly alias**: `ToolContractResolver` remains core-only. A
-  catalog hook receives it only as a field of `ToolCatalogContext`, and the
-  alias expands entirely through the facade-nameable
-  `lash::tools::ToolContract`; plugin authors can call it without naming the
-  alias.
-- **Runtime-side turn composition**: `PrepareTurnRequest`, `TurnPreparation`,
-  `TurnFinalization`, `CheckpointApplication`, `PluginAbort`. These are how the
-  runtime drives the registered hooks, not what a hook receives.
-- **Plugin-session internals**: `PluginOperationRegistrations`,
-  `SessionPluginSource`, `SessionRelation`, `AgentFrameAssignment`,
-  `AgentFrameId`, `AgentFrameReason`, `AgentFrameRecord`,
-  `OpenAgentFrameRequest`, `OpenAgentFrameOutcome`,
-  `SessionObservedProcessOutcome`, `SessionObservedProcessReceipt`.
-- **The persisted snapshot aggregate**: `PluginSessionSnapshot`,
-  `PluginSnapshotEntry`, `PluginSnapshotArtifact`. A plugin writes blobs and
-  returns its own `PluginSnapshotMeta`; the collection those land in is the
-  runtime's, and no plugin names it.
+`lash::plugins` exposes plugin operations, hook arguments, state access,
+protocol contracts and the types needed to implement them. Operations use
+`PluginQuery`, `PluginCommand` and `PluginTask` with their matching contexts and
+outcomes. Hosts invoke those operations through `lash::admin`. The facade's
+single general prelude is `lash::prelude`.
 
-FIG-1929 closed the remaining authoring gap by exporting the three registered
-hook arguments (`ToolCatalogContext`, `ToolResultProjectionContext`, and
-`AssistantStreamFinishedContext`), the stream-finished reason it carries
-(`AssistantStreamFinishReason`), and the operation definition returned by
-`PluginSession::plugin_operations()` (`PluginOperationDef` and
-`PluginOperationKind`). `ToolCatalogContext`'s readable field closure —
-`SessionToolAccess`, `SubagentSessionContext`, and `PluginExtensions` — follows
-it onto `lash::plugins`; exposing those values a plugin is handed does not
-expose the runtime-only services or session-authority assembly path.
-
-The rule is enforced, not asserted: `scripts/check_facade_only_examples.py`
-fails when any `.rs` file under `examples/` names `lash_core`, `lash_sansio`,
-or `lash_internal` in code. A plugin type that cannot be reached from `lash` is
-therefore a facade gap the next such module discovers, not a carve-out.
+`TurnContextTransform::transform` receives and returns `PreparedContext`.
+`TurnContext` carries runtime correlation; per-send prompt overrides belong to
+`RunSpec`. A plugin receives runtime-provided services rather than assembling
+the runtime's authority.
 
 ### Read-only handles
 
-Inspection hosts read settled session history, tree, and usage through
-`DurableSession::read` (ADR 0119; formerly `LashCore::read_session`), which returns the same `SessionReadView` a live
-session exposes without opening a runtime or acquiring its lease. Store
-implementors provide that capability through `SessionStoreFactory::read_session`;
-SQLite's `SqliteSessionStoreFactory::open_read_only` opens the catalog with
-`mode=ro` and never exposes its internal persistence handle. This prevents the
-read path from mutating durable session, lease, claim, or graph state. It is not
-a filesystem no-write guarantee: when no live connection has materialized a
-WAL catalog's wal-index, SQLite may create the catalog's `-wal` and `-shm`
-sidecars while reading it. A catalog on read-only media therefore cannot be
-inspected unless the required sidecars already exist; that SQLite failure is
-reported as a backend error. The reader does not use `immutable=1`, which would
-be unsound while another process may hold a writer.
+`DurableSession::read` returns settled `SessionReadView` data without opening a
+runtime or acquiring execution ownership. SQLite's
+`SqliteSessionStoreFactory::open_read_only` opens the catalog with `mode=ro`.
+The read path does not mutate session, lease or graph state.
+
+This is a database-state guarantee. SQLite can create WAL and shared-memory
+sidecars when it materializes a wal-index. Read-only media requires those
+sidecars to exist; failure is a backend error. `immutable=1` would be unsound
+while another process holds a writer.
 
 ## Why
 
-Three defects in one week were unused-public-surface defects: a drain API with
-zero callers concealed a wake-mark over-claim; an append precondition with one
-since-deleted caller was read in opposite ways by two capable reviewers; an
-orphaned retention lever meant deleting an unsafe deletion left a table with no
-reclamation path. Surface nobody consumes drifts until its first consumer
-discovers what it actually does. The example-coverage rule (the inventory and
-its CI contract) makes such drift visible, but visibility alone would have us
-writing examples against 5,424 public core items — most of which exist only
-because the facade's implementation happens to live in another crate. Narrowing
-visibility deletes no functionality: hosts keep everything through the facade.
-It deletes *promises we never meant to make*.
+A public contract needs an owner and a consumer. Promising every core
+implementation detail couples hosts to runtime internals. Hiding types that
+implementors need makes a trait impossible to implement through the facade.
+Signature closure keeps the supported contracts complete without turning
+implementation access into a package promise.
 
-The measurement behind this decision classified every public `lash-core` item:
-2,848 are reachable by no integrator class (942 of them by nothing at all,
-including the facade); 2,574 are integrator surface under the closure; 2 were
-contested and are resolved above. The facade's own 6,821 items produced zero
-trim candidates — the facade is already the deliberate API this ADR makes
-authoritative.
+Each facade API should have a compiled example or doctest. This is review
+doctrine, not a universal coverage ledger. Current enforcement is facade-only
+import scanning, the feature-plan check and compile-fail fixtures.
 
 ## Consequences
 
-- Anything consuming `lash-core` directly that is not one of the four classes
-  is unsupported. The measured exceptions — 79 items held only by direct
-  example or downstream-host use — are treated as **facade gaps**: each gets a
-  facade home (or the consumer moves to an existing one) rather than a
-  perpetual carve-out.
-- The example-coverage inventory shrinks with the surface, and the coverage
-  end-state ("every public API used and tested through our examples") is now a
-  statement about surface we deliberately promise. Conformance suites remain
-  the integrator classes' executable contract, and integrator-facing surface
-  is exercised by integrator-class examples rather than shoehorned into host
-  examples.
-- Internalization proceeds in waves: first the zero-consumer items, then the
-  facade-gap moves, then the remaining facade-only items. Each wave is
-  breaking for direct `lash-core` consumers and carries `Breaking:` release
-  notes naming the facade or seam replacement.
-- New public items in `lash-core` must name their integrator class in the
-  item's doc comment.
-  An item that cannot name one belongs behind the facade.
-- FIG-863's measured facade-seam floor is 3,193 `lash-core` rows, replacing
-  wave D's 3,050–3,150 forecast; the count is an outcome of applying the rule,
-  not a goal. Measured against the member-level closure above,
-  455 of the 561 inherent members on retained `lash-core` root exports have a
-  proven caller outside `lash-core`, and most of the remainder are load-bearing
-  in a direction no in-repo crate exercises yet. A wave that moved them to hit
-  a number would delete integrator ergonomics, not unkept promises. The core
-  row count is an outcome of applying the rule, never the input.
-- `lash-remote-protocol` converts wire DTOs to and from core types and cannot
-  depend on the facade, because the facade depends on it. Its `core-conversions`
-  feature is therefore a fifth seeding point for the closure alongside the four
-  classes. It reaches 70 inherent members on retained root exports, 52 of them
-  as the sole caller outside `lash-core`; all are retained core surface.
-- The example-coverage inventory keys one row per **API item**, not per path
-  (FIG-955), so "a `lash-core` row" now means an item with no facade projection.
-  At that keying the surface is 7,516 items, of which **826** are reachable only
-  through `lash_core`. The 3,193-row facade-seam floor above counted paths, and
-  that path count has since grown to 4,233 (FIG-863 measured 3,193; #258 added
-  949 reachability-closure rows and #244 one more). Of those paths, 3,407 name
-  items the facade already re-exports, and each was carrying a second — often
-  contradictory — disposition for the same contract. The rule is unchanged and
-  the count remains an outcome rather than a goal, but a path count and an item
-  count measure different things and must not be compared.
-- **Per-path existence stays enforced.** Retiring a `lash_core::` re-export is
-  breaking per the internalization bullet above, and item keying would have made
-  it invisible (the retired path is an alias, not a row). So each row records its
-  item's remaining public paths in `aliases`, derived from rustdoc the same way
-  `availability` and `kind` are, and any path appearing or disappearing fails
-  `scripts/check_api_example_coverage.py`. Only the *disposition* is centralized
-  on the item; the path set is not, and a wave that internalizes core paths must
-  still edit the inventory row by row.
-- **`#[doc(hidden)]` is not a ledger exemption.** Hiding the internal
-  cross-crate support modules from host-facing rustdoc is a documentation
-  choice; whether the inventory answers for their paths is a separate API
-  question, and one switch for both turned `lash_core::facade_support` into an
-  amnesty channel — 304 paths no row covered, and 126 items whose written
-  `unused-remove` verdicts were discharged by moving them there (FIG-1223).
-  The checker documents hidden items, records the gated support modules in the
-  inventory, tiers every anchor by its path shape (an example's host code, an
-  example's tests, another crate's `src/`, a `tests/` directory) and validates
-  each disposition against the tiers it may anchor in. Internal seams carry
-  `internal-consumed` — justified by an anchor in a *consuming* crate's `src/`,
-  checked on every run rather than asserted in prose — or `internal-test-only`
-  when nothing but tests reach them. Every `unused-remove` row leaves a
-  `[[removal_verdict]]` tombstone: a removal verdict is discharged by removing
-  the item, never by relocating it, and a path that reappears elsewhere needs an
-  explicit superseding disposition in the same diff.
-- **Machine-verified evidence is verified against the item, not against a
-  string.** A tier follows the code's compilation, so a file a parent declares for
-  tests is test code even though the file itself shows no marker — whatever the
-  `cfg` predicate says and wherever `#[path]` sends it. A member's anchor must tie
-  its line to the type that owns the member: qualified on the line, or reached
-  through a receiver that resolves — field by field, method by method, through
-  `type` aliases, variant payloads and `impl Trait for Type`, and assembled across
-  the continuation lines a fluent chain is written on — to that type or to the
-  trait that owns the member. A field written in a literal is judged by the
-  literal it sits in, because adjacent literals write the same field name for
-  different types, and an anchor inside a type declaration is no anchor at all: a
-  crate declaring its own same-named field is not consuming ours, and neither is
-  the crate whose source declares the item — which the ledger's path root does not
-  reveal, since `lash_core::PreparedTurnMachine` is declared in `lash-sansio`. Two
-  anchor shapes are ruled explicitly: an **import is not consumption** (a `use`
-  resolves whether or not anything needs the item, single-line or spread down a
-  brace list), while a **trait-impl signature is** (implementing the contract is
-  the strongest form the dependency claim takes). A bare
-  occurrence of the name — no qualification, no receiver, no literal, no
-  implementation — is a coincidence, not evidence. Failing closed on evidence is
-  right; failing closed into a *deletion instruction* is not, so a row any earlier
-  round tied to a consumer — by anchor or in prose — keeps that candidate in prose
-  for a reader instead of acquiring a removal verdict.
-  Naming no rival is not a defence: prelude and file-local types cannot be named,
-  so a receiver nobody can follow to the owner fails on its own. The same
-  predicate governs the *search* for a consumer, not just the check on an anchor
-  already written — a name-based search answers a different question and reports
-  live API as dead. A leaf name matches by coincidence — `as_str` on a
-  `serde_json::Value` once justified an internal seam — and prose citing a line
-  that never mentions the item is the same failure spelled in words. An item whose
-  consumer cannot be established that way carries a removal verdict for a reader
-  to confirm, not a justification nobody checked.
-- No justification may park a `lash-core` (or other facade-dependency) consumer
-  behind a pending migration to the facade. The cycle this ADR names for
-  `lash-remote-protocol` holds for every crate the facade is built on. The
-  checker derives that crate set from the resolved dependency graph
-  (`cargo metadata`) and reads the claim per sentence, so stating that a caller
-  *cannot* migrate — the honest description of the cycle — is not flagged.
+- Hosts and plugin authors use facade paths for their complete contracts.
+- Core dependencies, including wire-conversion crates, use explicit lower-level
+  seams where importing the facade would create a dependency cycle.
+- A public core item needs an integrator contract or an implementation consumer;
+  raw item counts are not a visibility target.
+- Example import scanning rejects core, sans-io and internal-package imports in
+  host examples. Compile-fail fixtures constrain forbidden host capabilities.
 
-### Host migration for the single execution seam (FIG-3354/3355/3356)
+## Code evidence
 
-The split between `execute` and `execute_attempt` let a provider declare an
-intent-bearing attempt route that a default could silently bypass. The leaf
-route is now exactly one required method; there is no compatibility ladder.
-A tool host migrates in four steps:
-
-1. **Static support.** A fixed tool set implements `StaticToolExecute` and is
-   served through `StaticToolProvider` — or `ToolProvider` directly when the
-   catalog is dynamic — with
-   `execute(ToolCall<'_>) -> ToolAttemptOutcome`. `call.name()` and
-   `call.tool_id()` read the pinned manifest; `ToolCall` is constructed by the
-   dispatcher, never by the host.
-2. **Outcome conversion.** A body that produces a plain `ToolOutcome` returns
-   it with `.into()`; a body that declares intents returns
-   `ToolAttemptOutcome::done(result, intents)` directly, and a deferred body
-   returns `ToolAttemptOutcome::pending(...)`.
-3. **New registration.** Internal process tools register through
-   `ToolRegistrations::internal` / `PluginSpec::with_internal_tool` as an
-   `InternalProcessToolDef` pairing a definition with an
-   `InternalProcessToolImplementation`; orchestrating tools register through
-   `OrchestratingToolDef` with an `OrchestratingToolImplementation`. Neither is
-   a leaf `ToolProvider` with an activation hint.
-4. **Removed projection.** `execute_by_id`, `execute_attempt`,
-   `execute_attempt_by_id`, `execute_internal`, and `execute_internal_by_id`
-   are gone. Callers that held a tool ID resolve the manifest with
-   `resolve_manifest_by_id` and call `execute` once.
-
-## Amendment (FIG-3562, 2026-09-29): one execution capability class
-
-[ADR 0116](0116-tools-are-opaque.md) collapses integrator class 3's three execution capability classes to one.
-Tool hosts implement `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome`,
-and every executable tool registers as a `ToolProvider`.
-`InternalProcessToolImplementation`, `InternalProcessToolDef`,
-`OrchestratingToolImplementation`,
-`OrchestratingToolDef`, `ToolRegistrations::internal`,
-`PluginSpec::with_internal_tool` and `with_orchestrating_tool` are deleted, and
-item 3 of the plugin-authoring amendment is superseded. `ToolContext` is no
-longer exported, and nor are the body capability clients `ToolDispatchClient`,
-`ToolSessionAdmin`, `ToolTriggerClient` and `ToolProcessEventClient`.
-`lash::tools` exports nothing that reaches dispatch, process administration
-or an effect controller. `ToolActivation` and the manifest's `activation`
-field are deleted.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
-the promised package API; the host/core ownership distinction here survives.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-The facade remains the promised host API; universal compiled-example coverage is review doctrine, and the deleted facade gates must not be read as current enforcement.
-Current checks are [import scanning](../../scripts/check_facade_only_examples.py),
-[the feature plan](../../scripts/check_feature_coverage.py), and
-[compile-fail fixtures](../../crates/lash/tests/ui.rs).
+- [Persistence contracts](../../crates/lash/src/lib.rs#L383) and
+  [plugin and engine contracts](../../crates/lash/src/lib.rs#L534).
+- [Core support module](../../crates/lash-core/src/lib.rs#L120).
+- [Tool call and required execution route](../../crates/lash-core-execution/src/tool_provider.rs#L1337).
+- [Internal conformance entry](../../crates/lash-conformance/src/lib.rs#L1).
+- [Settled session read](../../crates/lash/src/durable_session.rs#L361).
+- [Import scanning](../../scripts/check_facade_only_examples.py),
+  [feature plan](../../scripts/check_feature_coverage.py), and
+  [compile-fail fixtures](../../crates/lash/tests/ui.rs).

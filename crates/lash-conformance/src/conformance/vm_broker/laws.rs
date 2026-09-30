@@ -1,5 +1,7 @@
 //! The FIG-4159 laws. See the parent module for the harness.
 
+use lash_vm_broker::OperationRequestCodec;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -469,15 +471,16 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
         let identities = identities(&scope);
         let raw = |kind: EffectKind, payload: Vec<u8>| Step::Raw { kind, payload };
         let invoke = |binding: &str, operation: &str, arguments: serde_json::Value| {
-            lash_vm_broker::OperationRequest::Invoke(Invocation {
+            Invocation {
                 binding: binding.into(),
                 operation: operation.into(),
                 arguments,
-            })
+            }
+            .request()
             .encode()
             .0
         };
-        let forged = vec![
+        let mut forged = vec![
             // A binding the run was never admitted with.
             raw(
                 EffectKind::ResourceOperation,
@@ -506,15 +509,18 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
                 }))
                 .unwrap_or_default(),
             ),
-            // A handle the parent never granted.
-            raw(
-                EffectKind::Await,
-                lash_vm_broker::OperationRequest::Await {
-                    handle: "forged-handle".into(),
-                }
-                .encode()
-                .0,
-            ),
+        ];
+        // A handle the parent never granted.
+        let forged_handle_index = forged.len();
+        forged.push(raw(
+            EffectKind::Await,
+            lash_vm_broker::OperationRequest::Await(lashlang::Value::String(
+                "forged-handle".into(),
+            ))
+            .encode()
+            .0,
+        ));
+        forged.extend([
             // A payload under another kind's header.
             raw(
                 EffectKind::Sleep,
@@ -522,7 +528,7 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
             ),
             // A kind the broker does not broker.
             raw(EffectKind::ProcessEvent, Vec::new()),
-        ];
+        ]);
         let refusals = forged.len();
         let mut steps = forged;
         steps.push(Step::Invoke(echo(7)));
@@ -547,6 +553,11 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
                 "{law}: request {index} is refused: {result}"
             );
         }
+        assert_eq!(
+            results[forged_handle_index]["failed"]["refusal"],
+            serde_json::json!({ "refusal": "unknown_handle", "handle": "forged-handle" }),
+            "{law}: the forged handle reaches the grant check as a valid await request"
+        );
         let runs = scenario.probe.runs();
         assert_eq!(
             runs.iter()

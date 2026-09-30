@@ -220,7 +220,14 @@ pub(crate) async fn retrieve_attachment(
     // a bad request, never a store lookup.
     let parsed_id = lash::attachments::AttachmentId::parse(attachment_id)
         .map_err(|err| AppError::bad_request(err.to_string()))?;
-    let stored = match state.attachment_store.get(&parsed_id).await {
+    let stored = match state
+        .attachment_store
+        .get(
+            &parsed_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await
+    {
         Ok(stored) => stored,
         Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
             return Err(AppError::not_found(format!(
@@ -301,6 +308,7 @@ pub(crate) async fn send_turn(
                 // request rather than a store lookup.
                 &lash::attachments::AttachmentId::parse(attachment_id)
                     .map_err(|err| AppError::bad_request(err.to_string()))?,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
             )
             .await
         {
@@ -696,7 +704,10 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     ))
     .await
     .map_err(AppError::runtime)?;
-    session.close().await.map_err(AppError::session_open)?;
+    session
+        .close()
+        .await
+        .map_err(|refused| AppError::session_open(refused.into()))?;
     state.trace_for_session(
         &session_id,
         "mail.tool_catalog.refresh_enqueued",
@@ -864,7 +875,7 @@ pub(crate) async fn reset_chat(
         turn_input_applications: Vec::new(),
         turn_failure_settlements: Vec::new(),
         unknown_turn_terminals: Vec::new(),
-        usage: session.usage_report(),
+        usage: session.usage().await.map_err(AppError::internal)?.report(),
         pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))
 }

@@ -14,9 +14,8 @@ use lash::persistence::{
     AdmissionId, AdmitRootRequest, CheckpointAdmission, CheckpointAdmissionRequest, DriveEpochSeal,
     GraphAppend, IngressSettlement, OperationId, PersistedSessionConfig, RealizedNodeTimestamp,
     RuntimeCommit, RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCommitStore, SessionHeadMeta,
-    SessionHeadPayload, StoreError, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
-    commit_runtime_state_verified,
+    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, StoreError,
+    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, commit_runtime_state_verified,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -27,15 +26,11 @@ use lash::plugins::{
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
-use lash::usage::{TokenLedgerEntry, TokenUsage};
+use lash::usage::TokenUsage;
 use lash::{ModelLimits, ModelSpec};
 
-fn persistence_types_are_nameable(
-    graph: GraphAppend,
-    ledger: Vec<TokenLedgerEntry>,
-) -> RuntimeCommit {
+fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
     let operation = OperationId::turn("facade", "turn", "final");
-    let operation_storage_key = operation.storage_key().expect("operation storage key");
     RuntimeCommit {
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
@@ -50,24 +45,12 @@ fn persistence_types_are_nameable(
         graph_base_leaf_node_id: None,
         checkpoint: Default::default(),
         adopted_intent_rows: 0,
-        usage_deltas: ledger
-            .into_iter()
-            .enumerate()
-            .map(|(entry_ordinal, entry)| {
-                let identity = RuntimeUsageDeltaIdentity::for_entry(
-                    operation_storage_key.clone(),
-                    entry_ordinal as u64,
-                    &entry,
-                );
-                RuntimeUsageDelta { identity, entry }
-            })
-            .collect(),
         failure_evidence: Vec::new(),
         outcome: None,
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
         applied_commands: None,
-        compact_context_outcome: None,
+        command_outcome: None,
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,
@@ -335,7 +318,7 @@ fn main() {
         None,
         None,
     );
-    let _ = persistence_types_are_nameable(GraphAppend::PreserveHead, Vec::new());
+    let _ = persistence_types_are_nameable(GraphAppend::PreserveHead);
     let _ = plugin_types_are_nameable();
     let _ = context_compactor_types_are_nameable();
     let _ = direct_response_type_is_nameable;

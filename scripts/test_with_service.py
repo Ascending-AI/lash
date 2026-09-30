@@ -126,7 +126,7 @@ class WithServiceContract(unittest.TestCase):
 
     def test_store_tests_keeps_compilation_remote_and_service_execution_local(self) -> None:
         script = STORE_TESTS.read_text(encoding="utf-8")
-        self.assertIn("scripts/hermetic-build.sh test", script)
+        self.assertIn('"${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test', script)
         self.assertIn("--local-test-execution", script)
         self.assertIn("--no-test-cache", script)
         self.assertIn('--jobs "${LASH_POSTGRES_SLOT_COUNT:-32}"', script)
@@ -235,6 +235,55 @@ class FakeDocker:
 
 
 class WithServiceBehaviour(unittest.TestCase):
+    def test_server_double_ci_recipe_gets_postgres_and_propagates_failure(self) -> None:
+        step = workflow_text().split("      - name: Run functional E2E\n", 1)[1]
+        step = step.split("      - name:", 1)[0]
+        run = re.search(r"^        run: (.*)\n((?:          .*\n)*)", step, re.MULTILINE)
+        self.assertIsNotNone(run)
+        assert run is not None
+        command = textwrap.dedent(run[2]) if run[1] == "|" else run[1]
+        cases = (
+            ("server-double-e2e", 0),
+            ("server-double-e2e", 7),
+            ("effect-group-conformance-e2e", 0),
+        )
+        for recipe, exit_code in cases:
+            with self.subTest(recipe=recipe, exit_code=exit_code), tempfile.TemporaryDirectory() as raw:
+                directory = pathlib.Path(raw)
+                docker = FakeDocker(directory)
+                just = directory / "just"
+                just.write_text(
+                    '#!/usr/bin/env bash\n'
+                    'printf "%s\\n" "$1" "${LASH_POSTGRES_DATABASE_URL:-}" "${LASH_REQUIRE_POSTGRES:-}"\n'
+                    f"exit {exit_code}\n",
+                    encoding="utf-8",
+                )
+                just.chmod(0o755)
+                env = docker.env()
+                env.pop("LASH_POSTGRES_DATABASE_URL", None)
+                env.pop("LASH_REQUIRE_POSTGRES", None)
+                name = "server-double" if recipe == "server-double-e2e" else "effect-group-conformance"
+                rendered = command.replace("${{ matrix.recipe }}", recipe).replace(
+                    "${{ matrix.name }}", name
+                )
+                result = subprocess.run(
+                    ["bash", "-euc", rendered],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=120,
+                )
+                self.assertEqual(1 if exit_code else 0, result.returncode, result.stderr)
+                self.assertEqual(recipe, result.stdout.splitlines()[0])
+                if recipe == "server-double-e2e":
+                    self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n1\n")
+                    self.assertTrue(any(call.startswith("rm --force") for call in docker.logged()))
+                else:
+                    self.assertEqual(f"{recipe}\n\n\n", result.stdout)
+                    self.assertEqual([], docker.logged())
+
     def run_wrapper(
         self,
         directory: pathlib.Path,

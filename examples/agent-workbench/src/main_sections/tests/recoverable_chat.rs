@@ -1388,9 +1388,10 @@ impl lash::persistence::AttachmentStore for VanishingAttachmentStore {
     async fn get(
         &self,
         id: &lash::attachments::AttachmentId,
+        max_bytes: u64,
     ) -> Result<lash::persistence::StoredAttachment, lash::persistence::AttachmentStoreError> {
         if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-            return self.inner.get(id).await;
+            return self.inner.get(id, max_bytes).await;
         }
         Err(lash::persistence::AttachmentStoreError::Backend {
             operation: "get",

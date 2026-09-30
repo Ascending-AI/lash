@@ -1503,7 +1503,7 @@ impl ActiveTurnControl {
 }
 
 /// The pure turn-control laws; the laws that drive a host and a session store
-/// run over a SQLite memory backend in `tests/store_backed` (ADR 0102).
+/// run over a SQLite memory store set in `tests/store_backed` (ADR 0102).
 #[cfg(test)]
 #[path = "turn_control/tests.rs"]
 mod tests;

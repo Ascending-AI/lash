@@ -77,7 +77,8 @@ fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
 }
 
 fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMessage> {
-    let dialect = crate::dialect::TypescriptDialect::prompt_only(
+    let dialect = crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     render_history_messages(&RlmHistoryRenderInput {
@@ -98,7 +99,8 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
 
 #[test]
 fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
-    let dialect = crate::dialect::TypescriptDialect::prompt_only(
+    let dialect = crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     let entry = lash_rlm_types::RlmTrajectoryEntry {

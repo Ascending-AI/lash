@@ -129,7 +129,12 @@ async fn open_runtime(
     config.code_renderer = CodeRendererSlot(renderer);
     config.render.print.max_chars = Some(max_chars);
     let factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
-        RlmProtocolPluginFactory::new(config, backend).with_process_lifecycle(false),
+        RlmProtocolPluginFactory::new(
+            config,
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            backend,
+        )
+        .with_process_lifecycle(false),
     )];
     let host = PluginHost::new(factories);
     let plugins = if let Some(snapshot) = state.plugin_state() {
@@ -217,6 +222,7 @@ async fn drive_with_run_spec(
     })
     .expect("run spec render options");
     options.payload["channel"] = serde_json::json!("cell");
+    options.payload["dialect"] = serde_json::json!("typescript");
     store
         .enqueue_pending_turn_input(
             lash_core::PendingTurnInputDraft::new(
@@ -355,6 +361,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 })
                 .expect("create render options");
             created_options.payload["channel"] = serde_json::json!("cell");
+            created_options.payload["dialect"] = serde_json::json!("typescript");
             let mut runtime = open_runtime(
                 &backend,
                 base.clone(),
@@ -399,6 +406,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     })
                 .expect("replacement render options");
             replacement.payload["channel"] = serde_json::json!("cell");
+            replacement.payload["dialect"] = serde_json::json!("typescript");
             let command = runtime.set_protocol_turn_options(replacement).await;
             let receipt = match command {
                 Ok(()) => None,

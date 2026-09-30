@@ -9,7 +9,7 @@ use lash_core_execution::{
     FleetFormatStore, ModelSpec, PluginState, RuntimeCommit, RuntimeSessionState,
     SessionCatalogStore, SessionCommitStore, SessionCreationHead, SessionHistoryStore,
     SessionLookup, SessionPolicy, SessionStoreCreateRequest, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnInputStore,
+    ToolState, TurnInputStore,
 };
 use lash_sansio::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
@@ -96,7 +96,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
     let stored = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit session state");
     let orphan = store
@@ -154,7 +154,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
 }
 
 #[tokio::test]
-async fn sqlite_catalog_indexes_usage_by_session() {
+async fn sqlite_catalog_indexes_usage_by_owner() {
     let root = unique_temp_dir("usage-index");
     let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     admit_store(
@@ -174,17 +174,14 @@ async fn sqlite_catalog_indexes_usage_by_session() {
     let indexed: bool = conn
         .query_row(
             "SELECT EXISTS(
-                 SELECT 1 FROM pragma_index_list('usage_deltas')
-                 WHERE name = 'idx_usage_deltas_session_seq'
+                 SELECT 1 FROM pragma_index_list('usage_facts')
+                 WHERE name = 'idx_usage_facts_owner_seq'
              )",
             [],
             |row| row.get(0),
         )
         .expect("query usage indexes");
-    assert!(
-        indexed,
-        "shared-catalog usage reads require a session index"
-    );
+    assert!(indexed, "shared-catalog usage reads require an owner index");
 }
 
 #[tokio::test]
@@ -265,7 +262,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let mut deleted_state = factory_state(&deleted_store, &SessionId::from("delete/me"), 0).await;
     deleted_state.set_execution_state_snapshot(Some(vec![1, 2, 3].into()));
     deleted_store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state))
         .await
         .expect("commit deleted session checkpoint");
     {
@@ -372,16 +369,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
                 protocol_turn_options: Default::default(),
             },
         };
-        let usage = TokenLedgerEntry {
-            source: "session-partition-probe".to_string(),
-            model: "test".to_string(),
-            usage: TokenUsage {
-                input_tokens: 1,
-                ..Default::default()
-            },
-            usage_disposition: Default::default(),
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(state, &[usage]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(state);
         commit.graph = GraphAppend::Extend {
             nodes: vec![node.clone()],
         };
@@ -462,7 +450,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
             protocol_turn_options: Default::default(),
         },
     };
-    let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state, &[]);
+    let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state);
     first_commit.graph = GraphAppend::Extend {
         nodes: vec![node.clone()],
     };
@@ -473,14 +461,14 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .expect("commit first session node");
 
     second
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&second_state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&second_state))
         .await
         .expect("another session's live node must not invalidate an empty session");
 
     let mut second_state = second_state;
     second_state.head_revision = 1;
     let resident_leaf = second_state.session_graph.leaf_node_id.clone();
-    let mut cross_session_leaf = RuntimeCommit::persisted_state_for_test(&second_state, &[]);
+    let mut cross_session_leaf = RuntimeCommit::persisted_state_for_test(&second_state);
     cross_session_leaf.graph = GraphAppend::PreserveHead;
     second
         .commit_runtime_state(cross_session_leaf)
@@ -609,7 +597,7 @@ async fn commit_single_root_node(
         .clone()
         .expect("root leaf node id");
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit root node");
     (store, leaf)
@@ -723,7 +711,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             })
             .expect("append child node");
         child
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&child_state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&child_state))
             .await
             .expect("advance forked child");
     }

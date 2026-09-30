@@ -2297,7 +2297,7 @@ async fn consume_wake(
         if let Some(queued) = &admission.queued {
             settlement.completed_batches.push(queued.completion());
         }
-        RuntimeCommit::persisted_state_for_test(&state, &[])
+        RuntimeCommit::persisted_state_for_test(&state)
             .with_operation(operation)
             .map(|(mut commit, _)| {
                 commit.drive_fence = Some(Box::new(fence.clone()));
@@ -2306,7 +2306,11 @@ async fn consume_wake(
                     commit: crate::store::TurnCommitId::new(root.clone(), 0),
                     turn: root.clone(),
                     root: root.clone(),
-                    stop: None,
+                    outcome: crate::store::RootCommittedOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: String::new(),
+                        },
+                    ),
                 }));
                 commit
             })

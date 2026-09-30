@@ -25,9 +25,7 @@ pub(crate) use execution_context::{
     clear_process_invocation_correlation, execution_claim_of, process_lineage_of,
 };
 pub use opener_groups::{OpenerGroupRegistry, OpenerGroupsClosed, OpenerState, OpenerWorkBound};
-pub use settlement_incorporation::{
-    Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity,
-};
+pub use settlement_incorporation::{Incorporated, IncorporationLedger, SettlementSource};
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
     ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
@@ -798,7 +796,6 @@ impl Session {
         effect_controller: crate::runtime::ScopedEffectController<'run>,
         direct_completions: crate::DirectCompletionClient<'run>,
         trigger_router: Option<crate::TriggerRouter>,
-        process_definitions: Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>>,
         process_engines: crate::ProcessEngineRegistry,
         observer: Arc<dyn crate::engine::ObservationSink>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
@@ -818,7 +815,6 @@ impl Session {
             session_graph,
             processes,
             trigger_router,
-            process_definitions,
             process_engines,
             effect_controller,
             direct_completions: direct_completions.clone(),

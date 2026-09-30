@@ -1,214 +1,109 @@
-# Turn cancellation is a first-party work-driver primitive on the keyed-promise seam
+# Turn cancellation is a first-party work-driver primitive
 
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
+## Context
 
-Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) §10 applies the
-`undelivered` disposition by author. Its scope is the host-authored items
-addressed to the cancelled turn that it did not deliver. `Defer` no longer
-rewrites them: turn addressing is immutable, and an ended turn's items are
-next-turn items by rule. Process wakes the turn held are always deferred (claim
-released in the cancel commit, position kept, floor unchanged). Every affected
-item, deferred or dropped, is recorded with a closed reason. Only an explicit
-host withdrawal may drop a wake. Arbitration on the keyed-promise seam is
-unchanged.
+A foreground turn needs an exact, durable stop request without acquiring
+Runtime Process identity. `TurnAddress { session_id, turn_id }` names that
+turn. These are routing identities; Lash applies no authentication or
+authorization policy to them.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the session-execution-lease generation that
-authorizes a cancel closure, and lease renewal, release and takeover around it;
-the keyed-promise cancellation contract stays. Those passages stay as written
-until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the
-session lease) rewrites them.
+## Decision
 
-Foreground turns need a durable, externally addressable stop request without becoming Runtime
-Processes and without adding coordination state to the session store. We therefore define exact
-turn cancellation as `TurnAddress { session_id, turn_id }` on `TurnWorkDriver`, alongside (but
-separate from) the process work seam, `ProcessWorkSubstrate`. Session and turn ids are routing identities, not authorization
-credentials; every host boundary remains responsible for authentication and authorization.
+`TurnWorkDriver::request_cancel` races normal completion through a reserved,
+first-writer-wins keyed promise. The accepted request carries a request id,
+optional opaque origin and optional reason. A normal completion seals the
+gate, and later requests report `CompletionWonRace`. A second reserved
+promise publishes terminal evidence after commit. Semantic session and turn
+identity keeps the keys stable across owner loss.
 
-The primitive is cooperative. A request races the turn's normal completion through a reserved,
-first-writer-wins keyed promise. A cancellation winner carries a request id, optional opaque
-host-supplied origin, and optional reason as evidence; the running or replayed owner feeds that
-evidence into its internal cancellation token, assembles `TurnStop::Cancelled { evidence }`, and commits under
-the live session-execution lease. A normal completion seals the same gate before commit, causing
-later requests to report `CompletionWonRace`. A second reserved promise publishes terminal
-evidence after the commit so an external caller can attach without polling storage. The promise
-key uses semantic session/turn identity rather than lease generation: cancellation survives owner
-loss. The final commit remains governed by the session-head CAS and any claim-ownership checks
-(ADR 0029), after the owner reads and settles the pre-commit cancellation gate;
-lease loss alone does not reject a current-head commit.
+The configured effect host owns these promises. The request receipt describes
+addressing the gate; it does not prove that execution has stopped. The
+running or replayed owner observes the gate, honours cooperative cancellation
+and commits `TurnStop::Cancelled { evidence }`. Durable request rows are
+intent and receipt projections, not a stop channel or a second arbitration
+result. No waiter polls those rows to discover cancellation.
 
-The cancellation receipt reports only the outcome of addressing the keyed promise. The configured
-effect host owns the turn-control authority: the three reserved turn-control aliases resolve
-through its durable await-event resolver, and its observations are journaled, so the same
-cancellation keys survive owner-process loss. No store answers for them. FIG-3585 deleted the
-store-delegated turn control that let a native session route the aliases to the session store's
-SQL promise coordinator.
+Closing the reserved cancel, escalation and terminal promises is a
+crash-completable protocol. Before closure, the current drive fence authorizes
+one non-overwritable operation containing the control binding, admitted scope,
+keys, proposed base terminal and observed intent revision. An identical retry
+adopts it; a different operation conflicts. A successor may finish its exact
+promise resolutions. Final publication depends on the session-head CAS,
+settled cancellation facts and the authorization, not the authorizing fence's
+epoch. Activation repair validates its current drive fence and drains pending
+closures before doing new work.
 
-Closing those promises is a crash-completable protocol. Before resolving either gate, the current
-session-execution holder persists one exact, non-overwritable closure authorization for the turn.
-It records the chosen control binding, admitted physical execution scope, the three reserved keys,
-the proposed base terminal, the observed cancellation-intent revision, and the authorizing lease
-generation. A vacant slot accepts the operation, an identical retry adopts it, and a different
-operation conflicts. Lease renewal, release, and takeover preserve the slot. A successor may finish
-the same idempotent promise resolutions, including adopting a legitimate different first writer,
-and final settlement commits by session-head CAS even after advisory lease expiry or takeover
-(ADR 0029). Its fence is keyed on durable cancellation facts: retired scopes and conflicting or
-consumed closure authorizations refuse settlement; lease liveness, renewal, and generation do not
-veto final publication. Claim/reclaim and activation recovery retain their existing lease checks.
-Promise settlement and the store mutation are deliberately separate authority domains; the durable authorization bridges a crash between them without becoming
-a second winner record.
+Promise resolution and SQL mutation are separate authority domains. The
+retained authorization bridges a crash between them. Unknown or revoked
+promise evidence fails typed and leaves the authorization pinned. Destructive
+session or scope cleanup refuses while matching closure pins remain. An intent
+CAS refusal retries the refreshed predicate without rerunning model calls or
+restaging usage.
 
-Every store-backed activation validates the selected binding and drains pending closure operations
-before accepting input, draining commands, invoking a model, or doing follow-on work. The drain
-settles the exact reserved gates, derives disposition from their authenticated winner, and consumes
-the authorization atomically with input repair or final commit. An intent CAS refusal retains the
-authorization and retries only the refreshed predicate; it never reruns model calls, hooks, effect
-construction, or usage staging. Unknown or revoked promise evidence is a typed failure and leaves the
-authorization pinned. A missing cancellation intent does not justify sealing a future gate: repair
-rechecks absence transactionally and performs only the ordinary input deferral.
+Opaque origins are host data. Internal token cancellation synthesizes an
+`internal:<turn_id>` request identity; a raw cancellation token records no
+invented origin. Engine invocation cancellation or kill is host recovery under ADR 0110 and
+does not prove a Lash `Cancelled` result. Cooperative stop cannot guarantee
+that detached tasks or non-cooperative external work have stopped.
 
-Who cancelled is host-domain data: Lash records an opaque host-supplied origin and never interprets
-it, mirroring ADR 0026's treatment of host-supplied capability data. Process-local token entry
-points synthesize `internal:<turn_id>` request evidence because they do not traverse the addressed
-request gate. A host with a known origin can supply its own vocabulary, such as `"user"` or
-`"shutdown"`; a raw `TurnBuilder::cancel(CancellationToken)` honestly records no origin.
+## Cancel modes: immediate abort and after-step stop
 
-Turn cancellation has three operational layers:
+`Immediate` feeds accepted evidence into the cooperative token and can unwind
+provider, tool and durable-wait work. Its uncommitted tail returns to the last
+checkpoint. Journaled start, after-model and after-step gates preserve the
+observed decision on replay.
 
-1. `TurnWorkDriver::request_cancel` is the cooperative foreground-turn primitive. Every effect
-   host journals it, so it survives owner-process loss and replay. It can unwind
-   cancellable provider/tool waits, but it cannot guarantee that detached tasks, subprocesses, or
-   non-cooperative providers have stopped.
-2. Runtime Process cancellation remains the existing process event and worker-recovery protocol.
-   Foreground turns do not acquire Process identity, ownership, or lifecycle (ADR 0003).
-3. Engine invocation cancellation or kill is host-owned break-glass recovery. Per ADR 0019, owner
-   destruction is not cooperative evidence and must never be projected as Lash `Cancelled`; the
-   authoritative result is unknown unless a live/replayed owner commits one.
+`AfterStep` lets the current protocol iteration finish, including its tool
+calls and accepted checkpoint, then honours the request at the step boundary.
+It does not fire the cooperative token or backtrack the completed step. Both
+modes refuse a turn at its start gate when the request is already present.
+A durable wait can finish for `AfterStep`; a later timing escalation can
+interrupt it.
 
-For turns blocked in local composite execution, graceful cancellation cannot interrupt that work;
-the demonstrated break-glass is an admin `KILL`, run last because a killed handler cannot release
-the shared-session lease.
+The base gate permanently owns undelivered-input policy. An `Immediate`
+request may escalate an accepted `AfterStep` request through
+`TurnCancelEscalation` only with the same policy. A different policy reports
+`PolicyConflict` without changing the accepted intent or escalation. Weaker
+or equal requests report `AlreadyRequested`. The effective evidence uses the
+escalating request's identity, origin, reason and timing, but retains the
+base winner's undelivered disposition. Hosts own escalation timers.
 
-The keyed-promise implementation uses the existing `AwaitEventResolver` operations and the
-configured cancellation authority. Reserved `TurnCancelGate` and
-`TurnTerminal` identities are indexed as control promises: ordinary durable-wait
-cancellation does not sweep them, while session deletion revokes them. This adds
-no second replay journal (ADR 0012) and no claim
-TTL. The gate is the only stop signal: nothing waits on, polls, or coordinates
-through the store to learn that a turn was cancelled, so the wait stays on the
-work-driver seam (ADR 0016). The shared SQL coordinator may poll its own
-authoritative promise row after a missed notification; intent and projection
-rows are never polled as a stop signal. A live owner does hold an
-engine-native keyed-promise observation; Restate implements that observation
-through `LashDurableWaitWorkflow` ingress with bounded retry, not its Admin API.
+The disposition applies to host-authored items addressed to the cancelled
+turn that it never delivers. Deferred items retain their immutable addressing;
+an ended turn's items are next-turn items by rule. Held process wakes defer
+with their position preserved. A cancellation cannot drop a wake without an
+explicit host withdrawal. Affected items carry closed reasons (ADR 0101).
 
-Vacuum does not remove pending closure authorizations. Session deletion and Process-scope retirement
-inspect the durable session-to-scope pins first and refuse destructive cleanup while any matching
-operation remains. First-party memory, SQLite, and PostgreSQL factories expose that inspection at the
-lifecycle boundary; custom factories must implement it and fail closed when they cannot. Normal
-activation owns the drain. Administrative cleanup cannot erase an authorization merely because its
-original lease owner disappeared.
+An accepted checkpoint publishes `CheckpointRecorded` after its included
+activity and before an after-step stop at that boundary. It is live
+observation, not durable history. Hosts use it with ADR 0040's correlation
+retractions to identify an immediate stop's uncommitted tail.
 
-We rejected the store as a *coordination* mechanism for cancellation — a lease
-marker, or a row that a waiter polls — because that adds store coordination,
-polling, and recovery races. A durable turn-cancel request row does exist
-(`record_turn_cancel_request` / `turn_cancel_request`), and it is load-bearing
-as an intent and receipt projection. The keyed gate pair alone decides whether
-cancellation won and which base or escalated evidence the turn honours. Only
-that settled evidence may select the policy for active-turn input the cancelled
-turn never delivered. Teardown and orphan repair read durable intent so they
-know which unresolved gate to reconcile, then project the gate's effective
-winner back into the row. The row is not a stop signal, arbitration result, or
-channel any waiter observes. We
-rejected invocation-id cancellation because it leaks engine identity and can
-destroy an owner without a Lash result; turns-as-processes because ADR 0003 keeps foreground turns
-session-owned; and session-wide cancel-all because it needs an active-turn index and can touch the
-wrong or a future turn. A host that offers “stop all visible work” retains the exact active turn
-ids it submitted and fans out exact requests.
-
-## Cancel modes: immediate abort and after-step stop (FIG-635)
-
-A request carries a host-chosen `TurnCancelMode`. `Immediate` is the abort
-described above: the owner feeds the evidence into its cooperative token as
-soon as it observes the gate, in-flight provider and tool waits unwind, and the
-uncommitted tail backtracks to the last checkpoint (FIG-408). On a
-controller-owned journal, Immediate lands between journal commands: the start
-gate, the after-LLM gate, and the after-step gate are the journaled
-observation points, so a replay takes the same command path as the original
-attempt.
-
-`AfterStep` is the stop that loses no work. The owner defers the request until
-the step boundary that closes the current protocol iteration: the response
-has streamed, every tool call of that iteration has completed, and the
-iteration's checkpoint has committed. It is observed there under the
-replay-deterministic identity `turn_cancel.after_step.{iteration}` on every
-binding, after the commit, and honoured by finishing the turn with
-`TurnStop::Cancelled` whose evidence names the mode and the iteration. The
-cooperative token never fires for an after-step request, so tools run to
-completion and never see a cancelled token, and nothing backtracks. A turn
-that has not started yet is refused at the start gate in both modes. An
-after-step request that lands during a durable sleep composes with
-cancel-at-wake (FIG-2321): the wait completes, the iteration finishes, and the
-stop honours at its boundary. The undelivered-input disposition applies in
-both modes; a stop never drains queued work.
-
-Each accepted checkpoint publishes `CheckpointRecorded { protocol_iteration }`
-on the turn's live activity lane after its record is accepted. The marker
-follows every delta included in that checkpoint and precedes an `AfterStep`
-stop at the same boundary. For an `Immediate` stop, a host can find the
-uncommitted streamed tail after the last marker, or after `TurnStarted` when
-there was no checkpoint, after removing deltas retracted by
-`ModelAttemptReset`. The marker is live observation, not durable history.
-
-The gate itself stays first-writer-wins, so a stronger request cannot rewrite
-it. Its accepted request permanently owns the undelivered-input policy.
-Escalation rides a third reserved promise, `TurnCancelEscalation`, written only
-by an `Immediate` request with the same policy that found the gate holding an
-`AfterStep` request; escalation changes timing while the durable base projection
-retains the original policy acceptor. A different policy reports
-`PolicyConflict { requested, accepted }` before touching escalation. A
-same-or-weaker request still reports `AlreadyRequested`. Lash ships no
-escalation timer; "abort if the step has not finished after N seconds" is host
-policy expressed as a second request.
-
-That ordering is the whole contract for a repeated request, and it holds on
-both sides of the seam. Because the disposition comparison runs before the
-escalation promise is touched, only a matching-policy request can ever write
-one, and every reader of that promise — the driver's receipt, the owner's
-journaled peek, its live watch, and the closure that seals it at final commit
-— projects the escalation back onto the base winner's disposition. That
-projection is deliberately narrow: `undelivered` alone comes from the base
-winner. `request_id`, `origin`, `reason`, `mode` and `honoured_after_step` come
-from the escalation row, because those describe the escalating request and when
-it takes effect — the point of escalating. Timing escalation therefore changes
-when a cancellation is honoured and nothing else,
-whoever wrote the escalation row. Durably, a conflicting repeat is not an
-escalation either: the request row and the intent revision that fences the
-owner's closure CAS both stay where the accepted request left them, so a
-refused request has no effect a later reader could mistake for acceptance. A
-request that arrives once the base gate has sealed for completion is a typed
-no-op with no durable row at all, and its receipt carries no cancellation
-record — the gate seal is checked before the provisional write, alongside the
-committed-turn and published-terminal checks.
-
-Restate durable waits carry the gate payload. The wake an awakeable
-journals is derived from the gate resolution that settled it, so an
-`Immediate` request unwinds a parked sleep, await-event or process await at
-that wake exactly as before, while an `AfterStep` request lets the wait
-finish on its own terms: the iteration completes and the turn stops at its
-step boundary. A deferred wait re-parks on the turn's escalation promise, so
-a later `Immediate` request still unwinds it mid-wait.
+The remote cancellation DTOs carry the same request mode and terminal
+checkpoint evidence. Their conversions preserve `Immediate`, `AfterStep`,
+`honoured_after_step`, and the distinct `Escalated` receipt outcome through
+JSON transport. These shapes change in place under the pre-1.0 version
+freeze (FIG-3846).
 
 ## Terminal product-event ownership
 
-The turn execution publisher owns the observer-facing terminal event. A Stop
-handler attaches to terminal evidence and returns its receipt; it does not
-publish another terminal event, including for repeated requests or a completion
-that won the race. Removing a dangling route is not evidence of a failed turn.
-Cancellation traces use the request id in the recorded cancellation evidence,
-so a losing request attributes the stop to the same winner as the terminal.
+The turn execution publisher owns the observer-facing terminal event. A stop
+handler attaches to terminal evidence and returns a receipt; repeated requests
+do not publish another terminal event. Cancellation traces use the recorded
+winner's request id.
+
+## Consequences
+
+A host offering stop-all retains exact turn ids and submits exact requests.
+Session-wide guessing and invocation-id stop are rejected because they can
+address the wrong turn or destroy an owner without a Lash outcome. Turning a
+foreground turn into a Process is rejected because its lifecycle is
+session-owned. Store-polled cancellation is rejected because it adds a second
+coordination protocol beside the authoritative promise gate.
+
+## Implementation
+
+- [Addressed control and arbitration](../../crates/lash-core-execution/src/runtime/turn_control.rs).
+- [Closure authorization contract](../../crates/lash-core-store/src/store/mod.rs) and [closure evidence](../../crates/lash-core-store/src/turn_control_vocabulary.rs).
+- [Cancel modes and input policy](../../crates/lash-sansio/src/session_model/mod.rs).
+- [Promise-owner settlement](../../crates/lash-core-execution/src/runtime/effect/executor/turn_control_authority.rs).

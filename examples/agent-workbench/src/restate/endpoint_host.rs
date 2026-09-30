@@ -14,7 +14,13 @@ pub(crate) fn spawn_restate_endpoint(
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .expect("bind the workbench Restate endpoint");
-        lash::restate::serve_endpoint(listener, endpoint, std::future::pending::<()>()).await;
+        lash::restate::serve_endpoint(
+            listener,
+            endpoint,
+            lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+            std::future::pending::<()>(),
+        )
+        .await;
     });
 }
 
@@ -33,9 +39,12 @@ pub(crate) fn spawn_owned_restate_endpoint(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let endpoint = endpoint(state, backend, process_worker);
-        lash::restate::serve_endpoint(listener, endpoint, async move {
-            while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-        })
+        lash::restate::serve_endpoint(
+            listener,
+            endpoint,
+            lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+            async move { while !*shutdown.borrow() && shutdown.changed().await.is_ok() {} },
+        )
         .await;
     })
 }

@@ -130,8 +130,6 @@ impl Serialize for RuntimeAgentFrameInvariantFacts {
 pub struct RuntimeUsageInvariantFacts {
     pub turn_usage: RuntimeUsageTotals,
     pub total_usage: RuntimeUsageTotals,
-    pub token_ledger_total: RuntimeUsageTotals,
-    pub token_ledger_entry_count: Option<usize>,
     pub usage_event_count: usize,
     pub usage_event_cumulative_totals: Vec<RuntimeUsageTotals>,
     pub non_negative: bool,
@@ -147,11 +145,9 @@ impl RuntimeUsageInvariantFacts {
 
 impl Serialize for RuntimeUsageInvariantFacts {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("RuntimeUsageInvariantFacts", 10)?;
+        let mut state = serializer.serialize_struct("RuntimeUsageInvariantFacts", 8)?;
         state.serialize_field("turn_usage", &self.turn_usage)?;
         state.serialize_field("total_usage", &self.total_usage)?;
-        state.serialize_field("token_ledger_total", &self.token_ledger_total)?;
-        state.serialize_field("token_ledger_entry_count", &self.token_ledger_entry_count)?;
         state.serialize_field("usage_event_count", &self.usage_event_count)?;
         state.serialize_field(
             "usage_event_cumulative_totals",
@@ -576,8 +572,6 @@ pub fn runtime_usage_invariant_facts(
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
     let total_usage = turn_usage.clone();
-    let token_ledger_total =
-        RuntimeUsageTotals::sum(result.state.usage.rows.iter().map(|row| &row.usage));
     let usage_event_cumulative_totals = activities
         .iter()
         .filter_map(|activity| match &activity.event {
@@ -595,24 +589,10 @@ pub fn runtime_usage_invariant_facts(
     let mut negative_fields = Vec::new();
     collect_negative_usage_fields("turn_usage", &turn_usage, &mut negative_fields);
     collect_negative_usage_fields("total_usage", &total_usage, &mut negative_fields);
-    collect_negative_usage_fields(
-        "token_ledger_total",
-        &token_ledger_total,
-        &mut negative_fields,
-    );
-    for (index, row) in result.state.usage.rows.iter().enumerate() {
-        collect_negative_usage_fields(
-            &format!("token_ledger[{index}]"),
-            &RuntimeUsageTotals::from_usage(&row.usage),
-            &mut negative_fields,
-        );
-    }
     let non_negative = negative_fields.is_empty();
     RuntimeUsageInvariantFacts {
         turn_usage,
         total_usage,
-        token_ledger_total,
-        token_ledger_entry_count: Some(result.state.usage.rows.len()),
         usage_event_count: usage_event_cumulative_totals.len(),
         usage_event_cumulative_totals,
         non_negative,
@@ -680,14 +660,6 @@ impl RuntimeUsageTotals {
             usage.cache_write_input_tokens,
             usage.reasoning_output_tokens,
         )
-    }
-
-    fn sum<'a>(usages: impl IntoIterator<Item = &'a lash_core::TokenUsage>) -> Self {
-        let mut total = Self::default();
-        for item in usages {
-            total.saturating_add_assign(&Self::from_usage(item));
-        }
-        total
     }
 
     pub fn is_non_negative(&self) -> bool {

@@ -42,6 +42,21 @@ impl EffectHost for ListingHost {
         self.inner.await_event_resolver()
     }
 
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
+        self.inner.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        self.inner.retire_usage_execution(owner, scope).await
+    }
+
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,

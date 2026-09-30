@@ -547,6 +547,21 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run;
 
+    /// Journal a spending effect's one-way settle send to its owner's
+    /// accounting continuation (ADR 0125).
+    ///
+    /// One-way by construction: the settlement must outlive this invocation,
+    /// so it is carried by a send, which no cancel or kill of the sender
+    /// recalls, and projected in the continuation's own journal.
+    fn send_usage_settlement<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        owner_key: String,
+        request: crate::usage_accounting::UsageAccountingSettle,
+    ) -> crate::JournaledFuture<'run, ()>
+    where
+        'ctx: 'run;
+
     fn update_session_waits<'run>(
         &'run self,
         namespace: &'run crate::RestateNamespace,
@@ -767,7 +782,7 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _group_key: String,
-        _commit_seq: u64,
+        _rank: u64,
     ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
     where
         'ctx: 'run,
@@ -1211,6 +1226,25 @@ macro_rules! impl_restate_controller_context {
 
                 durable_wait_index_methods!('ctx);
 
+                fn send_usage_settlement<'run>(
+                    &'run self,
+                    namespace: &'run crate::RestateNamespace,
+                    owner_key: String,
+                    request: crate::usage_accounting::UsageAccountingSettle,
+                ) -> crate::JournaledFuture<'run, ()>
+                where
+                    'ctx: 'run,
+                {
+                    let send = namespace
+                        .usage_accounting(self, owner_key)
+                        .settle(request)
+                        .send();
+                    Box::pin(async move {
+                        send.await?;
+                        Ok(())
+                    })
+                }
+
                 fn attach_process_terminal<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
@@ -1473,13 +1507,13 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
                     group_key: String,
-                    commit_seq: u64,
+                    rank: u64,
                 ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
                 where
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .drain_blockers(EffectGroupDrainBlockersRequest { commit_seq })
+                        .drain_blockers(EffectGroupDrainBlockersRequest { rank })
                         .call();
                     Box::pin(async move { call.await.map(Reply::into_body) })
                 }

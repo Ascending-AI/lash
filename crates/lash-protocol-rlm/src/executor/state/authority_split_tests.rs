@@ -88,8 +88,8 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
     );
 
     // What the worker returns carries no authority either.
-    let (capture, _) = worker_side::capture(&session.vm, &DurableBaseline::default(), fleet_format)
-        .expect("the worker captures its guest state");
+    let (capture, _) =
+        worker_capture(&session, fleet_format).expect("the worker captures its guest state");
     assert!(
         !contains(&capture, SENTINEL_SECRET),
         "a grant's execution binding appeared in the worker's capture"
@@ -133,8 +133,8 @@ fn worker_returned_state_cannot_replace_parent_authority() {
     let parent_grants =
         serde_json::to_value(&session.deferred_resolutions).expect("encode the parent's grants");
 
-    let (honest, _) = worker_side::capture(&session.vm, &DurableBaseline::default(), fleet_format)
-        .expect("the worker captures its guest state");
+    let (honest, _) =
+        worker_capture(&session, fleet_format).expect("the worker captures its guest state");
     let honest = RlmWorkerCapture::accept(&honest).expect("an honest capture is accepted");
 
     // A returned capture naming a grant is refused outright.
@@ -188,4 +188,27 @@ fn worker_returned_state_cannot_replace_parent_authority() {
         "the root's grants must be the parent's, not the worker's"
     );
     assert!(!contains(&hydrated.root, "forged-by-the-worker"));
+}
+
+fn worker_capture(
+    session: &RlmExecutionState,
+    fleet: lash_core::FleetFormat,
+) -> Result<(Vec<u8>, ()), String> {
+    let parts = session.vm.state().capture(&Default::default(), fleet)?;
+    let mut capture = RlmWorkerCapture {
+        state_header: parts.header.into(),
+        changed: Default::default(),
+        unchanged: Default::default(),
+    };
+    for (name, fragment) in parts.fragments {
+        match fragment {
+            lashlang::DurableFragment::Changed(body) => {
+                capture.changed.insert(name, body.into());
+            }
+            lashlang::DurableFragment::Unchanged => {
+                capture.unchanged.insert(name);
+            }
+        }
+    }
+    Ok((capture.encode(), ()))
 }

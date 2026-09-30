@@ -423,6 +423,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &artifact_backend,
         )
         .with_process_lifecycle(true),
@@ -481,6 +482,7 @@ finish(await handle);
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 lash_lashlang_runtime::LashlangSurface::default(),
+                artifact_backend.worker_recovery(),
             ),
         ),
     );
@@ -857,7 +859,6 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![SessionId::from("session")],
-                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
@@ -962,7 +963,7 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
 
     let injected_error = host
         .execute_effect(
-            start_recovery_effect(start_key, &spec),
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
@@ -1032,7 +1033,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
 
     let outcome = host
         .execute_effect(
-            start_recovery_effect(start_key, &spec),
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
@@ -1080,7 +1081,10 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
         || registry_local_executor(registry.clone()).with_process_env_store(env_store.clone());
 
     let injected_error = host
-        .execute_effect(start_recovery_effect(start_key, &spec), executor())
+        .execute_effect(
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
+            executor(),
+        )
         .await
         .expect_err("injected post-registration start failure");
     let record = the_only_process(registry.as_ref()).await;
@@ -1098,7 +1102,10 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
     );
 
     let outcome = host
-        .execute_effect(start_recovery_effect(start_key, &spec), executor())
+        .execute_effect(
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
+            executor(),
+        )
         .await
         .expect("exact start retry completes ownership transfer");
     let RuntimeEffectOutcome::Process {
@@ -1135,7 +1142,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
 
     let outcome = host
         .execute_effect(
-            start_recovery_effect(start_key, &spec),
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
@@ -1191,7 +1198,10 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
         "injected external-ref write failure".to_string(),
     ));
     let _ = host
-        .execute_effect(start_recovery_effect(start_key, &spec), executor())
+        .execute_effect(
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
+            executor(),
+        )
         .await
         .expect_err("the first attempt's reference write fails");
     let first = the_only_process(registry.as_ref()).await;
@@ -1201,7 +1211,10 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     // row, and this submission is definitively refused.
     context.fail_next_process_workflow_start();
     let outcome = host
-        .execute_effect(start_recovery_effect(start_key, &spec), executor())
+        .execute_effect(
+            start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
+            executor(),
+        )
         .await
         .expect("a retry that did not create the row returns it rather than cancelling it");
     let RuntimeEffectOutcome::Process {
@@ -1225,10 +1238,25 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     assert_eq!(stored.id, first.id);
 }
 
-pub(super) fn start_recovery_effect(
+pub(super) async fn start_recovery_effect(
+    env_store: &dyn lash_core::ProcessExecutionEnvStore,
     start_key: &str,
     spec: &lash_core::ProcessExecutionEnvSpec,
 ) -> RuntimeEffectEnvelope {
+    let key = lash_core::StartKey::for_host(start_key);
+    let claim = lash_core::ReferrerClaim::guarded(
+        lash_core::ArtifactReferrer::Execution(
+            runtime_invocation(RuntimeEffectKind::Process, start_key)
+                .execution_scope()
+                .journal_identity()
+                .expect("starter journal"),
+        ),
+        lash_core::ArtifactCleanupPlan::AwaitJournal,
+    )
+    .expect("start claim");
+    let env_ref = lash_core::publish_process_execution_env(env_store, &claim, spec)
+        .await
+        .expect("publish start environment");
     let registration = ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "testing-fixture".to_string(),
@@ -1237,13 +1265,13 @@ pub(super) fn start_recovery_effect(
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_start_key(Some(lash_core::StartKey::for_host(start_key)));
+    .with_start_key(Some(key))
+    .with_execution_env_ref(Some(env_ref));
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::Process, start_key),
         RuntimeEffectCommand::process(ProcessCommand::Start {
             registration,
             observers: vec![SessionId::from("session")],
-            env_spec: Some(spec.clone()),
             execution_context: Box::new(ProcessExecutionContext::default()),
         }),
     )
@@ -1276,7 +1304,6 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
                 registration: external_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("process-start-replay"))),
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )
@@ -1316,9 +1343,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
 
     // Simulates Restate replay of the same parent handler after a later
     // suspension resumes. The already persisted registry record has an
-    // external_ref at this point, but the handler must still issue the same
-    // Restate send before the await call so the journal command sequence stays
-    // send -> call -> ... on every replay.
+    // external_ref at this point. The start still sends to its recorded id;
+    // the terminal await returns its recorded observation without an attach.
     host.execute_effect(start(), registry_local_executor(registry.clone()))
         .await
         .expect("replay start");
@@ -1328,13 +1354,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
 
     assert_eq!(
         context.process_command_log.lock_recover().as_slice(),
-        &[
-            format!("send:{process_id}"),
-            format!("call:{process_id}"),
-            format!("send:{process_id}"),
-            format!("call:{process_id}"),
-        ],
-        "child process start/await must replay the same Restate command sequence"
+        &[format!("send:{process_id}"), format!("send:{process_id}"),],
+        "the start replays its send and terminal awaits issue no attach"
     );
 }
 
@@ -1388,8 +1409,7 @@ pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waite
                     result: ProcessEffectOutcome::AttachTerminal
                 }
             ),
-            "{attempt} must report the arming, never a terminal: reading the \
-             terminal inside the parked handler is what the attach exists to avoid"
+            "{attempt} arms the ordinary waiter for a non-terminal child"
         );
     }
 
@@ -1471,7 +1491,6 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
                 registration: external_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("restart-after-prune"))),
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )
@@ -1554,7 +1573,6 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
@@ -1584,7 +1602,6 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
                     registration: external_registration()
                         .with_start_key(Some(lash_core::StartKey::for_host("parent-flow-child"))),
                     observers: Vec::new(),
-                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),

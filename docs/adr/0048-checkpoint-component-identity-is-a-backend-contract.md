@@ -1,50 +1,45 @@
 # Checkpoint component identity is a backend contract
 
-A session checkpoint is one manifest plus independently addressed tool-state,
-plugin-snapshot, and execution-state components. Their durable identity is part
-of the session-store contract, not a representation choice each backend may
-reinterpret.
+## Context
 
-The defect that forced this ruling predates the shared-history cutover. It has
-existed since the PostgreSQL backend was introduced in `973bf591` on
-2026-06-09. PostgreSQL stored a backend-only `SessionCheckpointEnvelope` that
-embedded component bodies but merely echoed any component refs supplied by the
-caller. Unlike SQLite, it minted no refs for newly stored bodies. After the
-runtime cleared a clean RLM executor's hydrated bytes, the next ref-only
-checkpoint therefore persisted no execution state, and a cold open silently
-lost the RLM globals. The in-memory store also echoed refs without implementing
-the same identity contract.
+A resumable checkpoint must retain unchanged execution bytes even when the
+runtime stops carrying a hydrated body. Backend-specific treatment of refs
+can silently discard that state on cold open.
 
-When a backend stores a checkpoint component body, it must mint the
-content-addressed ref that addresses that body and return the ref in
-`RuntimeCommitReceipt::manifest`. A later commit carrying that ref without a
-body means “unchanged”: the backend must resolve the body from storage when it
-hydrates the checkpoint. A ref-only commit whose body is absent is invalid and
-fails with the typed missing-component error rather than persisting partial
-state.
+## Decision
 
-SQLite, PostgreSQL, and the in-memory store now implement this same rule.
-PostgreSQL adopts the manifest-plus-component-blob shape and deletes
-`SessionCheckpointEnvelope`; PostgreSQL schema 24 is a reject-and-recreate
-boundary for the incompatible old envelope. Cross-backend conformance covers
-body-to-ref minting, clean ref-only commits, cold hydration, and rejection of
-unknown refs.
+A session checkpoint is one manifest plus a complete keyed set of independently
+addressed components (ADR 0056). Tool state, plugin snapshots and execution
+state are well-known keys, not a fixed cardinality limit. The manifest records
+each component's content ref and encoding version.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
+Changed logical bytes have a content-derived `BlobRef`. A backend validates
+and stores those bytes under that identity before publishing the checkpoint
+root, and returns the realized manifest in `RuntimeCommitReceipt`. A later
+ref-only entry means the component is unchanged. Cold hydration resolves the
+stored bytes; a missing ref fails with `CheckpointComponentMissing`, not a
+partial checkpoint. Supplied body/ref disagreement and unsupported encoding
+are typed refusals.
 
-This does not turn checkpoints into an event log. Each boundary still replaces
-the complete resumable-state snapshot, while component refs let an unchanged
-body be reused without recapturing or rewriting it. Backend storage mechanics
-such as compression remain private only after this identity and hydration
-contract is satisfied.
+SQLite file, SQLite memory and PostgreSQL implement the same identity and
+hydration contract. Conformance covers arbitrary component keys, unchanged
+refs, changed bytes, shared refs, cold hydration and unknown-ref rejection.
 
-[ADR-0049](0049-session-ids-are-used-once.md) removes the separate session
-lifetime discriminator. That does not alter content-addressed component
-identity: component refs still identify bytes, while the host-provided,
-single-use session id identifies the checkpoint owner and binding.
+Each boundary replaces the complete resumable-state snapshot. Reusing a
+component body is not an event-log append. Compression is a backend mechanism
+that cannot change logical identity or hydration. Component refs identify
+bytes; the single-use session id identifies their checkpoint owner (ADR 0049).
 
-## Amendment (FIG-4125, 2026-09-29)
+## Consequences
 
-Item 8: [ADR 0056](0056-checkpoint-components-generalize-to-a-keyed-set.md)
-supersedes the fixed three-component cardinality. Component identity and
-hydration remain backend contracts.
+The runtime can omit clean hydrated bytes without losing resumable state.
+Echoing a ref without providing its stored body is rejected because it makes
+a ref-only checkpoint incomplete. Hard-coding three component slots is rejected
+because independent runtime components need stable keys rather than another
+manifest redesign.
+
+## Implementation
+
+[Keyed manifest, content identity and codec validation](../../crates/lash-core-store/src/store/checkpoint.rs)
+and [component admission laws](../../crates/lash-conformance/src/conformance/runtime_persistence/checkpoint_admissions.rs)
+define the shared backend obligation.

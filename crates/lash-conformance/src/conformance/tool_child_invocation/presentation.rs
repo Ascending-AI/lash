@@ -503,8 +503,9 @@ impl crate::AttachmentStore for CountingAttachmentStore {
     async fn get(
         &self,
         id: &crate::AttachmentId,
+        max_bytes: u64,
     ) -> Result<crate::StoredAttachment, crate::AttachmentStoreError> {
-        self.inner.get(id).await
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &crate::AttachmentId) -> Result<(), crate::AttachmentStoreError> {

@@ -37,6 +37,14 @@ kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
 reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
 
+[[rule]]
+packages = ["lash-restate-postgres-workers-e2e"]
+kinds = ["test"]
+targets = ["provider_stream_bounds"]
+tags = ["manual", "cargo-service-gate"]
+reason = "requires native Restate and SQL services; execute this label uncached through scripts/ci/with-service.sh"
+args = ["--ignored"]
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard runs through `//tools/bazel:postgres_slot_runner`, which gives it
@@ -484,3 +492,24 @@ store_seam = [
 [[rule]]
 packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]
+
+# Model-source and VM work run in the shipped helper on every test tier.
+[[rule]]
+packages = ["lash-internal-protocol-rlm", "lash-internal-lashlang-runtime", "lash-runtime", "lash-sim", "lash-internal-restate", "lash-internal-sqlite-store", "lash-internal-postgres-store", "lash-internal-conformance"]
+kinds = ["unit-test", "test", "bin-unit-test"]
+data = ["//crates/lash-vm-worker:lash-vm-worker__bin"]
+env = { LASH_VM_WORKER = "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)" }
+
+# The replay-read gate (FIG-4324) reads the production sources of every crate,
+# example and runbook host, and the store trait declarations, at run time.
+[[rule]]
+packages = ["lash-internal-core-execution"]
+kinds = ["unit-test"]
+data = ["//:workspace_rust_sources"]
+
+# Performance unit laws drive RLM turns; the empty binary harnesses do not.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["unit-test"]
+data = ["//crates/lash-vm-worker:lash-vm-worker__bin"]
+env = { LASH_VM_WORKER = "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)" }

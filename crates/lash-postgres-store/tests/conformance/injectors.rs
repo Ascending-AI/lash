@@ -115,7 +115,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
 }
 
 pub(crate) struct PostgresFenceIntegrityInjector {
-    pub(crate) _database_lock: SharedDatabaseLock,
+    pub(crate) _database_fixture: IsolatedDatabase,
     pub(crate) storage: Arc<PostgresStorage>,
 }
 

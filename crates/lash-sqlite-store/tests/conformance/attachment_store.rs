@@ -140,7 +140,6 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     .expect("session put records an intent and stores the bytes");
     let mut commit = lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
         &state_referencing(&session_id, &held),
-        &[],
     );
     commit.committed_attachment_ids = vec![held.id.clone()];
     session
@@ -174,7 +173,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     );
     assert_eq!(
         attachments
-            .get(&held.id)
+            .get(&held.id, 32 * 1024 * 1024)
             .await
             .expect("a blob a committed referrer row holds survives the sweep")
             .bytes,
@@ -182,7 +181,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     );
     assert!(
         matches!(
-            attachments.get(&unheld.id).await,
+            attachments.get(&unheld.id, 32 * 1024 * 1024).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "a blob no referrer row holds is collected"
@@ -196,7 +195,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     // A second sweep changes nothing while the row still holds the blob.
     assert_eq!(sweep(&factory, &attachments).await.reclaimed_count, 0);
     attachments
-        .get(&held.id)
+        .get(&held.id, 32 * 1024 * 1024)
         .await
         .expect("the held blob survives a repeated sweep");
 
@@ -230,9 +229,34 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     );
     assert!(
         matches!(
-            attachments.get(&held.id).await,
+            attachments.get(&held.id, 32 * 1024 * 1024).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "the released blob is collected"
     );
+}
+
+#[tokio::test]
+async fn sqlite_attachment_materialization_read_budgets() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_conformance::attachment_materialization_read_budgets(backend.attachment_store()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_attachment_materialization_turn_witnesses() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let engine_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4294,
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&engine_stores),
+    )
+    .await
+    .expect("turn engine");
+    let host = double.restate().restate_effect_host();
+    let runner =
+        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    lash_conformance::attachment_materialization_turn_witnesses("sqlite", host, stores, runner)
+        .await;
 }

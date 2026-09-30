@@ -131,6 +131,7 @@ pub(super) async fn expected(world: &CrashWorld, ledger: &Ledger) -> Result<Expe
         closed_sessions: deleted,
         live_sessions: live,
         custom,
+        audits: Vec::new(),
     })
 }
 

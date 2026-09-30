@@ -14,15 +14,17 @@ use crate::trace::{OracleVerdict, WorkloadExpectations};
 struct CheckedSession {
     nodes: BTreeMap<String, Value>,
     leaf_node_id: Option<String>,
-    usage_rows: Vec<Value>,
+    /// The last accepted read model's turn usage: what the committed state
+    /// reports for the turn (context-window tracking, not accounting; usage
+    /// accounting is owner-scoped and never rides a commit, ADR 0125).
     current_turn_usage: RuntimeUsageTotals,
     checked_commits: usize,
 }
 
 /// Jepsen-style checker over the checkpoint-write history. This module does not
 /// call `ModelStore`, `SessionGraph::read_model`, or a backend API: it folds the
-/// serialized commit events into its own graph, active transcript, and token
-/// ledger, then compares that independent reconstruction with both the accepted
+/// serialized commit events into its own graph and active transcript, then
+/// compares that independent reconstruction with both the accepted
 /// raw rows and the accepted read-model projection captured at the commit seam.
 /// Verdict id of the independent checkpoint-state checker.
 pub const INDEPENDENT_CHECKPOINT_STATE_ORACLE: &str = "sim.oracle.independent-checkpoint-state.v1";
@@ -67,7 +69,6 @@ fn check_checkpoint_state(
         let attributed_session = SessionId::from(session_id.clone());
         let checked = sessions.entry(session_id.clone()).or_default();
         fold_graph_append(checked, &state.submitted_graph_append, &attributed_session)?;
-        fold_usage_rows(checked, &state.submitted_usage_rows, &attributed_session)?;
         checked.checked_commits += 1;
 
         let accepted_raw = state.accepted_raw_rows.as_ref().ok_or_else(|| {
@@ -171,60 +172,6 @@ fn fold_graph_append(
     Ok(())
 }
 
-fn fold_usage_rows(
-    checked: &mut CheckedSession,
-    rows: &Value,
-    session_id: &SessionId,
-) -> Result<(), String> {
-    let rows = rows
-        .as_array()
-        .ok_or_else(|| format!("checkpoint checker `{session_id}` usage rows are not an array"))?;
-    checked.current_turn_usage = sum_usage(rows);
-    for row in rows {
-        let source = row.get("source");
-        let model = row.get("model");
-        if let Some(existing) = checked
-            .usage_rows
-            .iter_mut()
-            .find(|existing| existing.get("source") == source && existing.get("model") == model)
-        {
-            for &field in RuntimeUsageTotals::FIELDS {
-                let total = existing
-                    .pointer(&format!("/usage/{field}"))
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default()
-                    .saturating_add(
-                        row.pointer(&format!("/usage/{field}"))
-                            .and_then(Value::as_i64)
-                            .unwrap_or_default(),
-                    );
-                existing["usage"][field] = json!(total);
-            }
-        } else {
-            checked.usage_rows.push(row.clone());
-        }
-    }
-    Ok(())
-}
-
-/// Each usage row's `(source, model)` key and counters, sorted by key.
-fn usage_row_counters(rows: &[Value]) -> Vec<(Value, Value, Value)> {
-    let mut counters = rows
-        .iter()
-        .map(|row| {
-            (
-                row.get("source").cloned().unwrap_or(Value::Null),
-                row.get("model").cloned().unwrap_or(Value::Null),
-                row.get("usage").cloned().unwrap_or(Value::Null),
-            )
-        })
-        .collect::<Vec<_>>();
-    counters.sort_by(|left, right| {
-        (left.0.to_string(), left.1.to_string()).cmp(&(right.0.to_string(), right.1.to_string()))
-    });
-    counters
-}
-
 fn compare_raw_rows(
     checked: &CheckedSession,
     raw: &Value,
@@ -246,20 +193,6 @@ fn compare_raw_rows(
             "checkpoint checker `{session_id}` graph leaf diverged from accepted raw rows"
         ));
     }
-    // The durable totals keep one row per `(source, model)`, sorted, with
-    // attempt counters beside the counters (ADR 0112 §8); the checker
-    // compares the key and the counters.
-    let raw_rows = raw
-        .pointer("/usage/rows")
-        .and_then(Value::as_array)
-        .map(|rows| usage_row_counters(rows));
-    if raw_rows != Some(usage_row_counters(&checked.usage_rows)) {
-        return Err(format!(
-            "checkpoint checker `{session_id}` usage reconstruction diverged from accepted raw rows: checker={}; raw={}",
-            Value::Array(checked.usage_rows.clone()),
-            raw.pointer("/usage/rows").unwrap_or(&Value::Null)
-        ));
-    }
     if raw.get("turn_state") != Some(submitted_turn_state) {
         return Err(format!(
             "checkpoint checker `{session_id}` submitted turn state diverged from accepted raw rows"
@@ -269,7 +202,7 @@ fn compare_raw_rows(
 }
 
 fn compare_read_model(
-    checked: &CheckedSession,
+    checked: &mut CheckedSession,
     read: &Value,
     session_id: &SessionId,
 ) -> Result<(), String> {
@@ -289,13 +222,12 @@ fn compare_read_model(
             "checkpoint checker `{session_id}` transcript reconstruction diverged from read model"
         ));
     }
-    let usage = checked.current_turn_usage.fields_value();
-    if read.get("token_usage") != Some(&usage) {
-        return Err(format!(
-            "checkpoint checker `{session_id}` usage reconstruction diverged from read model: checker={usage}; read={}",
-            read.get("token_usage").unwrap_or(&Value::Null)
-        ));
-    }
+    checked.current_turn_usage = RuntimeUsageTotals::from_value(
+        read.get("token_usage").unwrap_or(&Value::Null),
+    )
+    .map_err(|field| {
+        format!("checkpoint checker `{session_id}` read-model usage has no integer `{field}`")
+    })?;
     Ok(())
 }
 
@@ -353,20 +285,6 @@ fn compare_runtime_facts(
                 .unwrap_or(&Value::Null)
         ));
     }
-    let ledger_usage = json!(sum_usage(&checked.usage_rows));
-    if runtime
-        .observed
-        .pointer("/runtime_invariant_facts/usage/token_ledger_total")
-        != Some(&ledger_usage)
-    {
-        return Err(format!(
-            "checkpoint checker `{session_id}` cumulative usage reconstruction diverged from runtime ledger facts: checker={ledger_usage}; runtime={}",
-            runtime
-                .observed
-                .pointer("/runtime_invariant_facts/usage/token_ledger_total")
-                .unwrap_or(&Value::Null)
-        ));
-    }
     Ok(())
 }
 
@@ -407,19 +325,6 @@ fn rows_by_id(rows: &[Value], session_id: &SessionId) -> Result<BTreeMap<String,
         .collect()
 }
 
-fn sum_usage(rows: &[Value]) -> RuntimeUsageTotals {
-    let mut total = RuntimeUsageTotals::default();
-    for row in rows {
-        let contribution = RuntimeUsageTotals::from_field_values(|field| {
-            row.pointer(&format!("/usage/{field}"))
-                .and_then(Value::as_i64)
-                .unwrap_or_default()
-        });
-        total.saturating_add_assign(&contribution);
-    }
-    total
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,13 +334,6 @@ mod tests {
     #[test]
     fn independent_usage_fold_detects_a_corrupted_runtime_fact() {
         let checked = CheckedSession {
-            usage_rows: vec![json!({"usage": {
-                "input_tokens": 5,
-                "output_tokens": 2,
-                "cache_read_input_tokens": 0,
-                "cache_write_input_tokens": 0,
-                "reasoning_output_tokens": 0
-            }})],
             current_turn_usage: RuntimeUsageTotals::new(5, 2, 0, 0, 0),
             ..CheckedSession::default()
         };

@@ -401,6 +401,13 @@ pub enum RuntimeEffectCommand {
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
+    /// Record an emission's admission of one delivery it ingested before
+    /// the delivery's start is prepared (FIG-4297). The envelope names only
+    /// the delivery; the decision is the step's outcome.
+    AdmitTriggerDelivery {
+        occurrence_id: String,
+        subscription_id: String,
+    },
     Process {
         command: Box<ProcessCommand>,
     },
@@ -432,6 +439,15 @@ pub enum RuntimeEffectCommand {
     InspectAdmittedHead {
         root: crate::TurnId,
         head: crate::store::AdmittedHead,
+    },
+    /// Decide a follow-on recovery root before its turn (FIG-4361): whether
+    /// the head still owes `follow_on`, and, from the recovery count
+    /// `attempts` its drive admission recorded, whether it runs under a
+    /// raised count or commits exhausted. The body raises the count; replay
+    /// serves the recorded answer and never reads the head.
+    RecoverFollowOn {
+        follow_on: crate::TurnId,
+        attempts: u32,
     },
     /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
@@ -500,12 +516,12 @@ pub enum RuntimeEffectCommand {
     /// call runs under (FIG-3538); every sync carries it, the protocol-start
     /// one included (FIG-3587).
     SyncExecutionEnvironment,
-    /// Read the execution environment a tool child's request records
-    /// (ADR 0099 §3, FIG-3683): a recorded step, so the store is read once
-    /// and every replay serves the recorded spec.
+    /// Validate and hold the environment a tool child's request names
+    /// (ADR 0099 §3, FIG-3683). The recorded outcome carries its digest,
+    /// whose immutable bytes the execution referrer keeps available to replay.
     ///
-    /// Only a deterministic answer is its outcome: the spec, or the refusal
-    /// of an environment the store holds but this build cannot reconstruct.
+    /// The outcome is that reference, or the refusal of an environment the
+    /// store holds but this build cannot reconstruct.
     /// A store that did not answer is a fault of this attempt, never the
     /// step's outcome: the executor marks it retryable (see
     /// [`RuntimeEffectControllerError::retryable_uncommitted_derivation`]),
@@ -585,11 +601,13 @@ impl RuntimeEffectCommand {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
@@ -619,10 +637,6 @@ pub enum ProcessCommand {
         registration: ProcessRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         observers: Vec<SessionId>,
-        /// Captured environment carried inside the journal admission and
-        /// persisted by the local executor before process registration.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         #[serde(
             default,
             skip_serializing_if = "boxed_process_execution_context_is_empty"
@@ -651,7 +665,8 @@ pub enum ProcessCommand {
     /// This is the command half of
     /// [`PendingResolver::ProcessTerminal`](crate::PendingResolver::ProcessTerminal).
     /// It returns as soon as the boundary has taken responsibility for the
-    /// resolution, so the turn that issued it goes on to park on `key` through
+    /// resolution. A terminal already observed is returned as
+    /// [`ProcessEffectOutcome::Await`]; otherwise the turn parks on `key` through
     /// the ordinary [`RuntimeEffectCommand::AwaitEvent`] path. Arming is
     /// idempotent: the same `(process_id, key)` may be armed on every redrive
     /// of the parked turn, and the first terminal to land resolves the wait
@@ -667,27 +682,21 @@ pub enum ProcessCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<crate::RuntimeReplayAttribution>,
     },
-    CancelRefused {
-        process_id: ProcessId,
-        origin: crate::CancelOrigin,
-        requester: String,
-        refusal: crate::PluginError,
-    },
+    /// Deliver one signal. The command carries the signal as it is
+    /// admitted, never an append request: the append key is derived from the
+    /// signal's identity at admission, so no caller can select another
+    /// (FIG-4299).
     Signal {
-        process_id: ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
+        signal: crate::ProcessSignal,
     },
     EmitEvent {
         process_id: ProcessId,
         request: crate::ProcessEventAppendRequest,
     },
-    /// The journaled CAS write a `PublishDefinition` intent realizes
-    /// through (FIG-3470): the intent resolves the pinned reference and its
-    /// compare-and-swap expectation first, then the durable write crosses the
-    /// runtime-effect seam like every other journaled admission, so a redrive
-    /// replays the same registration instead of issuing a second write.
+    /// The journaled immutable-definition publish: the descriptor write and
+    /// the referrer edges of its artifact closure cross the runtime-effect
+    /// seam like every other journaled admission, so a redrive replays the
+    /// recorded definition instead of writing a second one (ADR 0113 §3.6).
     PublishDefinition {
         draft: crate::ProcessDefinitionDraft,
         module: Option<crate::DeclaredModuleArtifact>,
@@ -695,18 +704,10 @@ pub enum ProcessCommand {
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
     },
-    RegisterDefinition {
-        owner_scope: crate::TriggerOwnerScope,
-        name: String,
-        /// The engine-resolved definition reference the row pins.
-        pinned: crate::ProcessDefinitionRef,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expectation: Option<crate::ProcessDefinitionExpectation>,
-    },
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 // justification: the decode shape mirrors ProcessCommand, whose Start payload is not boxed for the same reason.
 #[allow(clippy::large_enum_variant)]
 enum ProcessCommandDecode {
@@ -714,8 +715,6 @@ enum ProcessCommandDecode {
         registration: ProcessRegistration,
         #[serde(default)]
         observers: Vec<SessionId>,
-        #[serde(default)]
-        env_spec: Box<Option<crate::ProcessExecutionEnvSpec>>,
         #[serde(default)]
         execution_context: Box<ProcessExecutionContext>,
     },
@@ -746,17 +745,8 @@ enum ProcessCommandDecode {
         #[serde(default)]
         attribution: Option<crate::RuntimeReplayAttribution>,
     },
-    CancelRefused {
-        process_id: ProcessId,
-        origin: crate::CancelOrigin,
-        requester: String,
-        refusal: crate::PluginError,
-    },
     Signal {
-        process_id: ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
+        signal: crate::ProcessSignal,
     },
     EmitEvent {
         process_id: ProcessId,
@@ -768,13 +758,6 @@ enum ProcessCommandDecode {
     },
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
-    },
-    RegisterDefinition {
-        owner_scope: crate::TriggerOwnerScope,
-        name: String,
-        pinned: crate::ProcessDefinitionRef,
-        #[serde(default)]
-        expectation: Option<crate::ProcessDefinitionExpectation>,
     },
 }
 
@@ -797,12 +780,10 @@ impl<'de> Deserialize<'de> for ProcessCommand {
             ProcessCommandDecode::Start {
                 registration,
                 observers,
-                env_spec,
                 execution_context,
             } => Self::Start {
                 registration,
                 observers,
-                env_spec: *env_spec,
                 execution_context,
             },
             ProcessCommandDecode::List {
@@ -839,28 +820,7 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 requester,
                 attribution,
             },
-            ProcessCommandDecode::CancelRefused {
-                process_id,
-                origin,
-                requester,
-                refusal,
-            } => Self::CancelRefused {
-                process_id,
-                origin,
-                requester,
-                refusal,
-            },
-            ProcessCommandDecode::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                request,
-            } => Self::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                request,
-            },
+            ProcessCommandDecode::Signal { signal } => Self::Signal { signal },
             ProcessCommandDecode::EmitEvent {
                 process_id,
                 request,
@@ -874,17 +834,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
             ProcessCommandDecode::GetDefinition { definition_id } => {
                 Self::GetDefinition { definition_id }
             }
-            ProcessCommandDecode::RegisterDefinition {
-                owner_scope,
-                name,
-                pinned,
-                expectation,
-            } => Self::RegisterDefinition {
-                owner_scope,
-                name,
-                pinned,
-                expectation,
-            },
         })
     }
 }
@@ -978,15 +927,12 @@ impl ProcessCommand {
                 format!("process:attach-terminal:{process_id}:{}", key.key_id)
             }
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
-            Self::CancelRefused { process_id, .. } => {
-                format!("process:cancel:{process_id}")
-            }
-            Self::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                ..
-            } => format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}"),
+            Self::Signal { signal } => format!(
+                "process:signal:{}:signal.{}:{}",
+                signal.identity.process_id(),
+                signal.identity.signal_name(),
+                signal.identity.signal_id()
+            ),
             Self::EmitEvent {
                 process_id,
                 request,
@@ -1004,12 +950,6 @@ impl ProcessCommand {
             Self::GetDefinition { definition_id } => {
                 format!("process:get-definition:{definition_id}")
             }
-            Self::RegisterDefinition {
-                owner_scope, name, ..
-            } => format!(
-                "process:register-definition:{}:{name}",
-                owner_scope.namespace()
-            ),
         }
     }
 }
@@ -1047,9 +987,6 @@ pub enum ProcessEffectOutcome {
     Cancel {
         record: Box<ProcessRecord>,
     },
-    CancelRefused {
-        refusal: crate::PluginError,
-    },
     Signal {
         // Boxed for the same reason as the record variants: a fat event should
         // not size the outcome enum inline through the recursive executor.
@@ -1062,9 +999,6 @@ pub enum ProcessEffectOutcome {
     },
     Definition {
         definition: Box<crate::ProcessDefinition>,
-    },
-    RegisterDefinition {
-        registration: Box<crate::ProcessDefinitionRegistration>,
     },
 }
 
@@ -1268,6 +1202,12 @@ pub enum RuntimeEffectOutcome {
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
+    /// The admission an
+    /// [`AdmitTriggerDelivery`](RuntimeEffectCommand::AdmitTriggerDelivery)
+    /// recorded for its delivery.
+    AdmitTriggerDelivery {
+        admission: Box<crate::TriggerDeliveryAdmission>,
+    },
     Process {
         result: ProcessEffectOutcome,
     },
@@ -1286,6 +1226,11 @@ pub enum RuntimeEffectOutcome {
     },
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
+    },
+    /// A follow-on recovery root's recorded decision (FIG-4361), with the
+    /// head its turn runs on (FIG-4380).
+    RecoverFollowOn {
+        answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
     /// The drive admission's recorded verdict.
     AdmitDrive {
@@ -1337,11 +1282,10 @@ pub enum RuntimeEffectOutcome {
         /// P7b). Empty when the sync failed.
         tool_surface: Vec<crate::ToolDefinition>,
     },
-    /// The environment a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
-    /// step read, recorded so a replay executes under the same spec without
-    /// reading the store again.
+    /// The environment a load validated and acquired under its execution.
+    /// Replay resolves the same immutable bytes from this recorded digest.
     LoadExecutionEnv {
-        spec: Box<crate::ProcessExecutionEnvSpec>,
+        env: crate::ProcessExecutionEnvRef,
     },
     Sleep,
     AwaitEvent {
@@ -1673,6 +1617,20 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts the admission an emission recorded for one trigger delivery
+    /// (FIG-4297).
+    pub fn into_trigger_delivery_admission(
+        self,
+    ) -> Result<crate::TriggerDeliveryAdmission, RuntimeEffectControllerError> {
+        match self {
+            Self::AdmitTriggerDelivery { admission } => Ok(*admission),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::AdmitTriggerDelivery,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
@@ -1716,12 +1674,12 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// The execution environment a recorded load read.
-    pub fn into_execution_env(
+    /// The immutable environment a recorded load holds.
+    pub fn into_execution_env_ref(
         self,
-    ) -> Result<crate::ProcessExecutionEnvSpec, RuntimeEffectControllerError> {
+    ) -> Result<crate::ProcessExecutionEnvRef, RuntimeEffectControllerError> {
         match self {
-            Self::LoadExecutionEnv { spec } => Ok(*spec),
+            Self::LoadExecutionEnv { env } => Ok(env),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::LoadExecutionEnv,
                 other.kind(),
@@ -1780,11 +1738,13 @@ impl RuntimeEffectOutcome {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,

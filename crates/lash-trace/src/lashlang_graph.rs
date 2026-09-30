@@ -18,7 +18,7 @@ use crate::{
 mod model;
 pub use model::*;
 
-/// In-memory store backed by the same pure fold exposed to hosts.
+/// Process-local graph accumulator backed by the same pure fold exposed to hosts.
 #[derive(Default)]
 pub struct TraceLashlangGraphStore {
     inner: Mutex<BTreeMap<String, TraceLashlangGraph>>,

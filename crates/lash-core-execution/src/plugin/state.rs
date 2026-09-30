@@ -13,7 +13,7 @@ const VALUE_LIMIT: usize = 32 * 1024;
 const STORE_LIMIT: usize = 128 * 1024;
 
 /// A deterministic rejection of a plugin-state key.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum KeyRejection {
     #[error("empty key")]
     Empty,
@@ -24,7 +24,8 @@ pub enum KeyRejection {
 }
 
 /// Rejections are atomic: neither values nor generation change.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginStateError {
     #[error("invalid key `{key}`: {reason}")]
     InvalidKey { key: String, reason: KeyRejection },
@@ -36,23 +37,25 @@ pub enum PluginStateError {
     },
     #[error("store is {bytes} bytes, limit {limit}")]
     StoreTooLarge { bytes: usize, limit: usize },
-    #[error("cannot encode `{key}`: {source}")]
-    Encode {
-        key: String,
-        source: serde_json::Error,
-    },
-    #[error("cannot decode `{key}`: {source}")]
-    Decode {
-        key: String,
-        source: serde_json::Error,
-    },
+    #[error("cannot encode `{key}`: {message}")]
+    Encode { key: String, message: String },
+    #[error("cannot decode `{key}`: {message}")]
+    Decode { key: String, message: String },
     #[error("generation conflict: expected {expected}, actual {actual}")]
     GenerationConflict { expected: u64, actual: u64 },
 }
 
 impl From<PluginStateError> for super::PluginError {
     fn from(error: PluginStateError) -> Self {
-        Self::Session(error.to_string())
+        Self::State(error)
+    }
+}
+
+impl PluginStateError {
+    /// Validation and codec refusals are permanent for the same input.
+    /// A generation conflict requires re-reading state and choosing a new edit.
+    pub fn is_terminal(&self) -> bool {
+        !matches!(self, Self::GenerationConflict { .. })
     }
 }
 
@@ -129,7 +132,7 @@ impl PluginStateStore {
             .map(|value| {
                 serde_json::from_value(value).map_err(|source| PluginStateError::Decode {
                     key: key.into(),
-                    source,
+                    message: source.to_string(),
                 })
             })
             .transpose()
@@ -151,7 +154,7 @@ impl PluginStateStore {
         validate_key(key)?;
         let value = serde_json::to_value(value).map_err(|source| PluginStateError::Encode {
             key: key.into(),
-            source,
+            message: source.to_string(),
         })?;
         self.set(key, value)
     }

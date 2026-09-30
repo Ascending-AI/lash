@@ -80,8 +80,6 @@ macro_rules! runtime_store_operations {
                 [session] fn load_session_window(&self, session_id: &SessionId, selector: WindowSelector) -> Result<Option<SessionWindowRead>, StoreError>;
                 [session] fn load_ancestors(&self, session_id: &SessionId, anchor: HistoryAnchor, budget: HistoryBudget) -> Result<HistoryPage, StoreError>;
                 [session] fn contains_active_ancestor(&self, session_id: &SessionId, node_id: &crate::NodeId) -> Result<bool, StoreError>;
-                [session] fn load_usage_totals(&self, session_id: &SessionId) -> Result<crate::usage::SessionUsageTotals, StoreError>;
-                [session] fn load_usage_ledger_page(&self, session_id: &SessionId, after: Option<&UsageLedgerCursor>, limit: NonZeroU32) -> Result<UsageLedgerPage, StoreError>;
                 [session] fn load_failure_evidence_page(&self, session_id: &SessionId, after: Option<&FailureEvidenceCursor>, limit: NonZeroU32) -> Result<FailureEvidencePage, StoreError>;
             }
             TurnInputStore {
@@ -126,7 +124,8 @@ macro_rules! runtime_store_operations {
                 [carried request] fn admit_root(&self, request: &AdmitRootRequest) -> Result<Option<RootAdmission>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 [session] fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
-                [carried fence] fn end_refused_root(&self, fence: &DriveFence, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RefusedRootEnd, StoreError>;
+                [carried fence] fn end_refused_root(&self, fence: &DriveFence, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RootEnd, StoreError>;
+                [carried fence] fn end_command_root(&self, fence: &DriveFence, root: &crate::TurnId, at_ms: u64) -> Result<RootEnd, StoreError>;
                 [session] fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn bound_turn_scopes(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
@@ -393,12 +392,13 @@ where
     T: RuntimeStoreDecorator + ?Sized,
     T::Inner: crate::attachments::AttachmentRootSet,
 {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, StoreError> {
-        self.inner().live_attachment_refs().await
+        source: crate::attachments::AttachmentRootSource,
+        after: Option<&crate::AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, StoreError> {
+        self.inner().attachment_root_page(source, after).await
     }
-
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
         self.inner().list_condemnations().await
     }

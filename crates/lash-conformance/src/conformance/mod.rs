@@ -37,8 +37,11 @@ mod artifact_referrers;
 mod artifact_store;
 mod attachment_referrers;
 pub use attachment_referrers::*;
+mod attachment_read_budgets;
 mod attachment_store;
+pub use attachment_read_budgets::*;
 mod await_event_cold;
+mod bound_trigger_duplicate;
 mod law_backend;
 pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
 pub use law_backend::{backend_over, recording_backend_over};
@@ -48,6 +51,7 @@ mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
 mod completion_routing;
 mod declared_start;
+mod definitions;
 mod deployment_view;
 mod direct_turn_acceptance;
 use deployment_view::DeploymentViewExt;
@@ -72,7 +76,6 @@ mod presentation_divergence_park;
 mod process_change_feed;
 mod process_change_horizon;
 mod process_continuation_store;
-mod process_definitions;
 mod process_event_append_arms;
 mod process_event_batch;
 mod process_filters;
@@ -119,6 +122,7 @@ pub use turn_commit_outcome::{
     failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
 };
 mod batch_sugar;
+mod recorded_batch;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -155,6 +159,7 @@ pub use cancelled_turn_withheld_input::*;
 pub use cell_binding_drift::*;
 pub use completion_routing::*;
 pub use declared_start::{DeclaredStartTier, SubagentPlugin};
+pub use definitions::*;
 pub use direct_turn_acceptance::*;
 pub use drive_admission::*;
 pub use effect_group_host::*;
@@ -175,7 +180,6 @@ pub use plugin_state::plugin_state_boundary_trace;
 pub use presentation_divergence_park::*;
 pub use process_change_horizon::*;
 pub use process_continuation_store::*;
-pub use process_definitions::*;
 pub use process_park_feed::*;
 pub use process_prune_reclaim::*;
 pub use process_prune_start_staging::*;
@@ -216,3 +220,22 @@ pub use turn_crash_matrix::*;
 pub use turn_park_feed::*;
 pub use turn_runner::*;
 pub use wake_delivery::*;
+
+mod worker_recovery;
+pub use worker_recovery::*;
+
+pub mod usage_ledger;
+pub use usage_ledger::{UsageLedgerSnapshot, UsageLedgerStoreFixture};
+mod usage_accounting;
+pub use usage_accounting::{
+    NoContinuationFaults, UsageAccountingTier, UsageContinuationFaults, UsageCrashEnding,
+    UsageCrashPoint, a_settlement_retried_after_its_projection_counts_once,
+    committed_turn_totals_are_preserved,
+    each_paid_attempt_counts_once_under_any_boundary_grouping_and_replay, usage_crash_cell,
+    usage_crash_p1_committed_cancelled, usage_crash_p1_committed_completed,
+    usage_crash_p1_committed_failed, usage_crash_p1_forked, usage_crash_p1_parked_forever,
+    usage_crash_p1_session_deleted, usage_crash_p2_committed_cancelled,
+    usage_crash_p2_committed_completed, usage_crash_p2_committed_failed, usage_crash_p2_forked,
+    usage_crash_p2_parked_forever, usage_crash_p2_session_deleted,
+    usage_of_an_unfinished_root_is_read_without_driving,
+};

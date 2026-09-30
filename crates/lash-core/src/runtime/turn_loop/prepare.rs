@@ -156,7 +156,6 @@ impl LashRuntime {
                         turn_pipeline,
                         recorded_assembly,
                         new_messages: messages,
-                        policy: self.state.effective_policy().clone(),
                         turn_index,
                         trace_turn_id,
                     },

@@ -1,82 +1,66 @@
-# 0083 — RLM channels are pinned when a session materializes
-
-Date: 2026-09-08
-
-## Status
-
-Accepted
+# 0083: RLM channels are pinned when a session materializes
 
 ## Context
 
-[FIG-2164](https://linear.app/ascending-ai/issue/FIG-2164) compares provider-native
-code calls with paired dialect cells. Both execute against the same persistent
-heap, tool catalog, execution checkpoint and finish contract. Their transport
-histories require different ownership and projection rules.
+Cell transport and provider-native code calls execute against the same persistent
+heap, catalog, checkpoints, and finish contract. Their model histories need
+different projection and response-admission rules.
 
 ## Decision
 
-`RlmProtocolPluginConfig.channel` selects `RlmChannel::Cell` or
-`RlmChannel::NativeTool`. Materialization records `channel` in the durable protocol
-turn options. Rematerialization requires that recorded pin
-and refuses substitution with `RecordedSessionConfigConflict`; missing pins are
-refused with `MissingRecordedSessionConfig`. There is no fallback or migration.
-Hosts select the channel before opening sessions. Workbench uses
-`LASH_RLM_CHANNEL=cell|native`; toolbench uses `--channel cell|native`.
+`RlmProtocolPluginConfig.channel` explicitly selects `Cell` or `NativeTool`.
+Materialization records that channel in durable protocol options. Rebuilding
+requires the pin: substitution returns `RecordedSessionConfigConflict`, and
+absence returns `MissingRecordedSessionConfig`. Channel selection does not infer
+compatibility or translate one transport's history into another.
 
-The native ABI is one `execute_code` tool, auto choice, with exactly one required
-string property `code` and no additional properties. `finish` remains inside the
-program. More than one call executes nothing and returns identical repair text
-for every distinct call id, consuming one no-progress attempt. Unknown tools,
-invalid JSON and missing/empty code have distinct repair decisions. The separate
-duplicate-id repair decision is historical, superseded by
-[ADR 0117](0117-lash-names-every-tool-call.md): shared response assembly
-normalizes missing, blank and duplicate provider ids before native admission.
-Native normalization checks tool arity and schema on those normalized calls.
+Native transport advertises one `execute_code` tool with exactly one required,
+nonempty string property `code` and no additional properties. Tool choice is
+auto. `finish` executes inside the program. More than one call executes nothing
+and supplies repair text, consuming a stalled attempt. Unknown tools, invalid
+JSON, missing code, and extra properties receive their own repair decisions.
+Shared response assembly normalizes provider call ids under ADR 0117 before
+native admission checks arity and arguments.
 
-Execution, finish-schema validation, semantic trajectory, catalog, control tools,
-bound variables and checkpoint identity are shared. Drivers, history projectors,
-response normalization and transport prompts are separate implementations.
-The existing cell observation renderer supplies the native tool-result bytes.
-Native parked-driver state uses format version 2 after removing unused prose and
-strictly refuses other versions; the shared executor snapshot format is unchanged. Ordered assistant
-Parts, including provider ids and opaque replay metadata, live
-in version-1 `native_transport` diagnostic envelopes keyed by semantic step id.
-Transport decoding tolerates the original unstamped shape, refuses newer versions,
-and surfaces malformed bindings as projection degradation without panicking. The native
-projector emits each call and its result together; terminal suppression and
-failure scrubbing remove complete exchanges. Provider signatures are never
-reconstructed. Existing `lashlang:` and `lashlang_step_*` durable identities stay.
+Both channels share execution, finish-schema validation, semantic trajectory,
+control tools, bindings, and checkpoint identity. Drivers, projectors, response
+normalization, and transport prompt copy are channel-specific. Native results
+use the common observation renderer.
 
-A nonempty prose-only response ends a Natural turn. FinishRequired requests
-`finish`; finish values, schema mismatch and execution errors follow the cell
-adjudication contract. Empty native responses, including reasoning-only, stop
-with ProviderError. The frozen cell driver currently adjudicates nonempty
-reasoning-only responses: parity tests cover truly empty responses, and a
-native-only test pins the clarified reasoning-only rule. Changing that cell
-behavior requires a separate contract change.
+Ordered assistant parts and opaque replay metadata travel in `native_transport`
+envelopes keyed by semantic step. The projector retains complete call/result
+exchanges. Terminal suppression and failure scrubbing remove complete exchanges;
+it cannot reconstruct provider signatures from semantic history. A semantic-only
+frame seed is user context, rather than permission to invent provider calls.
 
-Completed native code calls emit the dialect's existing cell-start and cell-end
-runtime events once. No argument deltas or stream-mask hooks are installed.
+Native parked-driver and transport data use their declared format guards and
+fleet read windows. Durable formats follow ADRs 0106 and 0115; current version
+identities live in the format registry.
+
+A nonempty prose-only native response ends a Natural turn. FinishRequired
+requests `finish`. Empty or reasoning-only native responses produce a provider
+error. Finish values, schema mismatch, and execution errors use the common cell
+adjudication contract. Completed code executions emit the shared cell-start and
+cell-end observations.
+
+## Alternatives considered
+
+Treating native exchanges as ordinary cell text loses provider-owned transport
+metadata. Reconstructing calls from semantic seeds invents replay authority.
+Accepting serial or parallel multiple native code calls complicates the one
+execution response contract; one code program can express the work explicitly.
 
 ## Consequences and non-goals
 
-Both channels remain first-class pending measurement. Toolbench pairs identical
-model strings, route, dialect and budgets in randomized order, preflights native
-support, and records per-attempt decisions, billed retry/cache usage and timings.
-The complete benchmark and recommendation are follow-ups.
+Both channels are selectable and durable. Native admission enforces one call
+independently of the provider's parallel-call setting, which follows ADR 0121.
+Live code streaming and serial multi-call execution are outside this contract.
+Transport-specific history remains distinct from common execution state.
 
-Live code streaming and serial multi-call execution are non-goals. The original
-absence of a parallel-call option is historical: provider generation options
-expose `parallel_tool_calls`, governed by
-[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md).
-Native arity is enforced by normalization independently of that option or
-provider behavior. Semantic-only frame seeds
-render as user context; they do not authorize reconstruction of provider calls.
+## Code references
 
-## Amendment (FIG-4163, 2026-09-30)
-
-ADR 0117 moves provider-id normalization upstream, and ADR 0121 governs the parallel-call generation option; the native single-code-call contract survives.
-[Response assembly](../../crates/lash-core/src/runtime/assembly.rs),
-[native normalization](../../crates/lash-protocol-rlm/src/native/tool.rs), and
-[provider generation options](../../crates/lash-core-llm/src/provider/options.rs)
-define these boundaries.
+- `crates/lash-protocol-rlm/src/plugin/channel.rs:36-78` records and validates the pin.
+- `crates/lash-protocol-rlm/src/native/tool.rs:5-118` defines and admits the native ABI.
+- `crates/lash-protocol-rlm/src/native/driver.rs` adjudicates responses and executions.
+- `crates/lash-protocol-rlm/src/native/projector.rs` projects complete exchanges.
+- `crates/lash-protocol-rlm/src/native/transport.rs` owns transport envelopes.

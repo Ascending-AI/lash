@@ -272,13 +272,6 @@
     "peak_bytes": 18309120,
     "samples": 3
   },
-  "//crates/lash-protocol-rlm:test_batch": {
-    "cpu_count": 3,
-    "memory_kb": 1572864,
-    "p95_cores": 1.48,
-    "peak_bytes": 287657984,
-    "samples": 17
-  },
   "//crates/lash-protocol-rlm:tool_batch_parallelism__test": {
     "cpu_count": 2,
     "memory_kb": 1048576,
@@ -566,13 +559,6 @@
     "peak_bytes": 32604160,
     "samples": 24
   },
-  "//crates/lash-sim:test_batch": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.31,
-    "peak_bytes": 149598208,
-    "samples": 28
-  },
   "//crates/lash-sqlite-store:conformance__test": {
     "cpu_count": 3,
     "memory_kb": 1048576,
@@ -614,13 +600,6 @@
     "p95_cores": 0.0,
     "peak_bytes": 18137088,
     "samples": 3
-  },
-  "//crates/lash-sqlite-store:test_batch": {
-    "cpu_count": 4,
-    "memory_kb": 1572864,
-    "p95_cores": 3.99,
-    "peak_bytes": 157982720,
-    "samples": 18
   },
   "//crates/lash-store-sql:lash-store-sql__unit_test": {
     "cpu_count": 1,
@@ -747,13 +726,6 @@
     "p95_cores": 0.0,
     "peak_bytes": 13598720,
     "samples": 3
-  },
-  "//crates/lash:test_batch": {
-    "cpu_count": 4,
-    "memory_kb": 1048576,
-    "p95_cores": 3.74,
-    "peak_bytes": 119910400,
-    "samples": 24
   },
   "//crates/lash:triggers_evidence__test": {
     "cpu_count": 1,

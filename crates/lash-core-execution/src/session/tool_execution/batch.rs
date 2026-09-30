@@ -252,10 +252,11 @@ impl RuntimeExecutionContext<'_> {
                 .map(|leaf| PreparedGroupChild::Tool(Box::new(leaf)))
                 .collect::<Vec<_>>();
             let consumer = ToolAggregateConsumer::AllSettled;
+            let group_key = self.tool_child_group_key(&batch_id);
             let handle = match self
                 .open_tool_child_group(
                     group_invocation,
-                    self.tool_child_group_key(&batch_id),
+                    group_key.clone(),
                     &batch_id,
                     &leaves,
                     consumer.wake(),
@@ -296,6 +297,18 @@ impl RuntimeExecutionContext<'_> {
                     return fail_batch(error.to_string(), &mut replies);
                 }
             };
+            // A cancelled consumer answers with its consumed prefix; every
+            // other reply is its member's durable final (ADR 0116 §2.6).
+            if settled.cancelled
+                && let Err(error) = self
+                    .present_cancelled_tool_group(&group_key, &leaves, &mut settled)
+                    .await
+            {
+                if !error.journaled {
+                    self.record_nested_effect_error(error.clone());
+                }
+                return fail_batch(error.to_string(), &mut replies);
+            }
             // The group reports settlement in child positions; the caller
             // counts in original call positions. Dropping an out-of-range
             // position and back-filling the gap would turn any malformed order

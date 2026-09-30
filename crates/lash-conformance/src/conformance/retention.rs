@@ -21,17 +21,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
-    let usage = crate::TokenLedgerEntry {
-        source: "retention".into(),
-        model: "retention-model".into(),
-        usage: crate::TokenUsage {
-            input_tokens: 7,
-            output_tokens: 3,
-            ..Default::default()
-        },
-        usage_disposition: Default::default(),
-    };
-    let commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[usage]);
+    let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     let receipt = store.commit_runtime_state(commit.clone()).await.unwrap();
     assert!(!receipt.receipt_replayed);
     let committed_at_ms = factory
@@ -58,13 +48,6 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         .expect("pre-terminal prune must never turn replay into conflict");
     assert!(replay.receipt_replayed);
     assert_eq!(replay.head_revision, receipt.head_revision);
-    assert_eq!(
-        crate::conformance::helpers::load_usage_ledger(store.store().as_ref(), store.session_id())
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
 
     // Another live scope is a negative control for the factory-wide sweep.
     let live_request = session_store_request(
@@ -78,7 +61,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         ..crate::RuntimeSessionState::new(live_request.config.session_policy())
     };
     live_state.ensure_agent_frame_initialized();
-    let live_commit = crate::RuntimeCommit::persisted_state_for_test(&live_state, &[]);
+    let live_commit = crate::RuntimeCommit::persisted_state_for_test(&live_state);
     live.commit_runtime_state(live_commit.clone())
         .await
         .unwrap();
@@ -107,9 +90,8 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         .await
         .unwrap();
     assert_eq!(report.removed_receipt_count, 1);
-    assert_eq!(report.removed_usage_delta_count, 1);
     assert_eq!(report.removed_attachment_root_count, 0);
-    assert_eq!(crate::MaintenanceReport::reclaimed_count(&report), 2);
+    assert_eq!(crate::MaintenanceReport::reclaimed_count(&report), 1);
     assert!(
         matches!(
             store.commit_runtime_state(commit).await,

@@ -19,14 +19,31 @@ fn host_claim() -> lash_core::ReferrerClaim {
     ))
     .expect("unguarded host pin")
 }
+fn compile_fixture(
+    source: &str,
+    program: lashlang::Program,
+    environment: &LashlangHostEnvironment,
+) -> lash_vm_client::service::CompiledModule {
+    match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileAst {
+            source: source.to_owned(),
+            program,
+            environment: environment.clone(),
+        })
+        .expect("compile fixture in worker")
+    {
+        lash_vm_client::service::Response::Module(module) => *module,
+        response => panic!("worker refused fixture: {response:?}"),
+    }
+}
 pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(
     store: Arc<dyn lash_core::ModuleArtifactStore>,
 ) {
     let store = LashlangArtifacts::new(store);
     let environment = LashlangHostEnvironment::default();
-    let handler = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "nested handler",
-        program: process_module(
+    let handler = compile_fixture(
+        "nested handler",
+        process_module(
             "handler",
             vec![
                 b::param("event", lashlang::TypeExpr::Str),
@@ -35,9 +52,8 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
             lashlang::TypeExpr::Bool,
             b::bool_lit(true),
         ),
-        environment: &environment,
-    })
-    .expect("compile immutable handler");
+        &environment,
+    );
     let process_type = b::process_type(
         vec![
             b::param("event", lashlang::TypeExpr::Str),
@@ -45,9 +61,9 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
         ],
         lashlang::TypeExpr::Bool,
     );
-    let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "nested union receiver",
-        program: process_module(
+    let receiver = compile_fixture(
+        "nested union receiver",
+        process_module(
             "install",
             vec![b::param(
                 "envelope",
@@ -63,19 +79,19 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
             lashlang::TypeExpr::Bool,
             b::bool_lit(true),
         ),
-        environment: &environment,
-    })
-    .expect("compile receiver");
+        &environment,
+    );
     for artifact in [&handler.artifact, &receiver.artifact] {
         store
             .publish_module_artifact(&host_claim(), artifact)
             .await
             .expect("publish artifact");
     }
-    let valid =
-        lashlang::ProcessDefinitionIdentity::from_artifact_export(&handler.artifact, "handler")
-            .expect("handler identity")
-            .to_process_value();
+    let valid = handler
+        .artifact
+        .definition_identity("handler")
+        .expect("handler identity")
+        .to_process_value();
     let start = |value| {
         let mut args = lashlang::Record::new();
         args.insert(
@@ -113,6 +129,7 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
     };
     let artifacts: LashlangArtifacts = store;
     prepare_lashlang_process_start(
+        &lash_vm_client::service::Service::default(),
         artifacts.clone(),
         None,
         start(valid.clone()),
@@ -125,6 +142,7 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
         let mut forged = valid.clone();
         forged[field] = serde_json::json!("forged-alias");
         let error = prepare_lashlang_process_start(
+            &lash_vm_client::service::Service::default(),
             artifacts.clone(),
             None,
             start(forged),

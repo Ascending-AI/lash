@@ -1,117 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let usage = |input_tokens| TokenLedgerEntry {
-        source: "ordinal-reuse".to_string(),
-        model: "usage-model".to_string(),
-        usage: crate::TokenUsage {
-            input_tokens,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 0,
-        },
-        usage_disposition: Default::default(),
-    };
-    let first_usage = usage(11);
-    let later_usage = usage(29);
-    let nodes = vec![crate::SessionAppendNode::plugin(
-        "usage-ordinal-reuse",
-        serde_json::json!({"append": "A"}),
-    )];
-    let mut initial_state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-
-    // U1 is confirmed under append operation A at ordinal zero.
-    let (mut first_append, _) =
-        append_request_commit(&mut initial_state, "usage-ordinal-reuse-a", &nodes, None);
-    first_append.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
-        &first_append.turn_commit.operation,
-        std::slice::from_ref(&first_usage),
-    )
-    .expect("identify first usage row");
-    let first_identity = first_append.usage_deltas[0].identity.clone();
-    let first_result =
-        commit_runtime_state_for_test(&store, first_append, "usage-ordinal-reuse-first")
-            .await
-            .expect("commit append A with U1");
-    assert_eq!(
-        first_result.committed_usage_delta_identities,
-        vec![first_identity.clone()]
-    );
-
-    // U2 is recorded after U1 confirmation. Replaying A reuses ordinal zero,
-    // but its content-bound full identity is distinct.
-    let mut retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
-    let (mut replay_append, _) =
-        append_request_commit(&mut retry_state, "usage-ordinal-reuse-a", &nodes, None);
-    replay_append.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
-        &replay_append.turn_commit.operation,
-        std::slice::from_ref(&later_usage),
-    )
-    .expect("identify later usage row");
-    let later_delta = replay_append.usage_deltas[0].clone();
-    assert_eq!(
-        later_delta.identity.operation_storage_key,
-        first_identity.operation_storage_key
-    );
-    assert_eq!(
-        later_delta.identity.entry_ordinal,
-        first_identity.entry_ordinal
-    );
-    assert_ne!(
-        later_delta.identity.payload_hash,
-        first_identity.payload_hash
-    );
-
-    let replay = commit_runtime_state_for_test(&store, replay_append, "usage-ordinal-reuse-replay")
-        .await
-        .expect("replay append A with U2 staged");
-    assert!(replay.receipt_replayed);
-    assert_eq!(
-        replay.committed_usage_delta_identities,
-        vec![first_identity]
-    );
-    assert!(
-        !replay
-            .committed_usage_delta_identities
-            .contains(&later_delta.identity),
-        "receipt replay must not confirm a different payload at the reused ordinal"
-    );
-
-    // The caller therefore retains U2 and publishes it on the next natural
-    // commit. Both full identities must be durable exactly once.
-    let mut natural_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
-    let mut natural_commit = RuntimeCommit::persisted_state_for_test(&natural_state, &[]);
-    natural_commit.usage_deltas = vec![later_delta.clone()];
-    let natural =
-        commit_runtime_state_for_test(&store, natural_commit, "usage-ordinal-reuse-natural")
-            .await
-            .expect("publish U2 on next natural commit");
-    assert_eq!(
-        natural.committed_usage_delta_identities,
-        vec![later_delta.identity]
-    );
-
-    natural_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
-    let durable = natural_state
-        .usage
-        .rows
-        .iter()
-        .find(|row| row.source == "ordinal-reuse" && row.model == "usage-model")
-        .expect("merged U1 and U2 are durable");
-    assert_eq!(durable.usage.input_tokens, 40);
-}
-
 /// The committed-turn fact the parent-end recovery sweep reads.
 ///
 /// A turn's parent-end ledger row is written to the process registry right
@@ -141,7 +30,7 @@ pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
         "root",
         committed.as_str(),
@@ -209,13 +98,9 @@ pub(super) fn append_request_commit(
         .map(|(_, derived)| derived.clone())
         .collect::<Vec<_>>();
     let requested_ids = persisted[persisted.len().saturating_sub(requested_node_count)..].to_vec();
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("build append request commit");
+    let mut commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(state, graph, operation)
+            .expect("build append request commit");
     commit.turn_commit = stamp;
     (commit, requested_ids)
 }
@@ -474,10 +359,9 @@ pub async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Ru
 
 /// Adopted FIG-2480 semantic-boundary operations, paired with a distinct
 /// boundary id so each iteration owns its own receipt row.
-const SEMANTIC_BOUNDARY_OPERATIONS: [(&str, &str); 3] = [
+const SEMANTIC_BOUNDARY_OPERATIONS: [(&str, &str); 2] = [
     ("record-config", "protocol-materialization"),
     ("create-session", "semantic-child"),
-    ("usage-ledger", "semantic-child-turn"),
 ];
 
 #[expect(
@@ -494,8 +378,7 @@ pub(super) fn semantic_boundary_commit(
         boundary_id,
         operation_key,
     );
-    let mut commit =
-        RuntimeCommit::persisted_state_with_operation_for_testing(state, &[], operation);
+    let mut commit = RuntimeCommit::persisted_state_with_operation_for_testing(state, operation);
     commit
         .stamp_semantic_boundary()
         .expect("stamp semantic-boundary receipt identity");
@@ -579,7 +462,7 @@ pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn Ru
             key,
         );
         let mut changed =
-            RuntimeCommit::persisted_state_with_operation_for_testing(&retry_state, &[], operation);
+            RuntimeCommit::persisted_state_with_operation_for_testing(&retry_state, operation);
         changed.config.provider_id = format!("changed-{key}");
         changed
             .stamp_semantic_boundary()
@@ -624,11 +507,8 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dy
             boundary,
             key,
         );
-        let mut appendish = RuntimeCommit::persisted_state_with_operation_for_testing(
-            &state,
-            &[],
-            operation.clone(),
-        );
+        let mut appendish =
+            RuntimeCommit::persisted_state_with_operation_for_testing(&state, operation.clone());
         appendish.turn_commit.append_request_identity = lash_core::AppendRequestIdentity::Append {
             encoding_version: 1,
             request_hash: "mislabeled-append".into(),
@@ -664,9 +544,6 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dy
                 lash_core::SemanticBoundaryOperation::CreateSession
             }
             lash_core::SemanticBoundaryOperation::CreateSession => {
-                lash_core::SemanticBoundaryOperation::UsageLedger
-            }
-            lash_core::SemanticBoundaryOperation::UsageLedger => {
                 lash_core::SemanticBoundaryOperation::RecordConfig
             }
         };
@@ -701,8 +578,7 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dy
         "semantic-park",
         "initial-park",
     );
-    let mut park =
-        RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    let mut park = RuntimeCommit::persisted_state_with_operation_for_testing(&state, operation);
     park.turn_commit.append_request_identity = lash_core::AppendRequestIdentity::SemanticBoundary {
         operation: lash_core::SemanticBoundaryOperation::RecordConfig,
         encoding_version: 1,
@@ -1073,6 +949,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
     let _failing_lease =
         seal_drive_fence_for_test(&store, &SessionId::from("root"), "atomic-append-failing").await;

@@ -18,7 +18,9 @@ use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::runtime::logical_turn::{LogicalTurnAdmissions, LogicalTurnStart};
 use crate::runtime::turn_loop::TurnStopwatch;
-use crate::store::{AdmittedHead, RootAdmissionAnswer, RootAdmissionRefusal};
+use crate::store::{
+    AdmittedHead, FollowOnRecoveryAnswer, RootAdmissionAnswer, RootAdmissionRefusal,
+};
 use crate::{
     RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError, TurnId, TurnInput,
 };
@@ -27,6 +29,11 @@ use lash_core_execution::runtime::effect::AdmittedHeadVerdict;
 impl LashRuntime {
     /// Admit the turn-lane run `admitted` is headed by and drive it as the
     /// root's logical turn, under the drive fence the root's seal raised.
+    /// The admission records `executor`, the execution that runs the root.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the root's admission takes the drive fence and its executor from the drive path that runs it, beside the head, sinks and live input the turn needs"
+    )]
     pub(super) async fn run_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -35,6 +42,7 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
         fence: &crate::store::DriveFence,
+        executor: crate::store::RootExecutor,
     ) -> Result<RootRun, DriveAbort> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let root = admitted.root().clone();
@@ -42,75 +50,78 @@ impl LashRuntime {
         let store = self.drive_store()?;
         // The admission records the head and the turn index, so the resident
         // head is brought current first; a replay reads both from the journal
-        // instead (FIG-3682).
-        self.refresh_resident_head().await.map_err(abort)?;
-        let admit_invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                root_controller.execution_scope().clone(),
-                // Keyed by the root, never by the drive admission: a later
-                // admission of the same root replays the admission its first
-                // execution recorded, so the root drives exactly the rows its
-                // journal was written for.
-                format!("drive-admit:{root}"),
-            )
-            .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            crate::RuntimeAttribution::for_turn_admission(
-                self.state.session_id.clone(),
-                root.clone(),
-            ),
-            format!("{root}.drive-admit"),
-        );
-        let answer = root_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    admit_invocation,
-                    crate::RuntimeEffectCommand::AdmitRoot { head: head.clone() },
-                ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(AdmitRootRunner {
-                        store: store.clone(),
-                        effect_host: Arc::clone(&self.host.core.control.effect_host),
-                        scope: root_controller.admitted_scope().clone(),
-                        fence: fence.clone(),
-                        head: head.clone(),
-                        root: root.clone(),
-                        max_inputs: self
-                            .host
-                            .core
-                            .durability
-                            .queued_work_batching
-                            .max_turn_input_admission(),
-                        policy: self
-                            .host
-                            .core
-                            .durability
-                            .queued_work_batching
-                            .admission_policy(self.max_context_tokens()),
-                        base: crate::store::SessionHeadRef {
-                            // Read by the admission body on its first execution.
-                            generation: 0,
-                            revision: self.state.head_revision,
-                            leaf: self.state.session_graph.leaf_node_id.clone(),
-                            checkpoint: self.state.checkpoint_ref.clone(),
-                        },
-                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                        turn_index: self.state.turn_index + 1,
-                        generation: crate::runtime::turn_loop::generation_fence::current(self),
-                        admitted_generation: admitted.admitted_generation().clone(),
-                        trace: AdmissionTrace {
-                            sink: self.host.core.tracing.trace_sink.clone(),
-                            base: self.host.core.tracing.trace_context.clone(),
-                            clock: Arc::clone(&self.host.core.clock),
-                            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                            turn_index: self.state.turn_index + 1,
-                        },
-                    }),
-                    None,
-                ),
+        // instead (FIG-3682). The refresh reads the live session outside any
+        // recorded step, so its outcome must never decide what the root
+        // journals (FIG-4346): a refresh that failed, a deleted session's
+        // among them, leaves the drive no head to admit on, and the root
+        // issues the same recorded steps headless, whose bodies answer only
+        // why ([`run_headless_root`]).
+        if let Err(fault) = self.refresh_resident_head().await {
+            return run_headless_root(
+                root_controller,
+                admitted,
+                head,
+                HeadlessRoot::Unrefreshed {
+                    catalog: self.host.core.session_store_factory(),
+                    fault,
+                },
             )
             .await
-            .and_then(crate::RuntimeEffectOutcome::into_root_admission)
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
+            .map(|outcome| RootRun {
+                outcome,
+                run: None,
+                driven_inputs: Vec::new(),
+                empty_drain: None,
+            });
+        }
+        let answer = execute_root_admission(
+            root_controller,
+            admitted,
+            head,
+            crate::RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(AdmitRootRunner {
+                    store: store.clone(),
+                    effect_host: Arc::clone(&self.host.core.control.effect_host),
+                    scope: root_controller.admitted_scope().clone(),
+                    fence: fence.clone(),
+                    head: head.clone(),
+                    root: root.clone(),
+                    max_inputs: self
+                        .host
+                        .core
+                        .durability
+                        .queued_work_batching
+                        .max_turn_input_admission(),
+                    policy: self
+                        .host
+                        .core
+                        .durability
+                        .queued_work_batching
+                        .admission_policy(self.max_context_tokens()),
+                    base: crate::store::SessionHeadRef {
+                        // Read by the admission body on its first execution.
+                        generation: 0,
+                        revision: self.state.head_revision,
+                        leaf: self.state.session_graph.leaf_node_id.clone(),
+                        checkpoint: self.state.checkpoint_ref.clone(),
+                    },
+                    // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                    turn_index: self.state.turn_index + 1,
+                    generation: crate::runtime::turn_loop::generation_fence::current(self),
+                    admitted_generation: admitted.admitted_generation().clone(),
+                    executor,
+                    trace: AdmissionTrace {
+                        sink: self.host.core.tracing.trace_sink.clone(),
+                        base: self.host.core.tracing.trace_context.clone(),
+                        clock: Arc::clone(&self.host.core.clock),
+                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                        turn_index: self.state.turn_index + 1,
+                    },
+                }),
+                None,
+            ),
+        )
+        .await?;
         let admission = match answer {
             Ok(RootAdmissionAnswer::Admitted { admission }) => {
                 let live = ResidentHead {
@@ -118,48 +129,23 @@ impl LashRuntime {
                     leaf: self.state.session_graph.leaf_node_id.clone(),
                     checkpoint: self.state.checkpoint_ref.clone(),
                 };
-                let inspection = crate::RuntimeEffectInvocation::new(
-                    crate::EffectAddress::new(
-                        root_controller.execution_scope().clone(),
-                        format!("drive-head:{root}"),
-                    )
-                    .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-                    crate::RuntimeAttribution::for_turn_admission(
-                        self.state.session_id.clone(),
-                        root.clone(),
+                let verdict = execute_head_inspection(
+                    root_controller,
+                    admitted,
+                    head,
+                    crate::RuntimeEffectLocalExecutor::owned_runner(
+                        Box::new(InspectAdmittedHeadRunner {
+                            store: store.clone(),
+                            root: root.clone(),
+                            head: head.clone(),
+                            base: admission.base.clone(),
+                            live,
+                        }),
+                        None,
                     ),
-                    format!("{root}.drive-head"),
-                );
-                let verdict = root_controller
-                    .execute_effect(
-                        crate::RuntimeEffectEnvelope::new(
-                            inspection,
-                            crate::RuntimeEffectCommand::InspectAdmittedHead {
-                                root: root.clone(),
-                                head: head.clone(),
-                            },
-                        ),
-                        crate::RuntimeEffectLocalExecutor::owned_runner(
-                            Box::new(InspectAdmittedHeadRunner {
-                                store: store.clone(),
-                                root: root.clone(),
-                                head: head.clone(),
-                                base: admission.base.clone(),
-                                live,
-                            }),
-                            None,
-                        ),
-                    )
-                    .await
-                    .and_then(|outcome| match outcome {
-                        crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict } => Ok(verdict),
-                        other => Err(crate::RuntimeEffectControllerError::wrong_outcome(
-                            crate::RuntimeEffectKind::InspectAdmittedHead,
-                            other.kind(),
-                        )),
-                    })
-                    .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
-                let verdict = verdict.map_err(abort)?;
+                )
+                .await?
+                .map_err(abort)?;
                 if let Err(error) = self
                     .adopt_admitted_turn(
                         AdmittedTurn {
@@ -240,7 +226,15 @@ impl LashRuntime {
     /// §4): every leading command, each commit fenced by the root's seal,
     /// until the command lane is empty. The root admits no turn. An
     /// administrative compaction runs here, lent the root's controller,
-    /// which it rescopes to the command's own scope (FIG-4201).
+    /// which it rescopes to the command's own scope (FIG-4201), and so do a
+    /// host's append, plugin operation and frame open (FIG-4202).
+    ///
+    /// Once the lane is empty the root ends like any other root: the store
+    /// writes its [`CommandsApplied`](crate::store::RootTerminalCause::CommandsApplied)
+    /// terminal, which arms its scope close, so the root's journal is
+    /// retired (FIG-4202). The end is an idempotent store write: a replay
+    /// finds it written, and a run a later admission superseded writes
+    /// nothing, leaving the lane to that admission.
     pub(super) async fn run_commands_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -248,15 +242,53 @@ impl LashRuntime {
         fence: &crate::store::DriveFence,
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
-        while Box::pin(self.drain_next_session_command_fenced(
-            fence,
-            tokio_util::sync::CancellationToken::new(),
-            root_controller,
-        ))
-        .await
-        .map_err(|error| drive_abort(Some(&root), error))?
-        .is_some()
-        {}
+        loop {
+            match Box::pin(self.drain_next_session_command_fenced(
+                fence,
+                tokio_util::sync::CancellationToken::new(),
+                root_controller,
+            ))
+            .await
+            {
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                // What the drain read live outside its recorded reads never
+                // decides what the root journals (FIG-4346): it reads on
+                // headless.
+                Err(crate::runtime::session_api::CommandDrainStop::Headless(fault)) => {
+                    return run_headless_commands_root(
+                        root_controller,
+                        admitted,
+                        HeadlessRoot::Unrefreshed {
+                            catalog: self.host.core.session_store_factory(),
+                            fault,
+                        },
+                    )
+                    .await
+                    .map(|outcome| RootRun {
+                        outcome,
+                        run: None,
+                        driven_inputs: Vec::new(),
+                        empty_drain: None,
+                    });
+                }
+                Err(crate::runtime::session_api::CommandDrainStop::Failed(error)) => {
+                    return Err(drive_abort(Some(&root), error));
+                }
+            }
+        }
+        let store = self.drive_store()?;
+        let end = store
+            .end_command_root(fence, &root, self.host.core.clock.timestamp_ms())
+            .await
+            .map_err(|error| {
+                DriveAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
+            })?;
+        if end.terminal().is_some()
+            && let Some(run) = self.drive_root.as_mut()
+        {
+            run.mark_terminal_written();
+        }
         // The outcome is the admission's, never what this execution found:
         // a redelivery finds the lane its first execution already applied,
         // and must answer the same. A lane that made no progress shows in the
@@ -271,31 +303,131 @@ impl LashRuntime {
     }
 
     /// Recover the follow-on the session head owes under `admitted`'s root
-    /// (ADR 0101 §3, FIG-3542), raising its recovery count from the
-    /// `attempts` admission recorded.
+    /// (ADR 0101 §3, FIG-3542), from the recovery count `attempts` its drive
+    /// admission recorded, under the drive fence its seal raised.
+    ///
+    /// The root's recorded decision, `drive-follow-on:{root}`, answers
+    /// whether the head still owes the follow-on and how it is recovered,
+    /// and raises the recovery count inside its body (FIG-4361). The rest of
+    /// the root drives the recorded answer, never the head a replay finds:
+    /// a follow-on the head owed no longer cedes the root, and one it owed
+    /// runs under the recorded fact or commits exhausted.
+    ///
+    /// The decision records the head the follow-on's turn runs on and that
+    /// turn's index, and its body retains that head (FIG-4380). The root
+    /// adopts the recorded head and pins the recorded index before its turn,
+    /// so a replay after the follow-on's own commit moved the head runs the
+    /// turn its journal holds. The resident head is brought current first,
+    /// for the decision's first execution to record; a refresh that failed
+    /// leaves the drive no head, and the root issues the same step headless
+    /// ([`run_headless_follow_on_root`]).
     pub(super) async fn run_follow_on_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
-        follow_on: &TurnId,
-        attempts: u32,
+        follow_on: &FollowOnWork<'_>,
         sinks: &DriveSinks<'_>,
+        fence: &crate::store::DriveFence,
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
+        let store = self.drive_store()?;
+        if let Err(fault) = self.refresh_resident_head().await {
+            return run_headless_follow_on_root(
+                root_controller,
+                admitted,
+                follow_on,
+                HeadlessRoot::Unrefreshed {
+                    catalog: self.host.core.session_store_factory(),
+                    fault,
+                },
+            )
+            .await
+            .map(|outcome| RootRun {
+                outcome,
+                run: None,
+                driven_inputs: Vec::new(),
+                empty_drain: None,
+            });
+        }
+        let answer = execute_follow_on_recovery(
+            root_controller,
+            admitted,
+            follow_on,
+            crate::RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(RecoverFollowOnRunner {
+                    store,
+                    fence: fence.clone(),
+                    follow_on: follow_on.turn.clone(),
+                    attempts: follow_on.attempts,
+                    base: crate::store::SessionHeadRef {
+                        // Read by the decision body on its first execution.
+                        generation: 0,
+                        revision: self.state.head_revision,
+                        leaf: self.state.session_graph.leaf_node_id.clone(),
+                        checkpoint: self.state.checkpoint_ref.clone(),
+                    },
+                    // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                    turn_index: self.state.turn_index + 1,
+                }),
+                None,
+            ),
+        )
+        .await?
+        .map_err(|error| drive_abort(Some(&root), error))?;
+        let (recovery, base, turn_index) = match answer {
+            FollowOnRecoveryAnswer::Ceded => {
+                return Ok(RootRun {
+                    outcome: RootOutcome::Ceded { root },
+                    run: None,
+                    driven_inputs: Vec::new(),
+                    empty_drain: Some(
+                        crate::runtime::turn_loop::EmptyQueuedDrainReason::AdmissionRefused(
+                            crate::AdmissionRefusal::AdmissionRaceLost,
+                        ),
+                    ),
+                });
+            }
+            FollowOnRecoveryAnswer::Run {
+                follow_on,
+                base,
+                turn_index,
+            } => (
+                crate::store::FollowOnRecovery::Run(follow_on),
+                base,
+                turn_index,
+            ),
+            FollowOnRecoveryAnswer::Exhausted {
+                follow_on,
+                base,
+                turn_index,
+            } => (
+                crate::store::FollowOnRecovery::Exhausted(follow_on),
+                base,
+                turn_index,
+            ),
+        };
+        // The follow-on's turn runs on the head its decision recorded, at the
+        // index it recorded, whatever head this execution refreshed: a replay
+        // after the follow-on's own commit finds a head that commit moved
+        // (FIG-4380).
+        if let Err(error) = self.adopt_recorded_turn(&base, turn_index).await {
+            self.record_turn_park_after_abort(&error, &root, None).await;
+            return Err(drive_abort(Some(&root), error));
+        }
+        // The recorded base is read without its pending fact, and the fact
+        // the turn runs under is the recorded one: the head's while the head
+        // owes the follow-on, since the decision's first execution raised or
+        // read it there, and every head write of the turn must carry the
+        // fact the head holds.
+        let (crate::store::FollowOnRecovery::Run(owed)
+        | crate::store::FollowOnRecovery::Exhausted(owed)) = &recovery;
+        self.state.pending_follow_on = Some(Box::new(owed.clone()));
         let host = Arc::clone(&self.host.core.control.effect_host);
         let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
-        let drain = Box::pin(self.recover_admitted_follow_on(options, follow_on, attempts))
-            .await
-            .map_err(|error| drive_abort(Some(&root), error))?;
-        self.root_run_of_drain(root, drain)
-    }
-
-    /// A follow-on recovery root's outcome from how its drain ended.
-    fn root_run_of_drain(
-        &self,
-        root: TurnId,
-        drain: crate::runtime::turn_loop::QueuedTurnDrain<crate::AssembledTurn>,
-    ) -> Result<RootRun, DriveAbort> {
+        let drain =
+            Box::pin(self.drive_recovered_follow_on(recovery, &options, fence.clone())).await;
+        self.admitted_turn_index = None;
+        let drain = drain.map_err(|error| drive_abort(Some(&root), error))?;
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
@@ -309,17 +441,6 @@ impl LashRuntime {
                 driven_inputs: Vec::new(),
                 empty_drain: None,
             },
-            crate::runtime::turn_loop::QueuedTurnDrain::Empty(
-                crate::runtime::turn_loop::EmptyQueuedDrainReason::ExecutionLaneBusy,
-            ) => {
-                return Err(DriveAbort::Retry(RuntimeError::new(
-                    RuntimeErrorCode::SessionExecutionLaneBusy,
-                    format!(
-                        "session `{}` cannot run root `{root}` until it acquires its execution lane",
-                        self.state.session_id
-                    ),
-                )));
-            }
             crate::runtime::turn_loop::QueuedTurnDrain::Empty(reason) => RootRun {
                 outcome: RootOutcome::Ceded { root },
                 run: None,
@@ -354,12 +475,6 @@ impl LashRuntime {
         // The root runs only under the executable generation its admission
         // recorded (FIG-3571), checked before anything else of it runs.
         crate::runtime::turn_loop::generation_fence::admit(self, generation)?;
-        let turn_index = usize::try_from(turn_index).map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "admitted turn index exceeds platform range",
-            )
-        })?;
         // The verdict is the one `drive-head` recorded, honoured at every
         // position (FIG-4058). Its live check, a head that moved from the
         // admission's base with no commit of this root behind it, is the
@@ -399,6 +514,26 @@ impl LashRuntime {
                 ));
             }
         };
+        self.adopt_recorded_turn(base, turn_index).await
+    }
+
+    /// Adopt `base`, the head a root's recorded step says its turn runs on,
+    /// as the resident session, and pin the recorded `turn_index` for the
+    /// turn's prepare phase, which then reads no live head (FIG-3682,
+    /// FIG-4380).
+    ///
+    /// A base the store no longer retains parks the root.
+    async fn adopt_recorded_turn(
+        &mut self,
+        base: &crate::store::SessionHeadRef,
+        turn_index: u64,
+    ) -> Result<(), RuntimeError> {
+        let turn_index = usize::try_from(turn_index).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "admitted turn index exceeds platform range",
+            )
+        })?;
         self.adopt_admission_base(base)
             .await
             .map_err(|error| match error {
@@ -412,6 +547,513 @@ impl LashRuntime {
             })?;
         self.admitted_turn_index = Some(turn_index);
         Ok(())
+    }
+}
+
+/// The invocation of one of a root's recorded drive steps, `{step}:{root}`
+/// on the root's scope. Keyed by the root, never by the drive admission: a
+/// later admission of the same root replays the step its first execution
+/// recorded, so the root drives exactly the rows its journal was written
+/// for.
+fn root_step_invocation(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    step: &str,
+) -> Result<crate::RuntimeEffectInvocation, DriveAbort> {
+    let root = admitted.root();
+    Ok(crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            root_controller.execution_scope().clone(),
+            format!("{step}:{root}"),
+        )
+        .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+        crate::RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
+        format!("{root}.{step}"),
+    ))
+}
+
+/// The root's recorded admission, `drive-admit:{root}`, whose first
+/// execution runs `runner`. The outer error is a step the drive could not
+/// address; the inner one is the step's answer that is not an admission:
+/// its recorded refusal, or a fault its attempt met.
+async fn execute_root_admission(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    head: &AdmittedHead,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Result<RootAdmissionAnswer, RuntimeError>, DriveAbort> {
+    let invocation = root_step_invocation(root_controller, admitted, "drive-admit")?;
+    Ok(root_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::AdmitRoot { head: head.clone() },
+            ),
+            runner,
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_root_admission)
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
+}
+
+/// The root's recorded head inspection, `drive-head:{root}`, whose first
+/// execution runs `runner`: the recorded verdict on the head the root's
+/// admission admitted it on.
+async fn execute_head_inspection(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    head: &AdmittedHead,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Result<AdmittedHeadVerdict, RuntimeError>, DriveAbort> {
+    let invocation = root_step_invocation(root_controller, admitted, "drive-head")?;
+    Ok(root_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::InspectAdmittedHead {
+                    root: admitted.root().clone(),
+                    head: head.clone(),
+                },
+            ),
+            runner,
+        )
+        .await
+        .and_then(|outcome| match outcome {
+            crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict } => Ok(verdict),
+            other => Err(crate::RuntimeEffectControllerError::wrong_outcome(
+                crate::RuntimeEffectKind::InspectAdmittedHead,
+                other.kind(),
+            )),
+        })
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
+}
+
+/// The follow-on a recovery root was admitted for, with the recovery count
+/// its drive admission recorded.
+pub(super) struct FollowOnWork<'a> {
+    pub(super) turn: &'a TurnId,
+    pub(super) attempts: u32,
+}
+
+/// A follow-on recovery root's recorded decision, `drive-follow-on:{root}`,
+/// whose first execution runs `runner` (FIG-4361). The outer error is a step
+/// the drive could not address; the inner one is the step's answer that is
+/// not a decision: its recorded retirement, or a fault its attempt met.
+async fn execute_follow_on_recovery(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    follow_on: &FollowOnWork<'_>,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Result<FollowOnRecoveryAnswer, RuntimeError>, DriveAbort> {
+    let invocation = root_step_invocation(root_controller, admitted, "drive-follow-on")?;
+    Ok(root_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::RecoverFollowOn {
+                    follow_on: follow_on.turn.clone(),
+                    attempts: follow_on.attempts,
+                },
+            ),
+            runner,
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_follow_on_recovery)
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
+}
+
+/// The first execution of a follow-on recovery root's decision: the drive's
+/// one live read of the fact the head owes, and the fenced write that raises
+/// its recovery count before the follow-on's first effect (ADR 0101 §3).
+///
+/// The decision is taken on the count `attempts` the drive admission
+/// recorded. A head that owes the follow-on at a count already past it was
+/// raised by an earlier execution of this step whose answer was not
+/// recorded, which this one continues without raising again. Once the raised
+/// count would pass the recovery bound the fact froze for its logical run,
+/// the answer is `Exhausted` and the fact is not raised: the bound of the
+/// host driving the root never decides it. The recorded fact carries that
+/// bound.
+///
+/// A run or an exhaustion records `base`, the resident head the drive
+/// refreshed, and `turn_index`, the next one after it, and retains the base
+/// under the fence before the raise, as a root's admission retains its own
+/// (FIG-3682, FIG-4380): the root's turn runs on that head at that index on
+/// every execution. A store that did not answer is this attempt's fault and
+/// the step runs again; a retired session is recorded (FIG-3630).
+struct RecoverFollowOnRunner {
+    store: crate::store::SessionStore,
+    fence: crate::store::DriveFence,
+    follow_on: TurnId,
+    attempts: u32,
+    /// The resident head the follow-on's turn runs on, as the drive
+    /// refreshed it. Its generation is read in the body.
+    base: crate::store::SessionHeadRef,
+    /// The follow-on's turn index: the next one after `base`.
+    turn_index: usize,
+}
+
+impl RecoverFollowOnRunner {
+    async fn decide(&self) -> Result<FollowOnRecoveryAnswer, crate::StoreError> {
+        let Some(owed) = self
+            .store
+            .load_pending_follow_on()
+            .await?
+            .filter(|owed| owed.is_turn(&self.follow_on))
+        else {
+            return Ok(FollowOnRecoveryAnswer::Ceded);
+        };
+        let basis = crate::store::PendingFollowOn {
+            attempts: self.attempts,
+            ..owed.clone()
+        };
+        let recovery = basis.recovery()?;
+        let base = crate::store::SessionHeadRef {
+            generation: self.store.read_session_state_version().await?,
+            ..self.base.clone()
+        };
+        self.store.retain_admission_base(&self.fence, &base).await?;
+        let turn_index = self.turn_index as u64;
+        let raised_earlier = owed.attempts > basis.attempts;
+        Ok(match recovery {
+            crate::store::FollowOnRecovery::Run(_) => FollowOnRecoveryAnswer::Run {
+                follow_on: if raised_earlier {
+                    owed
+                } else {
+                    self.store
+                        .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
+                        .await?
+                },
+                base,
+                turn_index,
+            },
+            crate::store::FollowOnRecovery::Exhausted(_) => FollowOnRecoveryAnswer::Exhausted {
+                // The head's fact: an earlier execution of this step may have
+                // raised it past `basis`.
+                follow_on: owed,
+                base,
+                turn_index,
+            },
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for RecoverFollowOnRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::RecoverFollowOn {
+            follow_on,
+            attempts,
+        } = &envelope.command
+        else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "follow-on recovery executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        if *follow_on != self.follow_on || *attempts != self.attempts {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "follow-on recovery executor was bound to another follow-on or recovery count",
+            ));
+        }
+        let answer = self
+            .decide()
+            .await
+            .map_err(|error| super::admission::store_fault("follow-on recovery failed", error))?;
+        Ok(crate::RuntimeEffectOutcome::RecoverFollowOn {
+            answer: Box::new(answer),
+        })
+    }
+}
+
+/// Why a sealed root's drive holds no current head of its session.
+#[derive(Clone)]
+pub(super) enum HeadlessRoot {
+    /// The engine could not open the session at all: its close or
+    /// tombstone already committed (ADR 0049).
+    Retired,
+    /// The drive opened the session, but its resident head could not be
+    /// brought current: `fault`, which a deleted session's refresh meets too.
+    /// `catalog` is the deployment's session catalog, which answers whether
+    /// the session was deleted.
+    Unrefreshed {
+        catalog: Arc<dyn crate::DeploymentStore>,
+        fault: RuntimeError,
+    },
+}
+
+impl HeadlessRoot {
+    /// How an attempt ends whose journal holds work of `admitted`'s root
+    /// past its headless steps, which cannot replay without the session's
+    /// head: `what` the journal holds. A live fault that journals nothing:
+    /// the refresh's, or, for a retired session, one naming the retirement.
+    /// The engine retries it; a session that stays retired is released by the
+    /// engine's park reconcile, whose park writer answers a deleted session
+    /// `TargetGone`.
+    fn past_its_steps(self, admitted: &Admitted, what: &str) -> DriveAbort {
+        DriveAbort::Retry(match self {
+            Self::Unrefreshed { fault, .. } => fault,
+            Self::Retired => RuntimeError::new(
+                RuntimeErrorCode::SessionHeadRefresh,
+                format!(
+                    "root `{}` of session `{}` recorded {what} before its session retired; the \
+                     work its journal holds after them cannot replay without the session",
+                    admitted.root(),
+                    admitted.session()
+                ),
+            ),
+        })
+    }
+}
+
+/// Run a sealed input- or queued-headed root whose drive holds no current
+/// head of its session (FIG-4346).
+///
+/// The root still issues its recorded admission and head inspection, in the
+/// order and under the envelopes a root with a head issues them, so a
+/// replay follows the journal an earlier attempt of the root recorded, and
+/// nothing the drive read outside those steps decides what it journals
+/// (ADR 0105 §1). Their bodies admit and inspect nothing, since there is no
+/// head to do it on: [`HeadlessRootStepRunner`] answers only why.
+///
+/// - A step that recorded the session's retirement ends the root with the
+///   typed `SessionDeleted` refusal (ADR 0049), recorded where the journal
+///   held nothing more, so every replay answers the same.
+/// - A step that recorded a refusal to admit cedes the root, as it does with
+///   a head.
+/// - A recorded admission and head inspection mean an earlier attempt ran
+///   the root's turn after them, and that turn cannot replay without the
+///   session's head ([`HeadlessRoot::past_its_steps`]).
+pub(super) async fn run_headless_root(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    head: &AdmittedHead,
+    headless: HeadlessRoot,
+) -> Result<RootOutcome, DriveAbort> {
+    let root = admitted.root().clone();
+    let runner = || {
+        crate::RuntimeEffectLocalExecutor::owned_runner(
+            Box::new(HeadlessRootStepRunner {
+                session: admitted.session().clone(),
+                step: HeadlessStep::Root {
+                    root: root.clone(),
+                    head: head.clone(),
+                },
+                headless: headless.clone(),
+            }),
+            None,
+        )
+    };
+    match execute_root_admission(root_controller, admitted, head, runner()).await? {
+        Ok(RootAdmissionAnswer::Admitted { .. }) => {}
+        Ok(RootAdmissionAnswer::Refused { .. }) => return Ok(RootOutcome::Ceded { root }),
+        Err(error) => return Err(drive_abort(Some(&root), error)),
+    }
+    if let Err(error) = execute_head_inspection(root_controller, admitted, head, runner()).await? {
+        return Err(drive_abort(Some(&root), error));
+    }
+    Err(headless.past_its_steps(admitted, "its admission and head inspection"))
+}
+
+/// Run a sealed command root whose drive holds no current head of its
+/// session (FIG-4346), from its next read of the session's command lane.
+///
+/// A command root's recorded steps are its reads of the lane
+/// (`session-command-run:{ordinal}`, numbered by `root_controller`); every
+/// command but an administrative compaction settles and commits off the
+/// journal. The headless root issues the reads in that order, and their
+/// bodies read nothing ([`HeadlessRootStepRunner`]):
+///
+/// - a read that recorded the session's retirement ends the root with the
+///   typed `SessionDeleted` refusal (ADR 0049);
+/// - a recorded empty lane is the root's end, `Applied`, as it is with a
+///   head;
+/// - a recorded run of commands that journal nothing is followed by the next
+///   read, as it is with a head;
+/// - a recorded compaction journaled its apply after the read, which cannot
+///   replay without the session's head ([`HeadlessRoot::past_its_steps`]).
+pub(super) async fn run_headless_commands_root(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    headless: HeadlessRoot,
+) -> Result<RootOutcome, DriveAbort> {
+    let root = admitted.root().clone();
+    loop {
+        let batches = crate::runtime::session_api::execute_session_command_run_read(
+            root_controller,
+            admitted.session(),
+            crate::RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(HeadlessRootStepRunner {
+                    session: admitted.session().clone(),
+                    step: HeadlessStep::CommandRun,
+                    headless: headless.clone(),
+                }),
+                None,
+            ),
+        )
+        .await
+        .map_err(|error| drive_abort(Some(&root), error))?;
+        if batches.is_empty() {
+            return Ok(RootOutcome::Applied { root });
+        }
+        let run = crate::AdmittedQueuedWork {
+            session_id: admitted.session().clone(),
+            batches,
+        };
+        let journals_nothing = run.session_commands().is_some_and(|commands| {
+            !matches!(
+                commands.as_slice(),
+                [(_, crate::SessionCommand::CompactContext { .. })]
+            )
+        });
+        if !journals_nothing {
+            return Err(headless.past_its_steps(admitted, "a compaction's read"));
+        }
+    }
+}
+
+/// Run a sealed follow-on recovery root whose drive holds no current head of
+/// its session (FIG-4361).
+///
+/// The root still issues its recorded decision, `drive-follow-on`, under
+/// the envelope a root with a head issues it, and its body decides nothing
+/// ([`HeadlessRootStepRunner`]):
+///
+/// - a decision that recorded the session's retirement ends the root with
+///   the typed `SessionDeleted` refusal (ADR 0049);
+/// - a recorded `Ceded` cedes the root, as it does with a head;
+/// - a recorded run or exhaustion means an earlier attempt ran the
+///   follow-on's turn after it, which cannot replay without the session's
+///   head ([`HeadlessRoot::past_its_steps`]).
+pub(super) async fn run_headless_follow_on_root(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    follow_on: &FollowOnWork<'_>,
+    headless: HeadlessRoot,
+) -> Result<RootOutcome, DriveAbort> {
+    let root = admitted.root().clone();
+    let runner = crate::RuntimeEffectLocalExecutor::owned_runner(
+        Box::new(HeadlessRootStepRunner {
+            session: admitted.session().clone(),
+            step: HeadlessStep::FollowOn {
+                follow_on: follow_on.turn.clone(),
+                attempts: follow_on.attempts,
+            },
+            headless: headless.clone(),
+        }),
+        None,
+    );
+    match execute_follow_on_recovery(root_controller, admitted, follow_on, runner).await? {
+        Ok(FollowOnRecoveryAnswer::Ceded) => Ok(RootOutcome::Ceded { root }),
+        Ok(FollowOnRecoveryAnswer::Run { .. } | FollowOnRecoveryAnswer::Exhausted { .. }) => {
+            Err(headless.past_its_steps(admitted, "its follow-on recovery"))
+        }
+        Err(error) => Err(drive_abort(Some(&root), error)),
+    }
+}
+
+/// The steps a headless root issues.
+enum HeadlessStep {
+    /// An input- or queued-headed root's admission and head inspection.
+    Root { root: TurnId, head: AdmittedHead },
+    /// A command root's read of the session's command lane.
+    CommandRun,
+    /// A follow-on recovery root's decision.
+    FollowOn { follow_on: TurnId, attempts: u32 },
+}
+
+/// The first execution of a headless root's step ([`run_headless_root`],
+/// [`run_headless_commands_root`], [`run_headless_follow_on_root`]): it
+/// admits, inspects, reads and decides nothing, and answers why the drive
+/// holds no head.
+///
+/// A retired session is a settled fact the step records, as the drive's own
+/// admission and seal record it (FIG-3630, FIG-3881): the engine could not
+/// open the session at all, or the catalog, read inside the step, holds the
+/// session's deletion tombstone. Any other refresh fault is this attempt's,
+/// never recorded, and the engine runs the step again.
+struct HeadlessRootStepRunner {
+    session: crate::SessionId,
+    step: HeadlessStep,
+    headless: HeadlessRoot,
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for HeadlessRootStepRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let bound = match (&self.step, &envelope.command) {
+            (
+                HeadlessStep::Root { head: bound, .. },
+                crate::RuntimeEffectCommand::AdmitRoot { head },
+            ) => head == bound,
+            (
+                HeadlessStep::Root {
+                    root: bound_root,
+                    head: bound_head,
+                },
+                crate::RuntimeEffectCommand::InspectAdmittedHead { root, head },
+            ) => root == bound_root && head == bound_head,
+            (
+                HeadlessStep::CommandRun,
+                crate::RuntimeEffectCommand::ReadSessionCommandRun { session },
+            ) => *session == self.session,
+            (
+                HeadlessStep::FollowOn {
+                    follow_on: bound_follow_on,
+                    attempts: bound_attempts,
+                },
+                crate::RuntimeEffectCommand::RecoverFollowOn {
+                    follow_on,
+                    attempts,
+                },
+            ) => follow_on == bound_follow_on && attempts == bound_attempts,
+            (_, other) => {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    format!(
+                        "headless root step executor cannot execute {} command",
+                        other.kind().as_str()
+                    ),
+                ));
+            }
+        };
+        if !bound {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "headless root step executor was bound to another session, root, head or follow-on",
+            ));
+        }
+        let retirement = |error: crate::StoreError| {
+            super::admission::store_fault("session retired under its root", error)
+        };
+        match self.headless {
+            HeadlessRoot::Retired => Err(retirement(crate::StoreError::SessionDeleted {
+                session_id: self.session,
+            })),
+            HeadlessRoot::Unrefreshed { catalog, fault } => {
+                match catalog.lookup_session(&self.session).await {
+                    Ok(crate::store::SessionLookup::Deleted) => {
+                        Err(retirement(crate::StoreError::SessionDeleted {
+                            session_id: self.session,
+                        }))
+                    }
+                    _ => Err(crate::RuntimeEffectControllerError::from(fault)
+                        .retryable_uncommitted_derivation()),
+                }
+            }
+        }
     }
 }
 
@@ -491,6 +1133,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::InspectAdmittedHead { root, head } = &envelope.command
         else {
@@ -609,6 +1252,9 @@ struct AdmitRootRunner {
     /// The executable generation the root is admitted under (FIG-3571).
     generation: Option<crate::ExecutableGeneration>,
     admitted_generation: crate::engine::BuildGeneration,
+    /// The execution that runs the root, which the admission records
+    /// (FIG-4403).
+    executor: crate::store::RootExecutor,
     trace: AdmissionTrace,
 }
 
@@ -617,6 +1263,7 @@ impl RuntimeEffectLocalRunner for AdmitRootRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitRoot { head } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
@@ -737,6 +1384,7 @@ impl AdmitRootRunner {
             turn_index: self.turn_index as u64,
             generation: self.generation.clone(),
             admitted_generation: self.admitted_generation.clone(),
+            executor: self.executor.clone(),
         };
         if let Some(admission) = self.store.admit_root(&request).await? {
             let causes = admission

@@ -43,6 +43,7 @@ pub mod driver;
 pub mod findings;
 pub mod host;
 pub mod plan;
+mod progress;
 
 use std::time::{Duration, Instant};
 
@@ -53,8 +54,8 @@ use crate::crash_matrix::invariants;
 /// ceiling (which a soak without refusals never meets).
 const FINAL_TICKS: usize = 90;
 
-/// How long one epoch may run in wall time.
-const EPOCH_WALL_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// Leave time for diagnostics and shutdown before the 600s CI action limit.
+const EPOCH_WALL_LIMIT: Duration = Duration::from_secs(4 * 60);
 
 /// Steps per epoch when `LASH_CHAOS_SOAK_STEPS` is unset.
 pub const DEFAULT_STEPS: usize = 200;
@@ -64,7 +65,7 @@ pub const DEFAULT_STEPS: usize = 200;
 pub struct SoakConfig {
     /// Epoch 0's seed; every later epoch's derives from it.
     pub seed: u64,
-    /// Run epochs until this much wall time is spent (at least one).
+    /// Wall-time budget shared by all epochs, including the active epoch.
     pub duration: Duration,
     /// Stop after this many epochs, when set.
     pub max_epochs: Option<usize>,
@@ -236,7 +237,25 @@ impl EpochReport {
 /// Run one epoch: its plan of `steps` steps under `seed` (less the kinds
 /// `without` names), then its end.
 pub async fn run_epoch(index: usize, seed: u64, steps: usize, without: &[String]) -> EpochReport {
+    Box::pin(run_epoch_with_limit(
+        index,
+        seed,
+        steps,
+        without,
+        EPOCH_WALL_LIMIT,
+    ))
+    .await
+}
+
+async fn run_epoch_with_limit(
+    index: usize,
+    seed: u64,
+    steps: usize,
+    without: &[String],
+    limit: Duration,
+) -> EpochReport {
     let started = Instant::now();
+    let deadline = tokio::time::Instant::now() + limit;
     let mut report = EpochReport {
         index,
         seed,
@@ -244,47 +263,69 @@ pub async fn run_epoch(index: usize, seed: u64, steps: usize, without: &[String]
         without: without.to_vec(),
         ..EpochReport::default()
     };
-    if tokio::time::timeout(
-        EPOCH_WALL_LIMIT,
-        Box::pin(run_epoch_inner(seed, steps, without, &mut report)),
+    let mut progress = match progress::Progress::new(index, seed) {
+        Ok(progress) => progress,
+        Err(error) => {
+            report
+                .violations
+                .push(format!("open the progress file: {error}"));
+            report.wall = started.elapsed();
+            return report;
+        }
+    };
+    progress.record(format!(
+        "setup; {steps} steps, without {without:?}, deadline {limit:?}"
+    ));
+    let mut driver =
+        match tokio::time::timeout_at(deadline, progress.wait("setup", driver::Driver::new(seed)))
+            .await
+        {
+            Ok(Ok(driver)) => driver,
+            Ok(Err(error)) => {
+                report.violations.push(format!("build the world: {error}"));
+                report.wall = started.elapsed();
+                progress.record(report.evidence());
+                return report;
+            }
+            Err(_) => {
+                report
+                    .violations
+                    .push(format!("setup ran past {limit:?} of wall time"));
+                report.wall = started.elapsed();
+                progress.record(report.evidence());
+                return report;
+            }
+        };
+    if tokio::time::timeout_at(
+        deadline,
+        Box::pin(run_epoch_inner(
+            seed,
+            steps,
+            without,
+            &mut driver,
+            &mut report,
+            &mut progress,
+        )),
     )
     .await
     .is_err()
     {
-        report.violations.push(format!(
-            "the epoch ran past {EPOCH_WALL_LIMIT:?} of wall time"
-        ));
-    }
-    report.wall = started.elapsed();
-    report
-}
-
-async fn run_epoch_inner(seed: u64, steps: usize, without: &[String], report: &mut EpochReport) {
-    let mut driver = match driver::Driver::new(seed).await {
-        Ok(driver) => driver,
-        Err(error) => {
-            report.violations.push(format!("build the world: {error}"));
-            return;
-        }
-    };
-    for (index, step) in plan::plan(seed, steps, without).iter().enumerate() {
-        let at_ms = driver.world.now_ms();
-        match driver.step(seed, step).await {
-            Ok(outcome) => report
-                .trace
-                .push(format!("#{index} @{at_ms} {step:?} -> {outcome}")),
-            Err(error) => {
-                report
-                    .trace
-                    .push(format!("#{index} @{at_ms} {step:?} -> FAILED: {error}"));
-                report
-                    .violations
-                    .push(format!("step #{index} {step:?}: {error}"));
-                break;
-            }
+        report
+            .violations
+            .push(format!("the epoch ran past {limit:?} of wall time"));
+        progress.record("epoch deadline expired; collecting terminal and obligation state");
+        if tokio::time::timeout(
+            Duration::from_secs(5),
+            diagnose(&driver, &mut report, &mut progress),
+        )
+        .await
+        .is_err()
+        {
+            report
+                .notes
+                .push("diagnostics exceeded 5s; partial state is in the progress log".to_owned());
         }
     }
-    Box::pin(finish(&mut driver, report)).await;
     let ledger = &driver.ledger;
     report.inputs = ledger.inputs.len();
     report.held = ledger.held.len();
@@ -296,12 +337,109 @@ async fn run_epoch_inner(seed: u64, steps: usize, without: &[String], report: &m
         .count();
     report.commands = ledger.commands;
     report.counts = driver.counts.clone();
-    driver.world.finish().await;
+    progress.record("shutdown");
+    if tokio::time::timeout(Duration::from_secs(5), driver.world.finish())
+        .await
+        .is_err()
+    {
+        report
+            .violations
+            .push("world shutdown exceeded 5s".to_owned());
+    }
+    report.wall = started.elapsed();
+    progress.record(report.evidence());
+    report
+}
+
+async fn diagnose(
+    driver: &driver::Driver,
+    report: &mut EpochReport,
+    progress: &mut progress::Progress,
+) {
+    let state = format!(
+        "terminal/obligation snapshot at {}ms: {:?}; ledger {:?}",
+        driver.world.now_ms(),
+        driver.counts,
+        driver.ledger
+    );
+    progress.record(&state);
+    report.notes.push(state);
+    for line in invariants::diagnose(&driver.world).await {
+        progress.record(&line);
+        report.notes.push(line);
+    }
+    match checks::expected(&driver.world, &driver.ledger).await {
+        Ok(expected) => {
+            let unsettled = invariants::check(&driver.world, &expected).await;
+            let state = format!(
+                "terminal and obligation checks: {} unsettled invariant(s)",
+                unsettled.len()
+            );
+            progress.record(&state);
+            report.notes.push(state);
+            for line in unsettled {
+                progress.record(&line);
+                report.notes.push(line);
+            }
+        }
+        Err(error) => {
+            progress.record(&error);
+            report.notes.push(error);
+        }
+    }
+    for line in checks::stalls(&driver.world).await {
+        progress.record(&line);
+        report.notes.push(line);
+    }
+}
+
+async fn run_epoch_inner(
+    seed: u64,
+    steps: usize,
+    without: &[String],
+    driver: &mut driver::Driver,
+    report: &mut EpochReport,
+    progress: &mut progress::Progress,
+) {
+    for (index, step) in plan::plan(seed, steps, without).iter().enumerate() {
+        let at_ms = driver.world.now_ms();
+        let started = Instant::now();
+        let active = format!("step #{index} @{at_ms} {step:?}");
+        progress.record(format!("{active}: start"));
+        report.trace.push(format!("{active}: start"));
+        let outcome = progress.wait(&active, driver.step(seed, step)).await;
+        let failed = outcome.is_err();
+        let line = match outcome {
+            Ok(outcome) => format!("{active} -> {outcome}; {:?}", started.elapsed()),
+            Err(error) => {
+                report.violations.push(format!("{active}: {error}"));
+                format!("{active} -> FAILED: {error}; {:?}", started.elapsed())
+            }
+        };
+        progress.record(&line);
+        report.trace.push(line);
+        if failed {
+            break;
+        }
+    }
+    progress.record("end-state checks");
+    report.notes.push("phase: end-state checks".to_owned());
+    Box::pin(finish_with_progress(driver, report, progress)).await;
 }
 
 /// The epoch's end: disarm every fault, tick recovery until the end state
 /// holds, and probe every live session.
+#[cfg(test)]
 async fn finish(driver: &mut driver::Driver, report: &mut EpochReport) {
+    let mut progress = progress::Progress::new(report.index, report.seed).expect("progress file");
+    finish_with_progress(driver, report, &mut progress).await;
+}
+
+async fn finish_with_progress(
+    driver: &mut driver::Driver,
+    report: &mut EpochReport,
+    progress: &mut progress::Progress,
+) {
     if let Ok(double) = driver.world.double() {
         double.server().clear_crashes();
     }
@@ -322,7 +460,14 @@ async fn finish(driver: &mut driver::Driver, report: &mut EpochReport) {
     let mut last = Vec::new();
     let mut held = false;
     for tick in 0..=FINAL_TICKS {
-        driver.world.quiesce().await;
+        progress.record(format!(
+            "end-state tick {tick}/{FINAL_TICKS}; virtual time {}ms; counts {:?}",
+            driver.world.now_ms(),
+            driver.counts
+        ));
+        progress
+            .wait("end-state quiesce", driver.world.quiesce())
+            .await;
         last = invariants::check(&driver.world, &expected).await;
         if last.is_empty() {
             held = true;
@@ -339,6 +484,10 @@ async fn finish(driver: &mut driver::Driver, report: &mut EpochReport) {
         }
     }
     if held {
+        progress.record("live-session probes and global invariants");
+        report
+            .notes
+            .push("phase: live-session probes and global invariants".to_owned());
         // A held root the soak never released keeps its session's lane by
         // design, so a probe input there would queue behind it: the probe
         // asks only the live sessions that hold no held root.
@@ -414,17 +563,22 @@ pub async fn run(config: SoakConfig) -> SoakReport {
     let trace = std::env::var("LASH_CHAOS_SOAK_TRACE").is_ok_and(|value| value == "1");
     let mut epochs = Vec::new();
     for index in 0.. {
+        let remaining = config.duration.saturating_sub(started.elapsed());
         if config.max_epochs.is_some_and(|max| index >= max)
-            || (index > 0 && started.elapsed() >= config.duration)
+            || (index > 0
+                && (remaining.is_zero()
+                    || (config.max_epochs.is_none() && remaining < EPOCH_WALL_LIMIT)))
         {
-            // Whichever limit is spent first ends the soak.
+            // Open-ended runs reserve a complete epoch instead of timing out
+            // a healthy last epoch with the remaining fraction of the budget.
             break;
         }
-        let epoch = Box::pin(run_epoch(
+        let epoch = Box::pin(run_epoch_with_limit(
             index,
             epoch_seed(config.seed, index),
             config.steps,
             &config.without,
+            EPOCH_WALL_LIMIT.min(remaining),
         ))
         .await;
         println!("{}", epoch.summary());
@@ -448,8 +602,122 @@ pub async fn run(config: SoakConfig) -> SoakReport {
 }
 
 #[cfg(test)]
+mod lost_root_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_open_ended_soak_reserves_a_complete_epoch() {
+        let report = Box::pin(run(SoakConfig {
+            seed: 0x4402,
+            duration: Duration::from_secs(2),
+            max_epochs: None,
+            steps: 0,
+            without: Vec::new(),
+        }))
+        .await;
+        assert_eq!(
+            report.epochs.len(),
+            1,
+            "do not admit a shortened last epoch"
+        );
+        assert!(report.failed().is_empty(), "{report:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_soak_deadline_keeps_the_active_step_and_terminal_state() {
+        let report = Box::pin(run(SoakConfig {
+            seed: 0x3873_0001,
+            duration: Duration::from_secs(1),
+            max_epochs: Some(2),
+            steps: DEFAULT_STEPS,
+            without: Vec::new(),
+        }))
+        .await;
+        assert_eq!(
+            report.epochs.len(),
+            1,
+            "the spent budget must not admit another epoch"
+        );
+        let epoch = &report.epochs[0];
+        assert!(!epoch.passed(), "an incomplete plan must fail");
+        assert!(
+            epoch
+                .violations
+                .iter()
+                .any(|line| line.contains("wall time")),
+            "{}",
+            epoch.evidence()
+        );
+        assert!(
+            epoch.trace.iter().any(|line| line.contains(": start")),
+            "retain the active step: {}",
+            epoch.evidence()
+        );
+        assert!(
+            epoch
+                .notes
+                .iter()
+                .any(|line| line.contains("terminal and obligation checks")),
+            "retain actual store state: {}",
+            epoch.evidence()
+        );
+        assert!(
+            report.wall < Duration::from_secs(15),
+            "deadline, diagnostics and shutdown must be bounded: {:?}",
+            report.wall
+        );
+        if let Some(directory) = std::env::var_os("TEST_UNDECLARED_OUTPUTS_DIR") {
+            let case = std::thread::current().name().expect("test case").to_owned();
+            let name: String = case
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            let saved = std::fs::read_to_string(
+                std::path::PathBuf::from(directory)
+                    .join(format!("{name}-{:016x}-0.log", epoch.seed)),
+            )
+            .expect("per-case progress file");
+            assert!(saved.contains("epoch deadline expired"), "{saved}");
+            assert!(saved.contains("terminal and obligation checks"), "{saved}");
+            assert!(saved.contains("FAILED"), "{saved}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_held_model_call_does_not_spend_the_recovery_wall_budget() {
+        let seed = 0x4402;
+        let mut driver = driver::Driver::new(seed).await.expect("world");
+        driver
+            .step(
+                seed,
+                &plan::Step::Open {
+                    session: 0,
+                    lane: plan::Lane::Held,
+                    parent: None,
+                },
+            )
+            .await
+            .expect("open held session");
+        let session = driver.ledger.sessions[0].id.clone();
+        driver
+            .send_held(&session, "held-budget", false)
+            .await
+            .expect("held input");
+        assert!(
+            driver.wait_reached("held-budget").await,
+            "the model must hold the call"
+        );
+        let quiesced =
+            tokio::time::timeout(Duration::from_millis(500), driver.world.quiesce()).await;
+        driver.world.finish().await;
+        assert!(
+            quiesced.is_ok(),
+            "a deliberately pending model call must not consume seconds per recovery tick"
+        );
+    }
 
     /// FIG-3948: the soak shape of FIG-3943, with the child registered under
     /// the turn id of an input withdrawn while the session's drive was held,

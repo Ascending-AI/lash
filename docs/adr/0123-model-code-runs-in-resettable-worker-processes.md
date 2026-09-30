@@ -2,45 +2,17 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4158, the first lane of FIG-3821). This lane lands
-the VM side of the decision: one owned, resettable instance, the owned
-step/resume interface, the authority split, opaque parent-side VM state and
-the parent-worker protocol types. FIG-4160 lands the worker entry and its
-bounded pool (`lash-vm-worker`), and FIG-4159 the parent's broker (section
-8) and the park of a run awaiting an effect. The move of both adapters into
-workers and the deletion of every in-parent parse, compile and execute path
-follow in their own lanes under FIG-3821, which stays open until the last of
-them lands.
-
-Sam's rulings of 2026-09-29 bind this decision:
-
-1. **The boundary is the language, plus crash containment.** The VM has no
-   ambient authority, and every effect it asks for goes through the parent.
-   The worker process contains crashes and keeps host credentials out of the
-   memory model code runs in: it starts with an empty environment and no
-   inherited descriptors but its pipe. There are no namespaces, Landlock,
-   seccomp, cgroups or fork server, so it is portable across Linux and
-   macOS. Lash never claims an OS-level security boundary: a native escape
-   from the VM reaches whatever the worker's OS user can reach.
-2. **Workers are reused after a reset.** A pool reuses a worker across
-   sessions once it is reset, so the VM is built for a reset that is clean
-   by construction and provable by law, not cleaned up field by field.
-3. **Whole-hog.** RLM code cells and durable Lashlang process bodies both
-   run in workers in 1.0, and so does every parse, link, compile and module
-   creation of model source. There is no in-process mode, and the in-parent
-   paths are deleted, not kept as a fallback.
+Accepted. The parent client owns the bounded pool and transport in
+`lash-vm-client`. `lash-vm-worker` owns source frontends and VM execution.
+RLM cells, durable process bodies and process creation use the worker service.
 
 ## Context
 
-Model code ran in the host process. Its guest state was spread across the
-RLM execution state, the process engine and one process-wide static (the
-record symbol interner). Its parked continuations and snapshots crossed
-between components as values the parent decoded semantically: restoring a
-heap compiles its regular expressions, so the parent compiled
-model-authored patterns just to read state it only needed to store. The RLM
-snapshot envelope carried the guest heap next to the parent's grants,
-including each grant's host-owned `execution_binding`, so anything that
-could read or write that envelope could read or replace authority.
+Reusable workers need one owner for guest state, a reset that covers all of
+it, and parent-owned identity and effect admission. VM snapshots need to be
+stored and routed without decoding guest values. Model code has no ambient
+language authority; its requested effects use host-owned bindings. Lash
+implements this execution boundary, not host auth or security policy.
 
 ## Decision
 
@@ -53,15 +25,15 @@ guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
 `LazyLock`:
 
 - Record keys are content-addressed `Symbol`s (`&'static str` constants or
-  shared `Arc<str>` text), compared by pointer then by text. The global
-  interner is gone.
+  shared `Arc<str>` text), compared by pointer then by text. Record symbols
+  require no global interner.
 - `scripts/check-vm-static-state.py` refuses a static in lashlang,
   lash-typescript, lash-lashlang-runtime or the worker crate unless
   `scripts/vm-static-state-allowlist.txt` names it with a reason. The
   allowlist holds build tables projected from constant lists, test-only
   counters, parent-side telemetry, and the heap's write-stamp counter,
   which is never guest-readable, persisted or sent. A stale or unreasoned
-  entry is refused too.
+  entry is also refused.
 - Third-party interning below the parser (swc's atoms) is outside the VM
   crates and carries no guest-readable state; it is recorded here, not
   allowlisted.
@@ -70,10 +42,9 @@ guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
 
 `VmInstance::reset` drops the instance and installs `VmInstance::pristine()`,
 the one constructor every fresh and every reset instance comes from. It
-constructs the instance fresh: FIG-4157 measured fresh construction faster
-than cloning a prebuilt template in both of its populations, so there is no
-template. It clears nothing field by field, so state added to the instance
-later is covered by the same drop. The laws:
+constructs a fresh instance rather than cloning a template. It clears nothing
+field by field, so state added to the instance later is covered by the same
+drop. The laws:
 
 - `vm_reset_leaves_no_guest_observable_state`: session A plants a sentinel
   in globals, a closure, a regular expression with advanced `lastIndex`, an
@@ -104,17 +75,21 @@ interface borrows:
   `ReissueOperation { operation, loop_phase }` when the continuation must
   issue an operation again. A signal wait handed to a successor reissues
   its wait. A run parked while awaiting an effect (section 8) reissues the
-  resource operation or sleep it was waiting on: the VM rewinds to the
-  operation's instruction, pushes its operands back, uncharges the
-  instruction and rewinds the call site's occurrence, so the reissued
-  request is the one it replaces. A foreground park also records
+  resource operation, resource-operation batch, process await or sleep it
+  was waiting on: the VM rewinds to the operation's instruction, pushes its
+  operands back, restores any pending-request entries a batch consumed,
+  uncharges the instruction and rewinds the occurrences of the call site and
+  of every batch leaf, so the reissued request is the one it replaces. An
+  await parked on one handle of a tuple, list or record of process handles
+  also carries the leaf results it already received (see "Await and batch
+  parking" below). A foreground park also records
   `loop_phase` (the instruction budget left until the next yield and the
   last announced cancel checkpoint), so a resumed run meets its cancel
   checkpoints where a run that never parked meets them, and it carries the
   run's expired functions. Resuming checks that the instruction pointer
   stands on the operation the discriminant names.
 - A resume may answer a parkable effect request (a resource operation, a
-  batch, a sleep or a signal wait) with `VmResume::Park`. The run suspends
+  batch, a process await, a sleep or a signal wait) with `VmResume::Park`. The run suspends
   into `VmStep::Parked` with `VmParkReason::AwaitingEffect`, and the parent
   resumes it later from the continuation with the effect's outcome. A run
   that cannot suspend there asks `VmRequest::ParkDeclined` and stays
@@ -157,16 +132,17 @@ policy.
 
 ### 5. The parent never decodes VM state
 
-To the parent, VM state is `lash_vm_protocol::OpaqueVmState`: a kind, an
+At the broker boundary, VM state is `lash_vm_protocol::OpaqueVmState`: a kind, an
 owner, the VM component versions (`lashlang::vm_contract_versions()`), a format
 version, a length, a BLAKE3 digest and the bytes. The parent checks those
 structurally, admitting each component against its declared read range
-(`lashlang::vm_contract_reads()`, ADR 0115, FIG-4261). The semantic decoders,
-which restore guest values and compile regular expressions, are reachable only through
+(`lashlang::vm_contract_reads()`, ADR 0115). The semantic decoders,
+which restore guest values and compile regular expressions, are reachable
+only through
 `VmInstance` (`open_continuation`, `open_snapshot`,
-`restore_durable_parts`): `VmContinuation` no longer implements
-`Deserialize`, and the protocol crate depends on nothing that could decode
-the bytes. `parent_state_decode_never_compiles_regexp` pins both halves: the
+`restore_durable_parts`): `VmContinuation` exposes no general
+`Deserialize` implementation, and the protocol crate depends on nothing that
+could decode the bytes. `parent_state_decode_never_compiles_regexp` pins both halves: the
 parent's decode of a segment whose continuation holds an invalid pattern
 succeeds, and only the worker's open refuses it.
 
@@ -186,7 +162,7 @@ transport or pool:
   sequence of the current lease and epochs.
 - **Framing.** A frame is the magic `LVMP`, the 32-byte digest of the exact
   `BuildIdentity`, a big-endian length and the payload. A frame from another
-  build is refused; there is no negotiation and no historical reader, since
+  build is refused; the protocol has no negotiation, since
   shapes change in place under the version freeze.
 - **Bounded decoding.** Decoding charges frame size, nesting depth, node
   count and cumulative allocation against `DecodeLimits` before it
@@ -194,13 +170,14 @@ transport or pool:
   frame is a typed `CodecRefusal`. Every value is a charged node, map keys
   included.
 - **Bounds.** `ProtocolBounds` states every bound a host holds its workers
-  to, with no implicit default. Its `standard()` preset takes FIG-4157's
-  measurements: 4 MiB frames; 100,000 decode nodes, about twice the densest
-  measured continuation, whose decode alone reached about 446 ms; 64 MiB of
-  cumulative decode allocation, about 3.6 times the largest measured; 2 MiB
+  to, with no implicit default. Its `standard()` preset allows 4 MiB frames;
+  nesting depth 128;
+  100,000 decode nodes; 64 MiB of cumulative charged decode allocation; 2 MiB
   of VM state; 1 MiB effect values; 64 KiB of source; and a 5-second
   no-response watchdog, which host waits pause and which is not a guest
-  execution limit.
+  execution limit. The shared adapter service admits 64 MiB VM state,
+  128 MiB frames, 256 MiB charged decode allocation and a 128 MiB queue.
+  These bounds are explicit in its pool configuration.
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
   `ProtocolViolation`, `PayloadTooLarge` and `WorkerLimitExceeded` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
@@ -239,8 +216,8 @@ belongs to the transport, which reports a silent worker as
   granted, a request kind the payload does not match, or an operation the
   broker does not serve yet. A refused request takes no ordinal. The broker
   serves resource operations, batches, awaits, sleeps and cancel
-  checkpoints; prints, finishes, failures, process events and signal waits
-  are refused as unsupported until the adapters move into workers.
+  checkpoints. The shipped adapters also serve prints, finishes, failures,
+  process events and signal waits through their admitted runtime hosts.
 - **The parent owns every counter.** `ParentLedger` gives each admitted
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
@@ -263,13 +240,16 @@ belongs to the transport, which reports a silent worker as
   retries an effect locally. A partial frame is refused and the last
   checkpoint kept, and a fully received `Complete` wins over a later EOF.
 - **Park on effect releases the slot.** When a parkable request's effect
-  needs a worker of its own (nested compilation, a nested run), the broker
-  answers `Park`. The worker serializes the run, which the broker commits,
-  and the slot goes back to the pool before the effect is performed. On the
+  needs a worker of its own (nested compilation, a nested run, the body of
+  an awaited process), the broker answers `Park`. The worker serializes the run. The broker holds that
+  continuation
+  within the invocation without committing a checkpoint, and the slot goes
+  back to the pool before the effect is performed. On the
   outcome the broker checks a worker out again, resumes the continuation,
   and hands the held outcome to the reissued request, matched by
   fingerprint. A pool of one slot therefore completes a nested
-  compilation instead of deadlocking.
+  compilation, or a cell that awaits a process it started, instead of
+  deadlocking.
 - **Cancellation.** A stop sends `Cancel` and waits the grace period
   before a physical kill. The run ends `Cancelled` only when the journal
   observed the cancellation at an instruction checkpoint (ADR 0039);
@@ -282,11 +262,13 @@ belongs to the transport, which reports a silent worker as
 - **Checkpoints.** `CheckpointStore::commit` stores the VM bytes, the
   ledger and the frame epoch together; it refuses a commit from a retired
   frame, and an identical re-commit is a no-op. `BrokerBounds::standard()`
-  is provisional until the pool presets land.
+  uses a 30-second settle deadline and a one-second cancellation grace.
 
-The conformance laws `vm_broker_tests!` register on every tier (the
-in-process and replaying Restate doubles, SQLite in memory and on file,
-Postgres and live Restate):
+The conformance laws `vm_broker_tests!` use an in-process worker double and
+journal effects through the tier's controller. The store matrix is SQLite
+memory, SQLite file and PostgreSQL; hosts are the in-process Restate server
+double, live Restate and lash-sim's in-process effect host. Upgrade proofs use
+the synthetic-next tier. The broker law macro registers:
 
 - `worker_kill_before_start_runs_no_effect`
 - `worker_kill_mid_compute_redrives_through_the_substrate`
@@ -300,15 +282,166 @@ Postgres and live Restate):
 - `frame_open_retires_worker_state_and_old_globals_are_undefined`
 - `one_slot_nested_effect_does_not_deadlock`
 
+### 9. The worker entry and pool
+
+`lash-vm-client` launches an explicitly configured worker entry with an empty
+environment. The entry closes inherited descriptors except its IPC socket
+before running the worker server. The pool bounds checkout, queue size,
+process count, deadlines, cumulative CPU and replacement attempts. Clean
+release resets the worker; a crash, protocol failure or exhausted limit
+discards it. Pool accounting stays parent-owned across redrive.
+
+This provides crash containment, rather than an OS sandbox. Lash installs no
+namespaces, seccomp, Landlock or cgroups. A native VM escape has the worker
+user's OS access. Both adapters run model code through this process boundary.
+
+Sources: `crates/lash-vm-client/src/ipc.rs:26`,
+`crates/lash-vm-worker/src/entry.rs:26`, and
+`crates/lash-vm-client/src/pool.rs`.
+
+### Presets and host packaging
+
+FIG-4162 retains the standard pool bounds: one prewarmed process, at most four
+processes, two queued inputs and eight MiB queued bytes. Protocol bounds remain
+four MiB frames, two MiB state, one MiB effect payloads, 64 KiB source, 100,000
+decoded nodes and 64 MiB charged decode allocation. VM admission allows fifty
+million instructions, 64 MiB guest memory and 1,024 frames. Checkout and IPC
+silence are five seconds, compute thirty seconds, serialization five seconds,
+cancellation grace 100 ms, cumulative CPU ten seconds, and attempts three.
+The restart window admits eight failed replacements per minute.
+
+These bounds limit resource admission; the synthetic service-time matrix does
+not prove an arbitrary-guest deadline or optimal host concurrency. Existing RLM
+and process fixtures need the service's explicit larger profile: 64 MiB state,
+128 MiB frames and queued input, and 256 MiB charged decode allocation. Small
+echo workloads do not justify reducing that valid-state envelope. Hosts select
+their own configuration when their workload needs different bounds.
+
+Releases bundle the optimized helper with its exact SDK source tree, compiler
+pin, lockfile and per-file checksums. The host must build against that source
+tree, on the matching target and profile without the testing feature. The
+helper reports its immutable compiled identity with `--build-identity`; pool
+admission compares it before guest work. A single executable instead registers
+the facade's early re-exec entry and frontend before constructing its runtime,
+credentials or stores, as `crates/lash/examples/worker_host.rs` demonstrates.
+Standalone registry consumption of the fingerprint closure remains FIG-4408.
+
+The optimized same-machine matrix records 10,000 paired fresh-state observations
+per workload and 200 cold helper starts. Warm zero-resource-effect overhead is
+0.155 ms p50 and 0.475 ms p99, within the 1/5 ms diagnostic budget. Scalar
+one-effect exchange is 105/1,281 microseconds, over the 100/500 microsecond
+budget; nine of ten exchange populations exceed at least one threshold.
+The whole-batch and large-value measurements include guest work and
+serialization. The matrix uses the canonical optimized workspace feature
+graph, including testing features, without invoking test controls. Shared-host
+load, sample counts, complete tails and memory counters are recorded in
+`crates/lash-perf/src/vm_worker_matrix/measurements-20260930.json` and its
+Markdown companion. These measurements support bounded admission and keep
+latency failures visible; they do not set a portable CI latency gate.
+
+Sources: `crates/lash-vm-client/src/config.rs:52`,
+`crates/lash-vm-client/src/service.rs:442`, `scripts/package_vm_worker.py:18`,
+and `.github/workflows/release.yml:689`.
+
 ## Consequences
 
-- The parent can store, route and fence VM state it never decodes, and a
-  worker can be replaced mid-session by replaying the journal into a
-  pristine instance.
-- Until the adapters move into workers, the parent calls the worker-side
-  functions in process. They are the only code that decodes guest state,
-  so moving them behind the pipe changes no parent code path.
-- Pre-warming the process-wide interner is gone with the interner.
-- The boundary statement is honest: a worker contains crashes and keeps
-  credentials out of reach of model code, and the language keeps authority
-  in the parent. Neither is an OS sandbox.
+Opaque records let the broker store and fence state without restoring guest
+values. A reset drops all guest-derived state by construction. Field-by-field
+cleanup could miss a newly added state owner; keeping grants in returned guest
+state would let that state replace parent-owned bindings.
+
+RLM cells, durable process bodies, process creation, artifact inspection and
+semantic guest-state restoration run through the shared worker service.
+Parent adapters retain opaque VM bytes and worker-verified structural metadata.
+
+## Implementation
+
+- `crates/lashlang/src/runtime/instance.rs:36` owns the instance;
+  `:65` resets by replacement and `:106` owns semantic state decoding.
+- `crates/lash-protocol-rlm/src/executor/state/worker_envelope.rs` separates
+  guest bytes from parent authority.
+- `crates/lash-vm-protocol/src/state.rs:86` defines opaque state;
+  `crates/lash-vm-protocol/src/codec.rs:3` defines framing and decode charges.
+- `crates/lash-vm-broker/src/broker.rs:22` defines worker-loss recovery;
+  `:391` releases a slot for a nested effect without committing the park.
+- `crates/lash-protocol-rlm/src/executor/mod.rs` and
+  `crates/lash-lashlang-runtime/src/process.rs` broker worker execution.
+- `crates/lash-vm-worker/src/service.rs` owns source compilation and artifact
+  inspection; `scripts/check-vm-parent-paths.py` checks the production inventory.
+- `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` pins reset and
+  step/resume equivalence; `crates/lash-conformance/src/macros/vm_broker.rs:12`
+  registers the broker laws; `crates/lash-vm-worker/tests/pool_laws.rs`
+  exercises the physical pool.
+
+### Durable worker accounting
+
+Cells and process bodies reserve their parent-admitted code scope on the
+backend before model work starts. The reservation records consumed attempts,
+known cumulative CPU, unknown CPU attempts, and whether a worker is active.
+Worker release settles measured CPU before parent callbacks. Park/resume and
+segment handover keep the same attempt. A failed or interrupted active attempt
+requires a replacement attempt on substrate redrive; the reservation prevents
+that redrive from receiving fresh counters. Fenced settlement prevents an older
+parent from overwriting a successor's totals.
+
+Parent loss during an active attempt records its CPU as unknown. It consumes
+an attempt without inventing measured usage or preventing durable redrive.
+Repeated losses exhaust the typed attempt bound. Each attempt has a CPU cap,
+so the worst-case work bound is `(attempts × per-attempt CPU cap) + known CPU`.
+Known CPU and consumed attempts remain monotone across redrives. SQLite and
+PostgreSQL store this accounting independently of positional effect journals.
+
+An owned child also installs a kernel CPU ceiling before guest work, from its
+current process CPU and the configured execution CPU budget. It remains
+in force across every effect response and if the parent dies. Only reset for a
+new checkout installs another ceiling. Waiting for a parent response settles
+known CPU and clears the active marker before any host callback; resuming
+computation marks it active again. The kernel rounds CPU limits to seconds, so the
+per-attempt cap used in the bound above is the configured cumulative CPU budget
+plus one second. The ceiling bounds computation. The worker has the filesystem
+and network access of its OS user.
+
+### Await and batch parking
+
+A cell or body that awaits a process handle, a tuple, list or record of them,
+or a resource-operation batch parks on that await and releases its worker, so
+the awaited body or nested work takes the slot. `EffectKind::parkable` and
+`VmRequest::parkable` admit `Await` and `ResourceOperationBatch`; the runtime
+adapter parks every parkable request. A hand-over answer on these paths is the
+park, never a guest error.
+
+An aggregate await stays one host await per handle, in traversal order. When
+the host parks the run on one handle, the continuation's resume point is
+`VmSuspendedOperation::Await { settled }`: the awaited value stands on the
+operand stack and, when `settled` is not zero, a list of the `settled` leaf
+results the run already received stands above it. The resumed run walks the
+same value again, takes those results for its first leaves without asking the
+host, and issues exactly the await it parked on, which the broker answers with
+its held outcome. A continuation carries at most
+`VM_PARKED_AWAIT_SETTLED_LIMIT` (1024) settled results; past the bound the
+capture declines and the host answers the await in place. Decoding refuses a
+larger count, and a reissued await whose carried results do not match its walk
+is refused.
+
+This representation keeps the host contract and the journal unchanged: each
+handle keeps its own admitted operation and ordinal, a straight-through run
+and a parked one issue the same awaits in the same order, and journal replay
+after a parent crash lines up position for position. Two alternatives are
+rejected. Reissuing the whole aggregate on resume would await settled handles
+again, so the reissued request would not match the held operation and
+each resume would admit fresh ordinals. One host await over the whole
+aggregate would change the `Await` ability for every host and merge
+separately journaled waits into one operation.
+
+A resource-operation batch is one host operation, so it parks as
+`VmSuspendedOperation::ResourceOperationBatch` and reissues the same batch.
+
+The native laws in `crates/lash-vm-worker/tests/pool_laws.rs`
+(`one_slot_process_await_releases_worker_for_the_awaited_body`,
+`one_slot_aggregate_process_await_parks_on_every_pending_handle`,
+`a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result`,
+`one_slot_resource_operation_batch_parks_and_resumes`), the VM laws in
+`crates/lashlang/src/runtime/tests/await_park_cases.rs`, and the RLM law
+`one_slot_cell_that_starts_and_awaits_a_process_completes` in
+`crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs`
+pin this behaviour.

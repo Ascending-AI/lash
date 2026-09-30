@@ -1,4 +1,4 @@
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use crate::plugin::RlmChannel;
 use lash_rlm_types::RlmTermination;
 
@@ -15,13 +15,14 @@ use lash_rlm_types::RlmTermination;
     reason = "the dialect's authoritative execution section validates its catalog by construction"
 )]
 pub(crate) fn execution_section(
-    dialect: &TypescriptDialect,
+    dialect: &SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,
+    discovery: Option<&lash_core::ToolDiscovery>,
 ) -> String {
     let tags = dialect.cell_tags();
     dialect
-        .render_execution_section(features, catalog, RlmChannel::NativeTool)
+        .render_execution_section(features, catalog, RlmChannel::NativeTool, discovery)
         .expect("validated dialect catalog")
         .lines()
         .filter(|line| ![tags.open, tags.close].contains(&line.trim()))
@@ -29,6 +30,6 @@ pub(crate) fn execution_section(
         .join("\n")
 }
 
-pub(super) fn finalization(dialect: &TypescriptDialect, termination: &RlmTermination) -> String {
+pub(super) fn finalization(dialect: &SessionDialect, termination: &RlmTermination) -> String {
     dialect.finalization_copy(termination, RlmChannel::NativeTool)
 }

@@ -94,7 +94,6 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         .expect("fork window");
     assert_eq!(read.window.leaf_node_id, Some(leaf));
     assert_eq!(read.head_revision, 0);
-    assert!(read.usage.rows.is_empty());
     assert!(
         branch
             .list_pending_turn_inputs()

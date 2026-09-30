@@ -99,22 +99,51 @@ pub struct SessionDeleteReport {
 /// idempotent and the next attempt starts over.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionDeleteFailure {
+    /// The effect host did not drain the session's usage accounting: its
+    /// settlements are not all delivered yet, or its owner is not retired
+    /// (ADR 0125). Nothing of the session was deleted; the relay retries.
+    #[error("usage accounting: {message}")]
+    UsageAccounting { message: String },
     /// The process registry did not delete the session's process state.
-    #[error("process state: {message}")]
-    Process { message: String },
+    #[error("process state: {source}")]
+    Process { source: Box<crate::PluginError> },
     /// The trigger store did not delete the session's subscriptions.
-    #[error("trigger subscriptions: {message}")]
-    Triggers { message: String },
+    #[error("trigger subscriptions: {source}")]
+    Triggers { source: Box<crate::PluginError> },
     /// The effect host did not revoke the session's durable waits.
-    #[error("durable waits: {message}")]
-    Waits { message: String },
+    #[error("durable waits: {source}")]
+    Waits { source: Box<crate::RuntimeError> },
     /// The effect host did not retire the session's effect journal.
-    #[error("effect journal: {message}")]
-    Journal { message: String },
+    #[error("effect journal: {source}")]
+    Journal { source: Box<crate::RuntimeError> },
     /// The session's storage delete stopped, with the reclaim counters it
     /// witnessed before it did (ADR 0067).
     #[error("storage: {0}")]
     Storage(Box<MaintenanceFailure<SessionBlobReclaimReport>>),
+}
+
+impl SessionDeleteFailure {
+    /// Whether the retained cause explicitly permits an identical retry.
+    /// Recorded deletion remains owned by its obligation regardless of this classification.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Process { source } | Self::Triggers { source } => source.is_retryable(),
+            // An undelivered drain is delivery still in flight.
+            Self::UsageAccounting { .. } => true,
+            Self::Waits { source } | Self::Journal { source } => source.is_retryable(),
+            Self::Storage(_) => false,
+        }
+    }
+
+    /// Whether the retained cause requires a host change before it can succeed.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Process { source } | Self::Triggers { source } => source.is_terminal(),
+            Self::UsageAccounting { .. } => false,
+            Self::Waits { source } | Self::Journal { source } => source.is_terminal(),
+            Self::Storage(_) => false,
+        }
+    }
 }
 
 /// What [`delete_session`] did.
@@ -164,8 +193,12 @@ pub enum SessionDeleteWait {
     Cleanup(SessionCleanup),
     /// This call's attempt failed; the relay attempts it again.
     Failed(SessionDeleteFailure),
-    /// The obligation is not due: another relay holds it (`Claimed`), or it
-    /// stalled and waits for an operator's re-arm (`Stalled`).
+    /// The relay settled without a detailed delete attempt: its budget
+    /// expired, the cleanup read failed, or the claimed key was undecodable.
+    /// A retry remains owed; a stall waits for an operator's re-arm.
+    Delivery(RelayVerdict),
+    /// The obligation could not be claimed: its retry is not due yet, another
+    /// relay holds it (`Claimed`), or it waits for a re-arm (`Stalled`).
     Obligation(ObligationState),
 }
 
@@ -265,22 +298,33 @@ pub async fn delete_session(
         Some(DeleteAttempt::Deleted(report)) => Ok(SessionDeletion::Deleted(report)),
         Some(DeleteAttempt::Waiting(cleanup)) => closing(SessionDeleteWait::Cleanup(cleanup)),
         Some(DeleteAttempt::Failed(failure)) => closing(SessionDeleteWait::Failed(failure)),
-        None => {
-            // Not attempted: another relay claimed it between the read and
-            // the claim.
-            debug_assert!(matches!(verdict, RelayVerdict::NotDue));
-            let state = obligations
-                .state(&obligation.id)
-                .await?
-                .unwrap_or(ObligationState::Claimed);
-            closing(SessionDeleteWait::Obligation(state))
-        }
+        None => match verdict {
+            // No local report proves what a competing delivery did. Read
+            // its durable state, including a physical delete that removed
+            // the obligation's row before this call could claim or settle it.
+            RelayVerdict::Delivered | RelayVerdict::ClaimLost | RelayVerdict::NotDue => {
+                match obligations.state(&obligation.id).await? {
+                    Some(state) => closing(SessionDeleteWait::Obligation(state)),
+                    None => Ok(SessionDeletion::AlreadyDeleted { session_id }),
+                }
+            }
+            RelayVerdict::Retried { .. }
+            | RelayVerdict::Stalled(_)
+            | RelayVerdict::Deferred { .. }
+            | RelayVerdict::Requested => closing(SessionDeleteWait::Delivery(verdict)),
+        },
     }
 }
 
 /// Physically delete session `session_id`, the last step of its deletion.
 /// Every step is idempotent; the storage delete, which removes the row the
 /// session's delete obligation lives on, is last.
+///
+/// Usage accounting drains first (ADR 0125): the close already killed the
+/// session's turn executions, so the drain reaches the owner's continuation
+/// after every settlement they sent, and retires the owner so a still-running
+/// group child is refused before it dispatches. The facts outlive the delete
+/// until retention reclaims them.
 ///
 /// # Errors
 ///
@@ -289,14 +333,21 @@ pub async fn physically_delete(
     administration: &SessionAdministration,
     session_id: &SessionId,
 ) -> Result<SessionDeleteReport, SessionDeleteFailure> {
+    administration
+        .effect_host()
+        .drain_usage_accounting(&crate::RuntimeOwner::Session(session_id.clone()))
+        .await
+        .map_err(|error| SessionDeleteFailure::UsageAccounting {
+            message: error.to_string(),
+        })?;
     let process = match administration.process() {
         Some(process) => Some(
             process
                 .registry()
                 .delete_session_process_state(session_id)
                 .await
-                .map_err(|error| SessionDeleteFailure::Process {
-                    message: error.to_string(),
+                .map_err(|source| SessionDeleteFailure::Process {
+                    source: Box::new(source),
                 })?,
         ),
         None => None,
@@ -305,20 +356,20 @@ pub async fn physically_delete(
         triggers
             .delete_session_subscriptions(session_id)
             .await
-            .map_err(|error| SessionDeleteFailure::Triggers {
-                message: error.to_string(),
+            .map_err(|source| SessionDeleteFailure::Triggers {
+                source: Box::new(source),
             })?;
     }
     let host = administration.effect_host();
     host.revoke_await_events_for_session(session_id)
         .await
-        .map_err(|error| SessionDeleteFailure::Waits {
-            message: error.to_string(),
+        .map_err(|source| SessionDeleteFailure::Waits {
+            source: Box::new(source),
         })?;
     host.retire_effect_journal(EffectJournalRetirement::session(session_id))
         .await
-        .map_err(|error| SessionDeleteFailure::Journal {
-            message: error.to_string(),
+        .map_err(|source| SessionDeleteFailure::Journal {
+            source: Box::new(source),
         })?;
     let storage = administration
         .store_factory()

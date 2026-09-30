@@ -142,7 +142,6 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
             actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id.clone())),
-            env_spec: None,
             draft: crate::TriggerSubscriptionDraft::for_process(
                 "law",
                 scenario.env_ref.clone(),
@@ -382,19 +381,6 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             .count(),
         1,
         "the child's declared event landed in the process registry exactly once"
-    );
-
-    // The usage leaf: the managed-LLM spend inside its attempt was captured
-    // into the journaled attempt outcome and aggregated onto the settlement.
-    let usage = &outcomes[5];
-    assert_eq!(
-        usage.1.usage.len(),
-        1,
-        "the child's direct-completion spend rides its settlement"
-    );
-    assert_eq!(
-        usage.1.usage[0].usage.input_tokens, 41,
-        "the captured delta is the attempt's own spend"
     );
 
     // Neither runtime-owned resolver can park on a service that cannot attach

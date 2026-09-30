@@ -462,4 +462,25 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         lash_core::drive::close_admitted_root(&self.config.env.core, &controller, session, root)
             .await
     }
+
+    /// Nudges every cleanup that awaits the root's journal: the frames its
+    /// commits ended (ADR 0113 §3.1), its own execution referrer, and any
+    /// guard it created, which a relay pass during the run deferred.
+    async fn root_run_ended(
+        &self,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        let journal = lash_core::ExecutionScope::turn(session.clone(), root.clone())
+            .journal_identity()
+            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+        self.config
+            .env
+            .core
+            .backend()
+            .artifact_cleanup()
+            .nudge_awaiting_journal(&journal, self.config.env.core.clock.timestamp_ms())
+            .await
+            .map(|_| ())
+    }
 }

@@ -46,7 +46,7 @@ fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
 }
 
 fn commit_state(boundary: &str, key: &str, state: &RuntimeSessionState) -> RuntimeCommit {
-    RuntimeCommit::persisted_state_for_test(state, &[])
+    RuntimeCommit::persisted_state_for_test(state)
         .with_operation(OperationId::new(
             ExecutionScope::runtime_operation(format!("session:root:boundary:{boundary}")),
             key,
@@ -142,90 +142,6 @@ async fn record_config_retry_after_head_advance() {
 #[tokio::test]
 async fn create_session_retry_after_head_advance() {
     semantic_boundary_retry_after_head_advance("root", "create-session").await;
-}
-
-#[tokio::test]
-async fn usage_ledger_retry_after_head_advance() {
-    semantic_boundary_retry_after_head_advance("child-turn", "usage-ledger").await;
-}
-
-#[tokio::test]
-async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
-    let directory = tempfile::tempdir().expect("database directory");
-    let path = directory.path().join("session.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("SQLite store");
-    admit_root(&store).await;
-    let entry = |source: &str| lash_core_execution::TokenLedgerEntry {
-        source: source.into(),
-        model: "ledger-model".into(),
-        usage: lash_core_execution::TokenUsage::default(),
-        usage_disposition: Default::default(),
-    };
-    let usage_commit = |state: &RuntimeSessionState, source: &str| {
-        let mut commit = commit_state("child-turn", "usage-ledger", state);
-        commit.usage_deltas = lash_core_execution::store::RuntimeUsageDelta::for_operation(
-            &commit.turn_commit.operation,
-            &[entry(source)],
-        )
-        .expect("usage delta identities");
-        commit
-            .stamp_semantic_boundary()
-            .expect("semantic-boundary stamp");
-        commit
-    };
-    let state = RuntimeSessionState {
-        session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
-    };
-    let first = usage_commit(&state, "child-turn-usage");
-    let original = store
-        .commit_runtime_state(first.clone())
-        .await
-        .expect("first usage flush");
-    let mut advanced_state = loaded_state(&store).await;
-    advanced_state.turn_index += 1;
-    let advanced = store
-        .commit_runtime_state(commit_state("intervening", "advance", &advanced_state))
-        .await
-        .expect("advance head");
-    // FIG-2480: a rebuilt retry carrying the same staged usage is answered from
-    // durable receipt evidence and publishes no second ledger row.
-    let loaded = loaded_state(&store).await;
-    let rebuilt = store
-        .commit_runtime_state(usage_commit(&loaded, "child-turn-usage"))
-        .await
-        .expect("rebuilt same-usage retry replays");
-    assert!(rebuilt.receipt_replayed);
-    assert_eq!(rebuilt.head_revision, original.head_revision);
-    assert_eq!(
-        rebuilt.committed_usage_delta_identities, original.committed_usage_delta_identities,
-        "replay must confirm the originally committed usage identities"
-    );
-    // Differing staged usage under the same boundary is a different request:
-    // refused, never deduplicated into the stored receipt.
-    let refused = store
-        .commit_runtime_state(usage_commit(&loaded, "child-turn-usage-changed"))
-        .await;
-    assert!(
-        matches!(
-            refused,
-            Err(StoreError::SemanticBoundaryIdentityConflict { ref operation_key, .. })
-                if operation_key == "usage-ledger"
-        ),
-        "differing staged usage must be refused: {refused:?}"
-    );
-    assert_eq!(
-        store
-            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
-            .await
-            .expect("read head")
-            .expect("session")
-            .head_revision,
-        advanced.head_revision,
-        "neither retry nor refusal may advance or rewind the durable head"
-    );
 }
 
 #[tokio::test]
@@ -358,12 +274,7 @@ async fn non_append_operations_refuse_append_identity_metadata() {
     let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
-    for key in [
-        "initial-park",
-        "record-config",
-        "create-session",
-        "usage-ledger",
-    ] {
+    for key in ["initial-park", "record-config", "create-session"] {
         let mut attempted = commit("identity-adoption", key, 0);
         attempted.turn_commit.append_request_identity =
             lash_core_execution::AppendRequestIdentity::Append {

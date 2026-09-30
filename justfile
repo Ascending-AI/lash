@@ -260,7 +260,12 @@ crash-matrix-restate-e2e:
   mkdir -p "$artifacts"
   log="$artifacts/crash-matrix.log"
 
-  binary="$(python3 "{{repo}}/scripts/ci/restate_suite.py" build //crates/lash-sim:crash_point_matrix__test | tail -n 1)"
+  mapfile -t built < <(python3 "{{repo}}/scripts/ci/restate_suite.py" build \
+    //crates/lash-sim:crash_point_matrix__test \
+    //crates/lash-vm-worker:lash-vm-worker__bin)
+  [[ "${#built[@]}" -eq 2 ]]
+  binary="${built[0]}"
+  export LASH_VM_WORKER="${built[1]}"
 
   # The server redelivers a failed attempt within a quarter second of the
   # deployment coming back, and never kills or pauses one on its own: a cell
@@ -278,7 +283,7 @@ crash-matrix-restate-e2e:
       --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=250ms \
       --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=1000000 \
       --server-env RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS=pause \
-      -- bash -c 'cd "$1" && exec "$2" --test-threads=1 --nocapture' _ \
+      -- bash -c 'cd "$1" && "$2" --test-threads=1 --nocapture && exec "$2" --ignored --exact live_short_settle_budget_is_bounded --test-threads=1 --nocapture' _ \
         "{{repo}}/crates/lash-sim" "$binary" 2>&1 | tee "$log"
   status="${PIPESTATUS[0]}"
   set -e
@@ -288,7 +293,7 @@ crash-matrix-restate-e2e:
   other_cells="$(grep -E ' on the [a-z]+ engine: ' "$log" | grep -vc ' on the live engine: ' || true)"
   echo "crash matrix on live Restate: ${live_cells} cell(s) ran live, ${other_cells} elsewhere"
   grep -E ' on the [a-z]+ engine: ' "$log" || true
-  grep -E '^test result: ' "$log" | tail -n 1 || true
+  grep -E '^test result: ' "$log" || true
   if [ "$status" -ne 0 ]; then
     echo "crash matrix on live Restate failed (exit $status); log: $log" >&2
     exit "$status"
@@ -714,8 +719,19 @@ check-file-size:
 multi-node-load target="local":
   bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}"
 
+# Phase B of the rolling upgrade (FIG-3805, `runbooks/rolling-upgrade/`): N
+# and the synthetic N+1 side by side on the FIG-4167 topology (three Restate
+# nodes, PostgreSQL, kind) under the load driver's sessions, through the
+# half roll, the rollback before finalize, the roll, finalize with the
+# object sweep, and the stale-writer fence (`scripts/loadtest_upgrade.py`).
+# Short, with no measurement archive: the witness verdict is the proof. Run
+# through kiln gate, like `multi-node-load`.
+e2e-rolling-cluster target="local":
+  bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}" rolling-upgrade
+
 loadtest-chart-check:
   bash "{{repo}}/scripts/check-loadtest-chart.sh"
   python3 "{{repo}}/scripts/test_loadtest_topology.py"
   python3 "{{repo}}/scripts/test_loadtest_faults.py"
+  python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
   python3 "{{repo}}/scripts/test_loadtest_manifest.py"

@@ -247,7 +247,7 @@ async fn classify_oauth_fixture(script: &str) -> CredentialError {
         .await
         .expect("scripted token endpoint response");
     let status = response.status;
-    let body = read_http_body_text(response.body, None, "read OAuth fixture")
+    let body = read_http_body_text(response.body, 16 * 1024 * 1024, None, "read OAuth fixture")
         .await
         .expect("OAuth fixture body");
     classify_oauth_refresh_error(OAuthError::token_endpoint(

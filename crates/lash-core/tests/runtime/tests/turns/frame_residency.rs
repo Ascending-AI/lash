@@ -249,8 +249,10 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
             )
             .await
             .expect("read the compaction's completion")
-            .and_then(|completion| completion.compact_context_outcome),
-            Some(lash_core::runtime::CompactContextOutcome::Opened { .. })
+            .and_then(|completion| completion.command_outcome),
+            Some(lash_core::runtime::SessionCommandOutcome::CompactContext {
+                outcome: lash_core::runtime::CompactContextOutcome::Opened { .. },
+            })
         ),
         "the compactor answered a summary"
     );

@@ -13,12 +13,12 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    abandoned_consumer_holds::AbandonedConsumerHoldStatements, definitions::DefinitionStatements,
-    events::EventStatements, observers::ObserverStatements,
-    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
-    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
-    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
-    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    abandoned_consumer_holds::AbandonedConsumerHoldStatements, events::EventStatements,
+    observers::ObserverStatements, parent_end_plans::ParentEndPlanStatements,
+    park_events::ProcessParkEventStatements, processes::ProcessStatements,
+    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
+    wake_allocation_floors::WakeAllocationFloorStatements, wake_deliveries::WakeDeliveryStatements,
+    wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -809,8 +809,6 @@ pub(crate) struct ProcessSql {
     pub(crate) process_postgres: ProcessPostgresStatements,
     /// Registry-wide statements only PostgreSQL issues.
     pub(crate) registry_postgres: ProcessRegistryPostgresStatements,
-    /// `process_definitions` statements, all of them shared.
-    pub(crate) definition: DefinitionStatements,
     /// `process_events` statements both backends issue verbatim.
     pub(crate) event: EventStatements,
     /// `process_observers` statements both backends issue verbatim.
@@ -857,7 +855,6 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         process: ProcessStatements::render(dialect),
         process_postgres: ProcessPostgresStatements::render(dialect),
         registry_postgres: ProcessRegistryPostgresStatements::render(dialect),
-        definition: DefinitionStatements::render(dialect),
         event: EventStatements::render(dialect),
         observer: ObserverStatements::render(dialect),
         observer_postgres: ObserverPostgresStatements::render(dialect),

@@ -8,12 +8,13 @@ use super::{
     WORKLOAD_MARKER, turn_id_for,
 };
 use crate::{journaled_session, turn_handler_error};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use lash::restate::RestateWait;
 use lash::runtime::AwaitEventResolver as _;
 use lash::{SessionId, TurnInput};
 use lash_perf::workload::{Generator, ProcessPlan, QueuedInputPlan, TurnPlan};
 use lash_restate::RestateRuntimeEffectController;
+use restate_sdk::context::{ContextSideEffects, RunFuture};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::WorkflowContext;
 use restate_sdk::serde::Json;
@@ -46,34 +47,79 @@ type Controller<'ctx> = RestateRuntimeEffectController<'ctx, WorkflowContext<'ct
 
 #[async_trait::async_trait]
 trait WorkloadProcessCleanup: Sync {
+    fn timestamp_ms(&self) -> u64 {
+        u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0)
+    }
+
     async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>>;
     async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()>;
     async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()>;
 }
 
+/// The deadline is recorded once. Every clock check and timed read runs
+/// inside a recorded step: replay reads its outcome, and a retried step
+/// retains the original deadline.
 async fn cleanup_model_children(
+    ctx: &WorkflowContext<'_>,
     admin: &impl WorkloadProcessCleanup,
     session: &str,
-) -> Result<usize> {
-    let cleanup = async {
-        let mut cleaned = std::collections::BTreeSet::new();
-        loop {
-            let children = admin.owned(session).await?;
-            if children.is_empty() {
-                return Ok::<_, anyhow::Error>(cleaned.len());
-            }
-            for child in &children {
-                admin.cancel(child).await?;
-            }
-            for child in children {
-                admin.await_terminal(&child).await?;
-                cleaned.insert(child);
-            }
+) -> HandlerResult<usize> {
+    let deadline = ctx
+        .run(|| async { Ok(admin.timestamp_ms().saturating_add(20_000)) })
+        .name("load.model-children.deadline")
+        .await?;
+    let mut cleaned = std::collections::BTreeSet::new();
+    loop {
+        let children = ctx
+            .run(|| async {
+                cleanup_read_before_deadline(admin, deadline, admin.owned(session))
+                    .await
+                    .map(Json)
+            })
+            .name("load.model-children.list")
+            .await?
+            .0;
+        if children.is_empty() {
+            return Ok(cleaned.len());
         }
+        for child in &children {
+            admin.cancel(child).await.map_err(terminal_chain)?;
+        }
+        for child in children {
+            ctx.run(|| async {
+                cleanup_read_before_deadline(admin, deadline, admin.await_terminal(&child)).await
+            })
+            .name("load.model-children.terminal")
+            .await?;
+            cleaned.insert(child);
+        }
+    }
+}
+
+/// This body is only called inside ctx.run, including its clock reads and
+/// timeout result. A replay never re-evaluates either decision.
+async fn cleanup_read_before_deadline<T>(
+    admin: &impl WorkloadProcessCleanup,
+    deadline: u64,
+    read: impl std::future::Future<Output = Result<T>>,
+) -> HandlerResult<T> {
+    let expired = || {
+        terminal(
+            "workload model-child cleanup did not reach terminal state: journaled deadline elapsed",
+        )
     };
-    tokio::time::timeout(Duration::from_secs(20), cleanup)
+    let remaining = deadline
+        .checked_sub(admin.timestamp_ms())
+        .filter(|remaining| *remaining > 0)
+        .ok_or_else(expired)?;
+    let answer = tokio::time::timeout(Duration::from_millis(remaining), read)
         .await
-        .context("workload model-child cleanup did not reach terminal state")?
+        .map_err(|_| expired())?
+        .map_err(terminal_chain)?;
+    if admin.timestamp_ms() >= deadline {
+        return Err(expired());
+    }
+    Ok(answer)
 }
 
 struct SessionProcessCleanup<'a, 'ctx> {
@@ -411,7 +457,7 @@ impl LoadWorker {
             })
             .ok_or_else(|| terminal(format!("the body of `{key}` declares no process")))?;
         let process_name = declaration.name.to_string();
-        // A host pin keeps the module alive for the process (ADR 0113).
+        // A host pin keeps the module and environment alive for the process (ADR 0113).
         let pin = lash::process::HostArtifactPin::mint();
         self.core
             .host_artifacts()
@@ -440,13 +486,19 @@ impl LoadWorker {
                 ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
             },
         );
+        let env_ref = self
+            .core
+            .host_artifacts()
+            .publish_process_env(&pin, &environment)
+            .await
+            .map_err(turn_handler_error)?;
         let request = lash_core::ProcessStartRequest::new(
             input,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
         .with_host_start_key(key.as_bytes())
-        .with_env_spec(environment)
+        .with_env_ref(env_ref)
         .with_extra_event_types(
             lash::process::lashlang_process_event_types()
                 .into_iter()
@@ -468,24 +520,13 @@ impl LoadWorker {
                 .map_err(turn_handler_error)?;
         } else if process.waits_for_signal() {
             tokio::time::sleep(Duration::from_millis(u64::from(process.wake_delay_ms))).await;
-            let event_type =
-                lash_core::facade_support::process_signal_event_type("resume").map_err(terminal)?;
-            let append =
-                lash_core::ProcessEventAppendRequest::new(
-                    event_type,
-                    json!({ "key": key, "signal": "resume" }),
-                )
-                .with_replay_key(
-                    lash_core::facade_support::process_signal_wait_key(&process_id, "resume", key),
-                );
+            let signal = lash_core::ProcessSignal::new(
+                lash_core::ProcessSignalIdentity::new(process_id.clone(), "resume", key.clone())
+                    .map_err(terminal)?,
+                json!({ "key": key, "signal": "resume" }),
+            );
             processes
-                .signal(
-                    &process_id,
-                    "resume",
-                    key.clone(),
-                    append,
-                    scoped(controller, key, "signal")?,
-                )
+                .signal(signal, scoped(controller, key, "signal")?)
                 .await
                 .map_err(turn_handler_error)?;
             signalled = true;
@@ -606,14 +647,14 @@ impl LoadWorker {
             .await;
         let execution = administration.for_invocation(ctx);
         let cleaned = cleanup_model_children(
+            execution.controller().context(),
             &SessionProcessCleanup {
                 processes: self.core.processes(),
                 controller: execution.controller(),
             },
             &session_id,
         )
-        .await
-        .map_err(terminal_chain)?;
+        .await?;
         println!("load cleanup session={session_id} model_children_cancelled={cleaned}");
         execution
             .controller()
@@ -640,7 +681,10 @@ impl LoadWorker {
             match self.core.session(session_id.clone()).open().await {
                 Err(error) => break Some(format!("{error:?}")),
                 Ok(session) => {
-                    session.close().await.map_err(turn_handler_error)?;
+                    session
+                        .close()
+                        .await
+                        .map_err(|refused| turn_handler_error(refused.into()))?;
                     if deletion != DeletionOutcome::Closing
                         || started.elapsed() >= CLOSING_DELETE_WAIT
                     {
@@ -700,71 +744,8 @@ fn input_outcome(outcome: lash::SendOutcome) -> InputOutcome {
     }
 }
 
-#[cfg(test)]
-mod cleanup_tests {
-    use super::*;
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    struct ParkedChildren {
-        rows: Mutex<BTreeMap<lash_core::ProcessId, (&'static str, lash_core::ProcessStatus, bool)>>,
-    }
-
-    #[async_trait::async_trait]
-    impl WorkloadProcessCleanup for ParkedChildren {
-        async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>> {
-            Ok(self
-                .rows
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, (owner, status, _))| *owner == session && status.is_live())
-                .map(|(id, _)| id.clone())
-                .collect())
-        }
-
-        async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()> {
-            self.rows.lock().unwrap().get_mut(process).unwrap().2 = true;
-            Ok(())
-        }
-
-        async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()> {
-            let mut rows = self.rows.lock().unwrap();
-            let (_, status, requested) = rows.get_mut(process).unwrap();
-            anyhow::ensure!(
-                *requested,
-                "a parked child needs cancellation before its terminal"
-            );
-            *status = lash_core::ProcessStatus::Cancelled;
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sessions()
-    -> Result<()> {
-        // Cancelling the turn drops its wait, while its registered child stays parked.
-        let child = lash_core::ProcessId::fixture("opaque-model-child");
-        let sibling = lash_core::ProcessId::fixture("another-session-child");
-        let admin = ParkedChildren {
-            rows: Mutex::new(BTreeMap::from([
-                (
-                    child.clone(),
-                    ("retired-session", lash_core::ProcessStatus::Waiting, false),
-                ),
-                (
-                    sibling.clone(),
-                    ("other-session", lash_core::ProcessStatus::Waiting, false),
-                ),
-            ])),
-        };
-        cleanup_model_children(&admin, "retired-session").await?;
-        let rows = admin.rows.lock().unwrap();
-        assert_eq!(rows[&child].1, lash_core::ProcessStatus::Cancelled);
-        assert_eq!(rows[&sibling].1, lash_core::ProcessStatus::Waiting);
-        assert!(!rows[&sibling].2);
-        Ok(())
-    }
-}
 #[path = "behaviors.rs"]
 mod behaviors;
+#[cfg(test)]
+#[path = "cleanup_tests.rs"]
+mod cleanup_tests;

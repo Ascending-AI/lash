@@ -57,7 +57,7 @@ async fn wait_definition_reclaimed(
     let backend = fixture.double.lash_backend();
     loop {
         let descriptor = backend
-            .process_definitions()
+            .definition_store()
             .get_process_definition(id)
             .await
             .expect("read definition reclamation");
@@ -73,11 +73,12 @@ async fn wait_definition_reclaimed(
     }
 }
 
+/// On the real clock: a paused one auto-advances while a PostgreSQL read
+/// waits on the network, and the pool's acquire timeout fires at once.
 #[tokio::test]
 async fn wait_edges_waits_for_condition_past_former_deadline() {
     let fixture = Fixture::new(0x4232_0001).await;
     let ready = std::sync::atomic::AtomicBool::new(false);
-    tokio::time::pause();
 
     let (edges, ()) = tokio::join!(
         wait_edges(&fixture, |edges| {
@@ -161,6 +162,7 @@ fn rlm_core_with_plugins(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory);

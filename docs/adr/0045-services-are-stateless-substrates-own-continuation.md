@@ -1,195 +1,84 @@
-# Services are stateless; substrates own continuation
+# Services are stateless; engines own continuation
 
-Amended 2026-09-27 (FIG-3588, [ADR 0110](0110-the-engine-owns-process-recovery.md)):
-"lash never re-drives engine-owned work" is absolute. Lash never re-runs started
-work from scratch on any tier: a started process resumes only by its engine
-replaying its journal, or ends `Abandoned` with `ResumeRefused { SubstrateLost }`
-before any effect. The amendment at the end of this ADR is the Restate
-mechanism, and ADR 0110 states it for the effect interface. There is no
-lash-side attempt budget; the engine's retry policy bounds retries.
+A service instance is stateless with respect to correctness across an effect
+boundary. In-memory turns, watch hubs and caches exist, but committed steps
+live in SQL state or the engine journal. Sticky sessions are an optimization,
+not correctness authority. The session-head CAS and sealed drive fence govern
+session mutations and admission (ADR 0101).
 
-Amended 2026-09-27 (FIG-3860,
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
-Restate is the only effect engine and the SQL stores are storage only. The
-in-process reference substrate — lash as the substrate over the SQL stores,
-with its own redrive and execution budget — is deleted; *Conformance is the
-contract* stands, and binds the one engine and any later one.
-
-A lash service instance is stateless with respect to correctness. In-memory
-state exists — a turn mid-stream, watch hubs, caches — but none of it may be
-load-bearing across an effect boundary. Every committed step lives in the
-store or the engine journal, and any instance can resume from committed state.
-Sticky sessions are an affinity optimisation, never a correctness requirement:
-the session-head CAS rejects stale history while commit-time claim ownership
-rejects work a successor already re-claimed (ADR 0029). Those authorities make
-resumption-anywhere safe rather than merely hopeful; the advisory lease itself
-does not reject a current-head tail from an owner that lost it.
-
-Statelessness has a floor. A turn actively streaming from a provider is
-irreducibly in memory until its next commit point. Crashing there costs
-re-execution from the last committed effect, never correctness. That is the
-trade the checkpoint-committed ingress work already assumed, and it is the
-right one.
+Streaming is in memory until the next recorded effect or checkpoint. A crash
+can cost re-execution of unrecorded work. It cannot authorize a fresh execution
+of work whose retained start proves that its journal is lost.
 
 ## Once in flight, the substrate owns it
 
-When an invocation is in flight, the durable substrate — Restate, Temporal,
-or whatever a host implements against the contracts — owns continuation:
-redrive after a crash, retry policy, and backpressure. Lash never re-drives
-engine-owned work. The Restate tier conforms today: live starts submit engine
-invocations, the `ProcessStart` obligation relay only *submits* `run/send` per
-armed row and executes nothing (ADR 0109), execution happens inside engine
-invocations where parked waits suspend natively, and a 10,000-row recovery is
-throttled by the engine's invoker, not by lash. This is the same rule that already governs durability
-(effect-host gaps close on the engine side) and work-item waits (await lives
-on the work-driver seam); this document names the general principle those
-rulings were instances of.
+Restate is the production effect engine; SQL stores are storage (ADR 0104).
+The engine owns invocation continuation, crash redrive, retry policy and
+backpressure. Lash does not restart a started process from scratch. The
+`ProcessStart` obligation relay submits work to the engine and executes no
+process body (ADR 0109). Waiting work suspends through engine operations.
 
-Two placement consequences follow. The shared segment executor
-(`run_process_segment_with_scoped_effect_controller`) carries no bound,
-because bounding it would double-bound work an engine already schedules. And
-no lash-side stampede control exists on engine tiers, because that is the
-engine's contractual job.
-
-This includes the same-session commit-admission FIFO, for both final turn
-commits and queued session-command commits. The controller explicitly declares
-whether an engine owns commit backpressure. Durable journal participation is
-not that discriminator: store-backed replay also journals effects and still
-uses the native FIFO. Turn-owned command drains carry the invocation controller;
-standalone command drains select the configured host controller. Storeless
-commits continue to bypass local admission.
+Engine-owned commit backpressure is an operation-level controller fact,
+`owns_commit_backpressure`. Core uses that contract rather than guessing from
+a backend name. An engine's retries and concurrency policy are not duplicated
+by a second runtime attempt budget or scheduler.
 
 ## Conformance is the contract
 
-A third-party substrate's redrive quality is its implementor's problem. What
-lash owes them is an airtight conformance surface: the effect-host contract,
-the work-driver seam, the process-registry conformance suite, and the
-differential replay tests of ADR 0044. Passing conformance must mean the
-substrate drives lash correctly; anything correctness-relevant that
-conformance does not exercise is a gap in lash, not in the substrate. The
-conformance kit is therefore a product surface, maintained and versioned like
-one.
+Effect-host, work-driver, process-registry and differential replay laws define
+what an engine implementor must supply. A correctness property absent from
+conformance is a gap in Lash's contract. Conformance remains maintained product
+code rather than an informal example.
+
+The current store matrix is SQLite file, SQLite memory and PostgreSQL. Hosts
+are the Restate server double, live Restate and lash-sim's in-process effect
+host. The test doubles exercise the journal contract over SQL storage.
 
 ## Consequences
 
-Anything found to keep correctness state only in instance memory across an
-effect boundary is a defect against this document. New coordination features
-land on the engine seam first. When a bound, a wait, or a redrive path is proposed
-inside lash-core, the first question is whether it belongs to the substrate —
-the answer decided FIG-526, and it will decide the next one.
+Correctness state held only in instance memory across a committed boundary is
+a defect. A recorded outcome settles as recorded; a live fault remains engine
+retry work. Replay divergence parks rather than publishing a fabricated
+terminal outcome. Recovery is engine-owned under ADR 0110.
 
-- lash-core never asks which tier it runs on. A behaviour difference is an
-  operation on the effect seam. Every host journals its effects (ADR 0102, D1;
-  FIG-3585 deleted the `EffectJournaling` fact and its `Local` arm). The only
-  documented exception is `owns_commit_backpressure`: it is a property of the
-  engine, not a tier flag. `scripts/check-substrate-boundary.sh` guards the
-  retired names.
-- How a failed turn settles is not a tier question either (FIG-3575). The
-  failure's code has a cause class, `RuntimeErrorCode::turn_failure_cause`:
-  a code is terminal exactly when it is an outcome. An outcome, and any
-  failure the journal already holds, is recorded as a failed turn and settles
-  a queued run once. A live fault aborts: an aborted direct turn returns its
-  acceptance receipt, and a queued run stays pending for its retry budget.
-  A replay refusal is a third class, `Parked` (FIG-3586, FIG-3587): the
-  lashlang divergence and cutover codes, `lashlang_cell_binding_drift`, and
-  any recorded effect's replay hash conflict on every SQL host. It is neither
-  terminal nor retryable: the turn aborts with its claims held, a typed park
-  is recorded, and no retry budget is spent, because every redrive by the same
-  build refuses again with zero dispatch. A hash conflict was recorded as a
-  failed turn before FIG-3587; it now parks on every SQL host. Restate's
-  envelope or group-reopen mismatch parks too, as the engine-neutral
-  `effect_replay_divergence`: its handler fails the attempt retryably, so the
-  invocation keeps its journal. Every host settles the same failure the same
-  way.
-- Decided 2026-09-24, not yet implemented (FIG-3600, [ADR 0101's
-  amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)):
-  continuation is the substrate's for **every** turn, because no caller-driven
-  turn exists after that cutover. The backend's work driver runs each turn.
-  A live fault is re-driven under the substrate's policy with the same turn id,
-  and an exhausted budget parks the turn. The aborted direct turn in the
-  bullet above goes away on landing.
+## Considered and rejected: durable partial assistant streams
 
-## Considered and rejected: durable partial assistant streams (2026-08-20)
+Persisting every assistant delta in session continuation storage adds a durable
+write per provider event to buy reconnect display. It is rejected because
+observation history is not session continuation authority. A host that needs
+crash-surviving preview activity supplies durable observation retention rather
+than adding token-by-token session commits.
 
-A 2026-08 review of a peer harness design examined the alternative this
-document's floor forgoes: persist each streamed assistant delta as a compact
-durable frame under the in-flight effect's reserved identity, delete the
-frame list atomically at settlement, and reduce the committed prefix into an
-explicit unknown-outcome response after a crash. The frames are auxiliary by
-construction (never completion authority, never a restart point), so the
-model is coherent. It is still rejected for lash: one durable transaction
-per provider event prices per-token writes into Postgres- and journal-backed
-stores, against the commit-budget rule; a partial-stream archive in the
-session store contradicts the rule that the store records continuation
-state, not observation history; and the property it buys is reconnect
-display, not correctness. Hosts that want crash-surviving partials own that
-choice at the observation plane: the live-replay store is host-supplied, the
-streamed deltas already flow through it, and a durable implementation of it
-recovers the same evidence without touching the session store or this
-document's floor.
+## A Restate segment never restarts started work
 
-## Amendment (FIG-3588, 2026-09-24): a Restate segment never restarts started work
+Every process segment establishes admission before any effect:
 
-"Lash never re-drives engine-owned work" is absolute on the Restate tier, and
-since [ADR 0110](0110-the-engine-owns-process-recovery.md) on every tier: the
-recovery disposition that once distinguished rerunnable from owner-bound work
-is deleted, and this admission applies to every process lash executes. A
-Restate workflow's invocation id is a function of its key (Restate v1.7.0,
-`InvocationUuid::generate`), so a retry of the invocation that started a
-segment and a fresh invocation of the same key after its journal was lost
-carry the same id. The id cannot tell them apart; a durable start marker does.
-Every `LashProcessWorkflow/run` invocation admits its segment before any
-effect, in this order, each step its own journaled command:
+1. A read-only journaled verdict inspects the retained start marker. A marker
+   for a lost execution refuses fresh execution with `SubstrateLost`. With no
+   marker, the verdict records an OS-random nonce. An already-completed
+   segment is ignored.
+2. A separate journaled start writes the marker set-if-absent. The same nonce
+   identifies this execution's own retry; a different nonce proves another
+   execution started it and refuses with `SubstrateLost`.
+3. Effects require the sealed `SegmentStarted` proof returned by start.
 
-1. **Verdict** (read-only). Read the segment's start marker: segment 0's is
-   the process's `first_started`, a later segment's is the marker on its
-   retained handover. Present: the process ends `Abandoned` with
-   `ResumeRefused { SubstrateLost }`, naming the lost execution. Absent: admit,
-   with a nonce drawn from OS randomness inside the step so it is journaled
-   with the verdict. A segment whose successor handover exists already
-   completed; it is ignored, never refused.
-2. **Start**. Write the marker with that nonce, set-if-absent. The recorded
-   nonce equals ours: this execution's own marker, possibly from its earlier
-   try. A different nonce: a lost execution started the segment, so
-   `SubstrateLost`.
-3. **Effects**, only under the proof step 2 returns (`SegmentStarted`, which
-   has no public constructor and which the segment's controller and runner
-   require).
+Drawing and writing in one retryable step is rejected because a retry could
+mint a different nonce and refuse its own committed marker. An invocation id
+or engine-context RNG cannot prove journal continuity after lost engine state.
 
-The nonce and the marker are two journaled steps because a retry re-runs a
-step whose completion was not journaled; one step that drew and wrote would
-draw a second nonce and refuse its own marker. Neither the context RNG nor the
-invocation id may supply the nonce: both repeat after a purge.
+A journaled verdict survives a crash before start. Loss of journal before a
+marker permits fresh admission because no effect can precede it. Loss after
+the marker refuses with zero redispatch, even if no effect actually ran. A
+false abandonment is the accepted direction; a duplicate execution is not.
 
-The resulting cases, each a law against Restate's own identity and retry
-semantics (`lash-restate` `tests::substrate_lost`):
+Recovery resubmits a live row under its current segment key. The engine
+coalesces a live invocation or retained journal; a missing journal encounters
+the admission proof. External invocation references are observation. The
+handler's generation sentinel and successor windows govern which build may
+continue it (ADRs 0043 and 0106).
 
-- (a) a crash between the steps retries over the journaled verdict and
-  proceeds;
-- (b) a journal lost before the marker commits admits a fresh run, and no
-  effect had run;
-- (c) a journal lost after the marker, before the first effect, ends
-  `SubstrateLost` with zero effects. This double fault is the accepted
-  direction: a false Abandoned, never a duplicate effect;
-- (d) a journal lost after effects ends `SubstrateLost` with no re-dispatch.
+## Implementation
 
-Restate v1.7.0 refuses to purge an invocation or its journal while the
-invocation is not completed, so (b) and (c) arise from endpoint crashes and
-lost journal storage, not from ordinary purges.
-
-The recovery resubmit therefore sends a live row under its latest segment's
-key, whatever its external reference says: Restate coalesces a submission onto
-a live or retained workflow, and a key it no longer holds runs the admission,
-which starts a segment that never started and refuses one that did. The
-external reference is observational. The first send of a registered row is the
-armed `ProcessStart` obligation's one delivery (ADR 0109); what resubmits an
-already-started row is the recovery pass's lost-run scan, not the relay. A boundary still writes its successor's
-reference before the handover and the send, and a store fault there is
-retried by Restate, never logged and dropped.
-
-`RESTATE_PROCESS_JOURNAL_VERSION` owns the handler's leading journaled
-commands; any change to them bumps it. Every submitter stamps it on the
-workflow input, and the handler refuses another generation before it
-journals anything, ending the process `ResumeRefused { RetiredGeneration }`.
-Refusing chains an earlier build submitted, rather than migrating them, is the
-current, temporary cutover policy, not a permanent law.
+- [Process segment admission](../../crates/lash-restate/src/process/admission.rs) and [engine submissions](../../crates/lash-restate/src/process/mod.rs).
+- [Controller backpressure contract](../../crates/lash-core-execution/src/runtime/effect/executor/control.rs).
+- [Failure classification](../../crates/lash-core-store/src/runtime_error/classification.rs).

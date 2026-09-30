@@ -36,16 +36,13 @@ pub(super) enum LifecycleCommand {
         generation: u64,
         reply: oneshot::Sender<Option<String>>,
     },
-    InstallToolCatalog {
-        generation: u64,
-        tools: Vec<rmcp::model::Tool>,
-    },
     Shutdown,
 }
 
 pub(super) struct LifecycleActor {
     entry: Weak<McpEntry>,
     commands: mpsc::UnboundedReceiver<LifecycleCommand>,
+    refresh_requests: watch::Receiver<u64>,
     published: watch::Sender<Option<Arc<PublishedService>>>,
     active_pid: Arc<AtomicU32>,
     shutdown_policy: McpShutdownPolicy,
@@ -102,9 +99,6 @@ enum CommandAction {
     CallTimedOut {
         reply: oneshot::Sender<Option<String>>,
     },
-    InstallToolCatalog {
-        tools: Vec<rmcp::model::Tool>,
-    },
     Shutdown,
     Continue,
 }
@@ -150,11 +144,23 @@ impl Future for ServiceWaiting {
     }
 }
 
+type CatalogRefreshResult =
+    Result<Result<Vec<rmcp::model::Tool>, McpError>, tokio::time::error::Elapsed>;
+type CatalogRefresh = Pin<Box<dyn Future<Output = CatalogRefreshResult> + Send>>;
+
+async fn poll_refresh(refresh: &mut Option<CatalogRefresh>) -> CatalogRefreshResult {
+    match refresh {
+        Some(future) => future.as_mut().await,
+        None => pending().await,
+    }
+}
+
 struct Connection {
     cancellation: rmcp::service::RunningServiceCancellationToken,
     request_tasks: Arc<crate::host::McpHostRequestTasks>,
     waiting: ServiceWaiting,
     child: Option<StdioChildGuard>,
+    refresh: Option<CatalogRefresh>,
 }
 
 impl Connection {
@@ -162,6 +168,9 @@ impl Connection {
     // actor itself is aborted, dropping the child guard retains the pool's
     // documented forced-abandonment kill-and-log fallback.
     async fn cancel_and_reap(mut self, actor: &mut LifecycleActor, server_name: &str) -> bool {
+        // Dropping the actor-owned future cancels discovery and any paused
+        // publication before transport or process cleanup begins.
+        self.refresh = None;
         if let Some(child) = self.child.as_mut() {
             child.begin_bounded_cleanup();
         }
@@ -216,6 +225,25 @@ impl Connection {
 }
 
 impl LifecycleActor {
+    fn catalog_refresh(
+        &self,
+        peer: rmcp::service::Peer<rmcp::service::RoleClient>,
+        deadline: Duration,
+    ) -> CatalogRefresh {
+        #[cfg(test)]
+        let entry = self.entry.clone();
+        Box::pin(async move {
+            let result = timeout(deadline, super::catalog::discover_tools(&peer)).await;
+            #[cfg(test)]
+            if matches!(result, Ok(Ok(_)))
+                && let Some(entry) = entry.upgrade()
+            {
+                entry.pause_before_refresh_install().await;
+            }
+            result
+        })
+    }
+
     fn reduce_command(
         phase: CommandPhase,
         command: Option<LifecycleCommand>,
@@ -273,13 +301,6 @@ impl LifecycleActor {
                     CommandAction::Continue
                 }
             }
-            LifecycleCommand::InstallToolCatalog { generation, tools } => {
-                if phase.observes(generation) {
-                    CommandAction::InstallToolCatalog { tools }
-                } else {
-                    CommandAction::Continue
-                }
-            }
             LifecycleCommand::Shutdown => CommandAction::Shutdown,
         }
     }
@@ -287,20 +308,21 @@ impl LifecycleActor {
     pub(super) fn new(
         entry: Weak<McpEntry>,
         commands: mpsc::UnboundedReceiver<LifecycleCommand>,
+        refresh_requests: watch::Receiver<u64>,
         published: watch::Sender<Option<Arc<PublishedService>>>,
         active_pid: Arc<AtomicU32>,
-        shutdown_policy: McpShutdownPolicy,
-        reconnect_initial_backoff: Duration,
-        keepalive_interval: Duration,
+        config: &crate::config::McpServerConfig,
     ) -> Self {
+        let keepalive_interval = config.liveness_probe_interval();
         Self {
             entry,
             commands,
+            refresh_requests,
             published,
             active_pid,
-            shutdown_policy,
+            shutdown_policy: *config.shutdown_policy(),
             generation: 0,
-            reconnect_backoff: reconnect_initial_backoff,
+            reconnect_backoff: config.reconnect_initial_backoff(),
             reconnect_attempts: 0,
             reconnect_at: None,
             keepalive_at: (!keepalive_interval.is_zero())
@@ -473,6 +495,7 @@ impl LifecycleActor {
             request_tasks: running.service().request_tasks(),
             waiting: ServiceWaiting::new(Box::pin(running.waiting())),
             child: stdio_child.take(),
+            refresh: None,
         };
         if self.pause_mid_establish().await {
             connection.cancel_and_reap(self, &server_name).await;
@@ -480,7 +503,7 @@ impl LifecycleActor {
             return ConnectionExit::Shutdown;
         }
 
-        let discovery = timeout(startup_timeout, peer.list_all_tools());
+        let discovery = timeout(startup_timeout, super::catalog::discover_tools(&peer));
         tokio::pin!(discovery);
         let tools = loop {
             tokio::select! {
@@ -591,6 +614,39 @@ impl LifecycleActor {
         loop {
             let keepalive_at = self.keepalive_at;
             tokio::select! {
+                result = poll_refresh(&mut connection.refresh), if connection.refresh.is_some() => {
+                    connection.refresh = None;
+                    let Ok(result) = result else {
+                        // rmcp retains a responder for an unanswered request.
+                        // End this service on timeout so repeated storms cannot
+                        // accumulate those responders across refresh attempts.
+                        self.unpublish(generation);
+                        self.record_error(format!("MCP catalog refresh timed out for `{server_name}`"));
+                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                        return if shutdown { ConnectionExit::Shutdown } else { ConnectionExit::Disconnected };
+                    };
+                    match result.and_then(|tools| import_tools(&server_name, tools))
+                        .and_then(|tools| self.entry.upgrade()
+                            .ok_or(McpError::PoolShutDown)?
+                            .replace_imported_tools(tools))
+                    {
+                        Ok(()) => {}
+                        Err(error) => {
+                            tracing::warn!(server = %server_name, error = %error, "MCP tools/list refresh refused");
+                            self.record_error(error.to_string());
+                        }
+                    }
+                }
+                changed = self.refresh_requests.changed(), if connection.refresh.is_none() => {
+                    if changed.is_err() {
+                        self.unpublish(generation);
+                        let _ = connection.cancel_and_reap(self, &server_name).await;
+                        return ConnectionExit::Shutdown;
+                    }
+                    if *self.refresh_requests.borrow_and_update() == generation {
+                        connection.refresh = Some(self.catalog_refresh(peer.clone(), startup_timeout));
+                    }
+                }
                 reason = &mut connection.waiting => {
                     let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
                     self.record_error(cause);
@@ -655,19 +711,6 @@ impl LifecycleActor {
                         } else {
                             ConnectionExit::Disconnected
                         };
-                    }
-                    CommandAction::InstallToolCatalog { tools } => {
-                        if let Some(entry) = self.entry.upgrade()
-                            && let Err(error) = import_tools(&server_name, tools)
-                                .and_then(|imported| entry.replace_imported_tools(imported))
-                        {
-                            tracing::warn!(
-                                server = %server_name,
-                                error = %error,
-                                "MCP tools/list refresh refused"
-                            );
-                            self.record_error(error.to_string());
-                        }
                     }
                     CommandAction::Continue => {}
                     CommandAction::Establish { .. } => {
@@ -776,18 +819,6 @@ impl LifecycleActor {
                                         } else {
                                             ConnectionExit::Disconnected
                                         };
-                                    }
-                                    CommandAction::InstallToolCatalog { tools } => {
-                                        if let Err(error) = import_tools(&server_name, tools)
-                                            .and_then(|imported| entry.replace_imported_tools(imported))
-                                        {
-                                            tracing::warn!(
-                                                server = %server_name,
-                                                error = %error,
-                                                "MCP tools/list refresh refused"
-                                            );
-                                            self.record_error(error.to_string());
-                                        }
                                     }
                                     CommandAction::Continue => {}
                                     CommandAction::Establish { .. } => {

@@ -94,14 +94,15 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-signal"),
             RuntimeEffectCommand::process(ProcessCommand::Signal {
-                process_id: record.id.clone(),
-                signal_name: "notify".to_string(),
-                signal_id: "notify".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    "signal.notify",
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        record.id.clone(),
+                        "notify".to_string(),
+                        "notify".to_string(),
+                    )
+                    .expect("signal identity"),
                     serde_json::json!({ "signal": "notify" }),
-                )
-                .with_replay_key("signal:notify"),
+                ),
             }),
         )
     };
@@ -235,7 +236,6 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
                 registration: external_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("fig3827-started-child"))),
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )

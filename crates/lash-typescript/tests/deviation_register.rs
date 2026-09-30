@@ -1,12 +1,8 @@
 //! Every refusal the deviation register promises is executable (FIG-3604).
 //!
-//! ADR 0062 register entry 5 promised that mutable captures are "rejected on
-//! both the read and the write path", and only the write path was: a closure
-//! reading a `let` reassigned after it was created silently answered a stale
-//! value. Nothing connected the promise to the code, so nothing noticed. The
-//! Test262 census already closes that gap for rejected features, where each
-//! rejected row carries a probe that must reject with the diagnostic it names;
-//! this is the same rule for the register.
+//! ADR 0062's deviation register connects each promised refusal to an
+//! executable probe. The Test262 census applies the same rule to rejected
+//! features: each rejected row has a probe for its named diagnostic.
 //!
 //! Two texts are read. ADR 0062's numbered register is the decision list, and
 //! the crate README's register is its executable counterpart. The rules:

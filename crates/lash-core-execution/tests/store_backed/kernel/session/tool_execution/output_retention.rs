@@ -145,7 +145,10 @@ async fn an_oversized_failure_is_retained_and_replays_verbatim_under_a_changed_p
     // otherwise have been shown.
     let stored = backend
         .attachment_store()
-        .get(&retained.reference.id)
+        .get(
+            &retained.reference.id,
+            crate::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("the retained failure is stored");
     assert_eq!(

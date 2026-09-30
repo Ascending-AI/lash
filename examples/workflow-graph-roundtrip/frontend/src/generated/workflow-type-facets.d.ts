@@ -43,6 +43,10 @@ export type ProcessType =
  */
 export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 /**
+ * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ */
+export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
+/**
  * Closed host-facing vocabulary for linker diagnostics.
  */
 export type WorkflowDiagnosticKind =
@@ -134,6 +138,7 @@ export interface ProcessParamWire {
   ty: TypeExpr;
 }
 export interface WorkflowTypeDiagnostic {
+  classification: WorkflowDiagnosticClassification;
   kind: WorkflowDiagnosticKind;
   message: string;
   node_id: string;

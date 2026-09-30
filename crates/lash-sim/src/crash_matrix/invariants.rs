@@ -94,6 +94,10 @@ pub struct Expected {
     pub closed_sessions: Vec<SessionId>,
     pub live_sessions: Vec<SessionId>,
     pub custom: Vec<(&'static str, CustomCheck)>,
+    /// Checks of the durable state a recovered world left, run once after
+    /// every invariant held. They are not timed against the detection
+    /// bound: an audit that reads every store and journal would spend it.
+    pub audits: Vec<(&'static str, CustomCheck)>,
 }
 
 impl std::fmt::Debug for Expected {
@@ -723,6 +727,12 @@ async fn check_deletions(world: &CrashWorld, expected: &Expected, violations: &m
 
 /// No lash drive of a live session is paused, backing off, or running.
 async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
+    if expected.live_sessions.is_empty()
+        && expected.deleted_sessions.is_empty()
+        && expected.closed_sessions.is_empty()
+    {
+        return;
+    }
     for view in world.invocations().await {
         let lash_drive =
             view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/");

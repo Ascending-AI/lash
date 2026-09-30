@@ -17,12 +17,12 @@ use super::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, 
 use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactStoreError, ArtifactStoreId, DefinitionRevisionId, EffectHost, JournalReplay,
-    ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
-    ProcessDefinitionRegistry, ProcessDefinitionStore, ProcessEngineRegistry,
-    ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
-    ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
-    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
+    ArtifactStoreError, ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore,
+    PluginError, ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStore,
+    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId,
+    ProcessInput, ProcessRegistry, ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode,
+    StartKey, SubscriptionRevisionId, TriggerStore, TriggerSubscriptionFilter,
+    TriggerSubscriptionLifecycle, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -65,12 +65,6 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
         &self,
         revision: &SubscriptionRevisionId,
     ) -> Result<SubscriptionRevisionStanding, String>;
-
-    /// Whether `revision` is its slot's current resolvable revision.
-    async fn definition_revision_current(
-        &self,
-        revision: &DefinitionRevisionId,
-    ) -> Result<bool, String>;
 }
 
 /// The authorities of one store set and its engine.
@@ -79,7 +73,6 @@ pub struct StoreSetAuthorities {
     pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
-    pub definitions: Arc<dyn ProcessDefinitionRegistry>,
 }
 
 #[async_trait::async_trait]
@@ -151,20 +144,6 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
             current,
             unbound_deliveries,
         })
-    }
-
-    async fn definition_revision_current(
-        &self,
-        revision: &DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        Ok(self
-            .definitions
-            .definition_state(revision.definition_id())
-            .await
-            .map_err(|error| error.to_string())?
-            .is_some_and(|record| {
-                record.revision == revision.revision() && record.lifecycle.resolvable()
-            }))
     }
 }
 
@@ -251,6 +230,13 @@ impl ArtifactCleanupRelay {
                 self.hold_retained_start(key).await?;
                 Ok(Resolution::Carry(carries.clone()))
             }
+            (
+                ArtifactCleanupPlan::Ended { carries },
+                ArtifactReferrer::StartInput { start_key, .. },
+            ) => {
+                self.hold_start_input(start_key).await?;
+                Ok(Resolution::Carry(carries.clone()))
+            }
             (ArtifactCleanupPlan::Ended { carries }, _) => Ok(Resolution::Carry(carries.clone())),
             (
                 ArtifactCleanupPlan::AwaitFrame { creator },
@@ -279,6 +265,19 @@ impl ArtifactCleanupRelay {
                 }
             }
             (
+                ArtifactCleanupPlan::AwaitStart { starter },
+                ArtifactReferrer::StartInput {
+                    start_key,
+                    starter: authority,
+                },
+            ) if starter == authority => {
+                if self.hold_start_input(start_key).await? {
+                    Ok(Resolution::Carry(Vec::new()))
+                } else {
+                    Ok(settled_or_not_yet(self.journal_settled(starter).await?))
+                }
+            }
+            (
                 ArtifactCleanupPlan::AwaitSubscriptionRevision { creator },
                 ArtifactReferrer::SubscriptionRevision(revision),
             ) => {
@@ -287,19 +286,6 @@ impl ArtifactCleanupRelay {
                     .await
                     .map_err(retryable_text("subscription read"))?;
                 if standing.current || standing.unbound_deliveries {
-                    return Ok(Resolution::NotYet);
-                }
-                Ok(settled_or_not_yet(self.journal_settled(creator).await?))
-            }
-            (
-                ArtifactCleanupPlan::AwaitDefinitionRevision { creator },
-                ArtifactReferrer::DefinitionRevision(revision),
-            ) => {
-                if authorities
-                    .definition_revision_current(revision)
-                    .await
-                    .map_err(retryable_text("definition read"))?
-                {
                     return Ok(Resolution::NotYet);
                 }
                 Ok(settled_or_not_yet(self.journal_settled(creator).await?))
@@ -449,6 +435,41 @@ impl ArtifactCleanupRelay {
             }
         }
         Ok(())
+    }
+
+    /// Attachments carry no artifact names. Acquire the retained input
+    /// before either AwaitStart or Ended can sever its staging edges.
+    async fn hold_start_input(&self, key: &StartKey) -> Result<bool, DeliveryFailure> {
+        let Some(retained) = self
+            .ports
+            .authorities
+            .retained_start(key)
+            .await
+            .map_err(retryable_text("start-input key read"))?
+        else {
+            return Ok(false);
+        };
+        let ids = retained.input.stored_attachment_ids();
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        let referrer = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
+        let claim = ReferrerClaim::unguarded(referrer.clone())
+            .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
+        match self
+            .ports
+            .attachments
+            .acquire_attachment_refs(&claim, &ids)
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(crate::StoreError::ArtifactReferrerEnded { referrer: ended })
+                if ended == referrer =>
+            {
+                Ok(true)
+            }
+            Err(error) => Err(attachment_store_failure(error)),
+        }
     }
 
     /// Every artifact the retained record names: its environment, its

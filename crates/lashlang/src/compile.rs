@@ -93,7 +93,7 @@ impl ModuleCompileDiagnostic {
 impl Serialize for ModuleCompileDiagnostic {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut entries = 2;
+        let mut entries = 1;
         entries += usize::from(self.span.is_some());
         entries += usize::from(self.offset().is_some());
         entries += usize::from(self.diagnostic.is_some());

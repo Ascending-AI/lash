@@ -6,75 +6,57 @@ Accepted.
 
 ## Context
 
-Lashlang modules and captured process execution environments are immutable,
-content-addressed inputs to durable execution. Their stores previously exposed
-ownerless writes, and the module store also exposed a generic mutable raw-byte
-keyspace. SQLite kept artifact references as permanent blob roots while
-PostgreSQL kept modules outside reclamation. Consequently a failed or abandoned
-publisher could leak bytes forever, while deleting by content address would be
-unsafe because several durable processes may share the same content.
-
-Compilation made this boundary less clear by optionally persisting as part of
-`compile_module`. A pure compiler cannot decide how long a host or replayable
-execution needs the artifact it produced.
+Several durable readers can share immutable modules and execution environments.
+Deleting content by address can break another reader; retaining every
+publication indefinitely leaks abandoned inputs. Compilation cannot choose the
+lifetime of its output.
 
 ## Decision
 
-Compilation links and introspects a lowered module and returns a
-`ModuleArtifact` (parsing belongs to the TypeScript front end); it does no I/O. Publication is a separate store operation and always names an
-`ArtifactOwner`: an explicit host identity, an authoritative process record, or
-a replayable execution scope.
+Compilation links and introspects a lowered program and returns a
+`ModuleArtifact` without I/O. The TypeScript front end owns parsing.
+Publication is a separate artifact-store operation.
 
-Stores persist exact `(artifact, owner)` edges rather than reference counts.
-Publishing the same verified content for another owner adds an edge. Releasing
-one owner severs only that edge, and the store reclaims the immutable bytes when
-no edge remains. Host edges are indefinite until the host explicitly releases
-them.
+Every publication or acquisition names a checked `ReferrerClaim`. Stores keep
+exact `(artifact, referrer)` edges. Equal immutable content can have several
+referrers. Cleanup severs only the ended referrer's edges and reclaims bytes
+when no edge remains. A content id alone retains nothing.
 
-Process start uses a deterministic execution owner derived from the process id.
-Environment and engine artifacts are protected under that staging owner before
-registration. After the process row commits, store operations atomically add
-the process owner and sever the staging owner; replaying that transfer is
-idempotent, including a replay after staging retirement. An authoritative
-abandonment decision retires the staging owner; a scheduling error after
-registration remains resumable and preserves its inputs. Retirement records a permanent execution-owner fence
-before severing remaining edges, so a delayed writer cannot republish after
-abandonment.
+The vocabulary and cleanup protocol belong to
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
+`ArtifactReferrer` names a frame environment, process record, subscription
+revision, start, execution journal, host pin, definition revision, session, or
+upload. Stores decode each kind/id pair through its canonical encoding and
+refuse malformed or unknown vocabulary.
 
-The generic raw artifact overwrite keyspace and all ownerless publication APIs
-are deleted. Module publication verifies the module's content-derived identity;
-environment publication verifies that its reference matches valid encoded
-bytes. Existing process-environment family-version refusal remains
-reject-and-recreate.
+Publication checks the referrer's fence, verifies immutable bytes, adds the
+edge, and arms any required cleanup guard in one transaction. Acquisition uses
+the same fence and guard rules and refuses missing bytes. Ending a referrer
+applies resolved cleanup atomically: fence it, acquire required carries,
+sever its edges, and reclaim unreferenced content. Repeating applied cleanup is
+a no-op. The fence prevents a delayed publisher from reviving the referrer.
 
-SQLite durable-core schema 57 adds owner edges and execution-owner retirement
-fences beside `artifact_refs`; process schema 33 retains exact prune release
-inputs, and effect schema 18 records artifact-cleanup completion on the existing
-scope-retirement evidence. PostgreSQL component 87 brings module and
-process-environment rows under the same owner-edge model, serializes every
-artifact mutation at a stable advisory-lock identity, and retains both prune
-release inputs and scope-retirement cleanup completion.
-These are reject-and-recreate boundaries under ADR 0081; no migration or dual
-path is provided.
+Process-start retention uses start and process-record referrers. Frame switches
+carry retained artifacts to the successor frame. Cleanup consumes durable end
+evidence, not elapsed time or an absent worker. Host pins remain until release.
+
+Evidence: `crates/lashlang/src/compile.rs:38`,
+`crates/lash-core-store/src/artifact_referrer.rs:46`, `:146`, `:201`,
+`crates/lash-core-execution/src/module_artifacts.rs:132`,
+`crates/lash-core-execution/src/runtime/process/start_staging.rs:385`,
+`crates/lash-sqlite-store/src/artifact_store.rs:186`, `:309`, `:538`, and
+`crates/lash-postgres-store/src/postgres/artifact_store.rs`.
+
+## Alternatives considered
+
+Reference counts conceal which durable reader retains content and add mutable
+retry accounting. Exact edges make acquisition and release idempotent per
+reader. Time-based reclamation cannot prove durable replay has relinquished its
+inputs; cleanup requires reader end evidence.
 
 ## Consequences
 
-- Two processes or hosts may safely share identical bytes without a mutable
-  counter or last-operation marker on the content.
-- Reclamation is an owner-severing transaction, not tracing garbage collection
-  and not a lease-, time-, or receipt-based inference.
-- Process pruning writes exact environment and engine release inputs before the
-  authoritative rows are pruned, then acknowledges them only after every store
-  has severed the process owner; tombstone compaction cannot outrun that evidence.
-- Scope retirement remains the abandonment authority: artifact cleanup consumes
-  its durable verdict until every configured store acknowledges the permanent
-  fence and owner severance; it does not invent another lifecycle journal.
-- A backend must make publication, transfer, release/reclaim, and execution-owner
-  retirement atomic and retry-safe. Missing exact edges on release are an
-  idempotent success; missing both sides of a transfer is an error.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 20: [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)
-supersedes the owner-kind and verb inventory here. Exact owner edges remain the
-rule.
+- Several readers safely share immutable bytes.
+- Reclamation follows exact edges and end fences.
+- Compilation and publication have separate responsibilities.
+- Every backend implements atomic publication and cleanup.

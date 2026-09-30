@@ -25,7 +25,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                 session_id: session_id.clone(),
                 ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
             };
-            view.commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            view.commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
                 .await
                 .expect("commit a nonzero head");
         }

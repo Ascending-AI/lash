@@ -54,13 +54,24 @@ pub struct PendingFollowOn {
     pub chain_depth: u32,
     /// Recoveries so far. Raised once per recovering drive, never reset.
     pub attempts: u32,
+    /// The recovery bound of the logical run, frozen when its first frame
+    /// switch owed a follow-on (the host's
+    /// `QueuedWorkBatchingConfig::max_follow_on_recoveries` then) and carried
+    /// along the chain. Every recovery decides on it, never on the bound of
+    /// the host that happens to drive it.
+    pub max_recoveries: u32,
 }
 
 impl PendingFollowOn {
     /// The follow-on of physical turn `physical_ordinal` of `root` switching to
-    /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
+    /// `frame_id` with `task`. `chain_depth` counts this switch;
+    /// `max_recoveries` is the logical run's frozen recovery bound; `resolved`
     /// is the shape the logical run's root resolved under, recorded so a
     /// recovered follow-on inherits it (FIG-3877).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "every argument is one recorded fact of the switch"
+    )]
     pub fn after_switch(
         root: &TurnId,
         physical_ordinal: u64,
@@ -68,6 +79,7 @@ impl PendingFollowOn {
         task: impl Into<String>,
         options: Option<crate::ProtocolTurnOptions>,
         chain_depth: u32,
+        max_recoveries: u32,
         resolved: Option<crate::run_spec::ResolvedRun>,
     ) -> Result<Self, StoreError> {
         let next =
@@ -80,6 +92,7 @@ impl PendingFollowOn {
             resolved_run: resolved.map(Box::new),
             chain_depth,
             attempts: 0,
+            max_recoveries,
         })
     }
 
@@ -129,11 +142,11 @@ impl PendingFollowOn {
     }
 
     /// What a drive that recovers this fact may do: raise `attempts` and run
-    /// the follow-on, or, once the raised count would pass `max_recoveries`,
-    /// commit it failed with [`FollowOnRecovery::Exhausted`].
-    pub fn recovery(&self, max_recoveries: u32) -> Result<FollowOnRecovery, StoreError> {
+    /// the follow-on, or, once the raised count would pass the fact's frozen
+    /// `max_recoveries`, commit it failed with [`FollowOnRecovery::Exhausted`].
+    pub fn recovery(&self) -> Result<FollowOnRecovery, StoreError> {
         let raised = self.raised()?;
-        Ok(if raised.attempts > max_recoveries {
+        Ok(if raised.attempts > self.max_recoveries {
             FollowOnRecovery::Exhausted(self.clone())
         } else {
             FollowOnRecovery::Run(raised)
@@ -166,6 +179,39 @@ pub enum FollowOnRecovery {
     /// The recovery bound is spent: commit the follow-on as a failed turn
     /// carrying `FollowOnRecoveryExhausted`, which clears the fact.
     Exhausted(PendingFollowOn),
+}
+
+/// What a follow-on recovery root records before its turn, as its
+/// `drive-follow-on` step (FIG-4361): the recovery its decision took on the
+/// fact the head owed, or that the head owed the follow-on no longer. The
+/// root drives the recorded answer, so a replay never decides from the head
+/// it finds.
+///
+/// A run or an exhaustion also records the head its follow-on's turn runs
+/// on, `base`, and that turn's index, `turn_index` (FIG-4380). The step's
+/// body retains the base as the session's latest admission's, as a root's
+/// admission retains its own (FIG-3682), and the root adopts it and pins the
+/// index before its turn, so a replay after the follow-on's own commit moved
+/// the head runs the turn it recorded.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum FollowOnRecoveryAnswer {
+    /// Run the follow-on: `follow_on` carries the raised attempt count.
+    Run {
+        follow_on: PendingFollowOn,
+        base: super::SessionHeadRef,
+        turn_index: u64,
+    },
+    /// The recovery bound is spent: the follow-on commits as its failed
+    /// terminal, carrying `FollowOnRecoveryExhausted`.
+    Exhausted {
+        follow_on: PendingFollowOn,
+        base: super::SessionHeadRef,
+        turn_index: u64,
+    },
+    /// The head owed the follow-on no longer: another driver answered it,
+    /// and the root runs nothing.
+    Ceded,
 }
 
 /// The admission a store is asked to make while it reads the head's fact.
@@ -316,6 +362,7 @@ mod tests {
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
+            max_recoveries: DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         }
     }
 
@@ -356,6 +403,7 @@ mod tests {
             "t",
             None,
             1,
+            DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             None,
         )
         .expect("first");
@@ -367,6 +415,7 @@ mod tests {
             "t",
             None,
             2,
+            DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             None,
         )
         .expect("second");
@@ -391,6 +440,7 @@ mod tests {
                 "t",
                 None,
                 1,
+                DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
                 None,
             )
             .expect("switch");
@@ -504,10 +554,7 @@ mod tests {
     fn recovery_is_bounded_and_never_resets() {
         let mut pending = fact("root:agent-frame:1", "f");
         for expected in 1..=DEFAULT_MAX_FOLLOW_ON_RECOVERIES {
-            match pending
-                .recovery(DEFAULT_MAX_FOLLOW_ON_RECOVERIES)
-                .expect("recovery")
-            {
+            match pending.recovery().expect("recovery") {
                 FollowOnRecovery::Run(raised) => {
                     assert_eq!(raised.attempts, expected);
                     pending = raised;
@@ -516,8 +563,24 @@ mod tests {
             }
         }
         assert!(matches!(
-            pending.recovery(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
+            pending.recovery(),
             Ok(FollowOnRecovery::Exhausted(_))
         ));
+    }
+
+    /// The bound a recovery decides on is the fact's, frozen when the chain
+    /// was owed, whatever bound the recovering host is configured with.
+    #[test]
+    fn recovery_decides_on_the_frozen_bound() {
+        let mut pending = fact("root:agent-frame:1", "f");
+        pending.max_recoveries = 0;
+        assert!(matches!(
+            pending.recovery(),
+            Ok(FollowOnRecovery::Exhausted(_))
+        ));
+        pending.max_recoveries = 1;
+        assert!(
+            matches!(pending.recovery(), Ok(FollowOnRecovery::Run(raised)) if raised.attempts == 1 && raised.max_recoveries == 1)
+        );
     }
 }

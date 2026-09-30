@@ -11,6 +11,7 @@
 use crate::AttachmentReferrers;
 use crate::{AttachmentId, ExecutionScope, PluginError, ProcessAwaitOutput};
 use lash_core_store::artifact_referrer::{ArtifactCleanupPlan, ArtifactReferrer, ReferrerClaim};
+use serde::{Deserialize, Serialize};
 
 /// Stored attachment ids of a process terminal output, sorted and
 /// deduplicated. Only a settled output carries a value; an abandoned or
@@ -54,17 +55,26 @@ pub fn receiving_claim(scope: &ExecutionScope) -> Result<ReferrerClaim, PluginEr
 }
 
 /// What acquiring a delivered value's attachments found.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DeliveryAcquisition {
     /// The receiver holds every stored attachment the value names.
     Held,
     /// A digest had no upload evidence: its source was ended and swept.
     SourceGone { digest: AttachmentId },
+    /// The receiver is fenced and acquires no attachment edge.
+    ReceiverEnded { referrer: ArtifactReferrer },
+    /// A permanent refusal whose typed cause is recorded with the delivery.
+    Refused {
+        refusal: crate::RuntimeEffectControllerError,
+    },
 }
 
 /// Acquire `receiving_claim(receiver)` on every stored attachment `output`
 /// delivers. An attachment the store holds no evidence for answers
-/// `SourceGone`; every other store failure is returned.
+/// `SourceGone`; a fenced receiver answers `ReceiverEnded`. Other store
+/// refusals are successful, typed acquisition results. Only transient
+/// storage faults leave the acquisition unrecorded for retry.
 pub async fn acquire_delivered_attachments(
     attachments: &dyn AttachmentReferrers,
     receiver: &ExecutionScope,
@@ -74,11 +84,20 @@ pub async fn acquire_delivered_attachments(
     if ids.is_empty() {
         return Ok(DeliveryAcquisition::Held);
     }
-    let claim = receiving_claim(receiver)?;
+    let claim = match receiving_claim(receiver) {
+        Ok(claim) => claim,
+        Err(error) => {
+            return Ok(DeliveryAcquisition::Refused {
+                refusal: error.into(),
+            });
+        }
+    };
     acquire_under(attachments, &claim, &ids).await
 }
 
-/// Acquire `claim` on `ids`, mapping a missing upload to `SourceGone`.
+/// Acquire `claim` on `ids`, distinguishing a missing source from an ended
+/// receiver. Permanent refusals retain their classification and cause as
+/// results; transient storage faults remain errors.
 pub async fn acquire_under(
     attachments: &dyn AttachmentReferrers,
     claim: &ReferrerClaim,
@@ -92,10 +111,23 @@ pub async fn acquire_under(
         Err(crate::StoreError::UnknownAttachment { digest }) => {
             Ok(DeliveryAcquisition::SourceGone { digest })
         }
-        Err(error) => Err(PluginError::Session(format!(
-            "failed to acquire the delivered attachments under `{}`: {error}",
-            claim.referrer().canonical_id()
-        ))),
+        Err(crate::StoreError::ArtifactReferrerEnded { referrer }) => {
+            Ok(DeliveryAcquisition::ReceiverEnded { referrer })
+        }
+        Err(error) => {
+            let transient = error.is_transient();
+            let mut error = crate::RuntimeEffectControllerError::from(error);
+            error.message = format!(
+                "failed to acquire the delivered attachments under `{}`: {}",
+                claim.referrer().canonical_id(),
+                error.message
+            );
+            if transient {
+                Err(PluginError::RuntimeEffectController(error))
+            } else {
+                Ok(DeliveryAcquisition::Refused { refusal: error })
+            }
+        }
     }
 }
 
@@ -111,9 +143,27 @@ pub fn source_gone_output(digest: &AttachmentId) -> ProcessAwaitOutput {
     ))
 }
 
+/// A completed delivery that acquires nothing because its receiver ended.
+pub fn receiver_ended_output(referrer: &ArtifactReferrer) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "process_result_receiver_ended",
+            referrer.canonical_id(),
+        ),
+    ))
+}
+
+fn receiver_ended_error(referrer: ArtifactReferrer) -> PluginError {
+    PluginError::RuntimeEffectController(
+        crate::StoreError::ArtifactReferrerEnded { referrer }.into(),
+    )
+}
+
 /// Acquire what `output` delivers into `receiver`, and answer the value the
 /// receiver records: `output` itself, or `source_gone_output` when a
-/// delivered attachment's source was already swept.
+/// delivered attachment's source was already swept, or
+/// `receiver_ended_output` when the receiver is fenced.
 pub async fn deliver_output(
     attachments: &dyn AttachmentReferrers,
     receiver: &ExecutionScope,
@@ -122,6 +172,10 @@ pub async fn deliver_output(
     match acquire_delivered_attachments(attachments, receiver, &output).await? {
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Ok(receiver_ended_output(&referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
@@ -133,7 +187,7 @@ fn process_record_claim(process_id: &crate::ProcessId) -> Result<ReferrerClaim, 
 
 /// The terminal a process's own run publishes: its record acquires every
 /// stored attachment the output delivers before the registry records it
-/// (ADR 0124 §8.5). An output whose source was already swept is published as
+/// (ADR 0124 §4). An output whose source was already swept is published as
 /// the typed source-gone failure instead.
 pub async fn publish_process_terminal(
     attachments: &dyn AttachmentReferrers,
@@ -144,6 +198,10 @@ pub async fn publish_process_terminal(
     match acquire_under(attachments, &process_record_claim(process_id)?, &ids).await? {
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
@@ -161,12 +219,17 @@ pub async fn acquire_completion_output(
         DeliveryAcquisition::SourceGone { digest } => {
             Err(PluginError::ProcessOutputAttachmentUnavailable { digest })
         }
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 
 /// The start input a registered process holds through its record
-/// (ADR 0124 §8.6): acquired after the registration committed, since the
-/// id is minted there. A missing upload refuses the step.
+/// (ADR 0124 §4). The start's guarded staging edge already holds the input
+/// when registration mints the id; cleanup completes this acquisition if
+/// the registering caller dies. A missing upload refuses the step.
 pub async fn acquire_start_input(
     attachments: &dyn AttachmentReferrers,
     record: &crate::ProcessRecord,
@@ -178,6 +241,10 @@ pub async fn acquire_start_input(
             "process `{}` start input names attachment `{digest}`, which has no upload evidence",
             record.id
         ))),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
+        DeliveryAcquisition::Refused { refusal } => {
+            Err(PluginError::RuntimeEffectController(refusal))
+        }
     }
 }
 

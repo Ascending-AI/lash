@@ -1,4 +1,4 @@
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use std::sync::Arc;
 
 use super::RlmProtocolPluginConfig;
@@ -8,7 +8,7 @@ use lash_core::{ProtocolBuildInput, TurnDriverPreamble};
 
 pub(super) struct RlmProtocolDriver {
     pub(super) config: RlmProtocolPluginConfig,
-    pub(super) dialect: Arc<TypescriptDialect>,
+    pub(super) dialect: Arc<SessionDialect>,
 }
 
 impl ProtocolDriverPlugin for RlmProtocolDriver {

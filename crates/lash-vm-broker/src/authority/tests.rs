@@ -30,11 +30,12 @@ fn context() -> AdmittedContext {
 }
 
 fn invoke(binding: &str, operation: &str, arguments: serde_json::Value) -> EncodedPayload {
-    OperationRequest::Invoke(Invocation {
+    Invocation {
         binding: binding.into(),
         operation: operation.into(),
         arguments,
-    })
+    }
+    .request()
     .encode()
 }
 
@@ -83,10 +84,7 @@ fn every_unauthorised_request_is_refused_typed() {
         ),
         (EncodedPayload(b"not a request".to_vec()), "Malformed"),
         (
-            OperationRequest::Await {
-                handle: "forged".into(),
-            }
-            .encode(),
+            OperationRequest::Await(lashlang::Value::String("forged".into())).encode(),
             "KindMismatch",
         ),
     ];
@@ -107,10 +105,7 @@ fn a_handle_is_honoured_only_in_the_frame_that_granted_it() {
         frame_epoch: FrameEpoch(0),
     };
     let grants = BTreeMap::from([("h-1".to_string(), grant)]);
-    let payload = OperationRequest::Await {
-        handle: "h-1".into(),
-    }
-    .encode();
+    let payload = OperationRequest::Await(lashlang::Value::String("h-1".into())).encode();
     assert!(
         resolve(
             &context(),
@@ -131,10 +126,7 @@ fn a_handle_is_honoured_only_in_the_frame_that_granted_it() {
         ),
         Err(AuthorityRefusal::RetiredScope { .. })
     ));
-    let forged = OperationRequest::Await {
-        handle: "h-2".into(),
-    }
-    .encode();
+    let forged = OperationRequest::Await(lashlang::Value::String("h-2".into())).encode();
     assert!(matches!(
         resolve(
             &context(),

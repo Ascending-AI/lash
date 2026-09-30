@@ -86,6 +86,10 @@ impl BoundSession {
         self.store.clone()
     }
 
+    pub(crate) fn usage_accounting(&self) -> Arc<dyn lash_core::UsageAccountingStore> {
+        self.backend.usage_accounting()
+    }
+
     pub(crate) fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.effect_host)
     }

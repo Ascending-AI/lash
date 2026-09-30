@@ -172,7 +172,7 @@ async fn run_cell_through_crashes(
     let double =
         crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let artifacts = crate::testing::memory_artifact_store().await;
+    let artifacts = crate::testing::sqlite_memory_artifact_store().await;
     let outcomes = Arc::new(std::sync::Mutex::new(Vec::new()));
     let crashing = crashing
         .into_iter()
@@ -501,7 +501,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut state,
             first_ctx.clone(),
             deferred_matrix_request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -537,7 +537,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             first_ctx.clone(),
             deferred_matrix_request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -565,7 +565,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             second_ctx.clone(),
             deferred_matrix_request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -594,7 +594,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             next_turn_ctx.clone(),
             deferred_matrix_request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -666,7 +666,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                     "#
                 .to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -766,7 +766,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             ExecRequest {
                 code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1298,7 +1298,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 ExecRequest {
                     code: "const result = await web.fetch({ url: 'https://example.test' }); finish(result);".to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 Some(resolver),
                 RlmProjectedBindings::default(),
@@ -1390,7 +1390,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                     "#
                 .to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1497,7 +1497,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1518,7 +1518,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1528,16 +1528,24 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(state.frame_held_module_refs().count(), 1);
-        let stats = state.vm.linked_programs().stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.misses, 1);
+        let stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(
+            stats.idle, stats.workers,
+            "completed workers are reset and reusable"
+        );
     });
 }
 
 #[test]
 pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
     block_on(async {
-        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+        let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
         let mut state = RlmExecutionState::for_engine("typescript");
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -1643,6 +1651,7 @@ pub(super) fn fixture_process_engines(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     artifact_store,
                     process_engine_surface(surface),
+                    backend.worker_recovery(),
                 ),
             )),
     )
@@ -1812,19 +1821,14 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         {
             observers.push(session_id.clone());
         }
-        let request_env_spec = request.env_spec.clone();
-        let env_ref = match request.env_spec.clone() {
-            Some(spec) => Some(
-                lash_core::testing::publish_process_execution_env_for_testing(
-                    self.env_store.as_ref(),
-                    &fixture_start_claim(),
-                    &spec,
-                )
-                .await?,
+        let request_env_spec = match request.env_ref.as_ref() {
+            Some(env_ref) => Some(
+                lash_core::runtime::load_process_execution_env(self.env_store.as_ref(), env_ref)
+                    .await?,
             ),
             None => None,
         };
-        let registration = request.into_registration(env_ref);
+        let registration = request.into_registration();
         // The runtime's recorded-intent route admits an engine start against
         // the env its own record carries and stamps the identity the engine
         // resolved, which is where the process's signal event types come from.
@@ -1942,21 +1946,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
-        // This fixture's `start` registers directly, so it performs the
-        // journaled effect's env publish itself: a spec-carrying start is
-        // staged under its start-scoped owner and stamped with the reference
-        // the publish produced.
-        if registration.env_ref.is_none()
-            && let Some(spec) = options.env_spec.as_ref()
-        {
-            let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
-                self.env_store.as_ref(),
-                &fixture_start_claim(),
-                spec,
-            )
-            .await?;
-            registration = registration.with_execution_env_ref(Some(env_ref));
-        }
         if matches!(
             registration.input.as_ref(),
             lash_core::ProcessInput::Definition { .. }
@@ -1972,12 +1961,12 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     env_store: Some(&self.env_store),
                     engines: Some(&self.engines),
                     engines_required: true,
+                    session_catalog: None,
                     executor: "the signal fixture",
                     starter: &starter,
                 },
                 registration,
                 &options.initial_observers,
-                options.env_spec.as_ref(),
             )
             .await
             .map(|started| started.record)
@@ -2007,7 +1996,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         process_id: &ProcessId,
         key: &lash_core::AwaitEventKey,
         scope: lash_core::ProcessOpScope<'_>,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<Option<lash_core::ProcessAwaitOutput>, lash_core::PluginError> {
         // Container snapshot laws join a child that has already completed.
         let output = self.await_process(process_id, scope).await?;
         let terminal = serde_json::to_value(output)
@@ -2015,7 +2004,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         self.effect_host
             .resolve_await_event(key, lash_core::Resolution::Ok(terminal))
             .await
-            .map(|_| ())
+            .map(|_| None)
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))
     }
 
@@ -2154,7 +2143,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 #[tokio::test]
 pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_engine() {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     // The cell runs in a handler on the double, whose process workflow runs
     // the started body: the signal crosses the engine's own delivery route
     // to the waiter the body parks on.
@@ -2184,6 +2173,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );
@@ -2289,7 +2279,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
 #[tokio::test]
 pub(super) async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     // Both cells run in the double's handler; its process workflow runs the body.
     let table = crate::testing::DoubleProcesses::new(0x7519_0002).await;
     let effect_host = table.backend().effect_host();
@@ -2317,6 +2307,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );
@@ -2418,7 +2409,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
 #[tokio::test]
 pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation() {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     let table = crate::testing::DoubleProcesses::new(0x7519_0003).await;
     let registry = table.registry();
     let process_env_store = table.env_store();
@@ -2505,15 +2496,4 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         .expect("inspected process id");
     assert_eq!(finish_id, recorded_pid);
     handler.close().await.expect("close the cell handler");
-}
-
-/// The claim a fixture that registers directly publishes a start's
-/// environment under. It stands in for the journaled start's own `Start`
-/// referrer, which only the runtime's start command arms, so it is a host
-/// pin the fixture never releases.
-fn fixture_start_claim() -> lash_core::ReferrerClaim {
-    lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-        lash_core::HostArtifactPin::mint(),
-    ))
-    .expect("a host pin is an unguarded referrer")
 }

@@ -26,7 +26,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
 }
 
 lash_conformance::wake_delivery_crash_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake-delivery crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -55,7 +55,7 @@ lash_conformance::wake_delivery_crash_tests!({
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        _database_lock,
+        _database_fixture,
         factory,
         registry,
         clock,
@@ -67,7 +67,7 @@ lash_conformance::wake_delivery_crash_tests!({
 });
 
 lash_conformance::wake_delivery_ordering_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake ordering-group conformance: \
              LASH_POSTGRES_DATABASE_URL is not set"
@@ -80,7 +80,7 @@ lash_conformance::wake_delivery_ordering_tests!({
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        _database_lock,
+        _database_fixture,
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
             pool: storage.pool().clone(),
@@ -89,5 +89,68 @@ lash_conformance::wake_delivery_ordering_tests!({
         lash_conformance::ProcessTerminalWaitWitness::Direct,
         || async {},
         || async {},
+    )
+});
+
+struct PostgresWakeDeliveryIsolationBackend {
+    storage: lash_postgres_store::PostgresStorage,
+    clock: Arc<lash_core_execution::testing::TestClock>,
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::WakeDeliveryIsolationBackend for PostgresWakeDeliveryIsolationBackend {
+    async fn corrupt_source(&self, process_id: &ProcessId) {
+        assert_eq!(
+            sqlx::query("UPDATE lash_processes SET record_json = '{}' WHERE process_id = $1")
+                .bind(process_id.as_str())
+                .execute(self.storage.pool())
+                .await
+                .expect("corrupt Postgres wake source")
+                .rows_affected(),
+            1
+        );
+    }
+
+    async fn reopen(&self) -> (Arc<dyn DeploymentStore>, Arc<dyn ProcessRegistry>) {
+        (
+            Arc::new(
+                self.storage
+                    .session_store_factory()
+                    .with_clock(self.clock.clone()),
+            ),
+            Arc::new(
+                self.storage
+                    .process_registry_with_wake_delivery_config(
+                        lash_core_execution::WakeDeliveryConfig::new(10_000)
+                            .expect("valid wake expiry")
+                            .with_enqueuing_stale_after_ms(25)
+                            .expect("valid claim lapse"),
+                    )
+                    .with_clock(self.clock.clone()),
+            ),
+        )
+    }
+}
+
+lash_conformance::wake_delivery_isolation_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        panic!("wake isolation conformance requires LASH_POSTGRES_DATABASE_URL");
+    };
+    reset(storage.pool()).await;
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
+    let backend = Arc::new(PostgresWakeDeliveryIsolationBackend {
+        storage,
+        clock: clock.clone(),
+    });
+    let (factory, registry) =
+        lash_conformance::WakeDeliveryIsolationBackend::reopen(backend.as_ref()).await;
+    (
+        database_fixture,
+        factory,
+        registry,
+        clock,
+        backend as Arc<dyn lash_conformance::WakeDeliveryIsolationBackend>,
     )
 });

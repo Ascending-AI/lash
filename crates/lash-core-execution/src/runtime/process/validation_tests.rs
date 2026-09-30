@@ -75,6 +75,7 @@ fn effect_summary_refuses_predecessor_vocabulary() {
         1,
         None,
         None,
+        None,
         42,
         None,
         crate::FleetFormat::current(),
@@ -102,6 +103,7 @@ fn effect_summary_refuses_unknown_field() {
         &record,
         request,
         1,
+        None,
         None,
         None,
         42,
@@ -137,6 +139,7 @@ fn effect_summary_refuses_unknown_runtime_kind() {
         1,
         None,
         None,
+        None,
         42,
         None,
         crate::FleetFormat::current(),
@@ -167,6 +170,7 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
         1,
         None,
         None,
+        None,
         42,
         None,
         crate::FleetFormat::current(),
@@ -193,6 +197,7 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         1,
         None,
         None,
+        None,
         42,
         None,
         crate::FleetFormat::current(),
@@ -207,6 +212,7 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         2,
         Some(1),
         Some(event.clone()),
+        None,
         43,
         None,
         crate::FleetFormat::current(),
@@ -227,6 +233,7 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         2,
         Some(1),
         Some(event),
+        None,
         43,
         None,
         crate::FleetFormat::current(),
@@ -285,6 +292,7 @@ fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
         1,
         None,
         None,
+        None,
         42,
         None,
         crate::FleetFormat::current(),
@@ -304,6 +312,7 @@ fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
         &record,
         empty,
         1,
+        None,
         None,
         None,
         42,
@@ -420,6 +429,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
             sequence,
             (sequence > 1).then_some(sequence - 1),
             None,
+            None,
             sequence + 10,
             None,
             crate::FleetFormat::current(),
@@ -462,12 +472,82 @@ fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
         1,
         None,
         None,
+        Some(0),
         42,
         None,
         crate::FleetFormat::current(),
     )
     .expect("host-supplied signal replay key should retain the existing append contract");
     assert!(matches!(plan, ProcessEventAppendPlan::Insert { .. }));
+}
+
+/// A signal append selects the wait it resolves (FIG-4298): the declared
+/// ordinal of the wait the process is parked on for the name, else the
+/// signal's position among the events of its type. A store that supplies no
+/// count for an unparked signal is refused, never guessed for.
+#[test]
+fn a_signal_append_selects_its_declared_wait_or_its_position() {
+    let registration = fixture_registration("signal-wait-selection").with_extra_event_types([
+        crate::ProcessEventType {
+            name: "signal.ready".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        },
+    ]);
+    let mut record =
+        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
+    let selected = |record: &ProcessRecord, before: Option<u64>| {
+        prepare_process_event_append(
+            record,
+            ProcessEventAppendRequest::new("signal.ready", serde_json::json!(1))
+                .with_replay_key("signal-wait-selection"),
+            4,
+            Some(3),
+            None,
+            before,
+            42,
+            None,
+            crate::FleetFormat::current(),
+        )
+        .map(|plan| match plan {
+            ProcessEventAppendPlan::Insert { event, .. } => event.semantics.signal_wait,
+            ProcessEventAppendPlan::Replay { .. } => panic!("a fresh signal inserts"),
+        })
+    };
+    let binding = |ordinal| Some(crate::ProcessSignalWaitBinding { ordinal });
+
+    assert_eq!(selected(&record, Some(2)).expect("unparked"), binding(3));
+    assert!(
+        selected(&record, None).is_err(),
+        "an unparked signal needs the store's count"
+    );
+
+    record.wait = Some(WaitState {
+        since_ms: 1,
+        kind: crate::WaitKind::Signal {
+            name: "ready".to_string(),
+            event_type: "signal.ready".to_string(),
+            key: crate::runtime::process_signal_wait_key(&record.id, "ready", 7),
+            ordinal: 7,
+        },
+    });
+    assert_eq!(selected(&record, Some(2)).expect("parked"), binding(7));
+    assert_eq!(selected(&record, None).expect("parked"), binding(7));
+
+    record.wait = Some(WaitState {
+        since_ms: 1,
+        kind: crate::WaitKind::Signal {
+            name: "other".to_string(),
+            event_type: "signal.other".to_string(),
+            key: crate::runtime::process_signal_wait_key(&record.id, "other", 7),
+            ordinal: 7,
+        },
+    });
+    assert_eq!(
+        selected(&record, Some(2)).expect("parked elsewhere"),
+        binding(3),
+        "a wait for another name does not bind this signal"
+    );
 }
 
 #[test]

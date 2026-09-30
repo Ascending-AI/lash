@@ -20,13 +20,19 @@ async fn freshness_runtime(
     (runtime, store)
 }
 
-async fn append_history(runtime: &mut LashRuntime, depth: usize) {
+async fn append_history(
+    runtime: &mut LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    depth: usize,
+) {
     assert!(depth >= 1, "the initial frame is the first history node");
     if depth == 1 {
         return;
     }
-    Box::pin(
-        runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
+    Box::pin(crate::runtime_support::apply_host_append(
+        runtime,
+        double,
+        lash_core::AppendSessionNodesRequest {
             operation_id: format!("freshness-depth-{depth}"),
             nodes: (1..depth)
                 .map(|ordinal| {
@@ -37,27 +43,47 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
                 })
                 .collect(),
             requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("append freshness history");
+        },
+    ))
+    .await;
     assert_eq!(runtime.state().session_graph.nodes.len(), depth);
+}
+
+/// Open the frame `material` keys as a host's frame open, a session command
+/// the runtime's next drive applies (FIG-4202).
+async fn open_frame(
+    runtime: &mut LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    material: &str,
+) -> lash_core::runtime::OpenAgentFrameCommandOutcome {
+    let command = lash_core::runtime::SessionCommand::OpenAgentFrame {
+        request: Box::new(
+            lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
+                lash_core::FrameKey::from_caller_material(material)
+                    .expect("non-empty frame material"),
+                lash_core::AgentFrameReason::new("test"),
+            ),
+        ),
+    };
+    match Box::pin(crate::runtime_support::apply_host_command(
+        runtime, double, command, material,
+    ))
+    .await
+    {
+        lash_core::runtime::SessionCommandOutcome::OpenAgentFrame { outcome } => outcome,
+        other => panic!("a frame open settles with its own outcome: {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    let opened = runtime
-        .open_agent_frame(
-            lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
-                lash_core::FrameKey::from_caller_material("changed-policy-frame")
-                    .expect("non-empty frame material"),
-                lash_core::AgentFrameReason::new("test"),
-            ),
-        )
-        .await
-        .expect("open a second agent frame");
+    let lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome: opened } =
+        Box::pin(open_frame(&mut runtime, &double, "changed-policy-frame")).await
+    else {
+        panic!("open a second agent frame");
+    };
     assert!(opened.opened, "the second frame must be newly opened");
 
     let changed_model = lash_core::ModelSpec::builder("changed-frame-model")
@@ -87,19 +113,14 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         .await
         .expect("load durable head before historical-frame refusal");
 
-    let error = runtime
-        .open_agent_frame(
-            lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
-                lash_core::FrameKey::from_caller_material("initial-frame")
-                    .expect("non-empty frame material"),
-                lash_core::AgentFrameReason::new("test"),
-            ),
-        )
-        .await
-        .expect_err("switching to a pre-existing historical frame must refuse");
+    let lash_core::runtime::OpenAgentFrameCommandOutcome::Refused { code, .. } =
+        Box::pin(open_frame(&mut runtime, &double, "initial-frame")).await
+    else {
+        panic!("switching to a pre-existing historical frame must refuse");
+    };
 
     assert_eq!(
-        error.code,
+        code,
         lash_core::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
     );
     assert_eq!(
@@ -118,13 +139,15 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         .load_session_head_meta()
         .await
         .expect("load durable head after historical-frame refusal");
+    // The open is a session command (FIG-4202): its refusal settles in one
+    // commit, which completes the command and moves nothing else.
     assert_eq!(
         durable_head_after_refusal
             .as_ref()
             .map(|head| head.head_revision),
         durable_head_before_refusal
             .as_ref()
-            .map(|head| head.head_revision)
+            .map(|head| head.head_revision + 1)
     );
     assert_eq!(
         durable_head_after_refusal
@@ -149,7 +172,7 @@ async fn unchanged_session_freshness_is_independent_of_history_depth() {
     for depth in [10, 256] {
         let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
         let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-        Box::pin(append_history(&mut runtime, depth)).await;
+        Box::pin(append_history(&mut runtime, &double, depth)).await;
         let head_reads_before = store.load_session_head_meta_count();
         let full_loads_before = store.load_session_count();
 
@@ -175,7 +198,7 @@ async fn unchanged_session_freshness_is_independent_of_history_depth() {
 async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let head_reads_before = store.load_session_head_meta_count();
     let full_loads_before = store.load_session_count();
     runtime.resident_session.mark_graph_head_stale();
@@ -203,8 +226,8 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
 async fn freshness_hydrates_when_revision_changed() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
-    let head = advance_session_head(store.as_ref(), &[], |_| {}).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
+    let head = advance_session_head(store.as_ref(), |_| {}).await;
     let full_loads_before = store.load_session_count();
 
     runtime
@@ -224,7 +247,7 @@ async fn freshness_hydrates_when_revision_changed() {
 async fn resident_refresh_adopts_the_durable_head_prompt() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let command = runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Settled host change",
@@ -242,7 +265,7 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
     let head_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
     );
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.prompt = head_prompt.clone();
     })
     .await;
@@ -263,9 +286,9 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
 async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_path() {
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
 
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.prompt = lash_core::PromptLayer::new().with_contribution(
             lash_core::PromptContribution::guidance("Durable base", "KEEP THE DURABLE PROMPT"),
         );
@@ -308,7 +331,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
 async fn resident_refresh_adopts_the_durable_head_model() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let settled_model = lash_core::ModelSpec::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
@@ -331,7 +354,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
         .context_window_tokens(65_536)
         .build()
         .expect("advanced durable model");
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.model = head_model.clone();
     })
     .await;
@@ -355,7 +378,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
 async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_plugins() {
     let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let live_subagent = |runtime: &LashRuntime| {
         runtime
             .plugin_session()
@@ -371,7 +394,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
         depth: 1,
         max_depth: 3,
     };
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.authority.subagent = Some(head_subagent.clone());
     })
     .await;
@@ -400,7 +423,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
 async fn resident_refresh_adopts_the_durable_head_provider_id() {
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let settled_provider = TestProvider::builder()
         .kind("settled-live-provider")
         .complete_error("provider must not be called by refresh")
@@ -421,7 +444,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
     )
     .await;
 
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.provider_id = "advanced-durable-provider".to_string();
     })
     .await;
@@ -442,7 +465,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
 async fn freshness_hydrates_when_leaf_changed() {
     let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let frame_node_id = runtime.state().session_graph.nodes[0].node_id.clone();
     let mut head = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -470,7 +493,7 @@ async fn freshness_hydrates_when_leaf_changed() {
 async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let mut head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
@@ -503,7 +526,7 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
 async fn freshness_skips_hydration_when_nothing_changed() {
     let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let resident_head = (
         runtime.state().head_revision,
         runtime.state().session_graph.leaf_node_id.clone(),
@@ -573,7 +596,7 @@ async fn protocol_turn_options_settle_through_the_commanded_write() {
 async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_head() {
     let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let options = commanded_turn_options("survives-invalidation-reload");
 
     let command = runtime.set_protocol_turn_options(options.clone()).await;
@@ -643,7 +666,7 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
 async fn live_policy_override_then_invalidation_reload_yields_the_head_values() {
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
     let overridden_model = lash_core::ModelSpec::builder("live-override-model")
         .context_window_tokens(123_456)
         .build()
@@ -682,7 +705,7 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     let head_prompt = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
     );
-    advance_session_head(store.as_ref(), &[], |state| {
+    advance_session_head(store.as_ref(), |state| {
         state.policy.model = head_model.clone();
         state.policy.prompt = head_prompt.clone();
     })
@@ -736,7 +759,7 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    Box::pin(append_history(&mut runtime, 2)).await;
+    Box::pin(append_history(&mut runtime, &double, 2)).await;
 
     runtime.invalidate_resident_session_state();
     let head_probes_before = store.load_session_head_meta_count();
@@ -781,100 +804,5 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
     assert!(
         runtime.resident_session.graph_loaded_from_store(),
         "the reload settles graph_loaded_from_store"
-    );
-}
-
-/// FIG-2782: the checkpoint-adopt path owns its own rehydration of the
-/// outstanding usage-attempt registry, and nothing else covers it.
-///
-/// Session construction rebuilds the registry from the durable ledger it opened
-/// on, so every reopen witness stays green even with the adopt-path rebuild
-/// deleted. This drives the other order: a live handle whose registry is empty
-/// adopts a head that already carries holes, while a resident correction that
-/// has not settled into any durable row is layered on top. The rebuilt set must
-/// be the durable holes minus the ones the resident correction already fills,
-/// which is only true if the adopt path rebuilds it at all.
-#[tokio::test(flavor = "multi_thread")]
-async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted_head() {
-    let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, 2)).await;
-    let model = runtime.state().effective_policy().model.id.clone();
-
-    // Durable holes committed outside this handle: two billed attempts whose
-    // usage never arrived, carried by one accumulating `(source, model)` row.
-    let durable_holes = lash_core::TokenLedgerEntry {
-        source: "turn".to_string(),
-        model: model.clone(),
-        usage: lash_core::TokenUsage::default(),
-        usage_disposition: lash_core::LedgerUsageOutcome::unreported([
-            lash_core::UnreportedLedgerAttempt {
-                call_id: "fig2782-call-alpha".to_string(),
-                attempt_ordinal: 1,
-                generation_id: Some("gen-alpha".to_string()),
-            },
-            lash_core::UnreportedLedgerAttempt {
-                call_id: "fig2782-call-beta".to_string(),
-                attempt_ordinal: 1,
-                generation_id: Some("gen-beta".to_string()),
-            },
-        ]),
-    };
-
-    // A resident correction for one of those holes: recorded on the shared
-    // ledger by a reconciliation that has not ridden a commit boundary yet, so
-    // it exists only in memory while its hole is still durable.
-    runtime.shared_token_ledger.lock_recover().push(
-        lash_core::runtime::session_manager::PendingTokenLedgerEntry::unstaged(
-            lash_core::TokenLedgerEntry {
-                source: "turn".to_string(),
-                model: model.clone(),
-                usage: lash_core::TokenUsage {
-                    input_tokens: 334,
-                    ..lash_core::TokenUsage::default()
-                },
-                usage_disposition: lash_core::LedgerUsageOutcome::Reconciled {
-                    call_id: "fig2782-call-beta".to_string(),
-                    attempt_ordinal: 1,
-                },
-            },
-        ),
-    );
-
-    assert!(
-        runtime.unreported_usage_attempts().is_empty(),
-        "the live handle must start with nothing registered, or the adopt is not what fills it"
-    );
-
-    // An external writer lands the usage holes on the durable head.
-    let advanced = advance_session_head(store.as_ref(), &[durable_holes], |_| {}).await;
-    let head_before_adopt = runtime.state().head_revision;
-
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("adopt the advanced durable head");
-
-    assert!(
-        runtime.state().head_revision > head_before_adopt,
-        "the adopt must actually advance the head, or the adopt path never ran"
-    );
-    assert_eq!(runtime.state().head_revision, advanced.head_revision);
-    assert_eq!(
-        runtime.unreported_usage_attempts(),
-        [lash_core::facade_support::UnreportedUsageAttempt {
-            call_id: "fig2782-call-alpha".to_string(),
-            attempt_ordinal: 1,
-            source: "turn".to_string(),
-            model: model.clone(),
-            generation_id: Some("gen-alpha".to_string()),
-        }],
-        "the adopted head must rebuild the outstanding set: every durable hole, \
-         minus the one the resident correction already fills"
-    );
-    assert_eq!(
-        runtime.shared_token_ledger.lock_recover().len(),
-        1,
-        "rebuilding from the resident correction must not consume it"
     );
 }

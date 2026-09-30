@@ -34,6 +34,7 @@ esac
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
+selection_python="${LIBTEST_SELECTION_PYTHON:-python3}"
 
 buck2_test_count=0
 buck2_report_root=""
@@ -55,7 +56,7 @@ buck2_test() {
       test_env+=(--test_env "$name")
     fi
   done
-  scripts/hermetic-build.sh test \
+  "${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test \
     --jobs "${LASH_POSTGRES_SLOT_COUNT:-32}" \
     --local-test-execution \
     --no-test-cache \
@@ -67,6 +68,19 @@ buck2_test() {
     --event-log "$buck2_report_root/events-${buck2_test_count}.json-lines" \
     "${test_env[@]}" \
     "$@"
+  "$selection_python" tools/buck2/libtest_selection.py buck2 \
+    "$buck2_report_root/test-${buck2_test_count}.json"
+}
+
+cargo_test() {
+  local log code=0
+  log=$(mktemp)
+  "$@" 2>&1 | tee "$log" || code=$?
+  if ((code == 0)); then
+    "$selection_python" tools/buck2/libtest_selection.py cargo "$log" "$@" || code=$?
+  fi
+  rm -f "$log"
+  return "$code"
 }
 
 labels() {
@@ -179,7 +193,11 @@ render_cargo_suite() {
     suite_has_flag "$flags" include-ignored && cmd+=(--run-ignored all)
     [ -n "$filter" ] && cmd+=(-E "test(${filter})")
   fi
-  "${cmd[@]}"
+  if [ "$runner" = cargo-test ]; then
+    cargo_test "${cmd[@]}"
+  else
+    "${cmd[@]}"
+  fi
 }
 
 run_uniform_store_suite() {
@@ -218,9 +236,9 @@ case "${suite}" in
         --test_arg=a_mismatched_version_stamp_is_reported_without_a_column_diff \
         //crates/lash-postgres-store:schema_drift__test
     else
-      cargo test -p lash-internal-postgres-store --locked --lib \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --lib \
         committed_shape_artifact_matches_the_ddl_artifact
-      cargo test -p lash-internal-postgres-store --locked --test schema_drift \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --test schema_drift \
         a_mismatched_version_stamp_is_reported_without_a_column_diff
     fi
     ;;
@@ -254,12 +272,12 @@ case "${suite}" in
         --test_arg=--ignored \
         //crates/lash-restate:lash-restate__unit_test
     else
-      cargo test -p lash-internal-postgres-store --locked
+      cargo_test cargo test -p lash-internal-postgres-store --locked
       # The synthetic successor's suites (FIG-4262), the Cargo spelling of
       # the feature-lane variants the generated label file adds above.
-      cargo test -p lash-internal-postgres-store --locked --no-default-features \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --no-default-features \
         --features synthetic-next
-      cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
+      cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
     ;;
 
@@ -268,7 +286,7 @@ case "${suite}" in
       # shellcheck disable=SC2046
       buck2_test $(labels s3)
     else
-      cargo test -p lash-internal-s3-store --locked
+      cargo_test cargo test -p lash-internal-s3-store --locked
     fi
     ;;
   *)

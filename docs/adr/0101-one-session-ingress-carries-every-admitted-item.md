@@ -2,1179 +2,389 @@
 
 ## Status
 
-Accepted 2026-09-23 (FIG-3540) as the design freeze for the one-ingress
-cutover. The pending follow-on (§3) is implemented (FIG-3542). The one-table
-model of §1 is **not adopted**: the *Amendment (FIG-3540 close-out)* below
-makes the session's one logical ingress the two admission tables composed
-under one sequence, and records which sections it overrides. Nothing else below
-describes current behaviour unless it says so. The FIG-3540 arc note is the
-frozen design this ADR records.
-
-Supersedes [ADR 0010](0010-pending-turn-input-is-admission-evidence.md).
-Strengthens [ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md).
-Amends [ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md),
-[ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
-[ADR 0046](0046-process-transitions-are-events-record-is-a-fold.md),
-[ADR 0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md),
-[ADR 0077](0077-session-state-migrates-totally-at-admission.md),
-[ADR 0097](0097-commit-identity-families-mint-frozen-unframed-preimages.md)
-and [ADR 0119](0119-durable-session-and-live-session-are-two-authorities.md),
-[ADR 0098](0098-one-owner-per-sql-table-across-both-stores.md) and the
-`CONTEXT.md` glossary; each carries a short note pointing here. ADR 0016,
-ADR 0023, ADR 0081 and ADR 0099 are unchanged.
-
-The owner rulings are recorded on the FIG-3540 arc (E1, E2, E4, D2, D14, F;
-Sam, 2026-09-23). A later ruling the same day replaces G: session commands
-become a class-level lane applied at turn boundaries (§4). The design changes
-D1–D17 come from the ingress prospect round
-(`/workspace/notes/lash/prospect-ingress-2026-09-23.md`), benchmarked against
-Temporal, Pekko, Restate, DBOS and LangGraph. Where a review or the prospect
-report differs from an owner ruling, the ruling is what this ADR records.
-
-Amended 2026-09-24 (FIG-3600; Sam's rulings on that ticket). The *Amendment
-(FIG-3600)* section below makes the ingress the only way a turn starts and the
-backend's work driver the only thing that runs one: the caller submits with
-`session.send(..)` and observes through a handle. It also makes the session
-model durable session config changed by a session command. It is implemented;
-its status paragraph names what remains. Where the amendment and an earlier
-section disagree, the amendment wins; the passages it overrides carry a short
-note.
-
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: ingress claims fenced by the session-execution
-lease, and the in-process work driver on SQLite and PostgreSQL (A1); per-session
-serialized execution becomes an engine obligation. Those passages stay as
-written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
-the session lease) rewrites them.
-
-Amended 2026-09-28 (FIG-3927), implemented: the FIG-3927
-amendment below removes the durable claim token and the `queued_runs` ledger
-from selection and settlement. A fenced write under the session's drive fence
-binds each admitted row to its root (`admitted_root`, `admitted_by`), the
-engine journal records the root's selection, and settlement is keyed by the
-root and the turn. It supersedes ADR 0029 and ADR 0053.
+Accepted.
 
 ## Context
 
-Lash feeds turns from two durable queues. `pending_turn_inputs` holds host
-input. `queued_work_batches` / `queued_work_items` hold process wakes, frame
-handoffs and session commands. ADR 0010 made the split a rule: "It is not queued
-work." Every lifecycle rule is therefore written twice: dedup, retention, cancel
-disposition, ordering, claim bounds, settlement, affected-item records. The
-second copy lags, and the lag has produced confirmed defects:
-
-* **Order across the two tables is a timestamp guess.** The two `enqueue_seq`
-  counters are incomparable, so the idle drain orders commands against inputs by
-  `enqueued_at_ms`, ties to input, and claims wakes only when no input was
-  claimed. A command enqueued before an input can apply after both the input and
-  a wake.
-* **A settled session command can run twice.** Settlement deletes the queued
-  row, and enqueue dedup only sees live rows. A host that retries a config patch
-  with the same key after settlement gets it applied again, possibly over newer
-  values.
-* **A conflicting replay is silently adopted** on the queued side (pinned by a
-  conformance law), while ADR 0010 makes it an error on the input side.
-* **A host-cancelled wake can come back** (FIG-3545): host cancel deletes the row
-  without raising the wake redelivery floor.
-* **An identical input retry is refused as a conflict** after its row was
-  deferred (FIG-3544): dedup compares the row's *current* delivery, which every
-  final commit and orphan repair rewrite from the addressed turn to the next
-  turn.
-* **The frame handoff lives in the queue** and inherits none of the protections
-  it needs. After a crash it can be overtaken by input or commands, deleted by a
-  host, stranded by a failed follow-on and later rendered as plain text in the
-  wrong frame (FIG-3542), and its chain bound resets on recovery.
-* **Cancel only knew one table.** Withheld wakes had no cancel disposition and no
-  record, so a turn cancel completed them: a silent, floor-raising drop.
-
-Every reference system with a durable per-entity queue keeps one row per item
-with one lifecycle: Restate keeps one invocation-status row per invocation and
-deleted its separate idempotency table; DBOS puts its queue columns on the
-workflow row with partial indexes.
+Host input, process wakes, and session commands require durable admission,
+comparable ordering, replay-safe settlement, and explicit cancellation outcomes.
+A frame handoff also needs recovery without becoming ordinary queued input.
 
 ## Decision
 
-**A session has one durable ingress: one table, one row per admitted item, one
-order, one claim, one settlement planner, one cancel vocabulary. Kind-specific
-behaviour is a property of the item's kind, never of a separate table or claim
-type.**
+A session has one logical durable ingress composed from its admission tables.
+The engine drives admitted turns. Callers submit durable data and observe the
+result; they do not own a turn's continuation.
 
 ### 1. The model
 
-*(Not adopted: the Amendment (FIG-3540 close-out) keeps the two admission
-tables as one logical ingress. The rest of this section is the design as
-frozen.)*
+`pending_turn_inputs` holds host input. `queued_work_batches` and
+`queued_work_items` hold process wakes and session commands.
+`session_ingress_sequence` allocates one per-session `enqueue_seq` across both
+admission families. The counter is allocated inside the producer transaction.
+The command lane is selected by kind; input and wakes form the turn lane.
 
-One table per SQL backend, `session_ingress` (SQLite) / `lash_session_ingress`
-(PostgreSQL), and one `Vec` plus one counter in the in-memory store. One row is
-one item. The batch/items split is deleted: every production producer admits one
-item at a time, and the only multi-item constructor is a test. A *claim* is the
-composition unit, and it already spans several rows.
+A selected row records `admitted_root` and `admitted_by`. Root and checkpoint
+admissions are fenced writes under the session's `DriveFence`. Admission
+delivers the row's store-to-engine ingress obligation. `IngressSettlement`
+names the root and its completed inputs, completed batches, released rows, and
+dropped rows. There is no durable claim token or queued-run ledger.
 
-| Column | Rule |
-| --- | --- |
-| `session_id`, `enqueue_seq` | One per-session sequence shared by every kind, taken under the session lock. |
-| `lane` | `command \| turn`, fixed by kind (`session_command` → `command`; `input`, `process_wake` → `turn`). Order is `(lane, enqueue_seq)` (§4, §5). |
-| `item_id` | Kind-derived. Input: the FIG-3513 acceptance-derived id. Wake: from the process and event sequence. Command: from its source key. |
-| `kind` | `input \| process_wake \| session_command`. |
-| `source_key` | One namespace, `UNIQUE(session_id, source_key)` over open and terminal rows alike. |
-| `delivery` | The submitted `Delivery`: immutable intent, written once at admission and never rewritten (§5.1). |
-| `submission_digest` | Written once at admission, never updated (§8). |
-| `payload` | `Input(TurnInput) \| ProcessWake(ProcessWakeDelivery) \| SessionCommand(SessionCommand)`. The wake payload stays a copy of the process delivery. |
-| `authority`, `merge_key` | Per-item data, nullable where a kind has none. They feed the drain policy and traces. Nothing authorizes on them and nothing gates a claim on them (§5). |
-| `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, as ADR 0010 defined it. |
-| `terminal_cause` | Closed, non-null exactly on terminal rows (§8). |
-| claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. *(FIG-3927: the claim columns are replaced by `admitted_root` and `admitted_by`; see the FIG-3927 amendment.)* |
-| `enqueued_at_ms`, `terminal_at_ms` | Informational and for claim-size bounds. Never an order key. |
+Selection is a recorded `AdmitRoot` step. The store records the selected result
+on `session_roots` in the same transaction as binding rows. Re-execution reads
+that result instead of choosing again. A checkpoint names its own recorded
+step. A root's fenced commit or terminal write settles or releases its rows.
+The session has at most one admitted unfinished root. A terminal root's owed
+scope close holds no admission and does not block the next root.
 
-`available_at_ms` is deleted: it has no non-test setter.
-
-**One `Delivery`:** `Turn { turn_id, min_boundary } | AnyBoundary | NextTurn`.
-Today's `TurnInputIngress::ActiveTurn` becomes `Turn`, `EarliestSafeBoundary`
-becomes `AnyBoundary`, and `NextTurn` / `AfterCurrentTurnCommit` become
-`NextTurn`. They are three variants, not two pairs collapsed into one.
-
-**One claim type:** `IngressClaim = WorkClaim<IngressClaimData { mode, items }>`
-with `ClaimMode::{ Idle, Checkpoint { turn_id, checkpoint }, Exact { item_ids }
-}`.
-*Amended (FIG-3540 S3, 2026-09-24):* `IngressClaim` is its own struct keyed by
-drive epoch and admission id (ADR 0105 §2), with a clock-free replay-stable
-token and no `WorkClaim` lease fields.
-It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
-An ingress drive is always a claimed drive: FIG-3532 removed the runtime
-unclaimed drive, so there is no `Unclaimed` variant. `WithheldTerminalWork`
-becomes one list of claims. *(FIG-3927: the claim type
-itself is gone; the root's recorded `AdmitRoot` step is the admission, and
-`WithheldTerminalWork` carries admitted row ids. See the FIG-3927
-amendment.)*
-
-**One settlement/disposition planner** with one settlement regime, the claimed
-one, and one disposition vocabulary `Complete | Drop | Defer`. Store-level
-settlement of unclaimed rows (ADR 0069 §5) has no producer after FIG-3532 and
-is deleted in the cutover (§14). The per-kind terminal side-write (the wake floor, §9)
-is a property of the kind. `RuntimeCommit` carries one `completed_claims` list
-and one `undelivered_claims` list (FIG-3531's field, generalized).
-
-**One store trait:** `SessionIngressStore` replaces `TurnInputStore` and
-`QueuedWorkStore`. Its enqueue answers
-`Inserted | Existing | Conflict | WakeRewound`, and it owns claim, abandon,
-cancel by id, source key or suffix, list (with `held`), vacuum and orphan repair.
-
-#### Per-kind invariants
-
-| | `input` | `process_wake` | `session_command` |
-| --- | --- | --- | --- |
-| Producer | Host, through durable acceptance (ADR 0069) | The process wake sender | `accept_session_command` |
-| Delivery | `Turn`, `AnyBoundary` or `NextTurn` | `AnyBoundary` | `NextTurn` |
-| Source key | Host-owned, or acceptance-derived (FIG-3513). A reserved system prefix is refused at admission. | `process:{pid}:event:{seq}:wake` | `command:{kind}:{key}` |
-| Digest covers | Submitted delivery and input | The process fact only: process, event sequence, payload. Not the host-configured delivery policy. | The command |
-| Lane | `turn` | `turn` | `command` |
-| Claimed with | Inputs and wakes, as one FIFO prefix | Inputs and wakes, as one FIFO prefix | Nothing, except adjacent `ApplyConfigPatch` commands |
-| Applied / delivered | At turn start or a checkpoint of the turn | At turn start or a checkpoint of the turn | Only at turn boundaries (§4) |
-| Rendered as | Messages; the first input's options win | Wake causes; wakes carry no options | Never rendered |
-| Terminal side-write | None | Floor raise, same transaction (§9) | None |
-| Turn cancel | The accepted request's `undelivered` disposition, for items addressed to the cancelled turn | Always `Defer` (§10) | Never in a turn's claim |
+Evidence: `crates/lash-core-store/src/store/admission_plan.rs:1`, `:31`, `:67`,
+`crates/lash-core-store/src/store/root.rs`,
+`crates/lash-sqlite-store/src/persistence/admission.rs`,
+`crates/lash-postgres-store/src/postgres/runtime_persistence/admission.rs`, and
+`crates/lash-store-sql/src/session_ingress.rs`.
 
 ### 2. What stays separate, and why
 
-These are real boundaries, not leftovers of the split:
+Process wake delivery outboxes and allocation floors belong to the process
+registry. Receiver wake-redelivery fences outlive queue rows. Turn cancellation
+is arbitrated through the keyed-promise contract of
+[ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md).
+Engine lane serialization controls driving, not ingress order. The host's
+`QueuedDrainPolicy` bounds composition. None is another turn ingress.
 
-* **The process delivery outbox and sender allocation floors.** Process-owned,
-  cascade with the process, and a different crash boundary from the session.
-* **The wake redelivery fence** (`wake_redelivery_fences`). A side table that must
-  survive `vacuum()`, because tombstones do not.
-* **Turn-cancel arbitration** on the keyed-promise seam (ADR 0039). The ingress
-  applies its settled evidence; it does not arbitrate.
-* **Restate / native lane acquisition policy.** It paces who drives, not what is
-  claimed.
-* **`QueuedDrainPolicy`** as a host seam. It chooses how much of the legal prefix
-  one claim takes (§5).
+Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
+`crates/lash-core-store/src/store/admission_plan.rs:332`, and
+`crates/lash-core-execution/src/runtime/turn_queue.rs`.
 
-None of these is a second ingress.
+### 3. The pending follow-on lives on the session head
 
-### 3. The pending follow-on lives on the session head (F, amended)
+A frame switch records `PendingFollowOn` atomically with its frame pointer in
+`pending_follow_on_json` on `session_head` or `lash_sessions`. It contains the
+follow-on turn id, frame id, task, options, resolved run, chain depth, recovery
+count, and the recovery bound of its logical run. It is not a queue item.
 
-A frame handoff is not an ingress item. The committed switch records the
-obligation on the session head, where it is consumed exactly once:
+The turn id derives from the logical root and next physical-turn ordinal.
+Only that follow-on's terminal commit clears the fact or replaces it with the
+next link. Every head write preserves its frame as current; another turn's
+commit or frame open is refused while it is owed. Its own checkpoint admission
+can proceed. Fork heads owe no source follow-on.
 
-```
-PendingFollowOn {
-    follow_on_turn_id, frame_id, task, options, chain_depth, attempts,
-}
-```
+Drive admission prioritizes owed follow-on recovery before the unfinished root,
+commands, or fresh turn-lane work. The original run continues its chain inline.
+A recovery root records its decision, `RecoverFollowOn`, between its seal and
+its turn. The step's body raises the recovery count once in a fenced write, and
+records the raised fact, the exhaustion, or that the head does not owe the
+follow-on. A raised or exhausted answer also records the head the follow-on's
+turn runs on and its turn index, and the step retains that head as an
+admission retains its base. Replay drives the recorded answer on the recorded
+head and index, and cannot raise the count twice.
+The first frame switch of a logical run freezes the host's
+`max_follow_on_recoveries` (default 3) on the fact, and the chain carries it:
+every recovery decides on the frozen bound, never on the bound of the host
+driving it, and the recorded decision carries it. Exhaustion commits
+`FollowOnRecoveryExhausted` as a failed follow-on with its task delivered and
+clears the fact. Chain depth also survives crashes. Cancellation answers the
+follow-on's own task, rather than deferring it as undelivered ingress.
 
-* **Where.** Its own nullable column on the head row, `pending_follow_on_json` on
-  `session_head` / `lash_sessions`, beside `current_frame_node_id`. It is a
-  column, not a `head_json` field, so a claim statement can evaluate the refusal
-  below without decoding the whole config. It is in `RuntimeSessionState`, in
-  `SessionHeadMeta`, and in the commit intent (§14).
-* **Written** by the frame-switch commit, atomically with
-  `current_frame_node_id = frame_id`. The switch commit's receipt records the
-  value it wrote, so a replayed switch commit returns the same fact.
-* **Turn id.** `follow_on_turn_id` is derived from the root turn of the logical
-  run plus its position in the chain, so the root is recoverable from the id.
-  The position is the physical-turn index, not a switch count: a FIG-3157
-  checkpoint follow-on also advances the index, so a switch-count id could
-  equal a turn already committed in the same run. A recovering run continues
-  its index from the stored value.
-* **Cleared** by the follow-on turn's terminal commit in the same head CAS,
-  whatever the outcome (`Finished`, `Failed`, `Stopped(Cancelled)`, the
-  frame-switch-limit error). If that turn switches again, the same CAS writes
-  the next fact. Nothing else clears it; there is no delete path.
-* **Precedence.** While the fact is set, every ingress claim is refused with the
-  typed non-error `Blocked(FollowOnPending { follow_on_turn_id, attempts })`,
-  except a `Checkpoint` claim whose `turn_id == follow_on_turn_id`. Drains see
-  "blocked", never an error that a `?` would turn into a failed follow-on.
-* **No other turn commits** (derived from F: host input that arrives before the
-  follow-on runs is claimed after it commits). While the fact is set, a turn
-  commit other than the follow-on's own is refused with `FollowOnPending`. Every
-  direct turn claims its row since FIG-3532, so its initial claim meets the
-  refusal above: its row stays queued in order and the drain answers it after
-  the follow-on commits. The head-write refusal is the backstop for any commit
-  that reaches the store anyway. *(FIG-3600: no direct turn exists after that
-  cutover; the driver's claim meets the same refusal.)*
-* **Head invariant.** Every head write checks
-  `pending_follow_on.frame_id ∈ { None, current_frame_node_id }`. A commit that
-  would move the frame while a follow-on is pending is refused, and
-  `open_agent_frame` refuses with `FollowOnPending`. A stranded handoff is
-  unrepresentable.
-* **Definition carry (FIG-4177).** Mint the successor frame id before its
-  seed callback. Acquire its engine-owned definition manifest edges before
-  the SQL head CAS; validate the canonical descriptor and carry SQL-owned
-  entries inside that CAS. Prepared engine edges arm an `AwaitFrame` guard:
-  a committed frame retained by a head, anchor or admission root keeps them;
-  an absent or unretained frame loses them only after the preparing journal
-  cannot replay. A post-commit crash leaves the complete successor closure.
-  Engine artifact bytes stay in the engine store. ADR 0113 §3.1 owns this
-  prepare/commit/reclaim protocol and the existing `Ended` cleanup.
-* **Recovery.** One check in the lease funnel: after acquiring the lease and
-  refreshing the head, a set fact is driven as a logical run before any ingress
-  claim. A Restate drive whose scope owns the chain (the root turn of
-  `follow_on_turn_id` equals its scope) replays its own chain in order and never
-  starts the fact from the lease
-  funnel, so the positional journal cannot mismatch.
-* **Recovery bound.** A drive that recovers the fact raises `attempts` by one
-  in a fenced head write before the follow-on's first effect; on Restate this is
-  the drive's first journaled step. The inline path never raises it. The bound
-  is host policy: `max_follow_on_recoveries` lives on the same host durability
-  object as the other claim bounds (§5; `QueuedWorkBatchingConfig` today), with
-  a default of 3. When the raised value would exceed it, the drive does not run
-  the follow-on. It commits the follow-on as a terminal `Failed` turn whose
-  failure is the typed error `FollowOnRecoveryExhausted { follow_on_turn_id,
-  attempts }`, with the task as its delivered input. That turn receipt is the
-  follow-on's terminal record, and the same head CAS clears the fact. The count
-  is never reset: no operator action, reopen or policy change resets it, and it
-  lives and dies with the fact. Without a bound, a follow-on that crashes its
-  process before committing would block the session forever.
-* **Chain bound.** `chain_depth` carries `MAX_AGENT_FRAME_SWITCHES` across a
-  crash instead of restarting at zero.
-* **Cancel.** The follow-on is the cancelled logical turn's own continuation,
-  not an undelivered item; `Defer`/`Drop` do not apply. A cancelled follow-on
-  commits `Stopped(Cancelled)` with its task as delivered input, which clears the
-  fact.
-* **Fork.** A fork head starts with no pending follow-on; the source keeps its
-  own.
-* **Store-less sessions** carry the same field in memory, so the claimless
-  in-memory branch and the `if claimed` guard are gone: one path.
+Definition carry prepares successor-frame engine edges before the SQL head CAS
+and retains the complete closure after a committed switch. Guarded cleanup
+uses frame retention and journal end evidence under
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
-*Implemented (FIG-3542), ahead of the table cutover.* The claims it refuses
-are today's turn-input and queued-work claims: an idle claim meets
-`QueuedWorkClaimRefusal::FollowOnPending` (or claims nothing), and a direct
-turn's drive stays queued. The recovery bound is `max_follow_on_recoveries`
-on `QueuedWorkBatchingConfig` and the exhaustion is
-`TurnFailureCode::FollowOnRecoveryExhausted`. Recovery runs at the queued-drain
-entry, the one place a redriven turn starts today
-(`turn_loop/follow_on_recovery.rs`): the drain's own queued run resumes a
-follow-on it owns, and a follow-on no run owns (a direct turn's switch) is
-driven as its own logical run. The raise is a fenced head write that moves no
-revision. S5 moves this call to drive admission (O6), where it becomes the
-drive's first journaled step.
+Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
+`:76`, `crates/lash-core/src/runtime/drive/admission.rs:213`,
+`crates/lash-core/src/runtime/drive/root.rs:677`, and
+`crates/lash-sqlite-store/src/persistence/session_commit.rs:14`.
 
 ### 4. Session commands are a lane applied at turn boundaries
 
-This section records the owner ruling that replaced G.
+Commands apply at idle or after a logical root finishes, ahead of fresh
+turn-lane roots. They do not apply mid-turn, at checkpoints, or between the
+physical turns of one logical run. An owed follow-on and an unfinished root
+retain precedence; a parked root whose redrive is unsettled holds the command
+lane as it holds inputs, with the typed, retryable `SessionRedriveUnsettled`,
+because the unfinished root owns the head. A checkpoint does not treat an open
+command as a barrier.
 
-**Session commands are a class-level lane in the same table.** Order is
-`(lane, enqueue_seq)` with `lane = command | turn`. Commands keep the one dedup,
-tombstone, cancel and claim vocabulary of every other kind; only their order
-and their application point differ.
+Commands are not admitted turn rows. The drive selects the leading command run
+and settles it in the applying commit. The drive's fenced read of the run is
+the commands' admission: it delivers each row's obligation, and a withdrawal
+reaches a command only before that read. Adjacent config patches coalesce within the command bound. Other commands
+apply alone. Each turn retains its recorded config snapshot through checkpoints
+and follow-ons. A command can therefore change the config used by an input
+queued before it. A host requiring an earlier config waits for the input's
+answer before submitting the patch.
 
-**Commands apply only at turn boundaries:** after a logical run's final commit,
-and at idle. At each boundary the driver first drains **all** open commands in
-`enqueue_seq` order. Adjacent `ApplyConfigPatch` commands in the command lane
-coalesce into one head commit (up to the existing 64-command cap per commit);
-any other command takes a commit of its own. Only once the command lane is empty
-does the driver claim turn-lane items, FIFO (§5).
+`CompactContext { instructions }` is a command. It applies under its command
+root's sealed fence, journals its summary, opens the frame and records usage
+with settlement in one commit. Its typed outcome is `Opened`,
+`NothingToCompact`, or `Failed`. A settled replay adopts the published head and
+cannot open another frame. A storeless runtime serializes direct compaction
+through its mutable runtime access.
 
-Commands never apply:
+Every host head write from outside a turn is a command applied against the
+boundary's resident head: an append (`AppendSessionNodes`), a plugin command
+(`RunPluginCommand`) or task (`RunPluginTask`), and a durable frame open
+(`OpenAgentFrame`). A store-backed runtime refuses the direct calls with
+`SessionCommandRequired`; only a storeless runtime applies them directly. Each
+applies alone and settles in the one commit that makes its head write. An
+append lands its nodes, or settles `StaleBranch` when its required ancestor
+left the active path. A plugin's code runs only after admission; its services
+join the command as in-turn services join a turn, so its graph appends, usage,
+runtime events, plugin state, and queued turns ride the command's commit, and a
+task journals its effects under the command's own queue-drain scope. A frame
+open opens its frame and restarts the live interpreter from the seed. A command
+that cannot apply, including one whose commit exceeds the commit budget,
+settles with its typed refusal, so the lane never waits on it.
 
-* mid-turn;
-* at a checkpoint — a checkpoint claim never looks at the command lane;
-* between the physical turns of one logical run (D8). The claimless pre-turn
-  command drain in `turn_loop/accept.rs` is deleted. A pending follow-on refuses
-  every claim, command drains included (§3), so commands wait until the chain
-  ends.
+Every command settles as a typed `SessionCommandOutcome` carried by its
+commit's receipt, so a submitter on any runtime reads
+`SessionCommandSettlement::Applied { receipt, outcome }`. A host submits with a
+stable idempotency key and gets a durable receipt
+(`SessionCommandAdmin::submit`); a resubmission under the key while the command
+is open names the same command. `settle` answers `Applied`, `Cancelled`, or
+`Pending` with the receipt when the drive has not applied the command by the
+deadline, and a host reattaches by the receipt. The convenience calls
+(`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
+operations, `compact_context`) submit and await. Dropping an await does not
+withdraw the command; `withdraw` does, transactionally, and answers
+`AlreadyAdmitted` once a drive read it. The runtime writer is never held while
+a settlement is awaited. A command root, once it drained the lane, writes its
+`RootTerminalCause::CommandsApplied` terminal and arms its scope close, so its
+journal is retired like a turn root's.
 
-**The administrative compaction is a command (FIG-4201).** The bound turn
-owns the session head, so `compact_context` is
-`SessionCommand::CompactContext { instructions }`, applied at a turn boundary
-like every other command. A compaction submitted while a turn runs waits for
-that turn's boundary: its context-pressure frame, a `continue_as` and its
-follow-on all commit first, and only then does the compaction's frame open.
-A compaction queued before an input applies before it.
+Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
+`crates/lash-core/src/runtime/session_api.rs:1375`,
+`crates/lash-core/src/runtime/compact_context.rs:1`,
+`crates/lash-core/src/runtime/host_commands.rs:1`,
+`crates/lash-core/src/runtime/drive/root.rs` (`run_commands_root`),
+`crates/lash/src/admin/host_commands.rs:1`, and
+`crates/lash-core-store/src/store/mod.rs:1591`.
 
-* It applies alone, under the command root's sealed fence, and runs its
-  effects under its own scope, the queue drain its batch names. A redrive of
-  the unsettled command replays the base it recorded and the summary it
-  journaled. A replay of the settled command replays the same steps, then
-  adopts the head its commit published and commits nothing (FIG-4258): the
-  input the same drive ran after it sealed a newer epoch, so the command
-  root's fence is stale.
-* One commit opens the frame with its seed, resets the stored execution
-  state and the prompt usage, persists the compaction's billed usage and
-  settles the command.
-* It settles as a typed outcome: `Opened`, `NothingToCompact`, or `Failed`
-  with a runtime error code. The outcome rides the commit's receipt, which
-  the batch's completion marker holds, so the submitter reads it on any
-  runtime. A compaction that cannot open its frame settles all the same: its
-  compactor failed, or a writer outside the lane moved the head from its
-  recorded base (`Failed` with `StoreCommitSuperseded`). The lane never waits
-  on a compaction that cannot apply.
-* The facade's `compact_context` submits the command, releases the runtime
-  writer, awaits the engine's drive and reads the settlement. A compaction
-  the drive has not settled by the deadline answers pending with its
-  receipt.
-* A storeless runtime has no drive and no durable head, and its `&mut`
-  already serializes a compaction with its turns, so it compacts directly
-  and never through a command.
+### 5. Ordering and composition
 
-**Commands never block inputs, and inputs never block commands.** There is no
-command barrier at idle or at checkpoints, and no exception for turn-addressed
-items: a `Turn{t}` item is simply deliverable into its running turn at t's
-checkpoints (§5.1).
+Within the turn lane, the shared `enqueue_seq` is the order; there is no input
+or wake priority. Commands are a separate lane and do not establish a turn-lane
+stop. Clock values can bound age; they cannot decide order. Lash implements no
+authentication or security policy.
 
-**A running turn finishes under its config snapshot.** Config is snapshotted
-when a turn starts. Every item delivered into that turn at a checkpoint, wakes
-included, is seen under that snapshot, even if a command admitted meanwhile
-will change the config at the next boundary.
-
-**The accepted cost.** An input enqueued before a command may run under the
-newer config: a command takes effect at the next turn boundary regardless of the
-turn-lane items queued ahead of it. Config is a per-turn snapshot, not a
-property of the queued item. A host that needs the old config for an input
-waits for that input to run before submitting the command. The precedent is
-Pekko's `ControlMessage`: a
-class-level lane that jumps the ordinary queue but never interrupts the step in
-progress, keeping FIFO within its own class. The strict FIFO barrier this
-replaces is recorded under *Alternatives*.
-
-`ClaimMode::Exact { item_ids }` stays as the one sanctioned out-of-order
-selection within the turn lane, kept for host-selected drains
-(`QueuedTurnBuilder` item ids). It is an operator or UI tool, never a producer
-delivery class. It never selects a command. *(FIG-3600 deletes host-selected
-drains: selecting items survives only as withdrawal or cancel (§10), so this
-claim mode loses the producer it was kept for. See the amendment, A8.)*
-
-A backend evaluates the turn-lane head inside the claim statement over a fixed
-head set. It never uses a skip-locked scan that can pass a locked head row; copy
-DBOS's partitioned-dequeue shape, not its `LIMIT … SKIP LOCKED` one.
-
-### 5. Ordering and composition (E1, D14, D13)
-
-**Within a lane, `enqueue_seq` is the only order. There is no kind priority
-inside the turn lane**; the command lane is the one class-level exception (§4).
-Enqueue order
-equals per-session commit order: every producer, the commit path included, takes
-the session lock before it takes the sequence number. Wall-clock time may bound
-how much a claim takes (the maximum pending age); it never decides order.
+Evidence: `crates/lash-core-store/src/store/admission_plan.rs:285`,
+`crates/lash-core/src/runtime/drive/admission.rs:289`,
+`crates/lash-core-execution/src/runtime/park.rs::turn_lane_head`, and
+`crates/lash-core-store/src/store/queued_work.rs:244`.
 
 #### 5.1 Turn addressing is immutable intent
 
-A row's `Delivery::Turn { turn_id: T, min_boundary }` is stored once and never
-rewritten. Its eligibility is derived, not stored:
-
-* **While T is running**, the item is deliverable only into T, at a checkpoint
-  whose boundary is at or after `min_boundary`.
-* **Once T has ended** (its final commit is recorded, whatever the outcome), the
-  item is treated as `NextTurn` by rule. The row is not updated; the claim
-  statement derives the effective delivery from T's state.
-
-**Admission validates the address.** At admission, under the session lock, a
-`Delivery::Turn { turn_id: T, .. }` item is accepted only if T is the session's
-running turn, or a turn of this session whose final commit is already recorded.
-The second case behaves as `NextTurn` from the moment it is stored, by the rule
-above. An address to a turn unknown to the session is refused with the typed
-error `TurnAddressUnknown { turn_id }` and is never stored. Today admission does
-not check the address at all (the host injection path enqueues
-`active_turn(turn_id, AfterWork)` for any id). Without the check, a row
-addressed to a turn that never runs would never become deliverable.
-
-This deletes the re-defer rewrite that every final commit and orphan repair
-perform today (§14). It also removes the root cause of FIG-3544: the stored
-delivery can no longer drift from what was submitted, so an identical retry
-always matches. The immutable submission digest (§8) stays as defence in depth.
+An input's submitted delivery is written once and never rewritten.
+`Turn { turn_id: T, min_boundary }` is eligible only at T's admitted checkpoints
+while T runs. Once T has terminal evidence it is eligible as next-turn input at
+its existing sequence position, by rule rather than stored delivery mutation.
+Admission accepts the address only if T is this session's running turn or has
+its final commit recorded. An unknown turn is refused with
+`TurnAddressUnknown`, with no row or sequence allocation.
 
 #### 5.2 Composition
 
-*(FIG-3927: the composition rule below is unchanged, but
-it runs over the open rows of both admission tables inside the root's
-recorded `AdmitRoot` step, not inside a claim. See the FIG-3927 amendment.)*
+Idle admission compares the next input with the earliest queued turn work.
+A composition of either admission family stops at the other family's earliest
+open turn row. It never skips that stop to take later work. A checkpoint can
+select input addressed to its running turn. Its unaddressed prefix stops at a
+delivery mismatch and at kind, total, or host policy bounds. The host's drain
+policy chooses how much eligible work to take. `authority` and `merge_key` are
+per-item data for policy and traces, not equality gates for composition.
 
-**One composition rule for idle and checkpoint claims of the turn lane alike.**
-At idle it runs only after the command lane is drained (§4); at a checkpoint the
-command lane is never consulted.
+One root answers every input it admits, at idle or at its checkpoints. Each
+input retains its own application evidence even when inputs share a root's
+answer.
 
-1. **Addressed items.** A checkpoint claim of turn t selects the open `Turn{t}`
-   items whose `min_boundary` the checkpoint admits, in seq order, by address.
-   They belong to the running turn; no earlier row holds them back. An idle
-   claim has no addressed items: every `Turn{T}`
-   item whose T has ended is `NextTurn` by rule (§5.1) and joins the prefix
-   below at its own position.
-2. **The FIFO prefix of unaddressed turn-lane items** (inputs and wakes).
-   Starting at the lowest open unaddressed seq, the prefix extends in seq order
-   and **stops, never skips**, at the first of (a `Turn{T}` item for an ended T
-   counts as `NextTurn`; one for another running turn is not deliverable here):
-   * a **delivery mismatch**: a row this claim mode cannot deliver. At idle both
-     `AnyBoundary` and `NextTurn` are deliverable, so inputs and wakes share a
-     prefix. At a checkpoint only `AnyBoundary` is, so a `NextTurn` row ends the
-     prefix;
-   * a per-kind cap (the FIG-3532 input bound, the wake bound), which is a stop
-     point inside the one prefix, never a filter;
-   * the one total bound;
-   * the rendered-context reserve and maximum pending age of the claim policy.
-3. **The host `QueuedDrainPolicy` chooses how much of that prefix to take.**
-   Exact claims do not consult it.
+### 6. Render order
 
-`authority` and `merge_key` are per-item data: they reach the drain policy and
-traces. They are not equality gates, and nothing authorizes on them. The two
-per-kind caps and the wake policy fold into one claim policy on the host
-durability object (`QueuedWorkBatchingConfig`), each cap host-configurable. The
-turn-input cap defaults to 64 (FIG-3532). A backlog beyond a cap stays queued in
-order, and its submitter sees the typed `Queued` outcome; nothing is dropped.
-The literal `64` at the checkpoint claim is deleted.
+Within one turn's delivered set, host messages precede wake causes, and each
+kind preserves its sequence order. Selection order and presentation order are
+separate. A wake is not host-authored input and carries no host turn options.
 
-**A queued direct turn succeeds.** A direct turn whose accepted row is queued
-behind the claim bound returns the typed success outcome `Queued { ahead }`, not
-an error (FIG-3532). The row stays admitted at its position, and the drain
-answers it in arrival order, exactly once. Replay reports the same position.
-*(FIG-3600: no caller runs a turn, so there is no caller turn to return
-`Queued { ahead }`. A sent input waits at its position, and its handle's
-outcome resolves when the driver answers it. See the amendment, A2.)*
+Evidence: `crates/lash-core/src/runtime/logical_turn.rs`,
+`crates/lash-core/src/runtime/turn_loop/commit.rs`, and
+`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`.
 
-A checkpoint's addressed items and its prefix are one claim and settle together.
+### 7. Admission, deferral and redrive
 
-### 6. Render order (D15)
+An interrupted selection replays its root's recorded admission. `Defer`
+releases the row binding at its own sequence position; subsequent admission
+recomposes open rows. A stale drive fence refuses admission and settlement
+without writing. Settlement checks that every named row belongs to the root.
+Completed input carries application evidence. Root terminal writes release
+remaining bindings, so terminal roots cannot retain admitted rows.
 
-Within one claim, committed history uses one fixed order on every path: host
-input messages first, then wake causes, each in `enqueue_seq` order. FIFO
-governs claiming; cross-kind order inside one turn carries no meaning. The order
-matches what the model already sees, because every projector renders wakes as a
-trailing turn-events block. Today the idle path commits wakes first and the
-checkpoint path commits input first; both become input-then-wake.
+Evidence: `crates/lash-core-store/src/store/admission_plan.rs:67`, `:197`,
+`crates/lash-core-store/src/store/root.rs`, and
+`crates/lash-sqlite-store/src/persistence/ingress_settlement.rs`.
 
-### 7. Claims, deferral and redrive (D16, D17)
+### 8. Dedup, digest and tombstones
 
-*(Superseded by the FIG-3927 amendment below: no durable
-claim token takes part in selecting or settling a turn. `Defer` releases an
-admitted row's binding at its own position, and an interrupted selection is
-the root's recorded admission.)*
+Admission records an immutable submission digest. Equal source key and digest
+returns the existing item, open or terminal. A changed digest returns a typed
+content conflict for every kind, without silently adopting different content.
+Wake identity covers its process fact rather than host-configured delivery
+policy. System source-key namespaces belong to their item kinds.
 
-* Claims are fenced by the session-lease generation (ADR 0029) with per-row claim
-  identity and no per-row expiry. Settlement checks claim identity, not only
-  state.
-* **`Defer` releases each row, never the claim as a unit.** A deferred row
-  returns to `open` at its own `enqueue_seq`, its claim columns cleared, and the
-  next claim recomposes from rows under §5. A multi-row claim is never replayed
-  as a unit through a predecessor-claim path, which could move later members
-  ahead of rows that became ready meanwhile.
-* **An interrupted claim** (never released; its generation superseded) is the
-  one case redriven from persisted per-row claim identity, because engine replay
-  must re-derive the same turn (ADR 0069 §6). The drain policy is not consulted
-  again.
-* **`Complete` requires delivery evidence** (D11). The planner accepts `Complete`
-  for an item only if the item is in the committing turn's rendered set. Every
-  other exit of a claimed item goes through `Defer` or `Drop` with its
-  affected-item record. The tombstone carries no settled-turn column; the
-  commit receipt already links it.
+Terminal items retain tombstones until host vacuum. Tombstones preserve kind,
+source key, sequence, submitted delivery, digest, terminal cause, and terminal
+time, with no admission binding. Cancelled items cannot reopen on retry.
+Terminal causes distinguish delivered input or wake, applied command, stale
+config revision, and cancellation. Open-row selection excludes tombstones.
 
-### 8. Dedup, digest and tombstones (D1, D4, D5, D6, D12)
+### 9. The floor invariant
 
-* **Immutable submission digest.** Admission writes `submission_digest` once,
-  beside the immutable `delivery` (§5.1). A replay with the same source key
-  compares digests only. Same digest → `Existing`, open or terminal. Different
-  digest → a typed `Conflict` to the submitter, for every kind, never an
-  untyped commit failure and never silent adoption. With delivery immutable the
-  digest is defence in depth for FIG-3544, not its fix. It flips the
-  conformance law that pinned silent adoption.
-* **Wakes.** The wake digest covers the process fact only. The wake sender treats
-  `Conflict` as a terminal discard with a non-blocking `ContentConflict` reason,
-  so a conflict ends that delivery without stalling later wakes from the same
-  process.
-* **Reserved prefixes** are enforced per kind at admission: only the wake kind
-  may use `process:…:wake`, only the command kind `command:…`. A host input
-  using a system prefix is refused to the host before it can meet a wake.
-* **Tombstones for every kind.** A terminal row stays until `vacuum()` removes it.
-  Its fields: kind, source key, `enqueue_seq`, delivery, digest,
-  `terminal_cause`, `terminal_at_ms`. An enqueue that meets a `cancelled`
-  tombstone returns `Existing` and never reopens it.
-* **Closed terminal cause.** `Delivered` (input or wake rendered by a committed
-  turn), `Applied` (command), `StaleConfigRevision { base, head }`
-  (`ApplyConfigPatch`, §12), `Cancelled(CancelReason)`.
-* **Tombstones stay off the claim path.** On both SQL backends: a partial index
-  over open rows; the unique source-key constraint covers tombstones (no SQLite
-  `ON CONFLICT IGNORE`); a CHECK that terminal rows carry no claim and do carry a
-  cause; an open-state predicate on every claim and head query.
+Every terminal wake transition raises the receiver redelivery floor to at least
+its sequence in the same transaction: delivery, drop, or host withdrawal.
+`Defer` retains position and does not advance the floor. Redelivery at or below
+the floor cannot recreate work after removal. Process-owned allocation floors
+and receiver floors have distinct responsibilities.
 
-### 9. The floor invariant (D3)
+Evidence: `crates/lash-core-store/src/store/admission_plan.rs:332`,
+`crates/lash-sqlite-store/src/persistence/queued_work.rs:110`, and
+`crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs`.
 
-**Every terminal transition of a wake raises the wake redelivery floor to at
-least its sequence in the same transaction**: `Complete`, `Drop`, host
-withdrawal, and conflict discard. `Defer` never touches the floor. Vacuum may
-delete a wake tombstone only at or below the floor. A redelivery at or below the
-floor is absorbed. This fixes FIG-3545.
+### 10. Cancel by author
 
-### 10. Cancel by author (E2, D12)
+A turn cancel applies its accepted undelivered-input policy to host input
+addressed to that turn. `Defer` is the default; `Drop` records cancellation.
+Other held input is released. Every held wake is deferred at its existing
+position with its floor unchanged. `TurnCancelInputOutcome` records affected
+inputs and affected wakes with their disposition. Host withdrawal may remove
+undelivered queued work, including wakes; wake withdrawal raises its floor.
+Dropping an observation handle cancels nothing.
 
-* **A turn cancel** (`Immediate` or `AfterStep`) applies the accepted request's
-  `undelivered` disposition (`Defer` by default, or `Drop`) to the
-  **host-authored items addressed to the
-  cancelled turn** that it did not deliver, whether it held them or they were
-  still open. `Defer` releases any claim and leaves the row as it is: T has now
-  ended, so the item is `NextTurn` by rule (§5.1), at its own position. `Drop`
-  tombstones it. Items not addressed to the cancelled turn are outside the
-  disposition's scope; any it held are released at their positions. A
-  `process_wake` it held is **always deferred**: the claim is released in the
-  cancel commit, the row keeps its `enqueue_seq`, and the floor is unchanged. A
-  wake's event text cannot be recovered by the model once dropped,
-  so a collateral drop at every turn cancel would silently remove facts the
-  model was about to see.
-* **A host withdrawal** (by item id, source key or suffix) may cancel any
-  undelivered item, a wake included. It writes a `cancelled` tombstone and, for a
-  wake, raises the floor in the same transaction.
-* **Every affected item is recorded**, deferred or dropped. The affected-item
-  record carries `item_id, kind, source_key, enqueue_seq, disposition, reason,
-  payload`, plus `fence_floor_after` for a dropped wake. `reason` is closed:
-  `TurnCancelled { request_id, mode } | HostWithdrawn { selector }`. A `Drop`
-  cannot be constructed without its record. The free-form
-  `TurnCancelRequest.reason` stays host evidence on the request; it is not the
-  record's reason.
-* One cancel outcome enum serves every kind: today's five outcomes plus suffix
-  cancel.
+Evidence: `crates/lash-core-store/src/turn_control_vocabulary.rs:54`, `:100`,
+`crates/lash-core-store/src/store/admission_plan.rs:376`, and
+`crates/lash-sqlite-store/src/persistence/ingress_settlement.rs:153`.
 
-### 11. Recompose and render every claim
+### 11. Recompose and render admitted work
 
-Every claimed item is rendered (D11 enforces it at settlement). A withheld claim
-carried into a FIG-3157 follow-on is rendered whole by the one materializer; the
-`.first()` asymmetry between what is rendered and what is settled is gone.
+Work retained across a physical-turn follow-on carries its admitted rows and
+application evidence. Rendering and settlement consume the delivered set,
+rather than settling a whole container from only its first rendered item.
 
-### 12. Commands are replay-safe by compare-and-set (D2)
+Evidence: `crates/lash-core/src/runtime/logical_turn.rs:66`, and
+`crates/lash-core/src/runtime/turn_loop/commit.rs`.
 
-Vacuum stays uniform for every kind: it has no horizon (ADR 0023), and command
-tombstones are not exempt. The session-command completion marker is deleted.
-Replay safety comes from the command instead:
+### 12. Commands are replay-safe by compare-and-set
 
-* **`ApplyConfigPatch` carries the config revision it was written against and is
-  refused if the head has moved.** The drain applies the patches of a coalesced
-  claim in seq order, each against a running revision: a patch applies only if
-  its `base_config_revision` equals the running value, and every applied patch
-  advances it by exactly one. A refused patch settles as a `completed` tombstone
-  with `StaleConfigRevision { base, head }`; its submitter receives a typed stale
-  outcome (a new `SessionCommandSettlement` variant) and recomputes against the
-  current head. The first application bumps the revision, so a replayed patch
-  never re-applies: before `vacuum()` it meets its tombstone (`Existing`), and
-  after `vacuum()` it is admitted as a new row and refused at drain by the same
-  check.
-* **`RefreshToolCatalog` is naturally idempotent.** It recomputes the tool
-  surface from live sources and carries no revision, as its type already
-  documents.
+`ApplyConfigPatch::base_config_revision` must equal the config's running
+revision. Each accepted patch advances `config_revision` by one; other commits
+preserve it. Coalesced patches check the running revision in sequence order.
+A stale patch changes no config and settles with the typed
+`StaleConfigRevision { base, head }` outcome for its submitter. Command
+tombstones follow ordinary vacuum; replay after vacuum meets the revision check
+and cannot reapply the patch. There is no separate session-command completion
+marker. `RefreshToolCatalog` recomputes live sources.
 
-**Precondition finding: Lash has no config revision today, so this ADR
-introduces one.**
+Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
+`crates/lash-core-store/src/session_state.rs:1446`, and
+`crates/lash-core-store/src/session_state/tests.rs:642`.
 
-* The head's `head_revision` (`SessionHeadMeta::head_revision`, a dedicated
-  column) advances on **every** head commit, turn commits included. A patch
-  submitted while a turn runs drains only at the next turn boundary (§4), after
-  that turn's final commit, so a compare-and-set against `head_revision` would
-  refuse almost every such patch. It is commit authority, not a config revision.
-* `ApplyConfigPatch::schema_version` is the head wire generation
-  (`SESSION_HEAD_META_SCHEMA_VERSION`), a codec discriminator.
-* No protocol-level config revision exists; the only `expected_revision` in the
-  protocol crates belongs to trigger subscriptions.
+### 13. Confirmations, stated as laws
 
-The new fields:
-
-* **`PersistedSessionConfig::config_revision: u64`**, inside the head's config.
-  It is `0` at session creation and advances by exactly one on every commit that
-  applies a patch or otherwise changes the persisted config (the reopen seed
-  commit when its reconciled config differs). Every other commit carries it
-  unchanged. Because it is part of the config, it is part of the commit-intent
-  preimage, and it is deterministic from the base head, so replay hashes are
-  stable.
-* **`ApplyConfigPatch::base_config_revision: u64`**, set at submission from the
-  resident state's head config after the refresh the setter already performs.
-
-This bumps `SESSION_HEAD_META_SCHEMA_VERSION` (11 → 12 at the time of writing)
-and rides the §15 cutover.
-
-### 13. Confirmations (D17), stated as laws
-
-* One table, one row per item, payload inline; the side tables of §2 stay.
-* Claims are fenced by lease generation, with per-row claim identity and no
-  per-row expiry. *(FIG-3927: admission and settlement are fenced by the
-  drive fence instead; see the FIG-3927 amendment.)*
-* Enqueue order equals per-session commit order.
-* Order is by sequence only; the wall clock may bound claim size, never order.
-* Items addressed to a finished turn are `NextTurn` by rule, at their own
-  position (§5.1). Unlike today, no commit rewrites them.
-
-### 14. Deletions
-
-*(The table and two-list deletions below are overridden by the Amendment
-(FIG-3540 close-out).)*
-
-* Tables `pending_turn_inputs`, `queued_work_batches`, `queued_work_items` on
-  every backend.
-* `BatchId` (host-facing pins become item ids), `DeliveryPolicy`,
-  `TurnInputIngress`, `TurnInputClaimMode`, `QueuedWorkClaimBoundary`,
-  `QueuedWorkBatch` / `Item` / `BatchPayloads` / `Kind` / `Class`,
-  `PendingSessionWorkOrdering`.
-* Both family claim planners and both settlement planners, the paired
-  claim-superseded errors, the `qwc` / `tic` claim-id dialects (one dialect
-  remains), and the two-list `LogicalTurnClaims` / `TurnClaimSettlement` /
-  `WithheldTerminalWork`.
-* The timestamp arbitration between commands and inputs, and
-  `session_command_precedes_turn_input`.
-* `available_at_ms`.
-* The session-command completion marker (`session_command_batch_completion_key`).
-* The claimless pre-turn command drain in `turn_loop/accept.rs`.
-* The command barrier, at idle and at checkpoints (D7), the rule that an exact
-  claim must not jump it (D9), and the exception letting turn-addressed items
-  pass it. Commands are a lane (§4). This also deletes
-  `claim_leading_ready_session_command`'s head-only rule and the checkpoint SQL
-  that returns nothing while a command is pending.
-* The `frame_handoff` kind and `AgentFrameTask` payload, the "handoff options
-  take the last" rule, `RuntimeCommit.enqueued_queue_batches` with its result
-  field, both store enqueue loops, its commit-budget term, its preimage field and
-  semantic-boundary entry, the seven-hop carrier from `logical_turn.rs` to the
-  store, the inline exact-claim block for the handoff, and the claimless
-  in-memory follow-on branch.
-* The literal `64` checkpoint bound.
-* Store-level settlement of unclaimed rows on all three stores, dead since
-  FIG-3532 removed the runtime unclaimed drive: `TurnInputCompletion.claim:
-  None`, `StoreError::UnclaimedTurnInputSettlementSuperseded` and its
-  `turn_input_settlement_superseded` code, and the
-  `unclaimed_turn_input_settlement_is_a_conditional_write` law. ADR 0069 §5
-  carries the matching note.
-* The re-defer rewrite of `Turn{t}` items to `NextTurn`, performed today by every
-  final commit (`defer_to_next_turn`) and by orphan repair. Delivery is
-  immutable, and an ended turn's items are `NextTurn` by rule (§5.1).
-
-Public API breaks are accepted with no aliases (E4): `BatchId` becomes an item id
-in `QueuedTurnBuilder`, `SessionCommandReceipt` and the queue events, and the
-per-family error codes collapse into one code per condition. *(FIG-3600 deletes
-`QueuedTurnBuilder` itself; see the amendment, A8.)*
-
-### 15. Cutover
-
-One wholehog cutover, one PR series ending in one cutover commit.
-
-* **Reject-and-recreate** ([ADR 0081](0081-destructive-schema-changes-are-currently-reject-and-recreate.md)).
-  SQLite `SCHEMA_VERSION` and the PostgreSQL schema version bump (74 and 115 at
-  the time of writing); `CURRENT_SESSION_STATE_VERSION` moves 2 → 3 with
-  `OLDEST_SUPPORTED_SESSION_STATE_VERSION = 3`, so an old session is refused at
-  admission rather than converted; the head meta version bumps (§12); the
-  commit-intent preimage changes (§3, one completed-claims list, no enqueued
-  batches, the pending follow-on). Every bump goes through the durable-format
-  registry (`scripts/versioned-surfaces.toml`, `lash::formats`) as recent
-  cutovers do, and durable-read fixtures are regenerated.
-* **No data migration and no aliases.** No converter step, no compatibility
-  reader for the old tables, no old names re-exported.
-* **In-flight Restate invocations are refused, not drained.** A journal written
-  by the old binary carries acceptance and claim shapes the new binary does not
-  replay. The cutover bumps the journaled acceptance and claim formats, and the
-  new binary refuses an old-shape journal entry fail-closed with a typed error
-  before any effect. There is no drain step and no compatibility replay. This
-  follows the current clean-cutover policy (2026-09-24): while lash has no
-  migration or drain path, a change that would otherwise need one bumps the
-  gating version and refuses old durable state before any effect. The policy is
-  temporary; the version gate is what a later migration or drain would key off.
-* A cancelled turn must not settle withheld wakes as completed (FIG-3543, D10).
-  Whatever the interim lanes ship, the cutover replaces it with §10.
+Sequence order is per-session commit order across admission families.
+Turn selection stops at the first ineligible unaddressed row; command priority
+applies only at turn boundaries. Recorded root admission survives redrive.
+Scope-close work cannot retain the root's turn admission. Follow-on frame and
+recovery bounds survive reopen. Wake terminal writes and floor writes are atomic.
 
 ### 16. Conformance laws
 
-Every law runs on SQLite, PostgreSQL and the in-memory store, and the existing
-turn-input and queued-work laws are re-expressed per kind against
-`SessionIngressStore`. The crash matrix is re-run for the PostgreSQL wake
-advisory lock on the merged table.
+Conformance covers shared sequence allocation, command-lane precedence,
+contiguous turn-lane selection, root admission replay, stale-fence refusal,
+follow-on head invariants and bounded recovery, cancellation of withheld inputs
+and wakes, wake floors, and config compare-and-set.
 
-1. **Order.** `enqueue_seq` is strictly increasing per session and equals commit
-   order across every producer.
-2. **FIFO prefix.** An idle turn-lane claim is a prefix of the open unaddressed
-   turn-lane rows; no claim skips a row it could not take.
-3. **Stop points.** The prefix ends at the first delivery mismatch, kind cap,
-   total bound or policy bound, and never continues past it, on either backend,
-   including with a locked head row. *(FIG-3927: the locked head row is an
-   admitted head row; see the FIG-3927 amendment.)*
-4. **Command lane.** At every turn boundary (after a logical run's final commit,
-   and at idle), every open command applies in `enqueue_seq` order before any
-   turn-lane claim; an open command never delays a turn-lane claim at a
-   checkpoint, and an open input never delays a command at a boundary.
-5. **Addressed items.** A `Turn{t}` item is claimable at t's admitting
-   checkpoints regardless of earlier rows, and never into another turn while t
-   runs. No write after admission changes a row's delivery; after t's final
-   commit a `Turn{t}` item is claimed exactly where a `NextTurn` item at its
-   position would be. Admission of a `Turn{T}` item succeeds only when T is the
-   session's running turn or a turn whose final commit is recorded (then
-   deliverable as `NextTurn` at once). An unknown T is refused with
-   `TurnAddressUnknown`, and no row, tombstone or sequence number is written.
-6. **Coalescing.** Adjacent config patches in the command lane share one head
-   commit; any other command takes its own.
-7. **Boundaries only.** No command applies mid-turn, at a checkpoint, or
-   between the physical turns of one logical run; items delivered at a
-   checkpoint are seen under the turn's start snapshot.
-8. **Exact.** An exact claim selects only turn-lane items.
-9. **Follow-on precedence.** While a pending follow-on is set, every claim other
-   than the follow-on's checkpoint claims returns `Blocked(FollowOnPending)`, and
-   every other turn commit is refused.
-10. **Follow-on frame.** No head write leaves a pending follow-on whose frame is
-    not current.
-11. **Follow-on recovery.** A crash after the switch commit runs the follow-on
-    first under `follow_on_turn_id`; the recovery past the configured bound
-    (default 3) commits the typed `FollowOnRecoveryExhausted` terminal and clears
-    the head; nothing resets the count; `chain_depth` survives recovery.
-12. **Dedup.** Same key and digest → `Existing` while the row or its tombstone
-    exists; different digest → typed `Conflict`, for every kind; an identical
-    retry after its addressed turn ended or was cancelled with `Defer` is
-    `Existing`.
-13. **Prefixes.** A host input with a reserved prefix is refused at admission.
-14. **Tombstones.** Every terminal row survives until `vacuum()`, is never
-    claimable, carries no claim and carries a closed cause; a `cancelled`
-    tombstone is never reopened by enqueue.
-15. **Floor.** Every wake terminal raises the floor in its transaction; `Defer`
-    does not; a redelivery at or below the floor is absorbed; vacuum never
-    removes a wake tombstone above the floor.
-16. **Cancel by author.** A turn cancel applies its disposition to the
-    host-authored items addressed to the cancelled turn and to no other item;
-    it defers every held wake (position kept, floor unchanged); every affected
-    item is recorded; a host withdrawal of a wake tombstones it, raises the
-    floor and records it.
-17. **Delivery evidence.** `Complete` of an unrendered item is refused.
-18. **Render order.** Input then wakes, each in seq order, identical on the idle
-    and checkpoint paths.
-19. **Recompose.** A deferred multi-row claim is recomposed row by row; a row
-    ready before a deferred member is claimed first.
-20. **Fencing.** ADR 0029's supersession law holds for the one claim type.
-    *(FIG-3927: this law becomes "a stale drive fence refuses admission and
-    settlement and writes nothing"; see the FIG-3927 amendment.)*
-21. **Config compare-and-set.** A patch with a stale base settles as
-    `StaleConfigRevision` and changes nothing; a patch replayed after `vacuum()`
-    never applies twice; a coalesced group checks the running revision in seq
-    order.
-22. **Cutover refusal.** A pre-cutover store is refused at open, and a
-    state-version-2 session is refused at admission.
-
-## Amendment (FIG-3600, 2026-09-24): one `send()` ingress; the driver runs every turn
-
-**Status.** Decided by Sam on FIG-3600, 2026-09-24, and implemented: `send()`
-is the only caller path, the backend's work driver runs every turn through a
-journaled admission, and the session model is durable config changed by
-command. FIG-3589's surface is deleted (A8), and so are the borrowed-controller
-turn entries `LashRuntime::{stream_turn, run_turn_assembled,
-stream_prepared_turn}`, the live `protocol_extension` and plugin inputs, and
-the live-input gate `ensure_durable_effect_input` (A6, A8; FIG-3837). A child
-session's turn, which runs inside its parent's execution, is the one turn the
-kernel still drives in process. It is one wholehog cutover: no aliases,
-no compatibility path for caller-driven turns, and no convenience wrapper that
-runs a turn inline. The evidence, including the design that was not taken, is
-in `/workspace/notes/lash/fig3573-arc/input-lifecycle/`. It amends ADR 0045,
-ADR 0069 (§7 is superseded on landing) and the `CONTEXT.md` glossary; each
-carries a note pointing here.
+Store tiers are SQLite file, SQLite memory, and PostgreSQL. Host tiers are the
+in-process Restate server double, live Restate, and lash-sim's in-process effect
+host. Upgrade proofs use synthetic-next. Evidence lives in
+`crates/lash-conformance/src/conformance/session_ingress.rs`,
+`crates/lash-conformance/src/conformance/drive_admission.rs`,
+`crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs`,
+`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`, and
+`crates/lash-restate-test/tests/follow_on_crash_replay.rs`.
 
 ### A1. The ingress is the only way a turn starts
 
-**A turn starts only from the session's ingress, and only the backend's work
-driver runs it.** Direct and queued turns collapse into one path,
-`session.send(input)`, with durable acceptance
-([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md)).
-
-* **The driver always runs the turn, even when the queue is empty.** If the
-  session is idle with an empty queue, the driver claims the input at once;
-  that is the old "direct" behaviour. Otherwise the input queues on the lanes
-  (§4, §5). The caller never runs a turn inside its own call.
-* **The backend carries the work driver.** The in-process driver on SQLite and
-  PostgreSQL, and the engine-backed driver on Restate, are part of the
-  `Backend` ([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md)). This
-  settles FIG-3581's open question about `process_work` / `with_queued_work`.
-* **Delivery modes replace steer and follow-up.** `NextTurn` is the default,
-  `AnyBoundary` steers into a running turn, and `Turn { id }` addresses one
-  turn (§5.1).
-* **"Now, despite the queue"** means the host withdraws or cancels the items
-  ahead (§10). There is no fast path and no priority.
+The caller submits with `session.send(input)`. Restate owns production driving
+and continuation under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+SQL stores persist state. Process-owned child-session turns execute under their
+own process run through the shared turn kernel. There is no caller-owned turn
+fast path past queued work.
 
 ### A2. The caller observes through a handle
 
-`send` returns a handle:
+`send` returns a handle with `events()` and `outcome()`. Cancellation withdraws
+queued input or requests durable cancellation of its running root. Dropping the
+handle stops observation, not execution. Outcomes distinguish answers, failure,
+cancellation, and a parked root.
 
-* `handle.events()` subscribes to the session observation stream from a
-  cursor;
-* `handle.outcome()` resolves to `Answered | Failed | Cancelled | Parked`.
+Evidence: `crates/lash/src/send.rs:634`, `:644`, and
+`crates/lash-core/src/runtime/session_manager/session_init.rs:1`.
 
-Cancel goes through `session.cancel(input or turn id)`: a host withdrawal while
-the input is queued (§10), and a durable turn cancel
-([ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md))
-once it runs. It replaces `cancel(CancellationToken)`. Activity sinks,
-`stream_to` and the effect sinks become `handle.events()`. Dropping a handle
-stops nothing: abandonment is expressed by cancel, never by silence (ADR 0069
-§3).
+### A3. Continuation belongs to the engine
 
-### A3. Continuation belongs to the substrate
-
-Continuation is the substrate's for every turn
-([ADR 0045](0045-services-are-stateless-substrates-own-continuation.md)),
-because no caller-driven turn exists.
-
-* A deterministic failure is recorded as a failed turn (FIG-3575), and the
-  outcome is `Failed`.
-* Live faults and crashes are re-driven by the substrate under its own policy:
-  the engine's retry on Restate, the worker's retry budget on SQLite and
-  PostgreSQL. A re-drive keeps the same turn id and replays the journal.
-* Lash never settles an attempt on anyone's behalf. With no caller-owned aborted
-  turn, nothing binds an input to an aborted turn (ADR 0069 §7).
+Program failure commits a failed outcome. Infrastructure faults redrive through
+the engine under the same recorded root and journal. Lash does not synthesize
+settlement because a caller or worker disappears.
 
 ### A4. Parked is a generic state of a driver-run turn
 
-A parked turn is not specific to code cells. Either of two causes parks a turn
-the driver runs:
+A parked root is visible and blocks ordinary new work until resolution.
+Explicit control supports redrive, cancel, and fork. A park is neither a
+program failure nor a fabricated answer. Restate owns retry policy under
+[ADR 0110](0110-the-engine-owns-process-recovery.md).
 
-* the substrate's re-drive budget is exhausted;
-* a replay divergence (FIG-3586).
-
-A parked turn is neither failed nor retried live. It is visible in drain status,
-and `handle.outcome()` resolves to `Parked`. The operator and host verbs are
-**re-drive** (same turn id, replaying the journal; after a divergence, on a
-build that matches it), **cancel** (`session.cancel`, ADR 0039) and **fork**.
+Evidence: `crates/lash-core/src/runtime/drive/admission.rs:112`, and
+`crates/lash-core-execution/src/runtime/park.rs`.
 
 ### A5. Session commands, and the session model as durable config
 
-**Session commands keep the command-lane semantics of §4**, including
-`SetModel`. They are applied at turn boundaries, and every pending command is
-applied before the turn-lane claim. The driver takes the per-turn config
-snapshot at turn start, **after** that drain.
+The session's provider/model route and generation settings are persisted config.
+Creation records them; commands change them at boundaries. The root records its
+resolved execution snapshot. Durable input may carry a `RunSpec` whose overrides
+apply to that run without overwriting the sticky session config.
 
-**The session model is durable session config:** a route
-`{provider, model}` plus settings such as the thinking level. It is never a live
-handle.
-
-* **Changed by command.** It changes through a session command, a config patch
-  on the command lane (§4, §12), and the change is recorded in history.
-  `send(SetModel)` followed by `send(input)` therefore runs that input on the new
-  model, deterministically. This is pi's `model_change`.
-* **Resolved at turn start.** The driver snapshots the session config and
-  resolves the route by name through the backend's provider resolver. A
-  re-drive resolves the same route. There is one resolution point per
-  execution.
-* **Validated twice.** When the command is sent, a bad route is refused at once
-  with a typed refusal and nothing is queued. When it is applied, at a later
-  time and possibly on another worker, it is checked again. The typed refusals
-  are `ProviderRouteUnknown` and `ProviderCredentialsMissing`.
-* **A refusal at apply** leaves the session model unchanged, and the turn queued
-  behind the command fails with that typed refusal. Nothing runs on a model the
-  host did not intend; there is no silent substitution.
-* **No per-turn override.** `TurnBuilder::provider(ProviderHandle)` is deleted.
-
-**The *Session Model* rule changes.** It used to say that the host supplies the
-model at every open and that stored state is never authoritative. The host now
-sets the model by command, the session state is durable, and the driver reads
-it. A worker reopening a session after a crash has no host to ask.
+Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
+`crates/lash-core-store/src/run_spec.rs`, and
+`crates/lash-conformance/src/conformance/run_spec_drive.rs`.
 
 ### A6. Everything on a sent input is durable data
 
-* Already durable: the prompt template, contributions, slots and layer (all in
-  `turn_context`), and `protocol_turn_options`.
-* Deleted: the live `protocol_extension` and `live_plugin_inputs`. Durable hosts
-  already refuse both; `protocol_turn_options` and persisted plugin state are
-  their durable forms.
+Prompt context, protocol turn options, and run-spec data cross ingress as
+serializable values. A live callback or plugin object cannot supply durable
+turn input.
 
 ### A7. No injected prompts
 
-Lash never writes model-visible markers or feedback because something failed or
-crashed. The model only ever sees real committed history.
-
-### A8. Deleted in the cutover
-
-* **Caller-driven turns:** `TurnBuilder::{run, run_with_effects, stream,
-  stream_to, stream_to_with_effects, *_with_scope, collect*}`, `AdvancedTurn`,
-  and the drive half of the direct-turn path
-  (`crates/lash-core/src/runtime/turn_loop/accept.rs`).
-* **Caller-driven drains:** `QueuedTurnBuilder`, the selected-drain builder, and
-  `drain_id` / `batch_ids` as caller-run drains. Selecting items survives only
-  as withdrawal or cancel (§10), so `ClaimMode::Exact` (§4) and law 8 lose the
-  host-selected drain they were kept for.
-* **FIG-3589's surface:** `claim_bound_turn_id`, `claim_bound_receipt_input_id`,
-  `PendingTurnInputReadStatus::TurnBound`,
-  `PendingTurnInputCancelOutcome::TurnBound`, and the receipt re-drive docs in
-  `crates/lash/src/error.rs` and ADR 0069 §7. With no caller-owned aborted turns,
-  nothing needs them.
-* **Old gates and live inputs:** FIG-3416's durable-admission gate
-  (`ensure_durable_effect_input`), the live `protocol_extension`,
-  `live_plugin_inputs`, and per-turn provider plumbing.
-* **Old vocabulary:** "Queued Turn" versus direct turn, in `CONTEXT.md`, ADR 0069
-  and this ADR.
-
-Every `session.turn(..).run()` / `queued_turn()` call site moves, repo-wide and
-in the same cutover, to `send` plus `outcome()` or `events()`.
-
-### A9. Not adopted
-
-* **FIG-3597 design (b), auto-cancel and hide.** It cancelled an aborted turn's
-  bound input and hid it at the next commit. That hides a loss from the host
-  and already-run effects from the model. With no caller-owned aborted turn,
-  there is no bound input left to hide.
-* **The pico3-style unanswered-marker lifecycle** (the rescoped FIG-3597 draft).
-  It settled an unanswered input into history with a model-visible abort marker.
-  The marker is an injected prompt, which A7 forbids. Its content had no durable
-  source for a turn's tool calls either. The substrate re-drives the turn or
-  parks it instead.
-* **A boundary commit triggered by relinquishment** (the lead's tie-break in
-  the combined critique). It was a separate journaled commit that settled a
-  relinquished attempt before the next turn claimed. It existed only because
-  the caller owned an aborted direct turn's continuation. Now the substrate
-  owns it, and an exhausted budget parks the turn for an operator or host
-  decision (A4); nothing settles it on anyone's behalf.
-* **`abandon(receipt)`.** It was a verb for a caller-owned aborted turn.
-  `session.cancel(input or turn id)` covers withdrawal, turn cancel and the
-  cancel of a parked turn: one verb.
-
-The peer evidence is pi `a8ed4977` (one `send()`, with steer and follow-up when
-busy; the model as a session setting with `model_change` entries), codex
-`7db578f`, openai-agents `32edd3c` / js `a0b1c6f`, and langgraph `1211af4`.
-
-## Amendment (FIG-3540 close-out, 2026-09-27): one logical ingress over two admission tables
-
-**Status.** Decided in the FIG-3540 close-out, 2026-09-27, as the default the
-arc named; logged for Sam, and reversible. Implemented.
-
-**Decision.** The one-table model of §1 is not adopted. The `session_ingress`
-table, `SessionIngressStore`, its claim and settlement planners, its vocabulary
-(`IngressClaim`, `ClaimMode`, the §10 record types) and its laws were built
-ahead of a cutover that never wired a producer to them: the runtime admits from
-`pending_turn_inputs` and `queued_work_batches` / `queued_work_items`, and
-FIG-3851 put the ADR 0109 ingress obligations on those rows. That unused path is
-deleted end to end on every store. The session's **one logical ingress is the
-two admission tables together**:
-
-* **One order.** Every producer allocates `enqueue_seq` from one per-session
-  counter (`session_ingress_sequence`, the only `session_ingress` table left)
-  under the session lock, so sequence numbers are comparable across both
-  tables and follow commit order (law 1).
-* **The command lane first (§4, binding).** Admission drains every open session
-  command before it claims turn-lane work, and a checkpoint claim never takes a
-  command. The lane is fixed by table and kind: a command row is the command
-  lane; host input and process wakes are the turn lane.
-* **One delivery obligation.** Both tables carry the ADR 0109 ingress
-  obligation, and the claim that admits a row delivers it.
-* **One cancel record (§10).** `TurnCancelInputOutcome` is the affected-item
-  record: `affected_inputs` for host input under the request's disposition, and
-  `affected_wakes` for held wakes, which a cancel always defers (FIG-3543).
-
-**Why two tables.** No ADR 0101 invariant was found that needs one table.
-Order needs one counter, not one table; command-lane precedence is an
-admission rule; the obligation and the cancel record are per row and per kind.
-Dedup stays per table: a cross-kind source-key collision has no producer, the
-reason *Alternatives* rejects a `dedup_domain` column.
-
-**What this overrides.** §1's table, single store trait and single claim type;
-§14's table and two-list deletions; §15's table cutover; §16's
-re-expression against `SessionIngressStore` (the laws hold per table).
-`WithheldTerminalWork` keeps one list per claim type: a turn-input claim and a
-queued-work claim remain different types. *(FIG-3927: the
-claims this amendment kept are gone — each root's contiguous run is bound by
-its recorded admission, not by a claim. See the FIG-3927 amendment.)*
-
-**FIG-3589's surface is deleted with it** (A8): `claim_bound_*`, `TurnBound`,
-the bind and reclaim store methods, and `ClaimMode::Exact`. A redrive of an
-aborted root replays the drive its root claim recorded (FIG-3840), and a park is
-released once no open input bound to its root in `session_root_inputs` remains.
-
-**No kind priority (§5), held (FIG-3905).** Once no command is open, idle
-admission compares the head next-turn input with the earliest pending queued
-batch by the shared `enqueue_seq` and admits whichever came first: a wake
-accepted before an input runs first, and an input accepted before a wake runs
-first. The drive's admission and the park reconcile's reading of the next root
-share one decision (`turn_lane_head`).
-
-**Each claim is a contiguous run of that order (FIG-3909).** A claim of one
-admission table stops at the other table's earliest row its generation has not
-claimed, and never skips it (`TurnLaneStop` over a queued-work scan; the same
-stop as a predicate of the next-turn input scan): an input root, and a queued run
-headed by input, take no input accepted after unclaimed queued turn work; a
-queued run headed by queued work, and a checkpoint's queued-work claim, take no
-work accepted after an unclaimed next-turn input. So one turn never takes an
-item past an earlier unconsumed item of the other kind. A session command stops
-nothing (§4); an addressed checkpoint input and the recomposition of an
-interrupted claim are exempt, as §5.2 and §7 already make them. *(FIG-3927:
-the contiguous run is a root's admission, not a claim, and a queued-headed run
-is an ordinary root; the stop is unchanged. See the FIG-3927 amendment.)*
-
-## Amendment (FIG-3927, 2026-09-28): admission binds rows to a root; there are no claims
-
-**Status.** Decided in FIG-3927 under D19, D22 and D24; implemented. FIG-3945
-deleted the `queued_runs` ledger and admits a queued-work head as an ordinary
-root; FIG-3946 replaced the claim columns with the admission binding, keyed
-settlement by root and deleted the claim, abandon and orphan-repair machinery;
-FIG-3947 closed it out. It amends §1 (the claim columns and claim type), §5.2, §7, §13, §16 laws 3 and 20,
-the FIG-3540 close-out, and ADR 0029 and ADR 0053, which it supersedes. Each
-carries a note pointing here.
-
-**Decision.** No durable claim token takes part in selecting or settling a turn.
-A row of either admission table is *admitted* when a fenced write under the
-session's current drive fence (ADR 0105 §2) records the root that admitted it
-and the recorded step that did so (`admitted_root`, `admitted_by`). That write
-is the row's admission and delivers its ingress obligation (ADR 0109 §3). An
-admitted row is released or settled only by a fenced commit of that root, or by
-the root's terminal write, whatever ended it. No row stays admitted to a root
-that has terminal evidence. A session has at most one root that is admitted and
-unfinished, and the drive resumes that root after any owed follow-on and
-before new work. A root is finished at its terminal write: the scope close it
-then owes (ADR 0108 §5) holds no admission, so the session's next root is
-admitted beside it (FIG-4035).
-
-**Selection** runs inside the drive, after the seal, as the root's recorded
-`AdmitRoot` step. It is keyed by the root, and its composition is the §5.2 rule
-over the open rows of both tables, contiguous per the close-out. The store
-records the result on the root (`session_roots`) in the same transaction, so a
-re-execution of the step reads it back rather than choosing again: a worker lost
-between the store's write and the journal's record never widens a turn. A
-checkpoint's selection is the same, keyed by its step. **Settlement** is keyed
-by the root and the turn: the commit names the rows it completes, releases or
-drops. The store checks each against the root and the commit against the drive
-fence. The commit identity (ADR 0105 §9) makes a replayed commit answer its
-receipt.
-
-**Commands** take no admission: the drive applies the leading command run at a
-boundary and settles those rows in the applying commit. A row withdrawn in
-between refuses the commit (§4, §12).
-
-**What this replaces.**
-
-* §7's generation-fenced claims, per-row claim identity, `Defer` of a claim and
-  redrive of an interrupted claim: `Defer` releases the binding at the row's
-  own position, and an interrupted selection is the root's recorded admission.
-* The queued-run ledger (D22).
-* The session-lease and drive-epoch claim authority (D24a/D24c).
-* Orphan repair: a root's terminal write releases its rows.
-* Host abandonment of a claim: cancel the root instead (A2).
-
-Law 20 becomes "a stale drive fence refuses admission and settlement and
-writes nothing". Law 3's "locked head row" becomes "an admitted head row".
+Worker loss or failed infrastructure does not create a model-visible abort
+marker. Committed history and explicit host input supply model context.
 
 ## Alternatives considered
 
-* **Keep two tables (ADR 0010).** Rejected. Every defect in *Context* is a rule
-  implemented twice with the second copy lagging.
-* **"Structural merge only", preserving every current arbitration.** Rejected.
-  The timestamp arbitration exists only because two counters are incomparable;
-  keeping it would re-implement an artefact of the split inside the merged model.
-* **Keep the batch/items shape.** Rejected: it preserves a shape no production
-  producer uses. A claim already composes several rows.
-* **A `dedup_domain` column.** Rejected: a second key for a collision with no
-  producer. Reserved prefixes per kind cover it.
-* **Silent adoption of a replay with changed content.** All five references do
-  it. Rejected; lash fails closed, and the immutable digest keeps that sound.
-* **Kind priority: host input before wakes.** Rejected (E1). It reproduces DBOS's
-  priority starvation, and today's version already inverts command order. If
-  reply latency ever outranks uniformity, the only admissible form is Pekko's
-  class-level order with `enqueue_seq` as a stable secondary key.
-* **Commands as a strict FIFO barrier in one sequence** (the earlier G ruling,
-  with D7 and D9). A command at seq s blocked every unaddressed claim with a
-  higher seq, at idle and at checkpoints; turn-addressed items needed an
-  exception to pass it, and exact claims needed a rule not to jump it.
-  Replaced by the owner for two reasons. First, command latency: a config patch
-  waited behind the whole queued backlog, and its settlement waiter mostly
-  returned `Pending`. Second, barrier complexity: a stop rule in every claim
-  statement on both backends, a checkpoint rule, an addressed-item exception
-  and an exact-claim refusal, all for an ordering guarantee — "queued work runs
-  under the config it was queued under" — that config snapshots per turn do not
-  need.
-* **A per-item "ahead of queued inputs" flag, a second table, or a time key for
-  commands.** Rejected. A per-item flag would have to pull every earlier command
-  along, a second table re-creates the split this ADR removes, and a time key
-  is the arbitration being deleted. The class-level lane (§4) is the one
-  admissible form.
-* **The frame handoff as an `Exact`-only queue kind.** Rejected (F). The handoff
-  uses almost none of the queue lifecycle, and that lifecycle is where every
-  handoff defect comes from. A head fact makes the stranded handoff
-  unrepresentable.
-* **The pending follow-on inside `head_json`.** Rejected: no claim transaction
-  reads the head config today, and the refusal must live in the claim statement.
-* **An unbounded follow-on retry.** Rejected: the block is session-wide, so an
-  unbounded retry of a crashing follow-on blocks the session forever.
-* **Exempt command tombstones from vacuum, or keep a vacuum-proof marker** (the
-  prospect's D2). Rejected by the owner ruling. Either keeps command evidence
-  forever and makes vacuum non-uniform; compare-and-set makes the command itself
-  replay-safe.
-* **Compare-and-set against `head_revision`.** Rejected: it advances on every
-  turn commit and would refuse nearly every patch queued behind a running turn.
-* **Authority and merge key as composition gates** (the prospect's D14 reading).
-  Rejected by the owner ruling: under that rule inputs and wakes would never
-  share an idle claim, because inputs carry no authority, and nothing authorizes
-  on either field.
-* **"NextTurn rows block nothing at a checkpoint"** (the prospect's G note).
-  Rejected: the owner ruling makes a delivery mismatch a stop point for the
-  unaddressed prefix on both paths. Only addressed `Turn{t}` items are selected
-  out of FIFO order.
-* **Uniform `Drop` on wakes at turn cancel** (Fable E.2). Rejected (E2): the
-  model cannot recover a dropped wake's event text.
-* **Keep re-deferring addressed items on every final commit.** Rejected (owner
-  ruling on turn addressing): a stored delivery that commits rewrite is the
-  root cause of FIG-3544, and "ended turn → next turn" is derivable from the
-  turn's own final commit.
-* **Migrate existing rows.** Rejected: reject-and-recreate is the accepted
-  cutover (ADR 0081), and a converter would be the shim this ADR removes.
-* **Aliases for renamed public types.** Rejected (E4): a shim.
+A single physical admission table is unnecessary for shared ordering and root
+binding; the existing tables share one counter and admission protocol.
+Timestamp arbitration cannot order concurrent producers reliably. Input-before-
+wake priority can starve earlier wakes. A strict command FIFO barrier delays
+config updates and complicates checkpoints; class-level command priority keeps
+FIFO within its lane and preserves the running turn's snapshot.
+
+A queued frame-handoff item can be withdrawn, overtaken, or rendered in another
+frame. The head fact carries its frame and continuation together. An unbounded
+follow-on retry can block the whole session indefinitely. Config compare-and-set
+against `head_revision` rejects patches merely because a turn commits;
+`config_revision` changes only with config. Caller-driven inline turns require
+another continuation owner; ingress and the engine supply one durable path.
 
 ## Consequences
 
-* Every lifecycle rule (dedup, retention, cancel, ordering, claim bounds,
-  settlement) is written once, and a new kind inherits all of it.
-* ADR 0069's "sole turn ingress" becomes literal: the session ingress is the
-  acceptance row class for host, process and command admissions, and no commit
-  writes ingress rows.
-* Turn-lane order becomes strict FIFO. A user message waits behind wake turns
-  enqueued before it, bounded by the drain policy. With the shipped
-  `OneAtATime` policy each turn is one row anyway.
-* A config patch submitted while a turn runs applies right after that logical
-  run's final commit, ahead of every queued input and wake. Queued work
-  enqueued before the patch may therefore run under the newer config; this is
-  the accepted cost of §4.
-* Hosts that retried a config patch against stale resident state now receive a
-  typed stale outcome instead of a silent overwrite.
-* Wake tombstones add volume until `vacuum()`; that is a vacuum-scheduling note
-  under ADR 0067, not a second retention model.
-* One cutover invalidates every existing session and store, and in-flight Restate
-  invocations must drain first.
-* Two live bugs (FIG-3544, FIG-3545) have standalone fixes now. The floor rule
-  carries into the cutover unchanged. For FIG-3544 the cutover removes the root
-  cause (immutable delivery, §5.1) and keeps the digest as defence in depth.
-
-## Links
-
-* FIG-3540 arc and owner rulings; children FIG-3541 (command double-apply,
-  fixed by §12), FIG-3542 (frame handoff as a queue row, fixed by §3), FIG-3543
-  (cancel completes withheld wakes, fixed by §10), FIG-3544, FIG-3545.
-* Prospect report `/workspace/notes/lash/prospect-ingress-2026-09-23.md` (D1–D17,
-  answers to F, G, E1, E2).
-* [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md) — vacuum has no
-  horizon.
-* [ADR 0081](0081-destructive-schema-changes-are-currently-reject-and-recreate.md)
-  — the cutover posture.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Items 4 and 12: The pre-1.0 version freeze changes durable shapes in place;
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
-cut. There is no command barrier at a checkpoint. Commands apply before fresh
-turn-lane roots at boundaries, while a running turn keeps its start snapshot.
+Order spans both admission tables. Commands precede fresh turns at boundaries.
+Recorded admission cannot widen on retry. Hosts observe durable handles, and
+wake cancellation preserves the receiver floor. Follow-ons survive worker loss
+as head obligations. Durable shape evolution follows the pre-1.0 freeze and
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).

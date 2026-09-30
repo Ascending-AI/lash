@@ -98,7 +98,7 @@ async fn commit_state(
     store: &dyn lash_core::DeploymentStore,
     state: &RuntimeSessionState,
 ) -> anyhow::Result<f64> {
-    let commit = RuntimeCommit::persisted_state_for_test_with_budget(state, &[], SEED_BUDGET);
+    let commit = RuntimeCommit::persisted_state_for_test_with_budget(state, SEED_BUDGET);
     let started = Instant::now();
     store.commit_runtime_state(commit).await?;
     Ok(elapsed_ms(started))

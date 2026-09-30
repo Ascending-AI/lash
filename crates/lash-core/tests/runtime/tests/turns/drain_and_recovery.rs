@@ -407,8 +407,11 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     );
 }
 
+/// A host's plugin command is a session command (FIG-4202): the drive runs
+/// the plugin's code at the boundary and lands its output and its events in
+/// the one commit that settles it.
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
+pub(super) async fn plugin_command_settles_its_events_in_one_commit() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
@@ -446,42 +449,39 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
             }),
         });
     let store = double_unbound_recording_store(&double).await;
-    let store_trait = store.clone() as Arc<dyn lash_core::RuntimeStore>;
-    let mut first = runtime_with_plugins_and_tools_and_host_and_store(
-        vec![Arc::clone(&plugin)],
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
-        test_host_config(&backend),
-        Arc::clone(&store_trait),
-    )
-    .await;
-    let operation_scope =
-        lash_core::ExecutionScope::runtime_operation("root:plugin-command:stable-request");
-
-    first
-        .run_plugin_command("test.emit", json!({}), None, operation_scope.clone())
-        .await
-        .expect("first command attempt");
-    let committed_after_first = *store.runtime_commit_count.lock_recover();
-    let mut retry = runtime_with_plugins_and_tools_and_host_and_store(
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         test_host_config(&backend),
-        store_trait,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
+    let committed_before = *store.runtime_commit_count.lock_recover();
 
-    retry
-        .run_plugin_command("test.emit", json!({}), None, operation_scope)
-        .await
-        .expect("lost-response retry");
+    let outcome = Box::pin(crate::runtime_support::apply_host_command(
+        &mut runtime,
+        &double,
+        lash_core::runtime::SessionCommand::RunPluginCommand {
+            name: "test.emit".to_string(),
+            args: json!({}),
+        },
+        "plugin-command-one-commit",
+    ))
+    .await;
 
-    assert_eq!(committed_after_first, 2);
+    let lash_core::runtime::SessionCommandOutcome::PluginOperation {
+        outcome: lash_core::runtime::PluginOperationCommandOutcome::Completed { output, events, .. },
+    } = outcome
+    else {
+        panic!("the plugin command settles completed: {outcome:?}");
+    };
+    assert_eq!(output, json!({"ok": true}));
+    assert_eq!(events.len(), 1, "the command's event settles with it");
     assert_eq!(
         *store.runtime_commit_count.lock_recover(),
-        committed_after_first,
-        "retrying one command scope must receipt-hit both durable effects"
+        committed_before + 1,
+        "the command, its output and its event land in one commit"
     );
 }
 

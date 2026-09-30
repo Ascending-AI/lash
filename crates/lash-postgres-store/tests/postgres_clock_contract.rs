@@ -451,7 +451,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         ))
     };
     let mut commit = lash_core_execution::testing::store_fixtures::settling_commit_for_test(
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         &fence,
         settlement,
     );
@@ -459,7 +459,11 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         commit: TurnCommitId::new(root.clone(), 0),
         turn: PhysicalTurn::derive_turn_id(&root, 0),
         root: root.clone(),
-        stop: None,
+        outcome: lash_core_execution::store::RootCommittedOutcome::Finished(
+            lash_core_execution::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     store
         .commit_runtime_state(commit)
@@ -540,7 +544,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         ))
     };
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit runtime state with injected clock");
     let committed_at_ms: i64 = sqlx::query_scalar(

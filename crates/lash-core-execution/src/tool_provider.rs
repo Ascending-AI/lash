@@ -405,20 +405,17 @@ impl<'run> AttemptContext<'run> {
     pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessSpawnProvenance> {
         self.process_spawn_provenance.as_ref()
     }
-    /// This accessor is part of ADR 0051's protocol and process-engine
-    /// implementor class: a leaf [`ToolProvider`] declaring `StartProcess`
-    /// must copy the captured environment into the durable request instead of
-    /// rebuilding it from mutable host state.
-    pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
-        self.execution_env_spec.clone()
-    }
-    /// The execution-environment reference this attempt inherits when it runs
-    /// inside a durable process (FIG-3116): a registration declaring that env
-    /// needs no publication because the reference already names durable bytes.
-    /// `None` means the declaration's env must be published from
-    /// [`Self::process_execution_env_spec`] at realization.
-    pub fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
-        self.inherited_process_execution_env_ref.clone()
+    /// The immutable environment this attempt declares by reference.
+    /// The runtime stores it under the declaring journal before recording the result.
+    pub fn process_execution_env_ref(&self) -> Result<crate::ProcessExecutionEnvRef, PluginError> {
+        if let Some(env_ref) = self.inherited_process_execution_env_ref.as_ref() {
+            return Ok(env_ref.clone());
+        }
+        self.execution_env_spec.stable_ref().map_err(|error| {
+            PluginError::Session(format!(
+                "failed to encode process execution environment: {error}"
+            ))
+        })
     }
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>

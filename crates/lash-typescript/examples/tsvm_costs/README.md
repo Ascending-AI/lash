@@ -2,6 +2,9 @@
 
 FIG-4157 is measurement only. These examples do not implement the production
 worker or its authority, reset, recovery, admission or watchdog contracts.
+These are the historical f0 inputs. For the integrated worker, reset, effect,
+queue and packaging measurements, use
+`crates/lash-perf/src/vm_worker_matrix/README.md`.
 
 Source the fork's `env.sh`, then build the two examples with the shared executor:
 

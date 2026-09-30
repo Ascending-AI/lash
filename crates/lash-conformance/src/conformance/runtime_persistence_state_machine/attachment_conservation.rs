@@ -204,9 +204,8 @@ async fn commit_with_attachment_refs(
             "commit-with-attachment-refs",
         )
     };
-    let (commit, _) =
-        RuntimeCommit::persisted_state_with_operation_and_staged_usage(&mut state, &[], operation)
-            .map_err(|error| error.to_string())?;
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, operation)
+        .map_err(|error| error.to_string())?;
     let commit = commit.with_committed_attachments([attachment.id.clone()]);
     let result = store
         .commit_runtime_state(commit.clone())
@@ -406,7 +405,7 @@ async fn probe_attachment_gc(
                 .to_string(),
         );
     }
-    if roots != expected {
+    if roots.values() != &expected {
         return Err(format!(
             "attachment GC root snapshot differs from surviving committed references: expected {expected:?}, got {roots:?}"
         ));
@@ -459,7 +458,7 @@ pub(super) async fn assert_attachment_conservation(
             "live attachment root set was empty while committed references survive".to_string(),
         );
     }
-    if actual != expected {
+    if actual.values() != &expected {
         return Err(format!(
             "live attachment roots differ from the union of surviving committed references: expected {expected:?}, got {actual:?}"
         ));
@@ -480,7 +479,7 @@ pub(super) async fn assert_attachment_conservation(
         if expected_live {
             handles
                 .attachment_backend
-                .get(&attachment_id)
+                .get(&attachment_id, 32 * 1024 * 1024)
                 .await
                 .map_err(|error| {
                     format!(

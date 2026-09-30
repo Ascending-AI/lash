@@ -121,7 +121,7 @@ pub struct GroupChildCoordination {
 
 /// Refuses a child whose recorded routing this deployment cannot honour.
 ///
-/// The routing mismatch ADR 0099 §3 amendment 2 names: "The request records
+/// The routing mismatch ADR 0099 §3 item 2 names: "The request records
 /// which of `inline` or `durable` the child was admitted under, so a recovered
 /// child never derives a key nothing will resolve." A
 /// child admitted with a durable completion key that lands on a host issuing
@@ -504,9 +504,6 @@ fn abandon_to_open_buffers(
     }
     for capture in captures {
         context.checkpoint_messages.enqueue(capture.messages);
-        if let Some(ledger) = context.direct_completions.usage_ledger() {
-            ledger.extend(capture.usage);
-        }
     }
 }
 
@@ -575,12 +572,17 @@ async fn settle_terminal_attempt(
     )
     .await?;
     // The §5 barrier: admitted drains emit their nested semantic commands in
-    // final-commit order, so a committed sibling below this child that still
-    // owes its drain holds this drain back until it finishes. The host waits
-    // on its own wake for that drain; the dispatch clock plays no part.
-    if let Some((group_key, commit_seq)) = &drain_admission {
+    // rank order, so a committed sibling ranked below this child that has not
+    // seated holds this drain back until it does. The host waits on its own
+    // wakes for those seats; the dispatch clock plays no part. A child that
+    // won its own commit with no intent to drain emits nothing, so it does
+    // not wait (FIG-4308); a commit this attempt did not win proves nothing
+    // about what the winner declared, so that child waits.
+    if let Some(admission) = &drain_admission
+        && (!admission.won_commit || !intents.is_empty())
+    {
         controller
-            .await_group_child_drain_admission(group_key, *commit_seq)
+            .await_group_child_drain_admission(&admission.group_key, admission.rank)
             .await?;
     }
     let mut intent_context = context.clone();
@@ -604,17 +606,29 @@ async fn settle_terminal_attempt(
     })
 }
 
+/// Where a group child's committed final takes its turn at the §5 barrier.
+#[derive(Debug)]
+pub(crate) struct GroupChildDrainAdmission {
+    /// The group the child's final committed in.
+    group_key: String,
+    /// The rank the §4 point reserved for the child.
+    rank: u64,
+    /// Whether this attempt's commit won the point (`Committed`) rather than
+    /// finding it already held (`AlreadyCommitted`).
+    won_commit: bool,
+}
+
 /// The §4 boundary: a group child's final record commits the moment the child
 /// reaches its terminal, *before* any declared intent runs and before its
 /// result is presented.
 ///
 /// Every terminal of a group child crosses this one boundary — an attempt that
 /// finished inline (`settle_terminal_attempt`) and a parked attempt whose
-/// deferred completion resolved (the invocation driver's resume). The durable
-/// final-commit order it allocates is the order sibling drains are admitted in
-/// and the order ranks are seated in (§5), so a child that deferred its
-/// boundary to a later step would take its place in the settlement order by
-/// when that step ran, not by when it settled.
+/// deferred completion resolved (the invocation driver's resume). The rank it
+/// reserves is the child's place in the settlement order and the order sibling
+/// drains are admitted in (§5), so a child that deferred its boundary to a
+/// later step would take its place in the settlement order by when that step
+/// ran, not by when it settled.
 ///
 /// Only a group child carries the address of its own replay row into
 /// settlement; every other caller passes `None` and pays no boundary work at
@@ -629,7 +643,7 @@ pub(crate) async fn commit_group_child_boundary(
     record: &mut ToolCallRecord,
     intents: &mut crate::ToolIntents,
     recorded_call_id: &mut lash_sansio::ToolCallId,
-) -> Result<Option<(String, u64)>, crate::RuntimeEffectControllerError> {
+) -> Result<Option<GroupChildDrainAdmission>, crate::RuntimeEffectControllerError> {
     let Some(address) = group_child.map(|child| &child.child) else {
         return Ok(None);
     };
@@ -664,13 +678,16 @@ pub(crate) async fn commit_group_child_boundary(
         .await?
     {
         crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => Ok(None),
-        crate::runtime::effect::EffectGroupChildCommitOutcome::Committed {
-            group_key,
-            commit_seq,
-        } => Ok(Some((group_key, commit_seq))),
+        crate::runtime::effect::EffectGroupChildCommitOutcome::Committed { group_key, rank } => {
+            Ok(Some(GroupChildDrainAdmission {
+                group_key,
+                rank,
+                won_commit: true,
+            }))
+        }
         crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
             group_key,
-            commit_seq,
+            rank,
             drain_input: sealed,
         } => {
             if let Some(sealed) = sealed {
@@ -688,7 +705,11 @@ pub(crate) async fn commit_group_child_boundary(
                 *intents = sealed.intents;
                 *recorded_call_id = sealed.recorded_call_id;
             }
-            Ok(Some((group_key, commit_seq)))
+            Ok(Some(GroupChildDrainAdmission {
+                group_key,
+                rank,
+                won_commit: false,
+            }))
         }
         crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
             group_key, ..

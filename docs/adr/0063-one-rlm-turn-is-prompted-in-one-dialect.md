@@ -2,65 +2,76 @@
 
 ## Status
 
-Partially superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
-The paired-language evidence and pinning obligations are superseded. The
-multi-dialect prompt architecture remains accepted, clarified by Sam's
-FIG-4276 ruling on 2026-09-30.
+Accepted.
+
+## Context
+
+An RLM prompt teaches the source the model can write. Shared IR and VM names
+also appear in tool identities and traces, so authored syntax and machine
+identifiers need distinct rules. TypeScript is the shipped source dialect;
+[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) owns that selection.
 
 ## Retained prompt contract
 
 Every shared RLM prompt fragment uses the selected dialect's vocabulary.
-`DialectPromptVocabulary` supplies the language name, cell tags, cell noun,
-print call, finish forms and continue-as examples. Bound variables, read-only
-variables, retries, budget advice and finalization must describe the source
-that the model can actually write. Cell-delimiter advice is specific to the
-selected dialect and exists only on the cell channel.
+`DialectPromptVocabulary` supplies the language name, cell noun, print call,
+finish forms and continue-as examples. The dialect also supplies cell tags,
+tool signatures and schema spelling. Bound variables, read-only variables,
+retry feedback, budget advice and finalization describe that source. Delimiter
+advice appears only on the cell channel and uses that dialect's delimiter.
 
-TypeScript is the only shipped dialect today. The retained prompt walker
-checks its assembled fragments, including host surfaces and tool signatures,
-against the retired authored-language markers. It keeps explicit carve-outs
-for IR and VM identifiers. A new dialect supplies its own vocabulary,
-signatures, schema spelling and prompt evidence; it need not match another
-dialect's behavior. ADR 0096 records the extension contract and the current
-TypeScript-specific prompt adapters that still need generalization.
+The `Dialect` and `DialectSession` contracts permit another front end to
+supply its own vocabulary and lowering into the shared IR. Its semantics and
+coverage do not need to match TypeScript's. The shipped TypeScript adapter
+owns its syntax-specific prompt fragments.
 
-The `__` namespace is reserved for internal runtime modules. They are hidden
-from model-visible host-surface documentation. The journaled clock and random
+The `__` namespace is reserved for internal runtime modules. Prompt inventories
+hide modules whose first path segment starts with `__`. The clock and random
 module is `__lashlang_runtime`, with resource type `lashlang.Runtime` and host
-operation `lashlang.runtime` (FIG-4020), regardless of source dialect.
+operation `lashlang.runtime`, independent of the source dialect.
 
-Tool descriptions and schema prose render verbatim (FIG-4093). A host that
-writes syntax-specific prose owns its consistency with the served dialect.
-There is no cross-language prose ban or prose-token substitution mechanism.
+Tool descriptions and schema prose render verbatim. A host contributing
+syntax-specific prose owns its consistency with the dialect it serves.
 
 ## Durable identifiers and traces
 
-`lashlang_step`, process identity families and `lashlang:effect:...` name the
-IR and VM. They retain their spellings across source dialects. IR module refs
-and source identity use the dialect-neutral atom `lashlang-ir`.
+`lashlang_step`, process identity families and `lashlang:effect:...` identify
+IR and VM execution. IR module references and source identity use
+`lashlang-ir`. Source vocabulary does not rename durable identity preimages.
 
-Cell execution traces name the source dialect in `language`; a compiled
-process body executes IR and keeps the engine's language label. Event names,
-JSONL filenames and graph APIs that name Lashlang continue to name the shared
-machine. Hosts that assemble prompts own the same dialect consistency rule
-for their examples and tutorials.
+Cell execution traces label the source dialect in `language`; compiled process
+bodies execute IR and keep the engine's language label. Event names, JSONL
+filenames and graph APIs that name Lashlang identify the shared machine.
 
-## Superseded history
+## Alternatives considered
 
-The original decision coupled two installed languages, registered-but-inactive
-cell recognition, session pinning and paired prompt evidence. Those obligations
-were retired with the authored Lashlang language. The `{{...}}` tool-prose token
-mechanism and its registration guard were removed by FIG-4093. The original
-`__typescript_runtime` spelling was replaced by FIG-4020. None is a requirement
-for future dialects.
+Hard-coding source syntax in shared prompts couples every prompt consumer to
+one front end and lets examples disagree with the parser. Vocabulary and
+signature rendering keep those choices with the front end.
 
-The FIG-2505 process-environment v4-to-v5 window is historical. Current format
-changes follow the pre-1.0 freeze and ADR 0115's 1.0 cut.
+Renaming durable machine identifiers for each source dialect changes replay
+identity without changing execution. Machine names remain dialect-neutral.
+
+Rewriting words in host prose risks changing descriptions and schema text.
+Verbatim rendering leaves that prose with its author.
+
+## Consequences
+
+A new dialect supplies prompt evidence as well as lowering. The TypeScript
+walker checks assembled fragments and explicitly allows machine identifiers.
+Hosts assembling examples and tutorials apply the same dialect-consistency
+rule to their own contributions.
 
 ## Executable evidence
 
-`no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
-[the walker tests](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
-checks TypeScript prompt fragments with the explicit IR/VM carve-outs.
-The extension-session tests in `dialect.rs` exercise vocabulary and delimiter
-selection without changing the IR, VM or execution request.
+- [Dialect and session contracts](../../crates/lash-protocol-rlm/src/dialect.rs#L33),
+  [vocabulary](../../crates/lash-protocol-rlm/src/dialect.rs#L308) and the
+  extension-session tests in that file cover vocabulary and delimiter selection.
+- [Prompt inventory filtering](../../crates/lash-protocol-rlm/src/protocol/prompt.rs#L21)
+  hides the internal namespace.
+- [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs#L65)
+  checks source wording with explicit IR and VM exceptions.
+- [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs#L480),
+  [process trace](../../crates/lash-lashlang-runtime/src/process/execution_trace.rs#L469)
+  and [IR identity](../../crates/lashlang/src/artifact_identity.rs#L6)
+  keep source labels separate from machine identities.

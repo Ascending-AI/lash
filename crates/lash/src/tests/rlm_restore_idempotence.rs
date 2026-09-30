@@ -254,6 +254,7 @@ async fn plugin_host_with_plugins(
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &crate::tests::double_backend().await.clone(),
         )
         .with_process_lifecycle(false),
@@ -442,6 +443,60 @@ async fn open_turn_handler(
         .expect("open the turn handler")
 }
 
+/// Apply a host's append as the session's drive does (FIG-4202): a session
+/// command the runtime's own drive applies at the turn boundary, on the
+/// session's engine.
+async fn host_append(
+    runtime: &mut LashRuntime,
+    request: AppendSessionNodesRequest,
+) -> Result<lash_core::AppendSessionNodesOutcome, lash_core::RuntimeError> {
+    let key = request.operation_id.clone();
+    let receipt = runtime
+        .submit_session_command(
+            lash_core::runtime::SessionCommand::AppendSessionNodes {
+                request: Box::new(request),
+            },
+            key.clone(),
+        )
+        .await?;
+    let session_id = SessionId::from(runtime.read_view().session_id());
+    let double = SESSION_ENGINES
+        .get()
+        .expect("session engines registered")
+        .lock_recover()
+        .get(&session_id.to_string())
+        .cloned()
+        .expect("session engine registered");
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::queue_drain(
+            &session_id,
+            key.as_str(),
+        ))
+        .await
+        .expect("open the append's drive handler");
+    let drained = runtime
+        .drive_next_queued_root(lash_core::facade_support::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            handler.scoped(),
+        ))
+        .await;
+    handler
+        .close()
+        .await
+        .expect("close the append's drive handler");
+    drained?;
+    match runtime.settle_session_command(receipt).await? {
+        lash_core::runtime::SessionCommandSettlement::Applied {
+            outcome: lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
+            ..
+        } => Ok(outcome),
+        other => Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::SessionCommandRun,
+            format!("the append did not settle applied: {other:?}"),
+        )),
+    }
+}
+
 async fn drive(
     runtime: &mut LashRuntime,
     input: TurnInput,
@@ -548,11 +603,14 @@ impl Backend {
             extra_plugins,
         )
         .await;
-        Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-seed".to_string(),
-            requires_ancestor_node_id: None,
-            nodes: seed_nodes("original"),
-        }))
+        Box::pin(host_append(
+            &mut runtime,
+            AppendSessionNodesRequest {
+                operation_id: "fig2521-seed".to_string(),
+                requires_ancestor_node_id: None,
+                nodes: seed_nodes("original"),
+            },
+        ))
         .await
         .expect("append seed");
         let snapshot = runtime
@@ -608,8 +666,6 @@ impl Backend {
             runtime,
             plugins,
             store,
-            snapshot,
-            prompt,
         }
     }
 }
@@ -618,8 +674,6 @@ struct SeededSession {
     runtime: LashRuntime,
     plugins: Arc<PluginSession>,
     store: Arc<FaultStore>,
-    snapshot: lash_core::plugin::HydratedExecutionState,
-    prompt: String,
 }
 
 fn continue_as_response() -> String {
@@ -735,130 +789,6 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
     );
 }
 
-/// (c) A faulted append rolls the protocol session back on the same frame:
-/// the never-persisted `projected_discarded` binding and the never-persisted
-/// `rolled_back_global` global must not survive into the next prompt, the next
-/// execution result, or the next durable checkpoint.
-async fn faulted_append_rollback(backend: Backend) {
-    let script = Arc::new(Script {
-        responses: vec![typescript_block("finish(baton);")],
-        ..Script::default()
-    });
-    let SeededSession {
-        mut runtime,
-        plugins,
-        store,
-        snapshot,
-        prompt,
-    } = Box::pin(backend.seeded_session("append-rollback", Arc::clone(&script))).await;
-    assert!(
-        runtime
-            .export_persistence_state()
-            .execution_state_hydration()
-            .expect("hydration")
-            .is_none(),
-        "{}: the durable head carries no execution root before the append (the seed events \
-         are the authority), so the rollback rebuilds from the pre-append capture alone",
-        backend.label
-    );
-
-    // The discarded seed carries a global the durable history never names, so
-    // a rollback that keeps the live execution is visible as a global with no
-    // originating event.
-    let mut discarded = seed("discarded");
-    discarded.globals.insert(
-        "rolled_back_global".to_string(),
-        serde_json::json!("UNCOMMITTED-GLOBAL"),
-    );
-    store.arm(CommitFault::FailNext);
-    let error = Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-        operation_id: "fig2521-discarded".to_string(),
-        requires_ancestor_node_id: None,
-        nodes: rlm_seed_initial_nodes(discarded),
-    }))
-    .await
-    .expect_err("the faulted append must fail");
-    let message = error.to_string();
-    assert!(
-        message.contains("injected commit failure")
-            && !message.contains("failed to restore protocol session"),
-        "{}: the append must surface the store failure alone, never a rollback failure: {message}",
-        backend.label
-    );
-    assert_eq!(*store.fault.lock_recover(), CommitFault::None);
-
-    let rolled_back_prompt = projected_prompt(&runtime, &plugins).await;
-    assert_eq!(
-        rolled_back_prompt, prompt,
-        "{}: rollback must restore exactly the durable bindings",
-        backend.label
-    );
-    let rolled_back_snapshot = runtime
-        .snapshot_execution_state()
-        .await
-        .expect("snapshot")
-        .expect("execution state");
-    assert_eq!(
-        rolled_back_snapshot, snapshot,
-        "{}: rollback must restore exactly the committed execution",
-        backend.label
-    );
-    let (live_globals, _) = snapshot_globals(&rolled_back_snapshot, "baton");
-    assert!(
-        !live_globals.iter().any(|name| name == "rolled_back_global"),
-        "{}: the rolled-back append's global must not survive in the live execution: {live_globals:?}",
-        backend.label
-    );
-
-    let run = drive(
-        &mut runtime,
-        TurnInput::text("go"),
-        "fig2521-after-rollback",
-    )
-    .await
-    .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
-    assert_eq!(
-        run.outcome,
-        TurnOutcome::Finished(TurnFinish::FinalValue {
-            value: serde_json::json!("original")
-        }),
-        "{}: the next execution must see the committed globals only",
-        backend.label
-    );
-    let last_request = script.requests.lock_recover().last().cloned().unwrap();
-    assert_eq!(
-        count(&last_request, "projected_discarded"),
-        0,
-        "{}: the discarded binding must not reach the next prompt: {last_request}",
-        backend.label
-    );
-    assert_eq!(
-        count(&last_request, "rolled_back_global"),
-        0,
-        "{}: the rolled-back global must not reach the next prompt: {last_request}",
-        backend.label
-    );
-    assert_eq!(
-        count(&last_request, "`projected_original`"),
-        1,
-        "{last_request}"
-    );
-    let (durable_names, durable_baton) = durable_globals(&store, "baton").await;
-    assert!(
-        !durable_names
-            .iter()
-            .any(|name| name == "rolled_back_global"),
-        "{}: the rolled-back global must not become durable: {durable_names:?}",
-        backend.label
-    );
-    assert_eq!(
-        durable_baton.as_deref(),
-        Some("Some(String(\"original\"))"),
-        "{}",
-        backend.label
-    );
-}
-
 /// (d) A follow-on turn assigns a global, then its commit is refused; the
 /// invalidated resident state reloads on the frame the plugin already holds,
 /// whose durable head carries no execution root (the frame switch cleared it).
@@ -951,16 +881,6 @@ async fn rlm_follow_on_failure_then_resident_reload_rebinds_the_frame_seed_on_sq
         Backend::sqlite().await,
     ))
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_memory() {
-    Box::pin(faulted_append_rollback(Backend::memory().await)).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_sqlite() {
-    Box::pin(faulted_append_rollback(Backend::sqlite().await)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1120,6 +1040,7 @@ async fn storeless_runtime(
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         )
         .with_process_lifecycle(false),
@@ -1156,11 +1077,13 @@ async fn storeless_runtime(
     runtime
         .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
         .expect("materialize protocol");
-    Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-        operation_id: "fig2521-storeless-seed".to_string(),
-        requires_ancestor_node_id: None,
-        nodes: seed_nodes("original"),
-    }))
+    Box::pin(
+        runtime.append_storeless_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-storeless-seed".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: seed_nodes("original"),
+        }),
+    )
     .await
     .expect("append seed");
     runtime
@@ -1275,11 +1198,13 @@ async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
         .expect("snapshot")
         .expect("execution state");
     let graph = format!("{:?}", runtime.export_persistence_state().session_graph);
-    let outcome = Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-        operation_id: "fig2521-stale".to_string(),
-        requires_ancestor_node_id: Some("absent".to_string().into()),
-        nodes: seed_nodes("discarded"),
-    }))
+    let outcome = Box::pin(
+        runtime.append_storeless_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-stale".to_string(),
+            requires_ancestor_node_id: Some("absent".to_string().into()),
+            nodes: seed_nodes("discarded"),
+        }),
+    )
     .await
     .expect("a stale ancestor is an outcome, not an error");
     assert!(
@@ -1308,205 +1233,6 @@ async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
     );
 }
 
-/// The execution-state entries of a commit's checkpoint.
-fn execution_entries(
-    commit: &RuntimeCommit,
-) -> std::collections::BTreeMap<String, lash_core::HydratedCheckpointComponent> {
-    commit
-        .checkpoint
-        .components
-        .iter()
-        .filter(|(key, _)| key.starts_with("execution_state"))
-        .map(|(key, component)| (key.clone(), component.clone()))
-        .collect()
-}
-
-/// The smallest byte budget `commit` fits.
-fn exact_byte_budget(commit: &RuntimeCommit) -> usize {
-    let mut probe = commit.clone();
-    let (mut low, mut high) = (1usize, 8 * 1024 * 1024);
-    while low < high {
-        let mid = low + (high - low) / 2;
-        probe.commit_budget = CommitBudget::bounded(mid, 1024);
-        if probe.validate_budget().is_ok() {
-            high = mid;
-        } else {
-            low = mid + 1;
-        }
-    }
-    low
-}
-
-/// The next commit after a committed global, with or without a rolled-back
-/// append in between: its execution entries, changed-entry count, manifest
-/// refs and byte budget.
-struct NextCommit {
-    entries: std::collections::BTreeMap<String, lash_core::HydratedCheckpointComponent>,
-    changed: usize,
-    refs: std::collections::BTreeMap<String, lash_core::CheckpointComponentDescriptor>,
-    commit: RuntimeCommit,
-}
-
-async fn next_commit_after(backend: &Backend, rolled_back_append: bool) -> NextCommit {
-    let SeededSession {
-        mut runtime, store, ..
-    } = committed_session(
-        backend,
-        if rolled_back_append {
-            "parity-rollback"
-        } else {
-            "parity-control"
-        },
-        vec![establish_response(), read_response()],
-    )
-    .await;
-    let before = runtime
-        .snapshot_execution_state()
-        .await
-        .expect("snapshot")
-        .expect("execution state");
-    if rolled_back_append {
-        // The committed root's resident bodies were released post-commit: the
-        // resident state refuses to hydrate them rather than reading as no
-        // execution, so the rollback must rebuild from the pre-append capture.
-        let resident_hydration = runtime
-            .export_persistence_state()
-            .execution_state_hydration();
-        assert!(
-            matches!(
-                resident_hydration,
-                Err(StoreError::ExecutionStateBodiesReleased)
-            ),
-            "{}: {resident_hydration:?}",
-            backend.label
-        );
-        store.arm(CommitFault::FailNext);
-        let mut discarded = RlmSeed::default();
-        discarded
-            .globals
-            .insert("discarded".to_string(), serde_json::json!([1, 2, 3, 4]));
-        Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-parity-discarded".to_string(),
-            requires_ancestor_node_id: None,
-            nodes: rlm_seed_initial_nodes(discarded),
-        }))
-        .await
-        .expect_err("the faulted append must fail");
-        assert_eq!(
-            runtime
-                .snapshot_execution_state()
-                .await
-                .expect("snapshot")
-                .expect("execution state"),
-            before,
-            "{}: rollback must restore the committed execution",
-            backend.label
-        );
-    }
-    store.take_commits();
-    let result = turn(&mut runtime, "next-commit").await;
-    assert_final_value(backend.label, &result, serde_json::json!("COMMITTED"));
-    let commit = store.take_commits().pop().expect("the next turn commits");
-    let durable = durable_execution_state(&store)
-        .await
-        .expect("the next commit carries an execution root");
-    assert_eq!(
-        snapshot_globals(&durable, "accumulated"),
-        snapshot_globals(&before, "accumulated"),
-        "{}",
-        backend.label
-    );
-    assert_eq!(
-        durable.components, before.components,
-        "{}: the next commit's leaves equal the committed leaves",
-        backend.label
-    );
-    let entries = execution_entries(&commit);
-    assert!(
-        !entries.is_empty(),
-        "{}: the witness must count real execution components",
-        backend.label
-    );
-    let changed = entries
-        .values()
-        .filter(|component| {
-            matches!(
-                component,
-                lash_core::HydratedCheckpointComponent::Changed { .. }
-            )
-        })
-        .count();
-    let refs = commit
-        .checkpoint
-        .manifest(lash_core::FleetFormat::current())
-        .expect("manifest")
-        .components
-        .into_iter()
-        .filter(|(key, _)| key.starts_with("execution_state"))
-        .collect();
-    NextCommit {
-        entries,
-        changed,
-        refs,
-        commit,
-    }
-}
-
-/// (g) A rolled-back append must not dirty the execution leaves the durable
-/// head already holds: the next commit sends exactly the components the
-/// no-append control sends, references the same leaf addresses, and fits the
-/// control's exact byte budget.
-async fn commit_after_rolled_back_append_matches_the_control(backend: Backend) {
-    let control = Box::pin(next_commit_after(&backend, false)).await;
-    let rolled_back = Box::pin(next_commit_after(&backend, true)).await;
-    let leaves = |next: &NextCommit| {
-        next.refs
-            .iter()
-            .filter(|(key, _)| key.as_str() != "execution_state")
-            .map(|(key, descriptor)| (key.clone(), descriptor.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>()
-    };
-    assert_eq!(
-        leaves(&control),
-        leaves(&rolled_back),
-        "{}: the next commit must reference the same leaf addresses",
-        backend.label
-    );
-    assert_eq!(
-        control.entries.keys().collect::<Vec<_>>(),
-        rolled_back.entries.keys().collect::<Vec<_>>(),
-        "{}",
-        backend.label
-    );
-    assert_eq!(
-        control.changed, rolled_back.changed,
-        "{}: a rolled-back append spuriously marks existing execution leaves changed: \
-         control {:?} vs rolled back {:?}",
-        backend.label, control.entries, rolled_back.entries
-    );
-    // Byte parity against the real budget validator: swap the control's
-    // execution leaves for the rolled-back commit's and it must still fit the
-    // control's exact budget.
-    let budget = exact_byte_budget(&control.commit);
-    let mut staged = control.commit.clone();
-    staged.commit_budget = CommitBudget::bounded(budget, 1024);
-    for (key, component) in &rolled_back.entries {
-        if key != "execution_state" {
-            staged
-                .checkpoint
-                .components
-                .insert(key.clone(), component.clone());
-        }
-    }
-    staged.validate_budget().unwrap_or_else(|error| {
-        panic!(
-            "{}: the commit after a rolled-back append must fit the control's {budget}-byte \
-             budget: {error}",
-            backend.label
-        )
-    });
-}
-
 /// (h) A message-only append between turns leaves the committed execution and
 /// the durable head untouched, and the next turn reads the committed global.
 async fn message_append_keeps_the_committed_execution(backend: Backend) {
@@ -1523,14 +1249,17 @@ async fn message_append_keeps_the_committed_execution(backend: Backend) {
         .await
         .expect("snapshot")
         .expect("execution state");
-    Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
-        operation_id: "fig2521-message".to_string(),
-        requires_ancestor_node_id: None,
-        nodes: vec![SessionAppendNode::message(
+    Box::pin(host_append(
+        &mut runtime,
+        AppendSessionNodesRequest {
+            operation_id: "fig2521-message".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: vec![SessionAppendNode::message(
                 lash_core::PluginMessage::text(lash_core::MessageRole::User, "message only")
                     .with_id("fig2521-message"),
             )],
-    }))
+        },
+    ))
     .await
     .expect("message append");
     assert_eq!(
@@ -1679,22 +1408,6 @@ async fn rlm_rejected_turn_does_not_leak_execution_on_memory() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_rejected_turn_does_not_leak_execution_on_sqlite() {
     Box::pin(rejected_turn_does_not_leak_execution(
-        Backend::sqlite().await,
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_commit_after_rolled_back_append_matches_the_control_on_memory() {
-    Box::pin(commit_after_rolled_back_append_matches_the_control(
-        Backend::memory().await,
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_commit_after_rolled_back_append_matches_the_control_on_sqlite() {
-    Box::pin(commit_after_rolled_back_append_matches_the_control(
         Backend::sqlite().await,
     ))
     .await;

@@ -389,7 +389,6 @@ async fn commit_initialized_session(
     let (mut commit, persisted_node_ids) =
         crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
             &mut persisted_state,
-            &[],
             operation,
             materialized.runtime.host.core.durability.commit_budget,
             materialized.runtime.fleet_format(),
@@ -842,13 +841,7 @@ impl RuntimeSessionServices {
             source: Box::new(source),
         })?;
         let turn = self
-            .run_child_session_turn(
-                child,
-                &turn_id,
-                turn_input,
-                scoped_effect_controller,
-                cancellation,
-            )
+            .run_child_session_turn(child, turn_input, scoped_effect_controller, cancellation)
             .await
             .map_err(|source| SessionTurnInitError::Turn {
                 session_id: session_id.clone(),
@@ -998,13 +991,12 @@ impl RuntimeSessionServices {
     }
 
     /// The shared child-turn drive: the owned runtime's single-writer lock,
-    /// a fresh task stack for shareable controllers, the event drain, and the
-    /// post-turn usage persistence. `cancel` is the process's token, so a
+    /// a fresh task stack for shareable controllers, and the event drain.
+    /// `cancel` is the process's token, so a
     /// cancelled process settles an ordinary cancelled turn inside the child.
     async fn run_child_session_turn(
         &self,
         child: &RuntimeHandle,
-        turn_id: &TurnId,
         input: crate::TurnInput,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancel: CancellationToken,
@@ -1060,11 +1052,6 @@ impl RuntimeSessionServices {
         };
         drop(sink);
         let _ = event_drain.await;
-        Box::pin(
-            self.usage
-                .persist_current_usage_ledger(&self.current, turn_id),
-        )
-        .await?;
         turn
     }
 }

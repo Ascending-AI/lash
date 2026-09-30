@@ -891,15 +891,13 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
         .run();
     insta::assert_snapshot!(run.transcript.render(), @r#"
     rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.typescript_code  text="finish({ missing: true });"
+    rlm          observe   message.code            text="finish({ missing: true });"
     rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=after_work
-    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0
-    rlm          observe   message.typescript_code  text="finish({ ok: true });"
+    rlm          observe   message.code            text="finish({ ok: true });"
     rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=before_completion
-    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          outcome   turn.final_value        value={"ok":true}
     "#);
 }
@@ -989,13 +987,12 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     // reaching the model, and exactly one checkpoint before re-entry.
     insta::assert_snapshot!(run.transcript.render(), @r#"
     rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.typescript_code  text="finish({ missing: true });"
+    rlm          observe   message.code            text="finish({ missing: true });"
     rlm          exec      cell.start              lang="typescript"
     rlm          park      cell.checkpoint
     rlm          resume    cell.restore
     rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=after_work
-    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0
     "#);
 }
@@ -1005,7 +1002,7 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     clippy::disallowed_methods,
     reason = "isolated test processes keep inline snapshots independent"
 )]
-fn registered_scenarios_emit_typed_transcripts_with_usage() {
+fn registered_scenarios_emit_typed_transcripts() {
     for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
         let path = format!("scenarios::{}", coverage.test_name);
         let output = std::process::Command::new(std::env::current_exe().expect("test binary"))

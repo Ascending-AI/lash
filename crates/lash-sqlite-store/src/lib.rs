@@ -120,7 +120,6 @@ mod obligation_ledger;
 mod pending_turn_inputs;
 mod persistence;
 mod preflight;
-mod process_definitions;
 mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
@@ -147,6 +146,7 @@ pub mod testing;
 mod trigger_schema;
 mod triggers;
 mod turn_ingress;
+mod worker_recovery;
 
 pub use attachment_store::SqliteAttachmentStore;
 pub use backend::{IncompleteSqliteStoreSet, SqliteStoreSet, SqliteStoreSetOptions};
@@ -184,7 +184,6 @@ use schema::{apply_pragmas, ensure_versioned_schema};
 /// `lash_compat` row in each physical database.
 pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
 
-pub use process_definitions::SqliteProcessDefinitionRegistry;
 pub use triggers::SqliteTriggerStore;
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and
@@ -207,8 +206,6 @@ pub struct SqliteStore {
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,
-    decoded_usage_rows: Arc<AtomicU64>,
-    decoded_usage_holes: Arc<AtomicU64>,
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     clock: Arc<dyn lash_core_execution::Clock>,
     artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
@@ -257,6 +254,9 @@ pub struct SqliteProcessRegistry {
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
+    /// Whether registration reads the store set's trigger deliveries, which
+    /// a delivery's start is checked against (FIG-4369).
+    trigger_delivery_bindings: process_registry::TriggerDeliveryBindings,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -608,3 +608,5 @@ mod read_failure_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+mod usage_accounting;

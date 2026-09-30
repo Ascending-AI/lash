@@ -1,234 +1,86 @@
 # Generation intent is session policy, and its fate on the wire is reported
 
-> **Superseded note (2026-07-31, FIG-842):** Observational memory was removed
-> from Lash as a product option. Its workers and maintenance calls are described
-> below only as historical context for this decision; they are no longer part of
-> the runtime or plugin surface.
+## Context
 
-> **Amended 2026-09-24 (FIG-1875):** the durable head now carries generation
-> intent. `PersistedSessionConfig` records `provider_id`, `model`,
-> `turn_budget`, `prompt`, `generation`, `tool_access`, `subagent` and
-> `protocol_turn_options`. On reopen the host spec's generation overlay merges
-> per option over the persisted `generation`, and a persisted model is kept when
-> the host supplies none (`crates/lash/src/session.rs`). The sentences below
-> saying the store is not a carrier of generation intent, and that only
-> `provider_id` comes from the record, describe the state before FIG-1875.
+Sampling and output controls must reach every call made for a session, including
+child and direct calls. A host also needs to distinguish the options it requests
+from what Lash sends and from what a provider reports about execution.
 
-> **Amended 2026-09-29 (FIG-4099):** generation is creation config. A reopen
-> runs with the recorded generation and writes nothing; the host spec's
-> overlay applies only when it creates the session, and a later change is
-> `update(SessionConfigPatch { generation: Some(overlay), .. })`, with the same
-> merge/replace vocabulary. See the amendment at the end.
+## Decision
 
-`GenerationOptions` is caller intent, but only the one-shot direct path had a caller-owned
-slot for it. Agent sessions synthesized their options from provider configuration —
-copying `ProviderOptions.max_output_tokens` onto the request, where the adapter's own
-resolver layered the same provider cap a second time, and hard-coding `temperature: None,
-seed: None` no matter what the caller wanted. A host benchmarking agent behavior could not
-make a turn repeatable and had no way to learn that from lash.
+Generation intent belongs to `SessionPolicy.generation`. Creation resolves the
+`SessionCreation.spec` overlay against the core policy and records it with the
+session's initial configuration. Only `create` creates a facade session. Open
+loads the recorded configuration; it does not reconcile a new generation
+setting, model, or session prompt into it. Later changes use
+`update(SessionConfigPatch)`.
 
-We decided that **generation intent belongs to the session policy**. `SessionSpec.generation`
-is the public overlay and it resolves into `SessionPolicy.generation`, the value every LLM
-call in the session carries. The policy is the right home rather than the spec alone,
-because subagent specs resolve against the parent's *live* policy, and because every
-carrier of a whole session policy — `SessionCreateRequest` on the child-session wire,
-`RemoteProcessExecutionPolicy` on the process/remote wire — then carries the sampling
-intent with it instead of silently dropping it at each boundary. Session-wide means session-wide: the
-direct requests plugins issue on the session's behalf (the observational-memory workers,
-the `llm_query` tool) read it from the policy they already read their model from, bounded by
-that model's capacity, rather than passing `GenerationOptions::default()` and running at
-provider defaults inside a session that asked for repeatability. Provider configuration keeps its own
-layer underneath the request, applied once, by the per-adapter resolver that already knows
-which wire has a seed field and which model pins sampling. There is no per-turn override:
-no caller in this workspace expresses sampling per turn, and true per-call intent is
-already served by a direct request.
+`GenerationOverlay::Merge` keeps unstated options. `Replace` discards them, and
+replacing with default options clears the intent. The same vocabulary applies
+to creation, child-policy resolution, and configuration patches. A child that
+sets only its cap therefore keeps an inherited temperature and seed unless it
+explicitly replaces them.
 
-The overlay **merges per option**, and discarding what is inherited has to be asked for
-(`GenerationOverlay::Replace`, spelled `.replace_generation(...)` / `.clear_generation()`).
-`GenerationOptions` is a set of independently optional controls rather than one value, so
-wholesale replacement would let a subagent spec that sets only an output-token cap drop a
-parent's pinned temperature and seed — and the disposition below could not report that,
-because the child never *requested* a temperature. Per-option layering is also what the
-layer directly underneath already does: `resolve_generation_policy` resolves a request's
-cap against provider configuration with `.or(...)`. `GenerationOverlay` is the vocabulary
-for *every* surface that layers these options, not just the spec: `SessionConfigPatch`
-carries one too, so a mid-run patch naming only a cap cannot drop a pinned temperature that
-the spec's overlay would have kept. Two surfaces for one field, disagreeing about whether
-naming one option discards the others, is the trap dressed as an API.
+The durable config includes the generation controls and session prompt. The
+live core prompt remains a separate base layer rendered on each request. A
+legacy absent session prompt reconstructs as an empty session layer; explicit
+emptiness also remains empty. Provider handles on open resolve the recorded
+provider pin and cannot silently replace it.
 
-We considered a per-option clear — a `GenerationOverlay` of three `Option<Option<_>>`
-fields, able to drop an inherited seed while keeping an inherited temperature — and
-accepted the coarser gesture. No caller expresses that, none of the references offer it
-(pydantic-ai, the Agents SDK and flue all merge with no per-field clear at all), and the
-cost of being wrong is one additive field change on a type whose two variants would become
-three. What could not be added later is the *default*: merge-by-default is the behavior
-callers write against, and flipping it after release breaks silently rather than at compile
-time.
+Every request taken from session policy pairs its generation options with the
+request's model. `ModelSpec` clamps a requested output cap to that model's
+capacity without rewriting stored intent. A cap is an upper bound, so using a
+smaller capacity satisfies bounded execution while reducing the requested
+allowance. The runtime records `ClampedToCapacity` on the response and attempt
+receipts. Direct calls through a tool's `AttemptContext::direct_completions`
+carry explicit request intent; a tool selecting a different model owns that
+pairing.
 
-Reopen follows ADR 0030 rather than inventing its own authority: **the host's configuration
-wins, for generation exactly as for the model and the prompt.** The facade reconciles the
-policy it resolves from the host's spec over loaded state, so a mid-run
-`update_session_config` change lasts until the host reopens with a spec that says otherwise
-— the same lifetime the since-removed `set_model` had. Pairing the host's new model with the
-store's old temperature would be the anomaly.
+Provider resolution layers its configured cap beneath request intent exactly
+once. It invents no cap or temperature. Unsupported explicit controls are typed,
+non-retryable refusals before I/O under
+[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md). A mixed-model
+session uses an explicit replacement or update to clear incompatible intent.
 
-That is the whole story on the durable side, because the session store is not a carrier of
-generation intent at all: what it records of a session's configuration is
-`PersistedSessionConfig` — provider id and model, the two facts that identify what produced
-the history. Generation options travel on the policy through the seams that hand a *whole*
-policy across a boundary and find no host on the far side: a process/remote execution
-environment, and a `RuntimeSessionState` a core embedder holds and hands back to
-`LashRuntime`. Forking is the case that makes the rule visible. A fork creates a session
-head at a retained point, not a second authority over configuration, so a branch resolves
-the host's spec when it opens exactly as a reopen of its source would; only `provider_id`
-comes from the record, naming the provider that produced the history the branch continues.
+## Receipts and protocol-owned boundaries
 
-Session-wide defaults make the adapter's silent omissions matter. Anthropic drops a
-caller-set temperature when the model's host-declared capability pins sampling or extended
-thinking does, Messages and Responses have no seed field, and Codex sends none of the three.
-Erroring instead would make a session-wide default unusable on any mixed-model session — a
-host would need every model's capability before setting one — but silence is how a
-repeatability request goes unhonored without anyone noticing. **Omission stays silent and
-becomes observable**: `GenerationReceipt` records, per option, whether the caller
-requested it and whether the assembled body carries it, with the reason when it does not.
-Adapters derive it from the body they just built, except for the protocol-ownership carve-out
-below. It rides the response, the per-attempt ledger of ADR 0032, the durable effect journal,
-the trace record, and the remote mirror, so a host asserts "nothing was dropped" instead of
-trusting that one temperature survived every model a run touched.
+`GenerationReceipt` joins resolved intent with adapter emission evidence.
+`Applied` means sent, not provider compliance. Receipts accompany responses,
+attempt accounting, durable effects, tracing, and remote responses.
+`ExecutionEvidence` remains provider-reported execution facts under ADR 0031.
+An absent receipt means unreported, not that nothing is requested.
 
-Protocol-owned response boundaries are the deliberate exception to caller ownership. A
-protocol projector may suppress a non-empty caller `stop_sequences` list when the protocol
-grammar owns the boundary and a provider wire stop could truncate that grammar. The wire
-then carries no stop sequences. That suppression is not `Applied`: the runtime reports
-`SuppressedProtocolOwned`, which makes both `nothing_omitted()` and `fully_honored()` false.
-Projection provenance is carried in-process on the projected request, then copied onto the
-response, partial response, and every attempt record; it is not a caller-controlled wire
-flag. An empty caller list remains `NotRequested`.
+A protocol projector can suppress caller stop sequences when a provider stop
+would truncate protocol grammar. The projected request carries local provenance
+for this suppression. The runtime narrows the response and attempt receipts to
+`SuppressedProtocolOwned`; an empty requested list remains `NotRequested`.
 
-Prompt-cache intent follows the same rule. An explicit `cache_breakpoint` is `Applied` when
-the adapter emits its cache-control dialect (including OpenAI's `prompt_cache_key`) and
-`OmittedUnsupported` when the provider drops it. Direct Google currently reports the latter
-rather than silently discarding the rolling RLM fence.
+The cache row reports protocol-placed cache breakpoints. A wire that cannot emit
+them reports `OmittedUnsupported`. This cache observation does not waive the
+pre-I/O refusal rule for explicit generation settings.
 
-`output_token_cap` **clamps rather than fails**, for the same reason. It is the one option
-a model can refuse arithmetically, and it was validated hard: a cap above the model's
-`output_token_capacity` failed the call non-retryably. As per-turn intent that was a loud,
-local error; as durable session policy it is a session that fails *every remaining turn*
-after the since-removed `set_model` selected a smaller model, and the only
-fail-closed field in an otherwise fail-silent struct. The cap is a bound, not a
-demand — a request for at most 32k is
-satisfied by a model that can only produce 8k — so the turn sends the capacity and reports
-`ClampedToCapacity`. The runtime is the only layer that saw both numbers, so it narrows the
-adapter's `Applied` on the response and on every attempt of the ledger together, and
-`nothing_omitted()` (nothing was dropped) is joined by `fully_honored()` (nothing was
-dropped *or* reduced) for a host that needs the number it named.
+`nothing_omitted()` detects omissions and protocol suppression.
+`fully_honored()` additionally detects capacity clamping. Neither asserts that
+the provider obeys a field it receives.
 
-Clamping belongs to the **policy**, not to the turn, so it lives on `ModelSpec` and every
-path that takes generation options *out of a session policy* applies it. The turn driver is
-not the only such path: the direct requests plugins issue on the session's behalf carry the
-policy's options too, and `DirectRequest` has no `ModelLimits` to check a cap against. Left
-to the turn path alone, the fix would have produced the worse version of the same failure —
-after the since-removed `set_model` selected a smaller model, turns clamp and
-proceed while every maintenance call fails at the provider. So the observational-memory
-workers and `ToolSessionAdmin` hand out
-options already bounded by the model the same policy names, and a tool that substitutes its
-own model owns that pairing. Clamping is per request, against the model the request runs on;
-the session's stored intent is never rewritten.
+## Alternatives considered
 
-One case does lose a named local error. Provider configuration reaches the wire through
-`resolve_generation_policy`, underneath the request, and is not caller intent, so nothing
-checks it: a `ProviderOptions.max_output_tokens` above the model's capacity now fails at the
-provider with its own 400 rather than as `output_token_cap_exceeds_model_capacity`. Before
-this change, agent-session requests synthesized their cap *from* that provider config, which
-is what put it in front of the check. Host configuration validated against host-declared
-capability is a check worth having, but it belongs where provider options are configured,
-not smuggled in through a request field that no longer carries them.
+Wholesale replacement by default would discard inherited options whenever a
+child or patch states one field. Merge-by-default preserves that intent.
+Per-option clearing is not part of the overlay vocabulary; explicit replacement
+makes discarding inherited intent visible. Silent omission followed by a receipt
+cannot undo a sent call, so unsupported controls are refused before dispatch.
 
-The disposition is deliberately *not* part of `ExecutionEvidence`. ADR 0031 binds that type
-to facts the provider reported about the execution; this is a fact about the request lash
-built, and folding request-side bookkeeping into provider-reported evidence would dissolve
-the distinction that makes evidence falsifiable. `None` on either type keeps meaning
-unreported: a third-party provider that does not report is distinguishable from one
-reporting that nothing was requested.
+## Consequences
 
-We rejected a typed pre-flight check for the unsatisfiable combination that motivated this
-(a seed against a routing pool whose backends have no seed field). `SamplingCapability` is
-temperature-only, so a check built on today's capability model would silently narrow to
-temperature and miss exactly the failure it was written for. That needs a typed seed
-capability first, and until then the disposition report tells a host what happened after the
-call rather than guessing before it.
+Creation and durable updates own session configuration. Reopen preserves it.
+Calls carry model-paired intent, and hosts can inspect receipt outcomes without
+confusing request emission with provider execution evidence.
 
-## Amendment (FIG-3562, 2026-09-29): `ToolSessionAdmin` is gone
+## Code references
 
-[ADR 0116](0116-tools-are-opaque.md) deletes `ToolSessionAdmin` with the other body capability clients. The
-sentence above that names it is historical. The clamping rule stands for the
-observational-memory workers and for direct requests a tool issues through
-`AttemptContext::direct_completions`.
-
-## Amendment (FIG-4120, 2026-09-29): refusal replaces silent omission
-
-[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md) (audit G9, Q1)
-reverses "omission stays silent and becomes observable". A setting the call's
-model or wire cannot carry is now **refused before any I/O**, with a typed,
-non-retryable failure (`unsupported_generation_option`,
-`output_token_cap_required`, and the others ADR 0121 lists). That covers a
-seed on Messages or Responses, sampling or a cap on Codex, stop sequences on
-Responses, and a temperature on a pinned model. A receipt arrives too late to
-un-send a call. A mixed-model session clears incompatible intent with
-`GenerationOverlay::Replace`.
-
-- **Shared pinning.** `resolve_generation_policy` applies `Pinned` sampling
-  once, for every adapter, together with active Anthropic thinking (and Claude
-  on Vertex). It is no longer an Anthropic-only adapter fact.
-- **No invented cap.** The provider-options cap is still the fallback beneath
-  the request, but lash adds no default of its own. The 32,768 constant is
-  gone. Anthropic, which requires a cap, refuses an uncapped call.
-- **Google.** Google no longer sends `temperature: 0` when none is set. Its
-  receipt comes from what the adapter emitted, not from the request.
-- **The receipt.** Rows are joined from resolution provenance and the
-  adapter's emission evidence, not from the body. Four rows are new:
-  `reasoning`, `parallel_tool_calls`, `thinking_summary` (the wire half of
-  `expose_thinking`) and `thinking_visibility` (its local half). Chat
-  Completions has no summary flag, so there `expose_thinking` is honored by
-  local visibility alone. `OmittedSamplingPinned` is deleted.
-  `OmittedUnsupported` remains only for the `cache` row, which reports
-  protocol-placed breakpoints. The clamp (`ClampedToCapacity`) and protocol
-  stop suppression (`SuppressedProtocolOwned`) are the only remaining non-send
-  dispositions, and the runtime still narrows them as described above.
-- **`parallel_tool_calls`** is a typed `GenerationOptions` field, and the
-  hard-coded values are gone.
-
-The paragraphs above that call omission silent-but-reported, and the rejected
-typed pre-flight check, describe the state before this amendment.
-
-## Amendment (FIG-4099, 2026-09-29): the host's config applies at creation
-
-"Reopen follows ADR 0030 … the host's configuration wins" is superseded, as is
-the FIG-1875 banner's per-option merge of the host's overlay on reopen.
-Generation, like the model and the prompt, is baked into the session's config
-when the session is created, and the recorded value is authoritative on every
-reopen. Every creating path — `open()` of a new id, `create()`,
-`open_with_state()`/`observe_with_state()` and the engine's own drive-open —
-passes the creator's config to the catalog as
-`SessionStoreCreateRequest::config`, and the store writes it as the session's
-initial config head in the same transaction as the catalog row
-(`SessionHeadMeta::created`). The request says which head it carries:
-host-facing creation states `SessionCreationHead::Config`, so the head is on
-disk before the session is first materialized, and it includes the protocol turn
-options the session's protocol resolves at creation (the RLM session config
-among them). A core runtime binding state it was handed states
-`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
-so only the row is written at admission. Admitting an id that already exists
-writes no config either way. The facade forms that config in one place,
-`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
-nothing: there is no reconciliation, no seed write and no report, and builder
-config stated on a reopen is ignored. Only live policy follows an open (the
-session binding, turn budget, autonomy, no-progress budget and charge safety),
-and a builder provider that cannot serve the recorded pin is still refused typed
-(`ProviderMismatch`) without a write. Every later change is the one durable
-command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
-generation, attachment acceptance and plugin session config.
-
-The `GenerationOverlay` vocabulary is unchanged and is now spelled on the
-patch: `Merge` keeps unstated recorded options, `Replace` discards them, and a
-default `Replace` clears.
+- `crates/lash/src/session.rs:49-74,152-169,247-275` separates creation from open.
+- `crates/lash-core-llm/src/provider/options.rs:299-445` resolves controls and joins receipts.
+- `crates/lash-core-store/src/session_identity.rs` owns persisted config projection.
+- `crates/lash-core-store/src/session_policy.rs:357-390` defines generation overlays.
+- `crates/lash-core/src/runtime/turn_driver/streaming/support.rs` applies cap and stop-suppression provenance.

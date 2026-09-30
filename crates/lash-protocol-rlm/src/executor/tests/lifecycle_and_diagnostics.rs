@@ -155,7 +155,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         code: "finish(1);".to_string(),
     };
     let mut artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::memory_artifact_store().await;
+        crate::testing::sqlite_memory_artifact_store().await;
     let mut surface = LashlangSurface::default();
     let mut deferred_resolver = None;
     let mut projected_bindings = RlmProjectedBindings::default();
@@ -405,7 +405,7 @@ pub(super) async fn execute_and_collect_inventory(
         ExecRequest {
             code: source.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(BindingDeferredResolver {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -519,7 +519,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 ExecRequest {
                     code: successful_code.to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -549,7 +549,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     ExecRequest {
                         code: code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -621,7 +621,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             ExecRequest {
                 code: "let survives: number = 7;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -660,7 +660,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 ExecRequest {
                     code: "let cancelledTail: number = 1; while (true) {}".to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -735,7 +735,7 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             ExecRequest {
                 code: "await sleep(3600000); let woke: number = 1;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -780,7 +780,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 ExecRequest {
                     code: code.to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -828,7 +828,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     ExecRequest {
                         code: code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -888,7 +888,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     ExecRequest {
                         code: first_code.clone(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -922,7 +922,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     ExecRequest {
                         code: tail_code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -959,7 +959,7 @@ pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
     let diagnostic = format_rlm_parse_diagnostic(
         "unterminated template literal".to_string(),
         crate::plugin::RlmChannel::Cell,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert!(diagnostic.contains("standalone `</typescript>` line"));
     assert!(diagnostic.contains("inside multiline source text"));
@@ -976,7 +976,7 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
     let native = format_rlm_parse_diagnostic(
         positioned.clone(),
         crate::plugin::RlmChannel::NativeTool,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert_eq!(native, positioned);
     assert!(!native.contains("</typescript>"), "{native}");
@@ -985,7 +985,7 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
     let cell = format_rlm_parse_diagnostic(
         positioned.clone(),
         crate::plugin::RlmChannel::Cell,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert_eq!(
         cell.strip_prefix(positioned.as_str())
@@ -1005,12 +1005,22 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
 /// gate is the diagnostic code, not the fact that compilation failed.
 #[test]
 pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
-    use crate::dialect::Dialect;
-    let kind = |source: &str| {
-        crate::dialect::TypeScript
-            .parse(source)
-            .expect_err("the source is rejected")
-            .kind
+    let kind = |source: &str| match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: source.into(),
+            environment: Default::default(),
+            cell: true,
+        })
+        .expect("worker diagnostic")
+    {
+        lash_vm_client::service::Response::CompileRefused { policy, .. } => {
+            if policy {
+                lash_core::CellFailureKind::Policy
+            } else {
+                lash_core::CellFailureKind::Program
+            }
+        }
+        other => panic!("expected a refusal: {other:?}"),
     };
     assert_eq!(
         kind("finish(taks);"),
@@ -1101,20 +1111,28 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
             .with_globals(["text"]);
 
-    use crate::dialect::Dialect;
-    let shadowed = crate::dialect::TypeScript
-        .parse_cell("text.sha256({});", &environment)
-        .expect_err("the cache parse does not carry the module catalog");
+    let diagnostic = |source: &str| match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileModule {
+            source: source.into(),
+            environment: environment.clone(),
+            cell: true,
+        })
+        .expect("worker diagnostic")
+    {
+        lash_vm_client::service::Response::CompileRefused {
+            error: lashlang::ModuleCompileError::Parse(diagnostic),
+            ..
+        } => diagnostic.message,
+        other => panic!("expected a parse refusal: {other:?}"),
+    };
+    let shadowed = diagnostic("text.sha256({});");
     assert_eq!(
-        shadowed.message,
+        shadowed,
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
-
-    let ordinary = crate::dialect::TypeScript
-        .parse_cell("const s = 'a,b'; s.anchor(',');", &environment)
-        .expect_err("an ordinary local method remains unsupported");
+    let ordinary = diagnostic("const s = 'a,b'; s.anchor(',');");
     assert_eq!(
-        ordinary.message,
+        ordinary,
         "method `anchor` is not in the TypeScript runtime surface"
     );
 }
@@ -1136,13 +1154,113 @@ impl ExecutionHost for NoopHost {
     }
 }
 
+pub(super) fn worker_compile_program(
+    program: &lashlang::Program,
+) -> Result<lash_vm_client::service::CompiledModule, String> {
+    match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::CompileAst {
+            source: String::new(),
+            program: program.clone(),
+            environment: Default::default(),
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::Module(module) => Ok(*module),
+        other => Err(format!("unexpected worker compile response: {other:?}")),
+    }
+}
+pub(super) trait WorkerFixtureState {
+    fn worker_bytes(&self) -> Option<Vec<u8>>;
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String>;
+}
+impl WorkerFixtureState for lash_vm_client::RemoteState {
+    fn worker_bytes(&self) -> Option<Vec<u8>> {
+        self.bytes().map(Vec::from)
+    }
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        self.install_bytes(bytes)
+    }
+}
+impl WorkerFixtureState for lashlang::State {
+    fn worker_bytes(&self) -> Option<Vec<u8>> {
+        Some(
+            self.snapshot()
+                .to_canonical_bytes()
+                .expect("fixture state encodes"),
+        )
+    }
+    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        *self = lashlang::State::from_snapshot(
+            lashlang::VmInstance::pristine()
+                .open_snapshot(&bytes)
+                .map_err(|e| e.to_string())?,
+        );
+        Ok(())
+    }
+}
 pub(super) async fn execute_with_projected(
-    compiled: &lashlang::CompiledProgram,
-    state: &mut lashlang::State,
+    module: &lash_vm_client::service::CompiledModule,
+    state: &mut impl WorkerFixtureState,
     projected: &ProjectedBindings,
 ) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
-    let env = ExecutionEnvironment::new(&NoopHost).with_projected_bindings(projected.clone());
-    lashlang::execute(compiled, state, &env).await
+    let service = lash_vm_client::service::Service::default();
+    let owner = lash_vm_protocol::VmOwner::new("projection-witness");
+    let snapshot = state
+        .worker_bytes()
+        .map(|bytes| {
+            lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
+                lash_vm_protocol::VmStateKind::Snapshot,
+                owner.clone(),
+                lashlang::vm_contract_versions(),
+                lashlang::LASHLANG_SNAPSHOT_VERSION,
+                bytes,
+            ))
+        })
+        .unwrap_or(lash_vm_protocol::StartState::Fresh);
+    let run = lash_lashlang_runtime::WorkerRun {
+        service: &service,
+        host: &NoopHost,
+        identities: lash_vm_broker::CodeCallIdentities::process_body(
+            lash_sansio::ProcessId::fixture("projection-witness"),
+        ),
+        owner,
+        frame_epoch: lash_vm_protocol::FrameEpoch(0),
+        program: lash_vm_protocol::ProgramSource::Artifact {
+            module_ref: module.module_ref.to_string(),
+            entry: lash_vm_protocol::ProgramEntry::Main,
+            artifact: module.artifact.bytes().to_vec(),
+        },
+        context: lash_vm_client::RunContext::default(),
+        projected: projected.clone(),
+        bounds: lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ),
+        state: snapshot,
+        boundary: &|| false,
+    }
+    .run()
+    .await
+    .expect("worker run");
+    match run {
+        lash_vm_broker::BrokeredEnd::Complete { value, checkpoint } => {
+            state
+                .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                .expect("install worker state");
+            Ok(rmp_serde::from_slice(&value.0).expect("worker outcome"))
+        }
+        lash_vm_broker::BrokeredEnd::GuestError { error, checkpoint } => {
+            if let Some(checkpoint) = checkpoint {
+                state
+                    .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                    .expect("install worker state");
+            }
+            Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
+                .expect("worker guest failure")
+                .error)
+        }
+        other => panic!("unexpected worker end: {other:?}"),
+    }
 }
 
 pub(super) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -1238,7 +1356,9 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
             .build()
             .into_runtime();
     let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
-    let artifact = lashlang::ModuleArtifact::from_program(program).expect("valid fixture module");
+    let artifact = worker_compile_program(&program)
+        .expect("valid fixture module")
+        .artifact;
     let trace = foreground_lashlang_execution_trace(
         &context,
         &artifact,
@@ -1293,7 +1413,7 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
 pub(super) async fn execute_continue_as_with_trace_sink(
     trace_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>>,
 ) -> lash_core::ToolCallRecord {
-    let definition = crate::continue_as_tool_definition();
+    let definition = crate::continue_as_tool_definition(&crate::dialect::TypescriptDialect);
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition]);
     let invocation = lash_core::testing::exec_code_invocation(
         "test-session",
@@ -1316,7 +1436,9 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             crate::testing::double_ports(&double, &handler),
             Arc::new(crate::control_tools::RlmControlToolsProvider {
-                vocabulary: crate::dialect::DialectPromptVocabulary::default(),
+                vocabulary: crate::dialect::Dialect::prompt_vocabulary(
+                    &crate::dialect::TypescriptDialect,
+                ),
             }),
             catalog,
             invocation,
@@ -1328,7 +1450,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
             code: r#"await control.continue_as({ task: "continue deterministically" });"#
                 .to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
@@ -1438,7 +1560,7 @@ pub(super) async fn execute_test_code(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest { code },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
@@ -1559,10 +1681,10 @@ pub(super) async fn execute_with_host_environment(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let ctx = super::triggers::trigger_tool_context(
         crate::testing::double_ports(&double, &handler),
-        crate::testing::memory_trigger_store().await,
+        crate::testing::sqlite_memory_trigger_store().await,
         &artifact_store,
         None,
     )
@@ -1612,7 +1734,7 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             ExecRequest {
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1646,7 +1768,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             ExecRequest {
                 code: "const value = 1;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1669,7 +1791,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
 }
 
 #[test]
-pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
+pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
@@ -1695,7 +1817,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1705,9 +1827,14 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(first.terminal_finish, Some(serde_json::json!(1)));
-        let first_stats = state.vm.linked_programs().stats();
-        assert_eq!(first_stats.hits, 0);
-        assert_eq!(first_stats.misses, 1);
+        let first_stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(first_stats.idle, first_stats.workers);
 
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -1721,7 +1848,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1731,10 +1858,14 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(second.terminal_finish, Some(serde_json::json!(1)));
-        let second_stats = state.vm.linked_programs().stats();
-        assert_eq!(second_stats.hits, 1);
-        assert_eq!(second_stats.misses, 1);
-        assert_eq!(second_stats.entries, 1);
+        let second_stats = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("worker pool")
+            .stats();
+        assert_eq!(second_stats.idle, second_stats.workers);
         assert!(state.frame_held_module_refs().next().is_none());
     });
 }

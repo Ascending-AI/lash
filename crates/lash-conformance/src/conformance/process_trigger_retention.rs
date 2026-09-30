@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
+mod delivery_starts;
+
 use crate::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessId, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
@@ -87,6 +89,27 @@ where
         Some(crate::testing::TriggerDeliveryPinReleaseLoss::AfterReleasing),
     )
     .await;
+}
+
+/// A trigger delivery's pin keeps its row from prune until it is released
+/// (ADR 0021, FIG-4203).
+pub async fn trigger_delivery_pin<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    delivery_starts::a_trigger_delivery_pin_holds_its_row_until_released(make().await).await;
+}
+
+/// A delivery's start whose key finds nothing registers nothing once its
+/// delivery is bound or gone (FIG-4369).
+pub async fn trigger_delivery_start_admission<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    delivery_starts::a_delivery_start_registers_nothing_once_its_process_was_pruned(make().await)
+        .await;
 }
 
 /// A reserved Engine target with a non-object payload cannot start. Its
@@ -606,13 +629,7 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": "worker" }),
         },
-        target_identity: ProcessIdentity::for_definition(
-            lash_core::ProcessDefinitionRef::unclaimed(
-                "test",
-                serde_json::json!({ "process_name": "worker" }),
-            ),
-            Some("worker".to_string()),
-        ),
+        target_identity: ProcessIdentity::labelled("test", Some("worker".to_string())),
         event_types: Vec::new(),
         input_template,
         target_label: Some("worker".to_string()),

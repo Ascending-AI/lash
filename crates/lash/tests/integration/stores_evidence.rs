@@ -210,14 +210,6 @@ pub(crate) fn store_area_test_support_witnesses() {
     field_witness(|value: &lash::persistence::DecodedRowCounts| {
         let _ = &value.graph_node_bodies;
     });
-    // FIG-2105-TEST-WITNESS-0080: lash::persistence::DecodedRowCounts::usage_rows [field]
-    field_witness(|value: &lash::persistence::DecodedRowCounts| {
-        let _ = &value.usage_rows;
-    });
-    // FIG-2105-TEST-WITNESS-0081: lash::persistence::DecodedRowCounts::usage_holes [field]
-    field_witness(|value: &lash::persistence::DecodedRowCounts| {
-        let _ = &value.usage_holes;
-    });
     // FIG-2105-TEST-WITNESS-0082: lash::persistence::DecodedRowCounts::turn_receipt_bodies [field]
     field_witness(|value: &lash::persistence::DecodedRowCounts| {
         let _ = &value.turn_receipt_bodies;

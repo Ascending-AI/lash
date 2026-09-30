@@ -56,8 +56,12 @@ impl AttachmentStore for FaultingAttachmentStore {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -236,7 +240,14 @@ pub async fn cross_session_attachment_adoption_conformance(
     .await
     .unwrap();
     assert_eq!(report.reclaimed_count, 0);
-    assert_eq!(bytes.get(&reference.id).await.unwrap().bytes, vec![8]);
+    assert_eq!(
+        bytes
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .bytes,
+        vec![8]
+    );
     store
         .end_attachment_referrer(&ArtifactReferrer::Session("reader-b".into()))
         .await

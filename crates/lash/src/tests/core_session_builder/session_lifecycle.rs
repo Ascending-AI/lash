@@ -6,6 +6,11 @@
 use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmSendBuilderExt as _;
+#[path = "session_lifecycle/commit_budget.rs"]
+mod commit_budget;
+
+#[path = "session_lifecycle/journal_retirement.rs"]
+mod journal_retirement;
 #[path = "session_lifecycle/provider_pin.rs"]
 mod provider_pin;
 #[path = "session_lifecycle/session_binding.rs"]
@@ -294,341 +299,6 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_BYTE_LIMIT: usize = 4_096;
-    let oversized_text = "x".repeat(CONFIGURED_BYTE_LIMIT * 2);
-    let provider = crate::testing::TestProvider::builder()
-        .kind("oversized-commit")
-        .complete(move |_request| {
-            let oversized_text = oversized_text.clone();
-            async move { Ok(text_response(&oversized_text)) }
-        })
-        .build()
-        .into_handle();
-    let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
-        crate::CommitBudget::new(
-            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-            crate::CommitBudgetLimit::Unbounded,
-        ),
-    )
-    .provider(provider)
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("commit-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error = match session
-        .send(TurnInput::text("produce an oversized turn"))
-        .output()
-        .await
-    {
-        Ok(_) => panic!("the oversized turn must fail at the production surface"),
-        Err(error) => error,
-    };
-
-    let EmbedError::Runtime(runtime_error) = &error else {
-        panic!("expected a host-visible runtime error, got {error}");
-    };
-    assert_eq!(
-        runtime_error.code,
-        lash_core::RuntimeErrorCode::StoreCommitByteBudgetExceeded
-    );
-    assert!(
-        runtime_error.message.contains(&format!(
-            "exceeding the {}-byte transaction budget",
-            CONFIGURED_BYTE_LIMIT
-        )),
-        "{}",
-        runtime_error.message
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-    Ok(())
-}
-
-#[tokio::test]
-async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_NODE_LIMIT: usize = 1;
-    let provider = crate::testing::TestProvider::builder()
-        .kind("oversized-node-commit")
-        .complete(|_request| async move { Ok(text_response("assistant response")) })
-        .build()
-        .into_handle();
-    let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
-        crate::CommitBudget::new(
-            crate::CommitBudgetLimit::Unbounded,
-            crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
-        ),
-    )
-    .provider(provider)
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("commit-node-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error = match session
-        .send(TurnInput::text("produce a turn"))
-        .output()
-        .await
-    {
-        Ok(_) => panic!("the over-limit node commit must fail at the production surface"),
-        Err(error) => error,
-    };
-
-    let EmbedError::Runtime(runtime_error) = &error else {
-        panic!("expected a host-visible runtime error, got {error}");
-    };
-    assert_eq!(
-        runtime_error.code,
-        lash_core::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-    );
-    assert!(
-        runtime_error.message.contains(&format!(
-            "exceeding the configured {CONFIGURED_NODE_LIMIT}-row node budget"
-        )),
-        "{}",
-        runtime_error.message
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-    Ok(())
-}
-
-async fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCore> {
-    explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
-        commit_budget,
-    )
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-}
-
-fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
-    let policy = lash_core::SessionPolicy {
-        provider_id: mock_provider().kind().to_string(),
-        model: mock_model_spec(),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-    };
-    let mut state = RuntimeSessionState::new(policy);
-    state.session_id = session_id.into();
-    state.ensure_agent_frame_initialized();
-    state.append_active_conversation_messages(&[text_message(lash_core::MessageRole::User, text)]);
-    state
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Result<()> {
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::Unbounded,
-        crate::CommitBudgetLimit::Unbounded,
-    ))
-    .await?;
-    let session = core
-        .session("testing-set-persisted-park")
-        .created()
-        .await
-        .open()
-        .await?;
-    let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
-    let node_ids = |nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]| {
-        nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
-    };
-    let fixture_nodes = node_ids(&fixture.session_graph.nodes);
-    let fresh = node_ids(&session.admin().state().export().await.session_graph.nodes);
-    assert_ne!(fresh, fixture_nodes);
-    session.admin().state().set_persisted(fixture).await?;
-    let resident = session.admin().state().export().await;
-    assert_eq!(node_ids(&resident.session_graph.nodes), fixture_nodes);
-    assert_eq!(
-        Box::pin(session.park()).await?.session_id(),
-        "testing-set-persisted-park"
-    );
-    Ok(())
-}
-
-fn assert_byte_budget_session_error(error: &EmbedError, configured_limit: usize) {
-    assert!(
-        matches!(
-            error,
-            EmbedError::Session(SessionError::Store {
-                source: lash_core::StoreError::CommitByteBudgetExceeded { max_bytes, .. },
-                ..
-            }) if *max_bytes == configured_limit
-        ),
-        "expected typed byte-budget rejection, got {error}"
-    );
-    assert!(
-        error.to_string().contains(&format!(
-            "exceeding the {configured_limit}-byte transaction budget"
-        )),
-        "{error}"
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-}
-
-fn assert_node_budget_session_error(error: &EmbedError, configured_limit: usize) {
-    assert!(
-        matches!(
-            error,
-            EmbedError::Session(SessionError::Store {
-                source: lash_core::StoreError::CommitNodeBudgetExceeded { max_nodes, .. },
-                ..
-            }) if *max_nodes == configured_limit
-        ),
-        "expected typed node-budget rejection, got {error}"
-    );
-    assert!(
-        error.to_string().contains(&format!(
-            "exceeding the configured {configured_limit}-row node budget"
-        )),
-        "{error}"
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-}
-
-#[tokio::test]
-async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_BYTE_LIMIT: usize = 256;
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-        crate::CommitBudgetLimit::Unbounded,
-    ))
-    .await?;
-    let session = core
-        .session("append-byte-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error =
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "x".repeat(CONFIGURED_BYTE_LIMIT * 4),
-                )]),
-        )
-        .await
-        .expect_err("the public append must reject its over-limit commit");
-
-    assert_byte_budget_session_error(&error, CONFIGURED_BYTE_LIMIT);
-    Ok(())
-}
-
-#[tokio::test]
-async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_NODE_LIMIT: usize = 1;
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::Unbounded,
-        crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
-    ))
-    .await?;
-    let session = core
-        .session("append-node-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error =
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "one appended message plus the initial frame exceeds one node",
-                )]),
-        )
-        .await
-        .expect_err("the public append must reject its over-limit commit");
-
-    assert_node_budget_session_error(&error, CONFIGURED_NODE_LIMIT);
-    Ok(())
-}
-
-#[tokio::test]
-async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_BYTE_LIMIT: usize = 256;
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-        crate::CommitBudgetLimit::Unbounded,
-    ))
-    .await?;
-    let session = core
-        .session("park-byte-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-    session
-        .admin()
-        .state()
-        .set_persisted(pending_park_state(
-            "park-byte-budget-surface",
-            &"x".repeat(CONFIGURED_BYTE_LIMIT * 4),
-        ))
-        .await?;
-
-    let error = match Box::pin(session.park()).await {
-        Ok(_) => panic!("park must reject its over-limit commit"),
-        Err(error) => error,
-    };
-
-    assert_byte_budget_session_error(&error, CONFIGURED_BYTE_LIMIT);
-    Ok(())
-}
-
-#[tokio::test]
-async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_NODE_LIMIT: usize = 1;
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::Unbounded,
-        crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
-    ))
-    .await?;
-    let session = core
-        .session("park-node-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-    session
-        .admin()
-        .state()
-        .set_persisted(pending_park_state(
-            "park-node-budget-surface",
-            "one pending message plus the initial frame exceeds one node",
-        ))
-        .await?;
-
-    let error = match Box::pin(session.park()).await {
-        Ok(_) => panic!("park must reject its over-limit commit"),
-        Err(error) => error,
-    };
-
-    assert_node_budget_session_error(&error, CONFIGURED_NODE_LIMIT);
-    Ok(())
-}
-
 /// The backend is a required argument, so a build without one cannot be
 /// written (the `core_builder_requires_a_backend` UI case). What the
 /// builder still refuses at `build()` is a missing runtime setting.
@@ -894,7 +564,11 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
     }))
     .expect("rlm config");
     let backend = double_backend().await;
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend.clone());
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        config,
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend.clone(),
+    );
     let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(mock_model_spec())
@@ -1111,14 +785,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // them (here `compile-extra-tool` resolves to `lookup`).
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone());
-    let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        &backend.clone(),
-    ));
+    let factory = Arc::new(rlm_factory(&backend));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn PluginFactory>,
         Arc::new(CompileSurfaceToolFactory::new(
@@ -1597,7 +1264,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let live_clone = session.clone();
     let err = match Box::pin(session.park()).await {
         Ok(_) => panic!("park must not proceed while another handle is live"),
-        Err(err) => err,
+        Err(refused) => EmbedError::from(refused),
     };
     assert!(matches!(err, EmbedError::SessionStillInUse));
 
@@ -1968,108 +1635,6 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     Ok(())
 }
 
-/// The backend's effect host, recording every journal retirement it is
-/// asked for before carrying it out.
-struct RetirementRecordingHost {
-    inner: Arc<dyn lash_core::EffectHost>,
-    retirements: Arc<std::sync::Mutex<Vec<lash_core::EffectJournalRetirement>>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RetirementRecordingHost {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &lash_core::SessionId,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::EffectHost for RetirementRecordingHost {
-    async fn journal_replay(
-        &self,
-        journal: &lash_sansio::EffectJournalIdentity,
-    ) -> std::result::Result<lash_core::JournalReplay, lash_core::RuntimeError> {
-        self.inner.journal_replay(journal).await
-    }
-
-    fn turn_control_binding_id(&self) -> String {
-        self.inner.turn_control_binding_id()
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'a>(
-        &'a self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<lash_core::ScopedEffectController<'a>, lash_core::RuntimeError> {
-        self.inner.scoped(scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<
-        Option<lash_core::ScopedEffectController<'static>>,
-        lash_core::RuntimeError,
-    > {
-        self.inner.scoped_static(scope)
-    }
-
-    async fn retire_effect_journal(
-        &self,
-        retirement: lash_core::EffectJournalRetirement,
-    ) -> std::result::Result<usize, lash_core::RuntimeError> {
-        self.retirements.lock_recover().push(retirement.clone());
-        self.inner.retire_effect_journal(retirement).await
-    }
-}
-
-#[tokio::test]
-async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
-    let retirements = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let recorded = Arc::clone(&retirements);
-    let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await).effect_host(
-        move |inner| {
-            Arc::new(RetirementRecordingHost {
-                inner,
-                retirements: recorded,
-            })
-        },
-    );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    drop(
-        core.session("retire-delete-session")
-            .created()
-            .await
-            .open()
-            .await?,
-    );
-
-    delete_bound_session(&core, "retire-delete-session").await?;
-
-    assert_eq!(
-        *retirements.lock_recover(),
-        vec![lash_core::EffectJournalRetirement::session(
-            "retire-delete-session"
-        )]
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn public_session_state_appends_preserve_concurrent_retirement_refusals() -> Result<()> {
     let backend = double_backend().await;
@@ -2110,27 +1675,30 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
                 .expect_err("message append must preserve the retirement refusal")
             };
 
+        // A host append is a session command (FIG-4202): the retired
+        // session refuses its submission, typed, before anything is queued.
         assert!(
             matches!(
                 &error,
-                EmbedError::Session(lash_core::SessionError::Store {
-                    context,
-                    source: lash_core::StoreError::SessionDeleted {
-                        session_id: deleted_session_id,
-                    },
-                }) if context == "failed to persist runtime state"
-                    && deleted_session_id == session_id
+                EmbedError::Runtime(runtime)
+                    if runtime.code == lash_core::RuntimeErrorCode::SessionDeleted
+                        && matches!(
+                            &runtime.cause,
+                            Some(lash_core::RuntimeErrorCause::SessionDeleted {
+                                session_id: deleted_session_id,
+                            }) if deleted_session_id == session_id
+                        )
             ),
             "{error:?}"
         );
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "runtime session error: failed to persist runtime state: {}",
-                lash_core::StoreError::SessionDeleted {
+        assert!(
+            error.to_string().contains(
+                &lash_core::StoreError::SessionDeleted {
                     session_id: SessionId::from(session_id),
                 }
-            )
+                .to_string()
+            ),
+            "{error}"
         );
     }
     Ok(())

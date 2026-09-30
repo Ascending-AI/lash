@@ -1,5 +1,5 @@
 lash_conformance::append_receipt_identity_corruption_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres corrupt receipt test: database is not configured");
         return;
     };
@@ -9,7 +9,7 @@ lash_conformance::append_receipt_identity_corruption_tests!({
     )).await.expect("admit corrupt-receipt root");
     let pool = storage.pool().clone();
     (
-        _database_lock,
+        _database_fixture,
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
         move || async move {
             sqlx::query(

@@ -292,6 +292,20 @@ impl RunRecorder {
         Ok(value)
     }
 
+    /// Record the usage the last recorded turn delivered. It is read after
+    /// the turn's spans, because accounting delivery is eventual (ADR 0125)
+    /// and the durable read is async.
+    pub(crate) fn record_last_turn_usage(
+        &mut self,
+        usage_delta: SessionUsageReport,
+        cumulative_usage: SessionUsageReport,
+    ) {
+        if let Some(turn) = self.turns.last_mut() {
+            turn.usage_delta = usage_delta;
+            turn.cumulative_usage = cumulative_usage;
+        }
+    }
+
     /// The turns recorded so far — for tails that aggregate over them
     /// beyond the default phase-profile fold.
     pub(crate) fn turns(&self) -> &[RuntimePerfTurnResult] {

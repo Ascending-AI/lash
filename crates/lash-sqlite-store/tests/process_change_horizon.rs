@@ -1,5 +1,5 @@
-//! The process change-horizon laws over a file backend and a named
-//! in-memory one (ADR 0102).
+//! The process change-horizon laws over file and named memory
+//! SQLite store sets (ADR 0102).
 
 use std::sync::Arc;
 

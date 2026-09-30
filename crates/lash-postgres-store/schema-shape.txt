@@ -26,6 +26,7 @@ table lash_abandoned_consumer_holds
   column owner_scope_kind text not-null
   primary-key (hold_key)
 table lash_artifact_cleanup_obligations
+  column awaited_journal_key text nullable
   column cleanup_json text not-null
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable
@@ -215,20 +216,6 @@ table lash_process_change_clock
   column singleton boolean not-null default
   column tombstone_compaction_horizon bigint not-null default
   primary-key (singleton)
-table lash_process_definitions
-  column change_seq bigint not-null
-  column created_at_ms bigint not-null
-  column definition_id text not-null
-  column deleted_at_ms bigint nullable
-  column fingerprint text not-null
-  column lifecycle text not-null
-  column name text not-null
-  column owner_scope text not-null
-  column record_json text not-null
-  column revision bigint not-null
-  column updated_at_ms bigint not-null
-  unique (owner_scope, name)
-  primary-key (definition_id)
 table lash_process_events
   column event_json text not-null
   column event_type text not-null
@@ -617,32 +604,48 @@ table lash_turn_parks
   column since_ms bigint not-null
   column turn_id text not-null
   primary-key (session_id)
-table lash_usage_delta_holes
-  column attempt_ordinal bigint not-null
-  column call_id text not-null
-  column generation_id text nullable
-  column seq bigint not-null
-  column session_id text not-null
-  primary-key (session_id, seq, call_id, attempt_ordinal)
-  foreign-key (seq) references lash_usage_deltas (seq) on delete cascade
-table lash_usage_deltas
+table lash_usage_facts
   column cache_read_input_tokens bigint not-null
   column cache_write_input_tokens bigint not-null
-  column entry_ordinal bigint not-null
+  column call_ordinal bigint not-null
+  column disposition text not-null
+  column effect_key text not-null
+  column fact_kind text not-null
+  column generation_id text nullable
   column input_tokens bigint not-null
+  column llm_call_id text not-null
   column model text not-null
-  column operation_storage_key text not-null
   column output_tokens bigint not-null
-  column payload_encoding_version integer not-null
+  column owner_id text not-null
+  column owner_kind text not-null
   column payload_hash text not-null
+  column provider_attempt bigint not-null
   column reasoning_output_tokens bigint not-null
-  column reconciled_attempt_ordinal bigint nullable
-  column reconciled_call_id text nullable
+  column recorded_at_ms bigint not-null
+  column run_id text nullable
   column seq bigint not-null default
-  column session_id text not-null
   column source text not-null
-  unique (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
+  unique (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
   primary-key (seq)
+table lash_usage_owner_retirements
+  column owner_id text not-null
+  column owner_kind text not-null
+  column retired_at_ms bigint not-null
+  primary-key (owner_kind, owner_id)
+table lash_usage_runs
+  column admitted_at_ms bigint not-null
+  column conflict_detail text nullable
+  column effect_key text not-null
+  column execution_scope_key text not-null
+  column model text not-null
+  column owner_id text not-null
+  column owner_kind text not-null
+  column resolved_at_ms bigint nullable
+  column run_id text not-null
+  column source text not-null
+  column state text not-null
+  column unknown_reason text nullable
+  primary-key (owner_kind, owner_id, effect_key, run_id)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null
   column process_id text not-null
@@ -653,3 +656,12 @@ table lash_wake_redelivery_fences
   column process_id text not-null
   column session_id text not-null
   primary-key (session_id, process_id)
+table lash_worker_recovery
+  column attempts integer not-null
+  column cpu_nanos bigint not-null
+  column in_flight integer not-null
+  column replacement integer not-null
+  column revision bigint not-null
+  column scope_id text not-null
+  column unknown_cpu_attempts integer not-null
+  primary-key (scope_id)

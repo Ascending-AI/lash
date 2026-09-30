@@ -14,6 +14,7 @@ async fn approval_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         backend,
     );
     LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)

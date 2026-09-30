@@ -37,10 +37,12 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         );
 
         const ROLLED_BACK_MARKER: &str = "must-not-survive-stale-append";
-        let writer = session.runtime.writer();
-        let mut runtime = writer.lock().await;
-        let result = Box::pin(
-            runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
+        // A host's append is a session command the drive applies at a turn
+        // boundary (FIG-4202); a stale ancestor settles it `StaleBranch`.
+        let result = session
+            .admin()
+            .state()
+            .append_session_nodes(lash_core::AppendSessionNodesRequest {
                 operation_id: "leaf-bearing-stale-append".to_string(),
                 nodes: vec![lash_core::SessionAppendNode::message(
                     lash_core::PluginMessage::text(
@@ -50,23 +52,20 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                     .with_id("leaf-bearing-stale-append-message"),
                 )],
                 requires_ancestor_node_id: Some("inactive-ancestor".to_string().into()),
-            }),
-        )
-        .await?;
+            })
+            .await?;
         assert!(matches!(
             result,
             lash_core::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }
                 if required_node_id == "inactive-ancestor"
         ));
         assert!(
-            runtime.read_view().messages().iter().all(|message| message
+            session.read_view().messages().iter().all(|message| message
                 .parts
                 .iter()
                 .all(|part| part.content() != ROLLED_BACK_MARKER)),
             "the stale append must be absent from the reconciled RLM history projection"
         );
-        session.runtime.publish_from(&runtime);
-        drop(runtime);
 
         let execution_after = session
             .admin()
@@ -723,7 +722,7 @@ finish(value);"#,
         .expect("definition id");
     let bytes = core
         .backend()
-        .process_definitions()
+        .definition_store()
         .get_process_definition(definition_id)
         .await
         .map_err(lash_core::PluginError::from)?

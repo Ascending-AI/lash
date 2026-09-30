@@ -566,12 +566,23 @@ async fn settle(
     }
     let context = target.context().await?;
     let mut from = follow::Position::at(cursor.clone());
+    let mut gaps = Vec::new();
     // A follow without a window answers; a pending one would go on from its
     // position.
     let outcome = loop {
         match Box::pin(follow::follow(&context, subject, from, &mut tap, None)).await? {
-            follow::Followed::Answered(outcome) => break *outcome,
-            follow::Followed::Pending(position) => from = position,
+            follow::Followed::Answered(mut outcome) => {
+                gaps.append(&mut outcome.gaps);
+                outcome.gaps = gaps;
+                break *outcome;
+            }
+            follow::Followed::Pending {
+                position,
+                gaps: mut met,
+            } => {
+                from = position;
+                gaps.append(&mut met);
+            }
         }
     };
     shared.remember(&outcome);

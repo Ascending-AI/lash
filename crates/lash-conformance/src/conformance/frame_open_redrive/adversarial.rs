@@ -13,7 +13,7 @@
 //! - An explicit empty pressure seed opens one frame; a pressure frame whose
 //!   commit the store refuses leaves nothing of the open visible.
 //! - Two plugins whose pressure hooks share an id keep their records apart.
-//! - Every open restarts the live interpreter: a staged open, an
+//! - Every open restarts the live interpreter: a host's commanded open, an
 //!   administrative compaction the command lane applies, and a storeless
 //!   runtime's direct compaction.
 
@@ -665,8 +665,9 @@ pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
 /// How [`every_open_restarts_the_live_execution_state`] opens its frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiveResetPath {
-    /// A staged open ([`crate::LashRuntime::open_agent_frame`]).
-    Staged,
+    /// A host's frame open: a session command the drive applies at a turn
+    /// boundary, on the runtime whose drive applies it (FIG-4202).
+    HostOpen,
     /// An administrative compaction the command lane applies, on the
     /// runtime whose drive applies it.
     Compact,
@@ -740,16 +741,35 @@ pub async fn every_open_restarts_the_live_execution_state(
             let mut runtime = build_runtime(&parts, None).await;
             let before = live_holds(&mut runtime, global).await;
             let mut runtime = match path {
-                LiveResetPath::Staged => {
-                    let opened = runtime
-                        .open_agent_frame(crate::OpenAgentFrameRequest::new(
-                            crate::FrameKey::from_caller_material("frame-open-law-staged")
+                LiveResetPath::HostOpen => {
+                    let command = crate::SessionCommand::OpenAgentFrame {
+                        request: Box::new(crate::OpenAgentFrameRequest::new(
+                            crate::FrameKey::from_caller_material("frame-open-law-host-open")
                                 .expect("non-empty frame material"),
-                            crate::AgentFrameReason::new("staged"),
-                        ))
+                            crate::AgentFrameReason::new("host_open"),
+                        )),
+                    };
+                    parts
+                        .store
+                        .enqueue_queued_work(
+                            crate::QueuedWorkBatchDraft::new(
+                                parts.session_id.clone(),
+                                crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                                command.clone(),
+                            )
+                            .with_source_key(command.source_key("live-reset")),
+                        )
                         .await
-                        .expect("stage a frame");
-                    assert!(opened.opened);
+                        .expect("accept the frame-open command");
+                    let drained = Box::pin(runtime.drive_next_queued_root(
+                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                    ))
+                    .await
+                    .expect("the drive applies the frame open");
+                    assert!(
+                        drained.ran().is_none(),
+                        "the drive only applies the command lane"
+                    );
                     runtime
                 }
                 LiveResetPath::Compact => {

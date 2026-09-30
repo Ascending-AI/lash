@@ -198,7 +198,11 @@ impl AttachmentStore for ProbeBackend {
         ))
     }
 
-    async fn get(&self, _id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        _id: &AttachmentId,
+        _max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         panic!("unexpected get")
     }
 

@@ -15,6 +15,15 @@
 //! that is shared across every session built from the same `LashCore`, so
 //! e.g. stdio servers are spawned once per process rather than per session.
 
+//! Tool-list notifications return after marking one latest dirty signal. The
+//! entry's lifecycle actor owns one refresh, with at most one pending repeat,
+//! and cancels it on disconnect or shutdown. Startup and refresh discovery
+//! accept at most 64 pages, 4,096 tools and 8 MiB of serialized page data in
+//! total, including cursors and metadata. Cursor cycles and catalogs exceeding
+//! a limit are refused without replacing the last installed catalog. A stalled
+//! refresh closes its service at the startup timeout and reconnects, retaining
+//! the last catalog while clearing unanswered protocol requests.
+
 pub mod config;
 pub mod error;
 pub mod host;

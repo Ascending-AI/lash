@@ -62,6 +62,7 @@
 //!    scenario in [`cases`].
 
 pub mod cases;
+mod catalog_audit;
 pub mod deployment;
 pub mod engine;
 pub mod invariants;
@@ -182,7 +183,7 @@ impl CrashPoint {
     }
 }
 
-/// The S8 slices of ADR 0109 §8 that own a cell today's `main` fails.
+/// The obligation kinds of ADR 0109 §3 that classify a crash-matrix cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum S8Slice {
     /// Ingress: the outbox arm, parks, `TurnStatus::Stalled`.
@@ -284,8 +285,17 @@ impl Activation {
 /// The recovery interval's tick, `T` of ADR 0109 §1.8: 10 s ± 10 %.
 pub const TICK: Duration = Duration::from_secs(10);
 
-/// The ADR 0109 §1.8 bound a cell's recovery must meet, in sim time from the
-/// crash to the first tick at which every invariant holds.
+/// The ADR 0109 §1.8 bound a cell's recovery must meet.
+///
+/// §1.8 bounds recovery by the recovery interval's cadence: an obligation
+/// becomes the relay's at a point in store time (a claim lapses, a due time
+/// passes), and the relay's next pass takes it. The bound is therefore judged
+/// in passes, from the first tick at which the store had made the obligation
+/// eligible ([`judge`](Self::judge)), never in store time from the crash: a
+/// live world's store clock flows with wall time, so a harness that stalls
+/// between two ticks (a CPU-starved or memory-stalled host) lands the next
+/// tick late, and a store-time bound would charge that stall to the recovery
+/// (FIG-4309).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DetectionBound {
     /// A lost immediate attempt on SQLite across a leader failover (the
@@ -307,23 +317,85 @@ pub enum DetectionBound {
 }
 
 impl DetectionBound {
-    /// The bound, with the tick's +10 % jitter taken at its worst.
+    /// Store time from the crash after which the obligation is the relay's:
+    /// the failover lease of a lost immediate attempt, the claim TTL of a
+    /// lapsed claim, the attempts' summed backoff at the ceiling. The dead
+    /// deployment wrote its rows by the crash, so each row's own point is at
+    /// or before this one.
     #[must_use]
-    pub fn limit(self) -> Duration {
-        let tick = TICK + TICK / 10;
+    pub fn eligible_after(self) -> Duration {
         match self {
-            Self::LostImmediateSqliteFailover => tick + Duration::from_millis(20_500),
-            Self::LapsedClaim => Duration::from_secs(60) + tick,
-            Self::LapsedClaimThenArmed => Duration::from_secs(60) + tick * 2,
-            Self::StalledInClaimingPass => tick,
+            Self::LostImmediateSqliteFailover => Duration::from_millis(20_500),
+            Self::LapsedClaim | Self::LapsedClaimThenArmed => Duration::from_secs(60),
+            Self::StalledInClaimingPass => Duration::ZERO,
             Self::AttemptCeiling => {
-                // Attempts 1..=16 at min(2^(n-1) s, 15 min), each plus a tick.
+                // Attempts 1..=16 at min(2^(n-1) s, 15 min).
                 let backoff: u64 = (1..16_u32)
                     .map(|attempt| (1_u64 << (attempt - 1)).min(900))
                     .sum();
-                Duration::from_secs(backoff) + tick * 16
+                Duration::from_secs(backoff)
             }
         }
+    }
+
+    /// The recovery passes the bound allows, counting the first tick at or
+    /// after [`eligible_after`](Self::eligible_after): the pass that takes
+    /// the obligation, one more for the obligation a chain arms, one per
+    /// attempt at the ceiling.
+    #[must_use]
+    pub const fn passes(self) -> usize {
+        match self {
+            Self::LostImmediateSqliteFailover | Self::LapsedClaim | Self::StalledInClaimingPass => {
+                1
+            }
+            Self::LapsedClaimThenArmed => 2,
+            Self::AttemptCeiling => 16,
+        }
+    }
+
+    /// The bound in store time from the crash when every tick lands one `T`
+    /// after the last, with the tick's +10 % jitter taken at its worst: how
+    /// many ticks a recovery is given, and what a cell that must outlast a
+    /// shorter bound compares against.
+    #[must_use]
+    pub fn limit(self) -> Duration {
+        let tick = TICK + TICK / 10;
+        let passes = u32::try_from(self.passes()).unwrap_or(u32::MAX);
+        self.eligible_after() + tick * passes
+    }
+
+    /// Judge a recovery by passes. `ticks` holds each tick's store time after
+    /// the crash, in order; `recovered_at` is the tick after which every
+    /// invariant first held (0: before any tick). The recovery meets the
+    /// bound when it held by the [`passes`](Self::passes)-th tick counting
+    /// from the first at or after [`eligible_after`](Self::eligible_after);
+    /// one that held before the obligation was eligible meets it too.
+    ///
+    /// # Errors
+    ///
+    /// The violation, naming the eligible tick and the tick that recovered.
+    pub fn judge(self, ticks: &[Duration], recovered_at: usize) -> Result<(), String> {
+        let eligible_after = self.eligible_after();
+        let Some(eligible_tick) = ticks
+            .iter()
+            .position(|at| *at >= eligible_after)
+            .map(|index| index + 1)
+        else {
+            return Ok(());
+        };
+        let last_allowed = eligible_tick + self.passes() - 1;
+        if recovered_at <= last_allowed {
+            return Ok(());
+        }
+        Err(format!(
+            "recovered after tick {recovered_at} ({:?} of sim time), past the §1.8 bound ({}): \
+             the obligation was eligible at tick {eligible_tick} ({:?}, {eligible_after:?} after \
+             the crash) and the bound allows {} pass(es) from there, through tick {last_allowed}",
+            ticks[recovered_at - 1],
+            self.label(),
+            ticks[eligible_tick - 1],
+            self.passes(),
+        ))
     }
 
     #[must_use]
@@ -543,6 +615,12 @@ pub const MATRIX: &[CaseSpec] = &[
     // cut after it leaves the claim the dead attempt took, which lapses.
     today(
         Seam::DefinitionStart,
+        CrashPoint::DuringEngineDelivery,
+        DetectionBound::LapsedClaim,
+        "a start by id cut before its registration step was stored admits at most one process, and a dead start that admitted none holds nothing once the host's pin is gone",
+    ),
+    today(
+        Seam::DefinitionStart,
         CrashPoint::MidJournalStep,
         DetectionBound::LostImmediateSqliteFailover,
         "a start by id whose registration committed before its result was journaled starts one process, which holds the definition",
@@ -671,6 +749,10 @@ pub struct CaseReport {
     pub notes: Vec<String>,
     /// The ticks the recovery interval ran.
     pub ticks: usize,
+    /// Each recovery tick's sim time after the crash, in order: one `T`
+    /// apart on the interval's cadence, further where the harness stalled
+    /// between two ticks.
+    pub tick_times: Vec<Duration>,
 }
 
 impl CaseReport {
@@ -702,12 +784,13 @@ pub async fn assert_cell(seam: Seam, point: CrashPoint) {
     let failed: Vec<&CaseReport> = reports.iter().filter(|report| !report.passed()).collect();
     for report in &reports {
         println!(
-            "{} seed {:#x}: crashed={} detected_after={:?} ticks={} violations={} notes={:?}",
+            "{} seed {:#x}: crashed={} detected_after={:?} ticks={} tick_times={:?} violations={} notes={:?}",
             report.test_name,
             report.seed,
             report.crashed,
             report.detected_after,
             report.ticks,
+            report.tick_times,
             report.violations.len(),
             report.notes
         );
@@ -728,4 +811,90 @@ pub async fn assert_cell(seam: Seam, point: CrashPoint) {
         "crash-matrix cell {seam:?} × {point:?} failed:\n{:#?}",
         failed
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seconds(ticks: &[u64]) -> Vec<Duration> {
+        ticks.iter().copied().map(Duration::from_secs).collect()
+    }
+
+    /// FIG-4161's session-delete seed on a stalled host: three ticks 45 s
+    /// apart, the claim lapsed by the second, and the delete its close armed
+    /// taken by the third. The obligation's two passes ran where §1.8 puts
+    /// them; the harness's stall between the ticks is not the recovery's.
+    #[test]
+    fn a_harness_stall_between_ticks_is_not_charged_to_the_recovery() {
+        let ticks = seconds(&[45, 88, 131]);
+        assert!(Duration::from_secs(131) > DetectionBound::LapsedClaimThenArmed.limit());
+        assert_eq!(
+            DetectionBound::LapsedClaimThenArmed.judge(&ticks, 3),
+            Ok(())
+        );
+        let ticks = seconds(&[25, 50, 76]);
+        assert!(Duration::from_secs(76) > DetectionBound::LapsedClaim.limit());
+        assert_eq!(DetectionBound::LapsedClaim.judge(&ticks, 3), Ok(()));
+    }
+
+    /// A recovery that needed a pass more than its bound allows fails, on the
+    /// interval's own cadence or a stalled one.
+    #[test]
+    fn a_recovery_a_pass_late_fails_on_any_cadence() {
+        let cadence = seconds(&[10, 20, 30, 40, 50, 60, 70]);
+        let late = DetectionBound::LapsedClaim.judge(&cadence, 7);
+        assert!(
+            late.as_ref()
+                .is_err_and(|violation| violation.contains("eligible at tick 6")),
+            "{late:?}"
+        );
+        assert_eq!(DetectionBound::LapsedClaim.judge(&cadence, 6), Ok(()));
+        let stalled = seconds(&[45, 88, 131, 175]);
+        assert!(
+            DetectionBound::LapsedClaimThenArmed
+                .judge(&stalled, 4)
+                .is_err()
+        );
+        assert!(DetectionBound::LapsedClaim.judge(&stalled, 3).is_err());
+    }
+
+    /// A tick that lands just before the claim lapses is not the eligible
+    /// one: the next is, and a recovery there meets the bound.
+    #[test]
+    fn the_eligible_tick_is_the_first_at_or_after_the_lapse() {
+        let ticks = seconds(&[10, 20, 30, 40, 50, 59, 69]);
+        assert_eq!(DetectionBound::LapsedClaim.judge(&ticks, 7), Ok(()));
+        assert_eq!(DetectionBound::LapsedClaim.judge(&ticks, 0), Ok(()));
+        assert_eq!(
+            DetectionBound::StalledInClaimingPass.judge(&ticks, 1),
+            Ok(())
+        );
+        assert!(
+            DetectionBound::StalledInClaimingPass
+                .judge(&ticks, 2)
+                .is_err()
+        );
+    }
+
+    /// The store-time limit is the pass bound on an unstalled cadence, so a
+    /// cell's tick budget and the scope-close cells' comparisons are
+    /// unchanged.
+    #[test]
+    fn the_limit_is_the_pass_bound_on_the_intervals_cadence() {
+        let tick = TICK + TICK / 10;
+        assert_eq!(
+            DetectionBound::LostImmediateSqliteFailover.limit(),
+            tick + Duration::from_millis(20_500)
+        );
+        assert_eq!(
+            DetectionBound::LapsedClaim.limit(),
+            Duration::from_secs(60) + tick
+        );
+        assert_eq!(
+            DetectionBound::LapsedClaimThenArmed.limit(),
+            Duration::from_secs(60) + tick * 2
+        );
+        assert_eq!(DetectionBound::StalledInClaimingPass.limit(), tick);
+    }
 }

@@ -60,7 +60,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 effect_controller,
                 direct_completions,
                 manager.trigger_router(),
-                manager.process_definition_registry(),
                 manager.process_engines().clone(),
                 observer,
                 chronological_projection,

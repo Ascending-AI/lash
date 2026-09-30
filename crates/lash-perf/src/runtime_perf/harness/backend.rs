@@ -82,7 +82,7 @@ pub(crate) async fn restate_backend_over(
 
 /// A fresh SQLite memory store set: storage only, for the store-level
 /// scenarios that drive no engine.
-pub(crate) async fn memory_stores() -> anyhow::Result<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_stores() -> anyhow::Result<lash_sqlite_store::SqliteStoreSet> {
     lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))

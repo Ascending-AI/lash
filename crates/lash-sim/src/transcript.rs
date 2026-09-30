@@ -1,9 +1,7 @@
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core::testing::behavior_transcript::{
-    Actor, Attr, Component, Entry, Kind, Transcript, Usage,
-};
+use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, Kind, Transcript};
 
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
 use crate::store::{CheckpointComponentWriteKind, CheckpointWriteEvent};
@@ -18,8 +16,8 @@ impl SimulationTrace {
     /// The projection intentionally omits provider-wire `ProviderEvent`
     /// fragments; those remain in `SimulationTrace::events`. Durable-write lines
     /// cover commits made through observed session-store factories. Lash-core's
-    /// `DurableProcessWorker` task body uses a bare in-memory store, so its
-    /// internal checkpoint commits are not represented here.
+    /// `DurableProcessWorker` uses the engine's SQLite memory store set directly,
+    /// so commits that bypass the observed factory are not represented here.
     pub fn render_transcript(&self) -> String {
         build(self, None).render()
     }
@@ -214,14 +212,6 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
         Actor::session(write.attributed_session().to_string()),
         write.revision_before,
         write.revision_after,
-        Usage::new(
-            write.usage.entries,
-            write.usage.input_tokens,
-            write.usage.output_tokens,
-            write.usage.cache_read_input_tokens,
-            write.usage.cache_write_input_tokens,
-            write.usage.reasoning_output_tokens,
-        ),
     );
     for component in &write.components {
         entry = entry.component(match &component.kind {
@@ -305,7 +295,6 @@ fn test_write(session_id: &SessionId, turn_index: usize) -> CheckpointWriteEvent
         turn_index,
         revision_before: (turn_index - 1) as u64,
         revision_after: turn_index as u64,
-        usage: Default::default(),
         components: Vec::new(),
         state: None,
     }
@@ -355,12 +344,10 @@ mod attribution_tests {
 
         let transcript = trace.render_transcript();
         let lines = transcript.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), 8, "{transcript}");
+        assert_eq!(lines.len(), 6, "{transcript}");
         // Two sessions interleave; every line, boundary and commit alike, must
         // name the actor it belongs to.
-        let expected_actors = [
-            "alpha", "beta", "alpha", "alpha", "alpha", "beta", "beta", "beta",
-        ];
+        let expected_actors = ["alpha", "beta", "alpha", "alpha", "beta", "beta"];
         for (line, actor) in lines.iter().zip(expected_actors) {
             assert!(
                 line.starts_with(actor),
@@ -651,7 +638,7 @@ mod tests {
         state.set_plugin_state(Some(PluginState::default()));
         state.set_execution_state_snapshot(Some(b"first execution state".to_vec().into()));
         let first = store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await
             .expect("seed checkpoint component refs");
         state.apply_persisted_commit_result(first);
@@ -661,7 +648,7 @@ mod tests {
         state.set_plugin_state(Some(PluginState::default()));
         state.set_execution_state_snapshot(Some(b"changed execution state".to_vec().into()));
         let second = store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await
             .expect("commit changed checkpoint components");
         assert_eq!(second.head_revision, 2);

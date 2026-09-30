@@ -125,6 +125,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             let artifacts_backend =
                 lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
             let fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+                std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &artifacts_backend,
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
@@ -167,7 +168,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             )?;
             let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
                 &runtime_state,
-                &[],
                 lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
             );
             let initial_result = store.commit_runtime_state(initial_commit).await?;
@@ -220,7 +220,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         lash_core::testing::stage_execution_state_components(&mut runtime_state, snapshot)?;
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
-            &[],
             lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
         );
 
@@ -269,7 +268,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 .sum::<usize>()) as u64;
 
         let (_, phase) = measure_runtime_perf_phase("checkpoint_state.execution_restore", || {
-            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&loaded_execution_state)
+            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::TypescriptDialect, &loaded_execution_state)
                 .map_err(anyhow::Error::from)
         })?;
         phase_profile.insert(phase.0, phase.1);

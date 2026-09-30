@@ -22,6 +22,7 @@ pub mod turn_input;
 pub mod turn_result;
 pub mod usage_activity;
 
+pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits, JsonDecodeUsage};
 pub use llm::*;
 pub use negotiation::{Negotiated, Negotiation, REMOTE_PROTOCOL, VersionRange, answer};
 pub use observations::*;
@@ -440,7 +441,7 @@ where
     T: serde::de::DeserializeOwned,
 {
     pub fn decode_json(bytes: &[u8], local: VersionRange) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_in_range(bytes, local)
+        Self::decode_json_with_limits(bytes, local, JsonDecodeLimits::default())
     }
 
     #[cfg(test)]
@@ -448,13 +449,23 @@ where
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_in_range(bytes, VersionRange::exactly(expected_version))
+        Self::decode_json_with_limits(
+            bytes,
+            VersionRange::exactly(expected_version),
+            JsonDecodeLimits::default(),
+        )
     }
 
-    fn decode_json_in_range(
+    /// Refuse byte, structure and allocation estimates before constructing the body.
+    pub fn decode_json_with_limits(
         bytes: &[u8],
         local: VersionRange,
+        limits: JsonDecodeLimits,
     ) -> Result<Self, RemoteProtocolError> {
+        limits.check(bytes).map_err(|error| match error {
+            JsonDecodeError::Json(error) => RemoteProtocolError::MessageDecode(error),
+            error => RemoteProtocolError::DecodeBudget(error),
+        })?;
         #[derive(serde::Deserialize)]
         struct VersionProbe {
             protocol_version: u32,
@@ -517,3 +528,6 @@ mod prompt_body_tests;
 
 #[cfg(test)]
 mod attachment_capability_tests;
+
+#[cfg(test)]
+mod decode_budget_tests;

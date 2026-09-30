@@ -292,7 +292,6 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub follow_on_bytes: usize,
     /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
-    pub usage_delta_bytes: usize,
     /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
     /// Saturating sum of the budgeted components.
@@ -315,7 +314,6 @@ pub fn measure_runtime_commit_budget(
         attachment_referrer_bytes: measurement.attachment_referrer_bytes,
         follow_on_bytes: measurement.follow_on_bytes,
         agent_frame_bytes: measurement.agent_frame_bytes,
-        usage_delta_bytes: measurement.usage_delta_bytes,
         turn_result_bytes: measurement.turn_result_bytes,
         total_bytes: measurement.total_bytes,
     })
@@ -512,7 +510,17 @@ impl Provider for TestProvider {
     }
 
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        (self.complete)(request).await
+        let mut response = (self.complete)(request).await?;
+        // A scripted answer that carries counters is one its provider
+        // reported, and a real provider reports them beside its own raw usage
+        // record: without one the attempt is unreported by the provider
+        // (ADR 0031), and its usage is no accounting fact (ADR 0125).
+        if response.provider_usage.is_none()
+            && response.usage != crate::llm::types::LlmUsage::default()
+        {
+            response.provider_usage = serde_json::to_value(&response.usage).ok();
+        }
+        Ok(response)
     }
 
     async fn reconcile_usage(
@@ -873,11 +881,10 @@ pub async fn execute_effect_locally(
                 command.as_ref(),
                 crate::ProcessCommand::PublishDefinition { .. }
                     | crate::ProcessCommand::GetDefinition { .. }
-                    | crate::ProcessCommand::RegisterDefinition { .. }
             ) {
                 let result = local_executor
-                    .into_process_definitions()?
-                    .execute(envelope.invocation.effect_replay_key(), *command)
+                    .into_definition_execution()?
+                    .execute(*command)
                     .await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
@@ -1654,30 +1661,19 @@ struct EffectBackedProcessService {
 }
 
 impl EffectBackedProcessService {
-    async fn cancel_command(
-        &self,
+    /// The cancel command production issues: the retained-process check is
+    /// the recorded cancel admission's, never a read ahead of it.
+    fn cancel_command(
         process_id: &ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<crate::ProcessCommand, crate::PluginError> {
-        match self.registry.require_process_id(process_id).await {
-            Ok(process_id) => Ok(crate::ProcessCommand::Cancel {
-                process_id,
-                origin,
-                requester,
-                attribution,
-            }),
-            Err(refusal @ crate::PluginError::ProcessUnknown { .. })
-            | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
-                Ok(crate::ProcessCommand::CancelRefused {
-                    process_id: process_id.clone(),
-                    origin,
-                    requester,
-                    refusal,
-                })
-            }
-            Err(error) => Err(error),
+    ) -> crate::ProcessCommand {
+        crate::ProcessCommand::Cancel {
+            process_id: process_id.clone(),
+            origin,
+            requester,
+            attribution,
         }
     }
 
@@ -1767,12 +1763,10 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let observers = request.observers.clone();
-        let env_spec = request.env_spec.clone();
-        let registration = admitted_registration(request.into_registration(None), &scope)?;
+        let registration = admitted_registration(request.into_registration(), &scope)?;
         let command = crate::ProcessCommand::Start {
             registration,
             observers: observers.into_iter().collect(),
-            env_spec,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
@@ -1804,7 +1798,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Start {
             registration,
             observers: options.initial_observers.into_iter().collect(),
-            env_spec: options.env_spec,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
@@ -1887,18 +1880,15 @@ impl crate::ProcessService for EffectBackedProcessService {
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = self
-            .cancel_command(
-                process_id,
-                crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(scope.effect_controller.execution_scope())
-                    .expect("serializable effect scope"),
-                None,
-            )
-            .await?;
+        let command = Self::cancel_command(
+            process_id,
+            crate::CancelOrigin::OperatorRequested,
+            serde_json::to_string(scope.effect_controller.execution_scope())
+                .expect("serializable effect scope"),
+            None,
+        );
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1910,17 +1900,14 @@ impl crate::ProcessService for EffectBackedProcessService {
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = self
-            .cancel_command(
-                process_id,
-                crate::CancelOrigin::ModelRequested,
-                identity.replay_key.clone(),
-                Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
-            )
-            .await?;
+        let command = Self::cancel_command(
+            process_id,
+            crate::CancelOrigin::ModelRequested,
+            identity.replay_key.clone(),
+            Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+        );
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1934,16 +1921,11 @@ impl crate::ProcessService for EffectBackedProcessService {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let event_type = crate::process_signal_event_type(&signal_name)?;
-        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-            crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-        );
-        let process_id = self.registry.require_process_id(process_id).await?;
         let command = crate::ProcessCommand::Signal {
-            process_id,
-            signal_name,
-            signal_id,
-            request,
+            signal: crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
+                payload,
+            ),
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
@@ -2325,11 +2307,11 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
+    ) -> Result<Option<crate::ProcessAwaitOutput>, PluginError> {
         self.terminal_attachments
             .lock_recover()
             .push((process_id.clone(), key.clone()));
-        Ok(())
+        Ok(None)
     }
 
     async fn start_from_recorded_intent(
@@ -2340,14 +2322,11 @@ impl crate::ProcessService for MockSessionManager {
     ) -> Result<crate::ProcessHandleView, PluginError> {
         let session_id = crate::plugin::require_session_owner(owner, "start_from_recorded_intent")?;
         let observers = request.observers.clone();
-        let env_spec = request.env_spec.clone();
         let record = self
             .start(
                 session_id,
-                request.into_registration(None),
-                crate::ProcessStartOptions::new()
-                    .with_initial_observers(observers)
-                    .with_env_spec(env_spec),
+                request.into_registration(),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
                 scope,
             )
             .await?;
@@ -2362,19 +2341,6 @@ impl crate::ProcessService for MockSessionManager {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         let registration = admitted_registration(registration, &scope)?;
-        // The mock stands in as the journaled start effect: a spec-carrying
-        // start is stamped with the content-addressed reference the executor's
-        // publish would produce, since registration validation requires it.
-        let registration = match (registration.env_ref.is_none(), options.env_spec.as_ref()) {
-            (true, Some(env_spec)) => registration.with_execution_env_ref(Some(
-                env_spec.stable_ref().map_err(|error| {
-                    PluginError::Session(format!(
-                        "failed to encode process execution environment: {error}"
-                    ))
-                })?,
-            )),
-            _ => registration,
-        };
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.

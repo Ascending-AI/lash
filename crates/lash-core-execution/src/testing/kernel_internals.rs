@@ -2,7 +2,7 @@
 //!
 //! Those tests were unit tests inside this crate until FIG-3582 moved every
 //! test that needs a concrete store or effect host to
-//! `tests/store_backed`, over a SQLite memory backend (ADR 0102): the store
+//! `tests/store_backed`, over a SQLite memory store set (ADR 0102): the store
 //! depends on this crate, so an in-crate `cfg(test)` module could not use it.
 //! This module is the `testing`-feature seam that keeps exactly the surface
 //! they reach reachable without widening the crate's shipped API. A
@@ -87,17 +87,12 @@ pub fn emit_tool_call_completed(
     tracing.emit_tool_call_completed(record, attempts, issuing_node_id, duration_ms, clock);
 }
 
-/// `RuntimeExecutionContext::process_start_execution_env`: the reference and
-/// spec a process start carries into its journaled command, which the
-/// publish-ordering laws read before the effect runs.
-pub fn process_start_execution_env(
+/// The digest-only start registration after its execution holds the environment.
+pub async fn process_start_execution_env(
     context: &crate::RuntimeExecutionContext<'_>,
     registration: crate::ProcessRegistration,
-) -> (
-    crate::ProcessRegistration,
-    Option<crate::ProcessExecutionEnvSpec>,
-) {
-    context.process_start_execution_env(registration)
+) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    context.process_start_execution_env(registration).await
 }
 
 /// `ToolChildHost::child_controller`: the group-child-bound controller a

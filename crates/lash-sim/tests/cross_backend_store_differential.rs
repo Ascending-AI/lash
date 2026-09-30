@@ -29,8 +29,8 @@ use lash_core::{
     QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore,
     RuntimeTurnCommitStamp, SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord,
     SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication,
-    TurnInputIngress, TurnInputStateKind,
+    StoreError, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress,
+    TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -116,7 +116,7 @@ enum CaseName {
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
     LostRootRecovery,
-    RefusedRootEnd,
+    RootEnd,
     PendingFollowOnRaise,
     RootAdmissionReplay,
     RefusedSurfaceOnDeletedSession,
@@ -170,7 +170,7 @@ impl CaseName {
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
             Self::LostRootRecovery => "lost_root_recovery",
-            Self::RefusedRootEnd => "refused_root_end",
+            Self::RootEnd => "refused_root_end",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
             Self::RootAdmissionReplay => "root_admission_replays_exact_result_after_drive_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
@@ -215,7 +215,6 @@ enum StoreOperation {
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
         checkpoint: CheckpointSpec,
-        usage: bool,
         adopt_attachment: bool,
     },
     /// A turn's terminal head write over the pending follow-on fact
@@ -508,7 +507,6 @@ fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) ->
         graph,
         turn_commit: None,
         checkpoint: CheckpointSpec::Empty,
-        usage: false,
         adopt_attachment: false,
     }
 }
@@ -593,7 +591,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                         turn_id: "nodeless-leaf-move",
                     }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
             ],
@@ -625,7 +622,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
                 StoreOperation::Commit {
@@ -634,7 +630,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
                 StoreOperation::Commit {
@@ -643,7 +638,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(vec![mutated()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
                     adopt_attachment: false,
                 },
             ],
@@ -708,7 +702,6 @@ fn runtime_commit(
     turn_commit: Option<TurnCommitSpec>,
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     checkpoint: HydratedSessionCheckpoint,
-    usage_deltas: Vec<TokenLedgerEntry>,
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
@@ -717,7 +710,7 @@ fn runtime_commit(
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &usage_deltas);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
     commit.current_frame_node_id = commit
@@ -910,21 +903,6 @@ fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::P
     }
 }
 
-fn differential_usage_delta() -> TokenLedgerEntry {
-    TokenLedgerEntry {
-        source: "differential".to_string(),
-        model: "test/model".to_string(),
-        usage: TokenUsage {
-            input_tokens: 21,
-            output_tokens: 12,
-            cache_read_input_tokens: 4,
-            cache_write_input_tokens: 3,
-            reasoning_output_tokens: 2,
-        },
-        usage_disposition: Default::default(),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -975,14 +953,6 @@ enum RawDurableReader {
         session_id: SessionId,
         store: Option<Arc<dyn RuntimeStore>>,
     },
-}
-
-fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
-    UsageDeltaObservation {
-        source: entry.source,
-        model: entry.model,
-        usage: entry.usage,
-    }
 }
 
 fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
@@ -1244,7 +1214,6 @@ impl BackendRunner {
                 self.current_frame_node_id.clone(),
                 HydratedSessionCheckpoint::default(),
                 Vec::new(),
-                Vec::new(),
             ),
             fence,
             settlement,
@@ -1253,7 +1222,11 @@ impl BackendRunner {
             commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
             turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
             root,
-            stop: None,
+            outcome: lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         }));
         if let Some((stored, neutral)) = admission_cases::backend_neutral_commit_hash(&commit) {
             self.neutral_commit_hashes.insert(stored, neutral);
@@ -1324,7 +1297,6 @@ impl BackendRunner {
                 graph,
                 turn_commit,
                 checkpoint,
-                usage,
                 adopt_attachment,
                 ..
             } => {
@@ -1335,10 +1307,6 @@ impl BackendRunner {
                     *turn_commit,
                     self.current_frame_node_id.clone(),
                     checkpoint_from_spec(*checkpoint, self.checkpoint_component_refs.as_ref()),
-                    (*usage)
-                        .then(differential_usage_delta)
-                        .into_iter()
-                        .collect(),
                     (*adopt_attachment)
                         .then(differential_attachment_id)
                         .into_iter()
@@ -1366,7 +1334,6 @@ impl BackendRunner {
                     None,
                     self.current_frame_node_id.clone(),
                     HydratedSessionCheckpoint::default(),
-                    Vec::new(),
                     Vec::new(),
                 );
                 let (frame, leaf) = head
@@ -1398,6 +1365,7 @@ impl BackendRunner {
                         resolved_run: None,
                         chain_depth: 1,
                         attempts: 0,
+                        max_recoveries: lash_core::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
                     });
                 self.commit_and_track(commit, CheckpointSpec::Empty).await
             }
@@ -1852,7 +1820,7 @@ impl BackendRunner {
                 };
                 let error = handle
                     .store
-                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
                     .await
                     .expect_err("stale handle commit must be fenced");
                 self.assert_session_deleted(&error, "stale-handle commit");
@@ -2149,22 +2117,23 @@ async fn runners_for_case_with_clock(
         relation,
     };
 
-    let memory_backend = Arc::new(
+    let sqlite_memory_stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::clone(&clock))
             .await
             .expect("open the SQLite memory differential store set"),
     );
-    let memory_factory = memory_backend.session_store_factory();
-    let memory_store = admit_test_session(memory_factory.clone(), &create_request)
+    let memory_factory = sqlite_memory_stores.session_store_factory();
+    let sqlite_memory_store = admit_test_session(memory_factory.clone(), &create_request)
         .await
         .expect("create SQLite memory differential store");
-    memory_store
+    sqlite_memory_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic SQLite memory session metadata");
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn DeploymentStore>;
-    let memory_path =
-        PathBuf::from(memory_backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
+    let memory_path = PathBuf::from(
+        sqlite_memory_stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    );
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
@@ -2204,7 +2173,7 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
 
     let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(
-        lash_conformance::recording_backend_over(memory_backend.clone()),
+        lash_conformance::recording_backend_over(sqlite_memory_stores.clone()),
     );
     let sqlite_lifecycle: lash::Backend =
         held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
@@ -2231,15 +2200,15 @@ async fn runners_for_case_with_clock(
         BackendRunner {
             name: "sqlite-memory",
             session_id: session_id.clone(),
-            store: Some(Arc::clone(&memory_store)),
+            store: Some(Arc::clone(&sqlite_memory_store)),
             factory: Some(memory_factory_dyn),
             raw_reader: RawDurableReader::Sqlite {
                 path: memory_path,
                 session_id: session_id.clone(),
-                store: Some(memory_store),
+                store: Some(sqlite_memory_store),
             },
             reopen: BackendReopen::SqliteMemory {
-                backend: memory_backend,
+                backend: sqlite_memory_stores,
             },
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),

@@ -1,316 +1,56 @@
 # Bounded journals are an effect-controller obligation
 
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
+## Decision
 
-Amended 2026-09-24 (FIG-3669), **partly implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: re-drive against `runtime_effect_replay` on the
-store tier and the SQL replay-row retirement; the bounded-journal obligation
-stays. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
-
-A Runtime Process may run arbitrarily many effects (authored loops, large batch drivers) and
-for arbitrary duration. In the durable tier that currently means one Restate invocation per
-process whose journal grows with every effect — the classic unbounded-history cliff other
-durable-execution systems cap outright (Temporal kills at ~51k history events; Inngest caps at
-1000 steps) and solve with an author-visible reset (continue-as-new, new function runs). We
-decided the reset is not the author's or the host's problem: **the `RuntimeEffectController`
-seam guarantees that executing a process never requires an unbounded single-invocation
-journal**, and each controller meets the guarantee with its backend's native mechanism. The
-inline controller satisfied it (effects re-drove against lash persistence; there was no
-journal replay); it became the native tier (FIG-2225) and FIG-3585 deleted it. `lash-restate` will segment
-a long process across chained invocations keyed by (process id, segment), carrying an
-effect-result checkpoint across the boundary. A future engine with native continue-as-new maps
-to that directly.
-
-Above the seam nothing changes: process identity, leases, durable waits, provenance, replay
-keys, and observation are segment-invariant, and no authoring construct or host projection
-ever sees a segment. The seam itself needs exactly two expansions: a non-terminal
-segment-boundary outcome on the effect-controller/run path that the process worker treats as
-an ordinary reschedule (the process stays running; never terminal), and promotion of the
-inline tier's effect-replay persistence to a controller-accessible seam so cross-segment
-replay reads durable outcomes instead of carrying an ever-growing checkpoint (the inline tier
-became the native tier in FIG-2225 and was deleted in FIG-3585). Boundary thresholds, next-segment self-submission, and
-checkpoint mechanics stay inside the controller crate. Open for the implementation pass: once
-outcomes write through to the replay store, the engine journal stops being the replay source of
-record — deciding how far to lean into that (engine as scheduler over lash-persisted replay) is
-the first design question, and durable-wait re-arming across a boundary needs
-deterministic-simulation and fault-matrix evidence either way. We rejected author-visible
-chaining (a `continue`-as-successor terminal that hosts stitch into lineages) because it
-exports a backend limitation into every authoring surface, host projection, and UI forever —
-and rejected a substrate-level incarnation primitive as duplicating what each engine already
-does natively. Consequence: the lash-restate segmentation is real, phased work — hosts must not
-ship unboundedly-looping processes on the Restate tier before it lands — and segment handover
-(including handover while parked on a Durable Wait) needs Deterministic Simulation and
-fault-matrix coverage.
-
-## Resolved in implementation design (2026-07-12)
-
-The implementation pass settled the questions this ADR left open, and corrected one framing
-above. Nothing in the original decision is reversed; the guarantee, the segment-invariance,
-and the two rejected alternatives all stand. The refinements:
+A process can execute arbitrarily many effects without requiring an unbounded single-invocation journal. `RuntimeEffectController` owns the boundary predicate and its engine-specific implementation. Restate segments a long process through bounded continuations; SQL stores hold domain state rather than effect replay. Process identity, provenance, wait identity and host observations remain independent of segment count.
 
 ### 1. The engine stays authoritative for durable execution within a segment
 
-We do not lean into "engine as scheduler over a lash-owned replay store." lash is
-engine-pluggable by design; taking on effect durability to dodge a journal that a proven
-engine already maintains would be re-implementing durable execution for a backend-specific
-symptom, with no reason that generalizes across engines. So: **the engine (Restate journal,
-Temporal history, or a SQL tier's effect-replay store) remains the source of record for
-effect durability inside a segment.** The only state that crosses a boundary is a bounded
-resumption snapshot (below), not an effect-replay ledger.
+Restate's journal is the source of effect outcomes inside a segment. Cross-segment state is a VM continuation and the runtime ledgers needed to resume it, rather than a growing effect-result ledger. Making the engine a scheduler over a second Lash replay store is rejected because it duplicates durable execution to address an engine-specific journal limit.
 
-This shrinks the second seam-expansion named above. "Promote the inline effect-replay
-persistence to a controller-accessible seam" is not needed for the engine tiers: cross-boundary
-resume rides the bounded continuation, and within-segment replay stays each engine's own
-concern (the engine journal, or a SQL tier's `runtime_effect_replay` store). We do not expose one tier's replay store to another.
+### 2. The boundary trigger is step-count, decided by the controller
 
-### 2. The boundary trigger is step-count, decided by the controller — never a durable wait
+The run loop consults `wants_segment_boundary(progress)` at a quiescent post-effect point. Restate's construction-time `segment_effect_budget` sets the completed-effect threshold. A non-capturable point declines the budget boundary. Elapsed wait duration does not grow step count: ordinary durable waits suspend through the engine. Explicit drain handover can transfer an open signal wait through a captured continuation.
 
-The original text framed the cliff as "journal grows with every effect … for arbitrary
-duration." Duration is the wrong half. On the target engines a wait is journal-neutral:
-Restate *suspends and frees* on any await (a month-long sleep is one journal entry, holds no
-compute, lasts indefinitely by design), and Temporal history grows on events, not on elapsed
-wait time. What actually grows an invocation's journal/replay cost is the **count of durable
-steps executed inside one incarnation** — a tight authored loop. So:
+Thresholds tune liveness without changing authored results. There is no implemented wall-clock segmentation cap. Tests can force boundaries with controller construction options.
 
-- **Segment on accumulated step/journal cost, taken at a quiescent post-effect point.** Every
-  journal-growing authored operation already passes through the effect seam, so post-effect
-  points are both frequent enough and naturally quiescent.
-- **Never segment at a durable wait — suspend there.** Suspending is the engine's native, free,
-  indefinite, and crash-safe behavior, and it keeps the durable-wait resolution inside the
-  engine's own mailbox (Restate awakeable/promise resolution is journal-idempotent; a Temporal
-  signal lands in history) instead of a hand-rolled buffer. This design *removes* the two
-  hardest open problems above — "durable-wait re-arming across a boundary" and "handover while
-  parked on a Durable Wait" — because that state no longer exists: you are never parked inside
-  an incarnation across a wait.
+### 3. Cross-boundary state is a bounded VM continuation
 
-The trigger is a single controller-owned predicate the run loop consults at each quiescent
-post-effect point: **`wants_segment_boundary(progress) -> Option<BoundaryReason>`**. The
-controller alone knows its backend's real limit, so the engine decides:
+The continuation retains instruction position, live slots and stacks. Its envelope retains replay ordinals, started-process ids, incorporation state, pending summaries and outstanding effect-group handles. The successor restores those fields before executing. The bound is live program data, not a universal byte limit: a program retaining an ever-growing value can grow its continuation independently of journal segmentation.
 
-- the SQL tiers → always `None` (the seam's default; their replay store is keyed per effect);
-- `lash-restate` → `Some(..)` as it approaches its replay-payload budget;
-- an engine with native continue-as-new → maps its own suggestion (e.g. Temporal
-  `GetContinueAsNewSuggested`) onto the predicate;
-- a future engine with generous limits → always `None`, and segmentation simply never fires.
+### 4. Code-version pinning and journal cost are separate concerns
 
-There is no host-facing segmentation-policy enum threaded through the run loop. Any tuning
-(a replay-budget fraction; a wall-clock cap, see §4) is **controller construction-time input**,
-folded into the same predicate; tests and DST force a boundary by constructing a controller
-whose predicate fires on a schedule. Correctness is invariant to the predicate: a process must
-compute identical results whether it segments every N steps or never — the predicate tunes
-liveness, never semantics. Disabling it on an engine with a hard cliff is an operational
-misconfiguration (the incarnation may die on an unbounded loop), not a wrong answer.
+Executable generations and routes determine whether a successor can resume captured work. Journal cost determines budget boundaries. Drain can request explicit handover, but code-version policy does not imply a wall-clock journal threshold. Incompatible stored generations use the engine's typed park or resume-refusal contracts under ADRs 0105, 0110 and 0115.
 
-### 3. Cross-boundary state is a bounded VM continuation (the real lash-side work)
+### 5. The handover and its requirements
 
-Investigation confirmed lash has no existing resumable-mid-computation snapshot. A lashlang
-process is a bytecode VM inside one pinned future, re-initialized at `ip: 0` from its original
-arguments each run; the only serializable snapshot is globals, and the session/turn
-`execution_state_snapshot` is owned by the RLM code-executor, not the workflow VM. The former
-`DurableStep` recorded one JSON effect result and was not a continuation. So a journal-reset
-incarnation cannot resume at loop iteration K+1 today.
+Three requirements govern a boundary:
 
-The bounded cross-boundary state is therefore a new **`VmContinuation`** — instruction pointer,
-slots/globals, operand stack, iterator stack/cursors, occurrence counters, and process-host
-effect ordinals — serialized at a quiescent post-effect boundary and used to reconstruct the
-successor VM. This is smaller than serializing a Rust future because lashlang already
-centralizes execution state in an explicit VM. Honest limit: the continuation is bounded by the
-program's live data, not by effect count — an author accumulating an unbounded value in a slot
-grows the continuation, exactly as continue-as-new does; no engine solves that. What we fix is
-the journal-of-all-effects growth, which is the actual cliff.
+1. Handover consists of ordered durable steps in one workflow handler. The handler records the successor reference and continuation, journals the successor send, forwards cancellation and retires the preceding continuation. Each store write is idempotent and the send belongs to the engine journal. After a crash, replay completes the sequence and reaches exactly one logical successor scheduling. Recovery produces the complete handover without an observable half-handover or a lost continuation. These steps span storage transactions.
+2. Successor execution is idempotent under the stable process identity across segment resets.
+3. No pending operation remains uncaptured at the cut. Required child identities, consumed settlement prefix and retention dependencies travel in the continuation.
 
-### 4. Two orthogonal reasons to bound an incarnation; do not conflate
+The process remains non-terminal through a segment boundary. A retained handover is replay authority until its resume step journals the continuation. After successor scheduling and cancellation forwarding, the predecessor retires the continuation it resumed from. Its replay uses the journaled resume value even after that retirement. The successor's continuation remains retained through terminal publication until pruning permits deletion.
 
-Journal/replay growth (§2) is one reason. The other is **code-version pinning**: a long-lived
-incarnation stays bound to the code version it started on and blocks clean rolling upgrades
-(Restate's documented motivation for "end and reschedule," which is *not* journal size). This is
-an engine-specific operational lever (Restate version pinning; Temporal worker versioning), a
-host preference ("I want to deploy within T"), and it would fold into the same predicate as an
-optional construction-time wall-clock cap. It is closer to the ADR-0023 host-lever pattern than
-to the journal obligation and must not be baked into it. No such cap is implemented: the unused
-`segment_duration_cap` option and its `DurationCap` boundary reason were deleted (FIG-3673), and a
-wall-clock cap would also have to be a recorded input to keep the cut point replay-stable
-(ADR 0105).
+The [build-roll handoff laws](../../crates/lash-restate/src/tests/segment_generation_handoff.rs) exercise crashes after the continuation write, before successor send, during cancellation forwarding after send and after retirement. The [handover crash-cut laws](../../crates/lash-restate/src/tests/segment_generation_handoff/crash_cuts.rs) run the continuation-write, retirement, before-send and immediately-after-send cuts with forced replay over SQLite memory, SQLite file and PostgreSQL. They assert one successor invocation, exact continuation restoration on every replay and one retained terminal outcome. The [segment redrive law](../../crates/lash-conformance/src/conformance/segment_redrive.rs) checks recorded effects within a segment; the [simulator process crash cases](../../crates/lash-sim/src/crash_matrix/cases/process.rs) check process start and terminal recovery.
 
-### 5. The handover, and the requirements that survive
+## Outstanding tool children at a boundary
 
-The successor is the engine's native primitive carrying the continuation — Restate's delayed or
-immediate self-`send` (its documented continue-as-new equivalent), Temporal `continue-as-new`.
-No bespoke `(process, segment)` chaining machinery beyond handing over the bounded continuation.
+Outstanding children do not block a capturable boundary. Otherwise repeated races against a hung child can grow one journal indefinitely. Successors reattach by retained invocation identity and continue from the captured settlement cursor under ADR 0099. Expired attachment is a typed recovery failure rather than permission to rerun a side effect.
 
-Where a boundary can coincide with buffered external work, prior art (Temporal's drain-before-
-continue-as-new and its livelock failure mode; Azure's still-buggy preserve-unprocessed-events;
-AWS's silence on in-flight callbacks across a split) converges on three requirements:
+Group admission bounds retained work per exact logical opener, including settled results still needed by replay or consumers. Reservations happen before dispatch, replay reuses them, and release requires discharging recovery and consumer dependencies. Command headroom is per executing controller/segment. Close budgets are attempt-local and do not alter committed obligations. ADR 0099 owns the full group accounting contract.
 
-1. the boundary transition — commit `VmContinuation`, retire the incarnation, schedule the
-   successor — is **one atomic unit**, so nothing arrives in an unobserved gap;
-2. successor start is **idempotent, keyed to the stable process id, not the incarnation**
-   (per-run dedup is proven insufficient across a reset);
-3. **no second uncaptured pending operation** at the cut — the continuation is the only
-   uncommitted thing, or any other pending op is carried into it.
+## Payload and lifecycle consequences
 
-Because §2 keeps us from segmenting at waits, the common boundary is a tight compute loop with
-no pending external event, so these bind narrowly; but they are mandatory for the crash-in-
-handover window and for the rare boundary that meets buffered work. Segment handover — including
-any interaction with a pending durable wait or a crash mid-transition — needs Deterministic
-Simulation and fault-matrix coverage before hosts may run unbounded loops on an engine tier.
+Segmentation bounds completed effect count, not the byte size of every result.
+Tool children journal their own outcomes. Intent admission allows at most 32
+declarations, 16 of one kind, and 64 KiB of canonical intent JSON per completed
+attempt. The byte bound measures the complete declaration, including its
+captured environment's digest. The capture lives once in the content-addressed
+process environment store and durable referrers keep it available for replay
+and realization (ADR 0113). Tool output values have no universal core byte cap.
+Hosts size their engine entry limits and apply tool/provider output policy.
 
-## Durable-core lifecycle retention (implemented)
+Restate owns invocation-journal retention. Domain-store maintenance does not manage SQL replay rows. Author-visible chaining and a generic store incarnation mechanism are rejected because they expose an engine limit to every author and host instead of keeping it with the controller.
 
-ADR 0047 applies the bounded-journal obligation to the substrate-owned replay
-table as well as to one engine invocation. The effect-host/controller contract
-now retires journals through typed `EffectJournalRetirement` targets:
-`Session { session_id }` and `Process { process_id }`.
-
-Engine-less SQL controllers persist a versioned canonical identity for the
-complete `ExecutionScope`. The human-facing `ExecutionScope::id()` remains a
-display value, not a durable key. Session-owned rows also carry an indexed
-`session_id` join column. Under [ADR-0049](0049-session-ids-are-used-once.md),
-that id names exactly one lifetime and is never reused after deletion. Session
-deletion removes the exact session journal; terminal-process retention removes
-the exact canonical process scope. Cleanup neither parses `scope_id` nor
-prefix-matches it.
-
-This keeps the inline SQL table as the engine-less tier's replay source without
-making it append-only. Session journals live until that session is deleted, and
-process journals live until host-scheduled terminal-process retention prunes
-the process. SQLite effect schema 6 and PostgreSQL store schema 28 are
-reject-and-recreate cutovers with no compatibility path.
-
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
-
-Restate keeps its native invocation journal and native retention. Its effect
-host creates and deletes no SQL replay rows, so lifecycle retirement is a
-no-op there. `StoreMaintenance` remains maintenance for the domain session
-store and does not know about effect-journal tables; lifecycle owners call the
-effect host directly.
-
-### ToolBatch entry payloads
-
-*(Amended 2026-09-24 (FIG-3397): the aggregate `ToolBatch` journal entry this
-section describes is deleted. A tool batch is now a durable effect group whose
-`ToolInvocation` children journal their own results, and a journaled
-`tool_batch` envelope is refused with a typed version refusal. The per-entry
-reasoning below applies to one tool child's result: one entry per child, not a
-fixed byte count. The intent admission bounds and the absence of a universal
-byte cap stand.)*
-
-The segmentation guarantee bounds journal growth by completed effect count; it
-does not claim that every effect result has a universal byte ceiling. Restate
-records one aggregate `ToolBatch` result per protocol iteration so replay can
-recover the ordered launch results and parent-end evidence without re-entering
-the batch interpreter. The same launch records are also present in their
-individual `ToolAttempt` entries. The intent portion has hard admission bounds:
-at most 32 declarations, at most 16 of one kind, and at most 64 KiB of canonical
-intent JSON per completed attempt. *(Amended 2026-09-30 (FIG-4255): the 64 KiB
-bound measures what the attempt declares. The execution environment a start or
-registration captures from its session — the session policy, prompt layers
-included — travels with the declaration but is not counted: its size is the
-host's, and counting it refused every child start of a turn under large project
-instructions.)* Tool output values have no core-wide byte
-cap: standard protocol limits its model-facing projection through the recorded
-tool renderer, and provider or tool contracts may impose tighter limits, but
-those are host policy rather than a durability invariant. The complete tool
-value remains in the journal.
-
-Accordingly the precise bound for a Restate `ToolBatch` is one journal entry per
-batch and a finite source batch, not a fixed byte count. Its payload is live
-program data, like a value retained in the VM continuation described in section
-3. Large tool outputs can therefore make one journal entry large even though
-segmentation prevents an unbounded number of entries in one incarnation. Hosts
-must size and monitor their substrate entry limit and apply an output policy
-when tools can return large values; changing to a universal byte rejection
-would be a separate product contract because it can turn an otherwise valid
-tool result into a deterministic failure.
-
-## Outstanding tool children at a boundary (FIG-3392)
-
-**Implemented** by FIG-3397 (reattachment and the admission bound); the full
-contract is
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
-
-Effect groups made it possible for a boundary to arrive while independently
-durable children are still running, and the obvious rule — *never segment while
-a tool child is unsettled* — is refused here, because it defeats this ADR rather
-than serving it. A process that repeatedly races one quick tool against one hung
-tool sits at width two indefinitely and would never reach a boundary; its
-journal would grow without bound, which is the cliff this obligation exists to
-close. Section 2's framing survives intact: the trigger is accumulated step
-cost, taken at a quiescent post-effect point, and **an outstanding child is not
-a reason to decline a boundary**. Declining at a *non-capturable* point remains
-correct (`crates/lash-lashlang-runtime/src/process.rs` records that case through
-`record_segment_boundary_decline`, "lashlang segment boundary declined at
-non-capturable point").
-
-**Outstanding children are reattached across segments instead.** The successor
-obtains the children the predecessor dispatched, by their retained invocation
-identity, and continues consuming settlements from the cursor the continuation
-carried. The three handover requirements in section 5 apply unchanged, and the
-third — *no second uncaptured pending operation at the cut* — is exactly the
-clause outstanding children must satisfy: the child identities, the consumed
-prefix and the result retention a successor still needs are carried into the
-continuation, or the boundary is not taken.
-
-Reattachment is bounded by the engine's retention, not by lash's wishes. On
-Restate, attach is by invocation id and is bounded by journal and idempotency
-retention (both default to 24 hours on the server), so **an expired attachment is
-a typed recovery failure, never permission to rerun the child's side effect**.
-
-**A group's open admits retained work, before it dispatches anything, and
-outstanding work is the wrong half.** Width alone bounds nothing, and neither
-does "outstanding": width-two races whose losers finish promptly accumulate
-unlimited settled rows and retained results while almost nothing is outstanding.
-The bound is therefore over **retained work per exact logical opener** — nested,
-accepted-unclaimed, running, closing **and settled-but-still-required** children
-and group metadata — counting unique executions separately from operand
-positions, reserved atomically at acceptance, reused by replay, and released only
-when a child's recovery and consumer dependencies are discharged. Refusal is of
-the whole open, before dispatch, and accepted work is never retroactively refused
-by a changed budget.
-
-**A completed group may retire as a whole while its opener remains live**, once
-no replay or continuation needs it and an existing identity fence prevents
-resurrection; otherwise a days-long opener could never reclaim anything. Retiring
-the live opener's whole scope to retire one group is not available.
-
-**Backend command headroom is a per executing controller/segment bound**, not one
-counter spanning a days-long opener. Admission includes a finite
-controller-specific upper bound for parent-side dispatch, observation,
-cancellation, incorporation and handover commands. The controller's budget stays
-the controller's — `crates/lash-restate/src/controller/mod.rs` carries
-`segment_effect_budget` as a construction-time option — and **FIG-3397 names those
-accounting units and their release conditions**.
-
-The **close deadline** takes the same construction-time shape, beside that budget.
-It is an **attempt-local drain budget** that starts when an attempt's cancel
-decision commits, so a slow sibling cannot consume another child's budget. On
-expiry the attempt is logically cancelled while the opener's closing state stays
-recorded and discoverable by the existing work driver; finalization does not
-commit an ordinary terminal that would fence out the remaining obligations.
-**Changing the budget never changes committed obligations.**
-
-**Mid-aggregate VM suspension is not assumed.** A resumable mid-aggregate frame
-is required only if command accounting shows a bounded aggregate cannot meet the
-controller budget; until that measurement exists, the aggregate is a unit of
-execution between boundaries and the bound above is the mechanism.
-
-**No universal result-byte cap follows**, for the reason the `ToolBatch` section
-above already gives: turning a valid tool result into a deterministic failure is
-a separate product contract. A group turns one journaled entry into *n*, which
-is honest accounting against this budget and not a new axis.
-
-Checkpoint journal rows deliberately carry the complete `CheckpointClaimSet`,
-not a compact list of row ids: the minimal durable-engine encoding is roughly
-2 KB — an order-of-magnitude estimate, not a measured bound — and grows with
-each claimed row up to the host's turn-input claim cap
-(`QueuedWorkBatchingConfig::max_turn_input_claim`, default 64). This bounded
-payload cost is the price of replay preserving complete
-settlement authority — claim identity, owner, lease token, fencing token,
-session-lease generation, and class-specific rows — so a recovered final commit
-can prove exactly what it may settle without consulting or reconstructing
-authority from mutable current state.
+[Boundary predicate](../../crates/lash-restate/src/controller/mod.rs), [continuation capture and restore](../../crates/lash-lashlang-runtime/src/process.rs), [workflow handover](../../crates/lash-restate/src/process/workflow.rs) and [retained handovers](../../crates/lash-sqlite-store/src/process_registry/segment_handover.rs) implement the contract.

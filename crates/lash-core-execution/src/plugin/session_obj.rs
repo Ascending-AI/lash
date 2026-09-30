@@ -1230,7 +1230,6 @@ mod attachment_notice_order_tests {
             possession: Vec::new(),
             triggers: Vec::new(),
             checkpoint_messages: Vec::new(),
-            usage: Vec::new(),
             stream: Default::default(),
             model_return: baseline,
         });

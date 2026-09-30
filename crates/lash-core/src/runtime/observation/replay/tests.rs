@@ -638,7 +638,7 @@ fn in_memory_replay_store_allocates_live_channel_lazily() {
         .expect("append a");
     {
         let sessions = store.sessions.lock_recover();
-        assert!(sessions.get("s").expect("buffer").sender.is_none());
+        assert!(sessions.buffers.get("s").expect("buffer").sender.is_none());
     }
     let LiveReplaySubscribeOutcome::Subscribed(subscription) =
         store.subscribe_after_cursor(&start).expect("subscribe")
@@ -647,7 +647,7 @@ fn in_memory_replay_store_allocates_live_channel_lazily() {
     };
     {
         let sessions = store.sessions.lock_recover();
-        assert!(sessions.get("s").expect("buffer").sender.is_some());
+        assert!(sessions.buffers.get("s").expect("buffer").sender.is_some());
     }
     drop(subscription);
     store
@@ -659,7 +659,7 @@ fn in_memory_replay_store_allocates_live_channel_lazily() {
         )
         .expect("append b");
     let sessions = store.sessions.lock_recover();
-    assert!(sessions.get("s").expect("buffer").sender.is_none());
+    assert!(sessions.buffers.get("s").expect("buffer").sender.is_none());
 }
 
 #[test]
@@ -763,4 +763,354 @@ async fn invalidation_fences_pending_publications_and_recovers_after_the_gap() {
     assert!(
         matches!(store.replay_after_cursor(&recovered), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1 && events[0].revision() == revision)
     );
+}
+
+#[derive(Debug)]
+struct ReplayClock(StdMutex<Instant>);
+
+impl ReplayClock {
+    fn advance(&self, duration: Duration) {
+        *self.0.lock_recover() += duration;
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for ReplayClock {
+    fn now(&self) -> Instant {
+        *self.0.lock_recover()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        crate::SystemClock.timestamp_datetime()
+    }
+
+    async fn sleep(&self, _: Duration) {
+        panic!("replay expiry laws do not sleep");
+    }
+
+    async fn sleep_until(&self, _: Instant) {
+        panic!("replay expiry laws do not sleep");
+    }
+}
+
+#[test]
+fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
+    let clock = Arc::new(ReplayClock(StdMutex::new(Instant::now())));
+    let store = InMemoryLiveReplayStore::with_clock(
+        InMemoryLiveReplayStoreConfig {
+            max_sessions: 100_001,
+            max_events_per_session: 1,
+            max_retained_bytes: 1024 * 1024 * 1024,
+            ..InMemoryLiveReplayStoreConfig::default()
+        },
+        clock.clone(),
+    );
+    let mut retained = Vec::new();
+    for index in 0..100_000 {
+        let session = SessionId::from(format!("idle-{index}"));
+        let event = store
+            .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
+            .expect("publish idle session");
+        retained.push(Arc::downgrade(&event));
+    }
+    {
+        let retention = store.sessions.lock_recover();
+        assert_eq!(retention.buffers.len(), 100_000);
+        assert_eq!(retention.expiry_entry_count(), 100_000);
+    }
+    clock.advance(DEFAULT_LIVE_REPLAY_TTL + Duration::from_secs(1));
+    assert_eq!(store.expire_idle_sessions(), 100_000);
+    assert!(
+        store.sessions.lock_recover().buffers.is_empty(),
+        "idle entries survive the expiry tick"
+    );
+    {
+        let retention = store.sessions.lock_recover();
+        assert_eq!(retention.expiry_entry_count(), 0);
+        assert_eq!(retention.retained_bytes, 0);
+        assert_eq!(retention.buffers.capacity(), 0);
+    }
+    assert!(
+        retained.iter().all(|event| event.upgrade().is_none()),
+        "idle events survive the expiry tick"
+    );
+}
+
+#[test]
+fn invalidation_releases_session_entries() {
+    let store = InMemoryLiveReplayStore::default();
+    for index in 0..100 {
+        let session = SessionId::from(format!("invalidated-{index}"));
+        store
+            .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
+            .expect("publish");
+        store.invalidate_session(&session).expect("invalidate");
+    }
+    assert!(
+        store.sessions.lock_recover().buffers.is_empty(),
+        "invalidation retains session entries"
+    );
+}
+
+#[test]
+fn deployment_session_capacity_evicts_with_a_gap() {
+    let store = InMemoryLiveReplayStore::default();
+    let session = SessionId::from("capacity-victim");
+    let old = store.current_cursor(&session, SessionRevision(1));
+    for index in 0..4097 {
+        store
+            .publish_test_event(
+                &SessionId::from(format!("pressure-{index}")),
+                SessionRevision(1),
+                None,
+                activity("pressure"),
+            )
+            .expect("publish pressure");
+    }
+    store
+        .publish_test_event(&session, SessionRevision(1), None, activity("recreated"))
+        .expect("recreate victim");
+    assert!(
+        matches!(
+            store.replay_after_cursor(&old),
+            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+        ),
+        "an evicted cursor replays a recreated session"
+    );
+    assert!(
+        store.sessions.lock_recover().buffers.len() <= 4096,
+        "deployment session capacity is unbounded"
+    );
+}
+
+#[test]
+fn deployment_byte_capacity_evicts_with_a_gap() {
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
+        max_events_per_session: 1,
+        max_sessions: 100,
+        max_retained_bytes: 8192,
+        ..InMemoryLiveReplayStoreConfig::default()
+    });
+    let victim = SessionId::from("byte-victim");
+    let old = store.current_cursor(&victim, SessionRevision(1));
+    store
+        .publish_test_event(
+            &victim,
+            SessionRevision(1),
+            None,
+            activity(&"a".repeat(5000)),
+        )
+        .expect("first payload");
+    store
+        .publish_test_event(
+            &SessionId::from("byte-pressure"),
+            SessionRevision(1),
+            None,
+            activity(&"b".repeat(5000)),
+        )
+        .expect("byte pressure");
+    store
+        .publish_test_event(&victim, SessionRevision(1), None, activity("recreated"))
+        .expect("recreate");
+    assert!(
+        matches!(
+            store.replay_after_cursor(&old),
+            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+        ),
+        "byte pressure replays a recreated session"
+    );
+    assert!(matches!(
+        store.subscribe_after_cursor(&old),
+        Ok(LiveReplaySubscribeOutcome::Gap(
+            LiveReplayGapReason::Unavailable
+        ))
+    ));
+}
+
+#[test]
+fn capacity_eviction_retires_pending_reservations() {
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
+        max_sessions: 1,
+        ..InMemoryLiveReplayStoreConfig::default()
+    });
+    let victim = SessionId::from("pending-victim");
+    let old = store
+        .prepare_publication(
+            &victim,
+            SessionRevision(1),
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                activity("pending"),
+            )],
+        )
+        .expect("reserve");
+    let old_cursor = old.latest_cursor().clone();
+    store
+        .publish_test_event(
+            &SessionId::from("pending-pressure"),
+            SessionRevision(1),
+            None,
+            activity("pressure"),
+        )
+        .expect("pressure");
+    let fresh = store.current_cursor(&victim, SessionRevision(1));
+    assert!(
+        store.publish_prepared(old).is_err(),
+        "evicted reservation can still publish"
+    );
+    store
+        .publish_test_event(&victim, SessionRevision(1), None, activity("fresh"))
+        .expect("fresh publication");
+    assert!(matches!(
+        store.replay_after_cursor(&old_cursor),
+        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+    ));
+    assert!(
+        matches!(store.replay_after_cursor(&fresh), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
+    );
+}
+
+#[tokio::test]
+async fn invalidation_releases_events_queued_for_live_subscribers() {
+    let store = InMemoryLiveReplayStore::default();
+    let session = SessionId::from("queued-victim");
+    let cursor = store.current_cursor(&session, SessionRevision(1));
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
+        store.subscribe_after_cursor(&cursor).expect("subscribe")
+    else {
+        panic!("fresh cursor");
+    };
+    let event = store
+        .publish_test_event(&session, SessionRevision(1), None, activity("queued"))
+        .expect("publish");
+    let retained = Arc::downgrade(&event);
+    drop(event);
+    store.invalidate_session(&session).expect("invalidate");
+    assert!(
+        retained.upgrade().is_none(),
+        "broadcast channel owns invalidated payloads"
+    );
+    use futures_util::StreamExt;
+    assert!(matches!(subscription.next().await, Some(Err(_))));
+}
+
+#[test]
+fn an_oversized_publication_fences_continuity_without_reserving_positions() {
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
+        max_events_per_session: 1,
+        max_retained_bytes: 8192,
+        ..InMemoryLiveReplayStoreConfig::default()
+    });
+    let session = SessionId::from("oversized");
+    let before = store.current_cursor(&session, SessionRevision(1));
+    assert!(
+        store
+            .prepare_publication(
+                &session,
+                SessionRevision(1),
+                vec![LiveReplayEventDraft::new(
+                    None::<String>,
+                    activity(&"x".repeat(20_000))
+                )]
+            )
+            .is_err()
+    );
+    assert!(matches!(
+        store.replay_after_cursor(&before),
+        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+    ));
+    assert!(matches!(
+        store.subscribe_after_cursor(&before),
+        Ok(LiveReplaySubscribeOutcome::Gap(
+            LiveReplayGapReason::Unavailable
+        ))
+    ));
+    let fresh = store.current_cursor(&session, SessionRevision(1));
+    assert!(
+        fresh.parse().expect("fresh cursor").live_position
+            > before.parse().expect("prior cursor").live_position
+    );
+    store
+        .publish_test_event(&session, SessionRevision(1), None, activity("fits"))
+        .expect("fresh publication");
+    assert!(
+        matches!(store.replay_after_cursor(&fresh), Ok(LiveReplayOutcome::Replayed(events)) if events.len() == 1)
+    );
+}
+
+#[test]
+fn pending_and_ready_publications_share_deployment_byte_capacity() {
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
+        max_events_per_session: 1,
+        max_retained_bytes: 16 * 1024,
+        ..InMemoryLiveReplayStoreConfig::default()
+    });
+    let victim = SessionId::from("reserved-byte-victim");
+    let first = store
+        .prepare_publication(
+            &victim,
+            SessionRevision(1),
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                activity(&"a".repeat(5000)),
+            )],
+        )
+        .expect("first reservation");
+    let old = first.latest_cursor().clone();
+    let second = store
+        .prepare_publication(
+            &victim,
+            SessionRevision(1),
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                activity(&"b".repeat(5000)),
+            )],
+        )
+        .expect("second reservation");
+    let ready_event = Arc::downgrade(&second.events()[0]);
+    store.publish_prepared(second).expect("ready suffix");
+    store
+        .publish_test_event(
+            &SessionId::from("reserved-byte-pressure"),
+            SessionRevision(1),
+            None,
+            activity(&"c".repeat(12_000)),
+        )
+        .expect("pressure");
+    assert!(
+        ready_event.upgrade().is_none(),
+        "ready reservation survives byte eviction"
+    );
+    assert!(
+        store.publish_prepared(first).is_err(),
+        "pending reservation survives byte eviction"
+    );
+    assert!(matches!(
+        store.replay_after_cursor(&old),
+        Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
+    ));
+    let retention = store.sessions.lock_recover();
+    assert!(retention.retained_bytes <= 16 * 1024);
+    assert_eq!(retention.expiry_entry_count(), retention.buffers.len());
+}
+
+#[test]
+fn repeated_access_keeps_one_expiry_key_per_session() {
+    let clock = Arc::new(ReplayClock(StdMutex::new(Instant::now())));
+    let store = InMemoryLiveReplayStore::with_clock(
+        InMemoryLiveReplayStoreConfig::default(),
+        clock.clone(),
+    );
+    let session = SessionId::from("active");
+    for _ in 0..10_000 {
+        store.current_cursor(&session, SessionRevision(1));
+        clock.advance(Duration::from_millis(1));
+    }
+    assert_eq!(store.sessions.lock_recover().expiry_entry_count(), 1);
+    clock.advance(DEFAULT_LIVE_REPLAY_TTL + Duration::from_secs(1));
+    assert_eq!(store.expire_idle_sessions(), 1);
+    let retention = store.sessions.lock_recover();
+    assert_eq!(retention.expiry_entry_count(), 0);
+    assert_eq!(retention.retained_bytes, 0);
+    assert!(retention.buffers.is_empty());
 }

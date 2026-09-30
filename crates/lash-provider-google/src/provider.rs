@@ -72,11 +72,11 @@ impl GoogleOAuthProvider {
             let headers = resp.headers;
             let body = read_http_body_text(
                 resp.body,
+                self.options.response_body_limit(),
                 timeouts.request_timeout,
                 "Cloud Code response body timed out",
             )
-            .await
-            .unwrap_or_default();
+            .await?;
             return Err(http_error_envelope(
                 format!("Cloud Code request failed with {}", status),
                 status,
@@ -108,6 +108,7 @@ impl GoogleOAuthProvider {
         if stream_events.is_none() {
             let text = read_http_body_text(
                 resp.body,
+                self.options.response_body_limit(),
                 timeouts.request_timeout,
                 "Cloud Code response body timed out",
             )
@@ -365,11 +366,11 @@ impl GoogleOAuthProvider {
             let headers = resp.headers;
             let body = read_http_body_text(
                 resp.body,
+                self.options.response_body_limit(),
                 self.options.llm_timeouts().request_timeout,
                 "Cloud Code loadCodeAssist body timed out",
             )
-            .await
-            .unwrap_or_default();
+            .await?;
             return Err(http_error_envelope(
                 format!("Cloud Code loadCodeAssist failed with {}", status),
                 status,
@@ -380,6 +381,7 @@ impl GoogleOAuthProvider {
         }
         let text = read_http_body_text(
             resp.body,
+            self.options.response_body_limit(),
             self.options.llm_timeouts().request_timeout,
             "Cloud Code loadCodeAssist body timed out",
         )

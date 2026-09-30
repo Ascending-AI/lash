@@ -69,9 +69,9 @@ impl ScopeRef {
         }
     }
 
-    /// The grant a host's session lookup mints. Only the facade calls this,
-    /// after it has read the session; registration accepts it only on a root
-    /// start.
+    /// The grant a host's session lookup mints. Only the facade calls this;
+    /// registration accepts it only on a root start, and the start's recorded
+    /// admission checks the session is live.
     #[must_use]
     pub fn host_session_lookup(session_id: SessionId) -> Self {
         Self {

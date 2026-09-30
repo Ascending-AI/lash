@@ -163,7 +163,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     );
     runtime_state.session_id = "private-child".into();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        crate::testing::memory_store_backend().await,
+        crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -187,7 +187,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     ));
     assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 0);
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        crate::testing::memory_store_backend().await,
+        crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));

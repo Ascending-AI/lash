@@ -311,14 +311,17 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
     );
     sweep().await;
     assert!(
-        backend.get(&crashed.reference.id).await.is_ok(),
+        backend
+            .get(&crashed.reference.id, 32 * 1024 * 1024)
+            .await
+            .is_ok(),
         "a still-committable turn's retained output survives the sweep"
     );
 
     // A later turn retains its own output, and its commit names it.
     let committed_text = "committed turn output\n".repeat(500);
     let committed = retain(committed_text.clone(), "committed-turn").await;
-    let commit = RuntimeCommit::persisted_state_for_test(&state(SESSION), &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&state(SESSION))
         .with_committed_attachments([committed.reference.id.clone()]);
     store.commit_runtime_state(commit).await.unwrap();
 
@@ -332,13 +335,17 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
     assert!(report.reclaimed_count >= 1, "{report:?}");
     assert!(
         matches!(
-            backend.get(&crashed.reference.id).await,
+            backend.get(&crashed.reference.id, 32 * 1024 * 1024).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "the crashed turn's retained output is reclaimed once its execution ends unnamed"
     );
     assert_eq!(
-        backend.get(&committed.reference.id).await.unwrap().bytes,
+        backend
+            .get(&committed.reference.id, 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .bytes,
         committed_text.into_bytes(),
         "the committed reference resolves to the exact retained bytes"
     );
@@ -370,7 +377,7 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
         .unwrap();
     let absent = AttachmentId::parse("atomic-z-absent").unwrap();
     let current = state("receiver");
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([id.clone(), absent.clone()]);
     assert!(matches!(
         receiver.commit_runtime_state(commit).await,
@@ -393,8 +400,8 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
             .unwrap()
             .contains(&session_referrer)
     );
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
-        .with_committed_attachments([id.clone()]);
+    let commit =
+        RuntimeCommit::persisted_state_for_test(&current).with_committed_attachments([id.clone()]);
     receiver.commit_runtime_state(commit).await.unwrap();
     assert!(
         receiver
@@ -496,7 +503,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
             }),
         )]),
     });
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let leaf = receipt.committed_leaf_node_id.unwrap();
@@ -532,7 +539,14 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         vec![referrer.clone()]
     );
     assert_eq!(sweep().await.reclaimed_count, 0);
-    assert_eq!(bytes.get(&reference.id).await.unwrap().bytes, vec![42]);
+    assert_eq!(
+        bytes
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .unwrap()
+            .bytes,
+        vec![42]
+    );
 
     h.factory.unpin(&leaf).await.unwrap();
     assert_eq!(
@@ -577,7 +591,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             }),
         )]),
     });
-    let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
+    let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let node = receipt.committed_leaf_node_id.unwrap();
@@ -790,4 +804,172 @@ pub async fn condemnation_needs_no_edge_and_no_pending_write(h: AttachmentReferr
         store.complete_attachment_write(&restoring, permit).await,
         Err(StoreError::StaleWritePermit { .. })
     ));
+}
+
+/// Deliberately stop a root enumeration before one kind or its next page.
+struct PartialAttachmentRoots {
+    factory: Arc<dyn DeploymentStore>,
+    omitted: AttachmentId,
+    truncate_page: bool,
+}
+
+#[async_trait::async_trait]
+impl AttachmentRootSet for PartialAttachmentRoots {
+    async fn attachment_root_page(
+        &self,
+        source: lash_core::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash_core::attachments::AttachmentRootPage, StoreError> {
+        use lash_core::attachments::{AttachmentRootPage, AttachmentRootSource};
+        if source == AttachmentRootSource::Referrer(ArtifactReferrerKind::ProcessRecord) {
+            if self.truncate_page && after.is_none() {
+                // Plant a nonterminal page. Stopping at this page must never
+                // authorize a deletion, even if another source was complete.
+                return AttachmentRootPage::from_rows(
+                    (0..AttachmentRootPage::QUERY_LIMIT)
+                        .map(|index| {
+                            AttachmentId::parse(format!("partial-page-{index:04}")).unwrap()
+                        })
+                        .collect(),
+                );
+            }
+            return Err(StoreError::IncompleteEnumeration {
+                scope: "live attachment roots",
+                unfinished: if self.truncate_page {
+                    "truncated process_record continuation"
+                } else {
+                    "skipped process_record source"
+                }
+                .into(),
+            });
+        }
+        self.factory.attachment_root_page(source, after).await
+    }
+
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
+        if id == &self.omitted {
+            return Ok(false);
+        }
+        self.factory.has_live_attachment_ref(id).await
+    }
+}
+
+async fn partial_attachment_enumeration(h: AttachmentReferrerHandles, truncate_page: bool) {
+    let store = create(&h.factory, "partial-roots").await;
+    let bytes = (h.bytes)();
+    let protected = bytes
+        .put(
+            b"protected by omitted process record".to_vec(),
+            image_meta(),
+        )
+        .await
+        .unwrap();
+    let visible = bytes
+        .put(b"visible session root".to_vec(), image_meta())
+        .await
+        .unwrap();
+    record_completed_write(
+        &store,
+        &write(
+            &protected.id,
+            ArtifactReferrer::ProcessRecord(ProcessId::fixture("partial-process")),
+        ),
+    )
+    .await;
+    record_completed_write(
+        &store,
+        &write(
+            &visible.id,
+            ArtifactReferrer::Session("partial-roots".into()),
+        ),
+    )
+    .await;
+    let partial = PartialAttachmentRoots {
+        factory: h.factory.clone(),
+        omitted: protected.id.clone(),
+        truncate_page,
+    };
+    let result = reclaim_unreferenced_attachments(
+        &partial,
+        bytes.as_ref(),
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await;
+    assert!(
+        matches!(result.unwrap_err().stop,
+        store::MaintenanceStop::Failed(AttachmentStoreError::RootSetEnumerationFailed { source })
+        if matches!(*source, StoreError::IncompleteEnumeration { .. })),
+        "partial enumeration must stop typed before destruction"
+    );
+    bytes
+        .get(&protected.id, 32 * 1024 * 1024)
+        .await
+        .expect("omitted referrer's live bytes survive");
+    bytes
+        .get(&visible.id, 32 * 1024 * 1024)
+        .await
+        .expect("visible live bytes survive");
+}
+
+pub async fn skipped_attachment_referrer_kind_cannot_authorize_delete(
+    h: AttachmentReferrerHandles,
+) {
+    partial_attachment_enumeration(h, false).await;
+}
+
+pub async fn truncated_attachment_root_page_cannot_authorize_delete(h: AttachmentReferrerHandles) {
+    partial_attachment_enumeration(h, true).await;
+}
+
+pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
+    h: AttachmentReferrerHandles,
+) {
+    let store = create(&h.factory, "complete-roots").await;
+    let session = SessionId::from("complete-roots");
+    let mut expected = std::collections::BTreeSet::new();
+    for index in 0..258 {
+        let id = AttachmentId::parse(format!("paged-root-{index:04}")).unwrap();
+        record_completed_write(
+            &store,
+            &write(&id, ArtifactReferrer::Session(session.clone())),
+        )
+        .await;
+        expected.insert(id);
+    }
+    for (index, referrer) in [
+        ArtifactReferrer::ProcessRecord(ProcessId::fixture("complete-process")),
+        ArtifactReferrer::Upload(UploadReferrerId::mint(session.clone())),
+        execution(&session, "complete-execution"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = AttachmentId::parse(format!("kind-root-{index}")).unwrap();
+        record_completed_write(&store, &write(&id, referrer)).await;
+        expected.insert(id);
+    }
+    let pending = AttachmentId::parse("pending-without-edge").unwrap();
+    let attempt = write(
+        &pending,
+        ArtifactReferrer::ProcessRecord(ProcessId::fixture("pending-process")),
+    );
+    let permit = permit(store.as_ref(), &attempt).await;
+    store
+        .forget_attachment_ref(attempt.claim.referrer(), &pending)
+        .await
+        .unwrap();
+    expected.insert(pending);
+    let witnessed = h.factory.live_attachment_refs().await.unwrap();
+    assert_eq!(
+        witnessed.values(),
+        &expected,
+        "the witness includes every source, the second page, and an edgeless pending write"
+    );
+    store
+        .abort_attachment_write(&attempt, permit)
+        .await
+        .unwrap();
 }

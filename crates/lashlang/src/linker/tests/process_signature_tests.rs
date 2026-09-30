@@ -26,7 +26,7 @@ fn trigger_target_uses_the_scoped_callable_when_it_shadows_a_declaration() {
     //   await triggers.register({
     //     source: source,
     //     subscription_key: <key>,
-    //     target: scan,
+    //     target: { definition: scan },
     //     inputs: { <input>: trigger.event }
     //   })?
     //   finish true
@@ -79,7 +79,7 @@ fn trigger_list_accepts_same_signature_alias_branch_targets() {
     // process install(handler: Handler) -> bool {
     //   selected = handler
     //   if true { selected = scan } else { selected = handler }
-    //   await triggers.list({ target: selected })?
+    //   await triggers.list({ target: { definition: selected } })?
     //   finish true
     // }
     let program = builders::module(

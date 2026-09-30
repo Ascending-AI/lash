@@ -144,7 +144,6 @@ fn lent_with_direct_completions(
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::ScopedEffectController::shared(
             Arc::new(crate::testing::UnavailableEffectController),
@@ -182,14 +181,8 @@ pub(super) fn child_controller() -> ScopedEffectController<'static> {
 }
 
 fn rebound(request: &ToolChildRequest) -> ToolDispatchContext<'static> {
-    rebind_child_dispatch(
-        &lent(),
-        request,
-        child_controller(),
-        spec(3),
-        &ToolUsageLedger::new(),
-    )
-    .expect("the lent client's test service binds to any recorded authority")
+    rebind_child_dispatch(&lent(), request, child_controller(), spec(3))
+        .expect("the lent client's test service binds to any recorded authority")
 }
 
 /// A child may be attributed to a session the lending opener is not: a process
@@ -225,7 +218,7 @@ fn the_child_keeps_its_recorded_agent_frame() {
     );
 }
 
-/// Ruling 1 (ADR 0099 §3 amendment 1): a reopen may not consult the live Tool
+/// Ruling 1 (ADR 0099 §3 item 1): a reopen may not consult the live Tool
 /// Catalog *for the recorded call*. The lent catalog holds a *different* tool
 /// with a *different* retry policy, so a rebind that kept it wholesale would
 /// run the child under a policy it was never admitted with — or fail to
@@ -275,14 +268,8 @@ fn a_live_entry_at_the_childs_own_id_loses_to_the_recorded_manifest() {
             contract: crate::ToolContract::default(),
         },
     ]));
-    let child = rebind_child_dispatch(
-        &lent,
-        &request(),
-        child_controller(),
-        spec(3),
-        &ToolUsageLedger::new(),
-    )
-    .expect("the lent client's test service binds to any recorded authority");
+    let child = rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
+        .expect("the lent client's test service binds to any recorded authority");
     let resolved =
         crate::tool_dispatch::resolve_callable_manifest_by_id(&child, &ToolId::from("search"))
             .expect("the recorded manifest resolves at the child's own id");
@@ -369,14 +356,8 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
             source: None,
             deliveries: Vec::new(),
         });
-    let child = rebind_child_dispatch(
-        &lent,
-        &request(),
-        child_controller(),
-        spec(3),
-        &ToolUsageLedger::new(),
-    )
-    .expect("the lent client's test service binds to any recorded authority");
+    let child = rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
+        .expect("the lent client's test service binds to any recorded authority");
     assert!(
         child.checkpoint_messages.drain().is_empty(),
         "a child must not inherit the opener's committed messages"
@@ -405,14 +386,8 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
 #[test]
 fn everything_not_on_the_checklist_is_the_lent_value() {
     let lent = lent();
-    let child = rebind_child_dispatch(
-        &lent,
-        &request(),
-        child_controller(),
-        spec(3),
-        &ToolUsageLedger::new(),
-    )
-    .expect("the lent client's test service binds to any recorded authority");
+    let child = rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
+        .expect("the lent client's test service binds to any recorded authority");
     assert!(Arc::ptr_eq(&lent.plugins, &child.plugins));
     assert!(Arc::ptr_eq(&lent.tools, &child.tools));
     assert!(Arc::ptr_eq(&lent.processes, &child.processes));
@@ -440,14 +415,8 @@ fn everything_not_on_the_checklist_is_the_lent_value() {
 fn a_childs_tool_context_holds_no_runtime_execution_context() {
     let lent = lent();
     let rebound = Arc::new(
-        rebind_child_dispatch(
-            &lent,
-            &request(),
-            child_controller(),
-            spec(3),
-            &ToolUsageLedger::new(),
-        )
-        .expect("the lent client's test service binds to any recorded authority"),
+        rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
+            .expect("the lent client's test service binds to any recorded authority"),
     );
     let context = child_tool_context(
         &rebound,
@@ -507,22 +476,12 @@ fn opener_derivation_names_every_admitted_opener_scope() {
 /// the way a managed-LLM transport's would — a test-fn source would bypass
 /// it entirely. Everything the client must rebind is captured where the
 /// service receives it: the recorded session and environment at bind, and
-/// the admitted controller's scope, the recorded turn, and the usage sink at
+/// the admitted controller's scope, the recorded turn, and whether a usage run was bound at
 /// call.
 #[derive(Default)]
 struct CompletionProbe {
     binds: std::sync::Mutex<Vec<(crate::RuntimeOwner, ProcessExecutionEnvSpec)>>,
     completes: std::sync::Mutex<Vec<(ExecutionScope, Option<crate::TurnId>, bool)>>,
-}
-
-/// What the service's `complete` does after it has received the call. The
-/// billed-failure arm models `apply_direct_outcome`'s ordering: the sealed
-/// provider record — a billed attempt that then failed — is a usage fact of
-/// the call and feeds the sink *before* the error projects.
-#[derive(Clone, Copy)]
-enum ProbeCall {
-    Succeed,
-    FailAfterBilling,
 }
 
 struct ProbedCompletionService {
@@ -531,7 +490,6 @@ struct ProbedCompletionService {
     /// prove it executes under the recorded authority — the production
     /// transport's answer to a foreign session.
     bindable: bool,
-    call: ProbeCall,
 }
 
 #[async_trait::async_trait]
@@ -543,32 +501,14 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         _position: crate::direct_completion_client::DirectExecutionPosition,
-        usage_sink: Option<&crate::runtime::ToolUsageLedger>,
+        usage_run: Option<&crate::UsageRun>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.probe.completes.lock_recover().push((
             effect_controller.execution_scope().clone(),
             turn_id.cloned(),
-            usage_sink.is_some(),
+            usage_run.is_some(),
         ));
-        // The sealed record feeds the bound sink the way the runtime service
-        // does — a billed provider attempt is a usage fact of the call,
-        // whatever the call then returns.
-        if let Some(sink) = usage_sink {
-            sink.record(
-                &match self.call {
-                    ProbeCall::Succeed => probed_call_record(),
-                    ProbeCall::FailAfterBilling => failed_billed_call_record(),
-                },
-                "test-source",
-                "test-model",
-            );
-        }
-        match self.call {
-            ProbeCall::Succeed => Ok(probed_completion()),
-            ProbeCall::FailAfterBilling => Err(crate::PluginError::Session(
-                "the provider attempt billed, then failed".to_string(),
-            )),
-        }
+        Ok(probed_completion())
     }
 
     async fn complete_llm(
@@ -579,7 +519,7 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
         _turn_id: Option<&crate::TurnId>,
         _position: crate::direct_completion_client::DirectExecutionPosition,
         _caused_by: Option<crate::CausalRef>,
-        _usage_sink: Option<&crate::runtime::ToolUsageLedger>,
+        _usage_run: Option<&crate::UsageRun>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         Err(crate::PluginError::Session(
             "the rebind probe answers text completions only".to_string(),
@@ -599,7 +539,6 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
             Arc::new(ProbedCompletionService {
                 probe: Arc::clone(&self.probe),
                 bindable: self.bindable,
-                call: self.call,
             }) as Arc<dyn crate::direct_completion_client::DirectCompletionService>
         })
     }
@@ -631,16 +570,6 @@ fn probed_call_record() -> crate::LlmCallRecord {
     }
 }
 
-/// A sealed provider record whose only attempt billed, then failed — the
-/// hostile case §13's usage line exists for: the spend is a fact even though
-/// the call's terminal outcome is an error.
-fn failed_billed_call_record() -> crate::LlmCallRecord {
-    let mut record = probed_call_record();
-    record.call_id = crate::LlmCallId("failed-billed-call".to_string());
-    record.attempts[0].outcome = crate::AttemptOutcome::Failed;
-    record
-}
-
 fn probed_completion() -> crate::DirectCompletion {
     crate::DirectCompletion {
         text: "probed completion".to_string(),
@@ -653,16 +582,11 @@ fn probed_completion() -> crate::DirectCompletion {
     }
 }
 
-fn probed_lent(
-    probe: &Arc<CompletionProbe>,
-    bindable: bool,
-    call: ProbeCall,
-) -> ToolDispatchContext<'static> {
+fn probed_lent(probe: &Arc<CompletionProbe>, bindable: bool) -> ToolDispatchContext<'static> {
     lent_with_direct_completions(crate::DirectCompletionClient::runtime(
         Arc::new(ProbedCompletionService {
             probe: Arc::clone(probe),
             bindable,
-            call,
         }),
         crate::runtime::ScopedEffectController::shared(
             Arc::new(crate::testing::UnavailableEffectController),
@@ -676,12 +600,12 @@ fn probed_lent(
 /// §3's managed-LLM line of the checklist: the lent client is rebound to the
 /// child's recorded authority, so the service is asked to bind the recorded
 /// session and environment — and the call it then receives arrives on the
-/// child's admitted controller under the recorded turn, with the child's
-/// usage ledger bound, never the opener's current facts.
+/// child's admitted controller under the recorded turn, never the opener's
+/// current facts.
 #[tokio::test]
 async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
     let probe = Arc::new(CompletionProbe::default());
-    let lent = probed_lent(&probe, true, ProbeCall::Succeed);
+    let lent = probed_lent(&probe, true);
     // A recorded parent that carries the child's turn, so the rebound
     // client's attribution observably comes from the journal and not from
     // the opener's minted `opener-turn`.
@@ -696,8 +620,7 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
             "recorded-parent",
         ),
     )));
-    let usage_ledger = ToolUsageLedger::new();
-    let child = rebind_child_dispatch(&lent, &request, child_controller(), spec(3), &usage_ledger)
+    let child = rebind_child_dispatch(&lent, &request, child_controller(), spec(3))
         .expect("the probe service binds to the recorded authority");
 
     {
@@ -728,15 +651,13 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
             &[(
                 ExecutionScope::turn("child-session", "turn"),
                 Some(crate::TurnId::from("child-turn")),
-                true
+                false
             )],
             "the call arrived on the child's admitted controller under the \
-             recorded turn, with the child's usage sink bound"
+             recorded turn; the rebind binds no usage run, which only the \
+             child's `ToolAttempt` body supplies (ADR 0125)"
         );
     }
-    let deltas = usage_ledger.take();
-    assert_eq!(deltas.len(), 1, "the billed attempt lands on the child");
-    assert_eq!(deltas[0].usage.input_tokens, 5);
 
     // The opener's own client is untouched: a call on it still arrives under
     // the turn it was minted with — the rebind cloned, it did not mutate.
@@ -764,16 +685,10 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
 #[test]
 fn a_completion_service_that_cannot_bind_the_recorded_authority_refuses() {
     let probe = Arc::new(CompletionProbe::default());
-    let lent = probed_lent(&probe, false, ProbeCall::Succeed);
-    let error = rebind_child_dispatch(
-        &lent,
-        &request(),
-        child_controller(),
-        spec(3),
-        &ToolUsageLedger::new(),
-    )
-    .err()
-    .expect("an unbindable service refuses the child");
+    let lent = probed_lent(&probe, false);
+    let error = rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
+        .err()
+        .expect("an unbindable service refuses the child");
     assert_eq!(
         error.code,
         crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
@@ -783,48 +698,6 @@ fn a_completion_service_that_cannot_bind_the_recorded_authority_refuses() {
         1,
         "the refusal came from asking, not from skipping the bind"
     );
-}
-
-/// §13's usage line: a provider attempt that billed and then failed is a
-/// spend of the child even though the call returns an error. The service
-/// feeds its sealed record to the bound sink before the error projects —
-/// the same ordering `apply_direct_outcome` holds — so the ledger the
-/// settlement drains already carries the failed attempt's usage.
-#[tokio::test]
-async fn a_billed_failed_completion_attempt_lands_on_the_child_usage() {
-    let probe = Arc::new(CompletionProbe::default());
-    let lent = probed_lent(&probe, true, ProbeCall::FailAfterBilling);
-    let usage_ledger = ToolUsageLedger::new();
-    let child = rebind_child_dispatch(
-        &lent,
-        &request(),
-        child_controller(),
-        spec(3),
-        &usage_ledger,
-    )
-    .expect("the probe service binds to the recorded authority");
-
-    child
-        .direct_completions
-        .direct_completion(
-            crate::DirectRequest::text("law-model", "a call that bills then fails"),
-            "law-source",
-        )
-        .await
-        .expect_err("the failed call surfaces as an error");
-
-    let deltas = usage_ledger.take();
-    assert_eq!(
-        deltas.len(),
-        1,
-        "the failed attempt's billed spend is retained, not dropped"
-    );
-    assert_eq!(
-        deltas[0].llm_call_id,
-        crate::LlmCallId("failed-billed-call".to_string())
-    );
-    assert_eq!(deltas[0].provider_attempt, 1);
-    assert_eq!(deltas[0].usage.input_tokens, 5);
 }
 
 /// The recorded cancellation authority is the scope the child's waits
@@ -855,7 +728,7 @@ async fn the_cancel_wait_observes_the_admitted_scope() {
 /// would act on is `observe_turn_cancel`, so asserting the shape is asserting
 /// the gate was never attached.
 /// A process-execution-env store that fails every read with `error`.
-struct FailingEnvStore(fn() -> crate::ArtifactStoreError);
+struct FailingEnvStore(fn() -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>);
 
 #[async_trait::async_trait]
 impl crate::ProcessExecutionEnvStore for FailingEnvStore {
@@ -887,7 +760,7 @@ impl crate::ProcessExecutionEnvStore for FailingEnvStore {
         &self,
         _env_ref: &ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
-        Err((self.0)())
+        (self.0)()
     }
 }
 
@@ -932,9 +805,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let timed_out = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::Backend(
+            Err(crate::ArtifactStoreError::Backend(
                 "pool timed out while waiting for an open connection".into(),
-            )
+            ))
         })),
     )
     .await;
@@ -954,9 +827,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let missing_bytes = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::ArtifactMissing {
+            Err(crate::ArtifactStoreError::ArtifactMissing {
                 artifact_ref: "env".into(),
-            }
+            })
         })),
     )
     .await;
@@ -975,9 +848,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let invalid = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::Decode(
+            Err(crate::ArtifactStoreError::Decode(
                 "invalid process execution environment reference".into(),
-            )
+            ))
         })),
     )
     .await;
@@ -991,11 +864,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     );
 
     // Nothing stored under the reference: the request's outcome.
-    let missing = settle(
-        &request,
-        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
-    )
-    .await;
+    let missing = settle(&request, Arc::new(FailingEnvStore(|| Ok(None)))).await;
     assert!(!retried(&missing), "a missing environment is recorded");
     assert_eq!(
         missing.code,
@@ -1006,6 +875,20 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         crate::TurnFailureCause::Outcome
     );
     assert!(missing.message.contains("missing process execution env"));
+
+    let unavailable = settle(
+        &request,
+        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
+    )
+    .await;
+    assert_eq!(
+        unavailable.turn_failure_cause(),
+        crate::TurnFailureCause::LiveFault
+    );
+    assert!(
+        retried(&unavailable),
+        "a failed acquisition is retried before journaling"
+    );
 }
 
 /// A child whose presentation effect a controller refused — a replay

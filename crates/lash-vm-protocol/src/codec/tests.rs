@@ -140,7 +140,7 @@ fn every_message_round_trips() {
             error: EncodedPayload(b"TypeError".to_vec()),
         },
         WorkerMessage::Cancelled,
-        WorkerMessage::ResetDone,
+        WorkerMessage::ResetDone { cpu_nanos: 12 },
     ];
     for message in workers {
         let frame = WorkerFrame {

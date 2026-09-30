@@ -155,20 +155,74 @@ use lash::triggers::TriggerSubscriptionRecord as _;
 /// `lash_sansio::schema_contract`, the one sans-io module the host names.
 use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};
 
+/// FIG-4373: what a facade-only host needs to wrap a protocol factory, name
+/// the registration groups a registrar hands out, and decorate a store set.
+mod host_wrapping_inventory {
+    use lash::persistence::ArtifactCleanupLedger as _;
+    use lash::persistence::ProcessDefinitionStore as _;
+    use lash::persistence::WorkerRecoveryClaim as _;
+    use lash::persistence::WorkerRecoveryError as _;
+    use lash::persistence::WorkerRecoveryLimits as _;
+    use lash::persistence::WorkerRecoveryStore as _;
+    use lash::persistence::WorkerRecoveryTotals as _;
+    use lash::plugins::ContextRegistrations as _;
+    use lash::plugins::ExecutionRegistrations as _;
+    use lash::plugins::OutputRegistrations as _;
+    use lash::plugins::PluginOperationRegistrations as _;
+    use lash::plugins::ProcessEngineContributionContext as _;
+    use lash::plugins::PromptRegistrations as _;
+    use lash::plugins::ProtocolRegistrations as _;
+    use lash::plugins::SessionRegistrations as _;
+    use lash::plugins::ToolCallRegistrations as _;
+    use lash::plugins::ToolCatalogRegistrations as _;
+    use lash::plugins::ToolRegistrations as _;
+    use lash::plugins::ToolResultRegistrations as _;
+    use lash::plugins::TriggerEventRegistrations as _;
+    use lash::plugins::TurnRegistrations as _;
+}
+
+/// FIG-4373: the RLM config groups and the deferred-resolution errors the
+/// RLM factory and resolvers name.
+#[cfg(feature = "rlm")]
+mod rlm_host_wrapping_inventory {
+    use lash::rlm::LashlangProcessAdmissionRefusal as _;
+    use lash::rlm::LashlangRuntimeError as _;
+    use lash::rlm::RlmAbilities as _;
+    use lash::rlm::RlmLanguageFeatures as _;
+    use lash::rlm::RlmProjectedSeedEntry as _;
+    use lash::rlm::RlmProjectedSeedSnapshot as _;
+    use lash::rlm::RlmPromptFeatures as _;
+    use lash::rlm::RlmSeedPluginBody as _;
+    use lash::rlm::ToolBindingError as _;
+    use lash::rlm::UnsetChannel as _;
+    use lash::tools::DeferredLinkError as _;
+    use lash::tools::DeferredResolutionError as _;
+}
+
 // --- `rlm`: the Lashlang protocol, runtime and language surface ---
 
 #[cfg(feature = "rlm")]
 mod rlm_inventory {
     use lash::persistence::LashlangArtifacts as _;
+    // The code-mode dialect seam (ADR 0096).
+    use lash::rlm::CellTags as _;
+    use lash::rlm::Dialect as _;
+    use lash::rlm::DialectPromptVocabulary as _;
+    use lash::rlm::DialectRefusal as _;
+    use lash::rlm::DialectRefusalKind as _;
+    use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::LashlangAbilities as _;
     use lash::rlm::LashlangHostEnvironment as _;
     use lash::rlm::LinkedModule as _;
     use lash::rlm::ModuleCompileOutput as _;
     use lash::rlm::NamedDataType as _;
+    use lash::rlm::ResolvedToolBinding as _;
+    use lash::rlm::ShapeNotation as _;
     use lash::rlm::TypeExpr as _;
     use lash::rlm::TypeField as _;
+    use lash::rlm::TypescriptDialect as _;
     use lash::rlm::lashlang_surface_extension as _;
-    use lash::tools::link_with_deferred_resolution as _;
+    use lash::tools::compile_with_deferred_resolution as _;
 
     // The Lashlang language vocabulary, re-exported whole as `lash::rlm::lang`.
     use lash::rlm::lang::AbilityOp as _;

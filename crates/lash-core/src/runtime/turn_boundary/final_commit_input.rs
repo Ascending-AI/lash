@@ -18,7 +18,6 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) execution_state_update: ExecutionStateUpdate,
     pub(super) agent_frame_switch_materializes: bool,
     pub(super) store: Option<&'a crate::store::SessionStore>,
-    pub(super) usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,
     pub(super) ingress_settlement: TurnIngressSettlement,

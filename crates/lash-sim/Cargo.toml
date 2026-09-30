@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vm-client = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }

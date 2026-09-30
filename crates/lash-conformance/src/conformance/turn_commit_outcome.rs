@@ -27,15 +27,13 @@ async fn law(store: Arc<dyn ConformanceDeployment>, expected: TurnCommitOutcome)
     };
     let turn_id = TurnId::from("outcome-turn");
     let operation = OperationId::turn(&session_id, turn_id.as_str(), "final");
-    let (mut commit, _) =
-        RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
-            &mut state,
-            &[],
-            operation,
-            CommitBudget::bounded(1024 * 1024, 512),
-            FleetFormat::current(),
-        )
-        .expect("build turn commit");
+    let (mut commit, _) = RuntimeCommit::persisted_state_with_operation_and_budget(
+        &mut state,
+        operation,
+        CommitBudget::bounded(1024 * 1024, 512),
+        FleetFormat::current(),
+    )
+    .expect("build turn commit");
     commit.outcome = Some(expected.clone());
     let first = store
         .commit_runtime_state(commit.clone())

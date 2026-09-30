@@ -557,7 +557,6 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_e
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![SessionId::from("session")],
-                    env_spec: None,
                     execution_context: Box::new(execution_context),
                 }),
             ),
@@ -853,14 +852,14 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
     let plugin_host = lash_core::facade_support::PluginHost::new(plugins);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
-    // The worker reaches sessions through the catalog the test hands it, and
-    // artifacts through the recovery backend its registrations publish into,
-    // which holds modules and definition manifests in one store set (ADR
-    // 0113 §3.3). The session catalog is the law's reopened catalog.
+    // Definition descriptors and their manifests share the recovery backend.
+    // Each fixture gets independent worker counters for its execution scopes.
+    let worker_recovery = memory_engine_backend().await.worker_recovery();
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(
         RECOVERY_ARTIFACT_BACKEND.clone(),
     )
     .map_session_store_factory(|_| store_factory)
+    .map_worker_recovery(|_| worker_recovery.clone())
     .into_backend();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend,
@@ -873,6 +872,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 recovery_artifact_store(),
                 lash_lashlang_runtime::LashlangSurface::default(),
+                worker_recovery,
             )
             .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
         ),
@@ -1395,7 +1395,6 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![creator_scope.session_id.clone()],
-                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),

@@ -100,10 +100,17 @@ impl TryFrom<lash_core::runtime::ProcessEventSemantics> for RemoteProcessEventSe
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::runtime::ProcessEventSemantics) -> Result<Self, Self::Error> {
-        let lash_core::runtime::ProcessEventSemantics { terminal, wake } = value;
+        let lash_core::runtime::ProcessEventSemantics {
+            terminal,
+            wake,
+            signal_wait,
+        } = value;
         Ok(Self {
             terminal: terminal.map(TryInto::try_into).transpose()?,
             wake: wake.map(Into::into),
+            signal_wait: signal_wait.map(|binding| RemoteProcessSignalWaitBinding {
+                ordinal: binding.ordinal,
+            }),
         })
     }
 }
@@ -112,10 +119,17 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessEventSemantics) -> Result<Self, Self::Error> {
-        let RemoteProcessEventSemantics { terminal, wake } = value;
+        let RemoteProcessEventSemantics {
+            terminal,
+            wake,
+            signal_wait,
+        } = value;
         Ok(Self {
             terminal: terminal.map(TryInto::try_into).transpose()?,
             wake: wake.map(Into::into),
+            signal_wait: signal_wait.map(|binding| lash_core::runtime::ProcessSignalWaitBinding {
+                ordinal: binding.ordinal,
+            }),
         })
     }
 }

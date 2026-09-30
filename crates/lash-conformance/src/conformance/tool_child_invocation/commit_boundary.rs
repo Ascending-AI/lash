@@ -268,7 +268,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
         ))
         .await
         .expect("the group opens under the live opener");
-    // B commits first (commit_seq 1) and parks at its first intent write.
+    // B commits first (rank 1) and parks at its first intent write.
     sink.await_blocked(&call_b).await;
     // A's body is released; its attempt finishes and commits second — its
     // drain must wait at the §5 barrier behind B's owed drain.

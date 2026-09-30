@@ -9,12 +9,12 @@
 //! execution is terminated at the decision (the token is a physical-stop
 //! signal, not authorization), so the parked leaf never returns and its
 //! declared intents are never minted. The gated process service records
-//! nothing and the definition registry holds no slot.
+//! nothing and the definition store holds no descriptor.
 //!
 //! The typed evidence is then the bound controller itself: the law mints it
 //! through `scoped_for_group_child` — the same seam `ToolChildHost` drives —
 //! while the group is still live, exactly as the real child's controller
-//! exists from dispatch, and pushes a `RegisterDefinition` admission through
+//! exists from dispatch, and pushes a `PublishDefinition` admission through
 //! it after the cancel decision commits. The substrate answers with
 //! `RuntimeEffectGroupChildCancelDecided`: the SQL claim refuses the insert
 //! inside its transaction, the native controller refuses under the group
@@ -95,18 +95,15 @@ fn assert_fence_refusal(error: &crate::RuntimeEffectControllerError) {
 }
 
 /// The process-side wiring the opener's dispatch installs: the gated service
-/// the law asserts stayed empty, the env store the child host needs, and the
-/// definition registry the fenced write would have reached.
+/// the law asserts stayed empty and the env store the child host needs.
 struct FenceOpenerProcesses {
     processes: Arc<dyn crate::ProcessService>,
     env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
 }
 
 /// The opener registration the law needs: `register_opener_with_processes`
-/// plus the process-definition registry and the law's resolve-only engine,
-/// so the leaf's `PublishDefinition` declaration resolves and reaches
-/// the journaled write the fence refuses.
+/// plus the law's resolve-only engine, so the leaf's `PublishDefinition`
+/// declaration resolves and reaches the journaled write the fence refuses.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -122,7 +119,6 @@ fn register_fence_opener(
     let FenceOpenerProcesses {
         processes,
         env_store: process_env_store,
-        definitions: process_definitions,
     } = processes;
     let installed = install_child_host(host, &process_env_store);
     let admitted = crate::AdmittedScope::new(scope.clone());
@@ -148,7 +144,6 @@ fn register_fence_opener(
     .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
     .tool_registry(Arc::new(tool_registry))
     .processes(processes)
-    .process_definitions(process_definitions)
     .process_engines(engines)
     .direct_completions(crate::DirectCompletionClient::from_fn(
         |_request, _source| Ok(law_direct_completion()),
@@ -250,11 +245,11 @@ fn fence_group(
 /// the substrate physically stops the in-flight attempt, so the leaf never
 /// mints the `StartProcess`, `EmitProcessEvent` and
 /// `PublishDefinition` its terminal declared — the gated process
-/// service records nothing and the definition registry holds no slot.
+/// service records nothing and the definition store holds no descriptor.
 ///
 /// The fence is then probed directly: the bound controller minted before the
 /// close — `scoped_for_group_child`, the child's own controller shape —
-/// refuses a `RegisterDefinition` admission with the typed
+/// refuses a `PublishDefinition` admission with the typed
 /// `RuntimeEffectGroupChildCancelDecided`. On a durable tier the reopen half
 /// serves rank 0 as the cancelled terminal the close committed; on the
 /// drain-less Restate tier the group's ranks are unreadable by contract
@@ -274,7 +269,6 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-fence-group");
-    let owner_scope = crate::TriggerOwnerScope::session(session_id.clone());
     let child_admitted = crate::AdmittedScope::new(scope.clone());
 
     let world = (fixture.make_world)(ToolChildWorldSpec {
@@ -283,7 +277,7 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
     .await;
     let host = world.host;
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
-    let definitions = Arc::clone(&scenario.process_definitions);
+    let definitions = Arc::clone(&scenario.definition_store);
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
         inner: crate::testing::effect_backed_process_service(
@@ -302,7 +296,6 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
         FenceOpenerProcesses {
             processes: Arc::clone(&processes),
             env_store: Arc::clone(&scenario.process_env_store),
-            definitions: Arc::clone(&definitions),
         },
         opener.clone(),
         tokio_util::sync::CancellationToken::new(),
@@ -358,6 +351,16 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
     // reports no controller and skips the probe.
     match bound {
         Ok(Some(bound)) => {
+            let fenced_draft = crate::ProcessDefinitionDraft::new(
+                LAW_FENCE_ENGINE_KIND,
+                serde_json::json!({ "fenced": group_key }),
+                [],
+            )
+            .expect("the probe draft assembles");
+            let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("a host pin claim needs no guard");
             let envelope = crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(scope.clone(), format!("{group_key}:fenced-write"))
@@ -365,22 +368,20 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
                     crate::RuntimeAttribution::none(),
                     format!("{group_key}:fenced-write"),
                 ),
-                crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
-                    owner_scope: owner_scope.clone(),
-                    name: format!("{group_key}-fenced-definition"),
-                    pinned: crate::ProcessDefinitionRef::unclaimed(
-                        LAW_FENCE_ENGINE_KIND,
-                        serde_json::json!({ "program": "law-fence" }),
-                    ),
-                    expectation: None,
+                crate::RuntimeEffectCommand::process(crate::ProcessCommand::PublishDefinition {
+                    draft: fenced_draft.clone(),
+                    module: None,
                 }),
             );
             let error = bound
                 .execute_effect(
                     envelope,
-                    crate::RuntimeEffectLocalExecutor::process_definitions(Arc::clone(
-                        &definitions,
-                    )),
+                    crate::RuntimeEffectLocalExecutor::definition_artifacts(
+                        crate::ProcessEngineRegistry::new().with_registration(
+                            crate::ProcessEngineRegistration::accepting(Arc::new(LawFenceEngine)),
+                        ),
+                        claim,
+                    ),
                 )
                 .await
                 .expect_err(
@@ -402,14 +403,14 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
                     crate::RuntimeAttribution::none(),
                     format!("{group_key}:fenced-write-2"),
                 ),
-                crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
-                    owner_scope: owner_scope.clone(),
-                    name: format!("{group_key}-fenced-definition-2"),
-                    pinned: crate::ProcessDefinitionRef::unclaimed(
+                crate::RuntimeEffectCommand::process(crate::ProcessCommand::PublishDefinition {
+                    draft: crate::ProcessDefinitionDraft::new(
                         LAW_FENCE_ENGINE_KIND,
-                        serde_json::json!({ "program": "law-fence-2" }),
-                    ),
-                    expectation: None,
+                        serde_json::json!({ "fenced": format!("{group_key}-2") }),
+                        [],
+                    )
+                    .expect("the probe draft assembles"),
+                    module: None,
                 }),
             );
             let error = bound
@@ -422,6 +423,14 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
                 .await
                 .expect_err("a second admission under the cancel-decided child is refused");
             assert_fence_refusal(&error);
+            assert_eq!(
+                definitions
+                    .get_process_definition(&fenced_draft.id())
+                    .await
+                    .expect("the definition store reads"),
+                None,
+                "the refused publication stored no descriptor"
+            );
         }
         Ok(None) => {
             // The host mints no owned scoped controller at all — the probe has
@@ -440,12 +449,18 @@ pub async fn a_cancel_decided_before_a_sink_is_refused_at_the_sink(
         "the cancelled child's declared intents never reached the process service: {:?}",
         sink.landed()
     );
-    let registered = definitions
-        .list_definitions(&owner_scope)
-        .await
-        .expect("the definition registry lists");
-    assert!(
-        registered.is_empty(),
-        "the cancelled child's definition registration never landed: {registered:?}"
+    let declared_draft = crate::ProcessDefinitionDraft::new(
+        "law",
+        serde_json::json!({ "leaf": "fence", "call_id": fence_call_id(&group_key) }),
+        [],
+    )
+    .expect("the leaf's declared draft assembles");
+    assert_eq!(
+        definitions
+            .get_process_definition(&declared_draft.id())
+            .await
+            .expect("the definition store reads"),
+        None,
+        "the cancelled child's declared publication never landed"
     );
 }

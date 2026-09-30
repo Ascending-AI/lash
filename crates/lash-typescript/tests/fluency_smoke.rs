@@ -302,7 +302,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         const source = timer.Schedule({ expr: "0 8 * * *" });
         const registration = await triggers.register({
           source,
-          target: remember,
+          target: { definition: remember },
           inputs: (event) => ({ tick: event }),
           name: "fluency-trigger"
         });

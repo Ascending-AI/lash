@@ -146,7 +146,7 @@ pub async fn checkpoint_identity_is_independent_of_compression_profile(
             loaded_conformance_state(store, &session).await
         };
         state.ensure_agent_frame_initialized();
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.checkpoint.components.insert(
             "profile/leaf".into(),
             crate::HydratedCheckpointComponent::changed(bytes.clone()),
@@ -189,7 +189,7 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let bytes = vec![b'a'; 12_288];
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "profile/leaf".into(),
         crate::HydratedCheckpointComponent::changed(bytes.clone()),
@@ -200,7 +200,7 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
     let descriptor = first.manifest.components["profile/leaf"].clone();
     for (index, store) in stores.iter().enumerate().skip(1) {
         let state = loaded_conformance_state(store, &session).await;
-        let mut unchanged = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut unchanged = RuntimeCommit::persisted_state_for_test(&state);
         unchanged.checkpoint.components.insert(
             "profile/leaf".into(),
             crate::HydratedCheckpointComponent::Unchanged {
@@ -234,7 +234,7 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
                 .expect("head before invalid root")
         );
         let state = loaded_conformance_state(store, &session).await;
-        let mut invalid = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut invalid = RuntimeCommit::persisted_state_for_test(&state);
         invalid.checkpoint.components.insert(
             "profile/new-leaf".into(),
             crate::HydratedCheckpointComponent::changed(b"must roll back".to_vec()),

@@ -172,7 +172,9 @@ struct UnavailableRootSet;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnavailableRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(
+        &self,
+    ) -> Result<crate::attachments::CompleteAttachmentRoots, crate::StoreError> {
         Err(crate::StoreError::Backend(
             "root enumeration unavailable".to_string(),
         ))
@@ -187,12 +189,28 @@ impl AttachmentRootSet for UnavailableRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for RecordingRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(self
+    async fn attachment_root_page(
+        &self,
+        source: crate::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
+        let roots: BTreeSet<_> = self
             .manifests
             .iter()
             .flat_map(|manifest| manifest.live_ids())
-            .collect())
+            .collect();
+        let ids = if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session)
+        {
+            roots
+                .into_iter()
+                .filter(|id| after.is_none_or(|after| id > after))
+                .take(AttachmentRootPage::QUERY_LIMIT)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        AttachmentRootPage::from_rows(ids)
     }
 
     async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, crate::StoreError> {
@@ -240,7 +258,7 @@ async fn committed_factory_attachment() -> (
     Arc<dyn AttachmentStore>,
     AttachmentId,
 ) {
-    let substrate = crate::testing::memory_store_set().await;
+    let substrate = crate::testing::sqlite_memory_store_set().await;
     let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
@@ -293,7 +311,10 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
     assert_eq!(report.reclaimed_count, 0);
     assert!(report.failed_ids.is_empty());
     assert!(report.deleted_while_referenced.is_empty());
-    backend.get(&id).await.expect("committed blob survives");
+    backend
+        .get(&id, 32 * 1024 * 1024)
+        .await
+        .expect("committed blob survives");
 }
 
 /// Deliberately faulty snapshot projection over a factory that really does hold
@@ -306,8 +327,12 @@ struct EmptySnapshotFactoryRoots<'a> {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(BTreeSet::new())
+    async fn attachment_root_page(
+        &self,
+        _source: crate::attachments::AttachmentRootSource,
+        _after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        crate::attachments::AttachmentRootPage::from_rows(Vec::new())
     }
 
     async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
@@ -393,7 +418,7 @@ async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     );
     assert!(report.deleted_while_referenced.is_empty());
     backend
-        .get(&id)
+        .get(&id, 32 * 1024 * 1024)
         .await
         .expect("the committed blob survives a blind snapshot and a blind probe");
 }
@@ -405,7 +430,9 @@ struct DeleteFailingAttachmentStore {
 impl DeleteFailingAttachmentStore {
     async fn new() -> Self {
         Self {
-            inner: crate::testing::memory_store_set().await.attachment_store(),
+            inner: crate::testing::sqlite_memory_store_set()
+                .await
+                .attachment_store(),
         }
     }
 }
@@ -420,8 +447,12 @@ impl AttachmentStore for DeleteFailingAttachmentStore {
         self.inner.put(bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -480,7 +511,9 @@ async fn gc_all_deletes_failed_is_incomplete() {
 
 #[tokio::test]
 async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
-    let backend = crate::testing::memory_store_set().await.attachment_store();
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
 
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
@@ -513,7 +546,9 @@ async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
 
 #[tokio::test]
 async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
-    let backend = crate::testing::memory_store_set().await.attachment_store();
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 6], meta())
         .await
@@ -540,14 +575,16 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
         "the refusal must carry the report accumulated before it: {error:?}"
     );
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("refused sweep preserves the blob");
 }
 
 #[tokio::test]
 async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
-    let backend = crate::testing::memory_store_set().await.attachment_store();
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 7], meta())
         .await
@@ -567,14 +604,16 @@ async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
 
     assert_eq!(report.reclaimed_count, 1);
     assert!(matches!(
-        backend.get(&attachment.id).await,
+        backend.get(&attachment.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
 
 #[tokio::test]
 async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
-    let backend = crate::testing::memory_store_set().await.attachment_store();
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 8], meta())
         .await
@@ -594,14 +633,16 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 
     assert_eq!(report.reclaimed_count, 0);
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("fresh blob survives");
 }
 
 #[tokio::test]
 async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protected() {
-    let backend = crate::testing::memory_store_set().await.attachment_store();
+    let backend = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 9], meta())
         .await
@@ -634,15 +675,16 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
         )
     );
     backend
-        .get(&attachment.id)
+        .get(&attachment.id, 32 * 1024 * 1024)
         .await
         .expect("fresh blob survives degraded sweep");
 }
 
 #[tokio::test]
 async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest = Arc::new(RecordingReferrers::default());
     let session = RuntimeAttachmentStore::new(
         Arc::clone(&backend),
@@ -681,17 +723,21 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
     .expect("healthy non-empty-root sweep");
 
     assert_eq!(report.reclaimed_count, 1);
-    backend.get(&live.id).await.expect("live blob survives");
+    backend
+        .get(&live.id, 32 * 1024 * 1024)
+        .await
+        .expect("live blob survives");
     assert!(matches!(
-        backend.get(&orphan.id).await,
+        backend.get(&orphan.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
 
 #[tokio::test]
 async fn facade_get_resolves_content_addresses_across_sessions() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
     let session_a = RuntimeAttachmentStore::new(
         backend.clone(),
@@ -728,8 +774,9 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
 
 #[tokio::test]
 async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
     let session =
         RuntimeAttachmentStore::new(backend.clone(), manifest, session_owner("session-1"));
@@ -748,7 +795,7 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
     );
     assert_eq!(
         backend
-            .get(&reference.id)
+            .get(&reference.id, 32 * 1024 * 1024)
             .await
             .expect("bytes remain")
             .bytes,
@@ -758,8 +805,9 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
 
 #[tokio::test]
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest_a = Arc::new(RecordingReferrers::default());
     let manifest_b = Arc::new(RecordingReferrers::default());
     let session_a = RuntimeAttachmentStore::new(
@@ -809,7 +857,11 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     .expect("sweep with b holding a ref");
     assert_eq!(report.reclaimed_count, 0, "b still references the blob");
     assert_eq!(
-        backend.get(&ref_b.id).await.expect("blob alive").bytes,
+        backend
+            .get(&ref_b.id, 32 * 1024 * 1024)
+            .await
+            .expect("blob alive")
+            .bytes,
         vec![5, 5, 5]
     );
 
@@ -827,15 +879,16 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     .expect("sweep with no refs");
     assert_eq!(report.reclaimed_count, 1);
     assert!(matches!(
-        backend.get(&ref_b.id).await,
+        backend.get(&ref_b.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
 
 #[tokio::test]
 async fn gc_spares_a_blob_its_upload_still_holds() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest = Arc::new(RecordingReferrers::default());
     let session = RuntimeAttachmentStore::new(
         backend.clone(),
@@ -861,7 +914,11 @@ async fn gc_spares_a_blob_its_upload_still_holds() {
     .expect("sweep");
     assert_eq!(report.reclaimed_count, 0, "an upload edge is a live ref");
     assert_eq!(
-        backend.get(&reference.id).await.expect("kept").bytes,
+        backend
+            .get(&reference.id, 32 * 1024 * 1024)
+            .await
+            .expect("kept")
+            .bytes,
         vec![3, 1, 4]
     );
 }
@@ -870,8 +927,9 @@ async fn gc_spares_a_blob_its_upload_still_holds() {
 // edge at expiry, and the next sweep collects the bytes.
 #[tokio::test]
 async fn gc_collects_a_blob_whose_upload_ended() {
-    let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_store_set().await.attachment_store();
+    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
+        .await
+        .attachment_store();
     let manifest = Arc::new(RecordingReferrers::default());
     let session = RuntimeAttachmentStore::new(
         backend.clone(),
@@ -902,7 +960,7 @@ async fn gc_collects_a_blob_whose_upload_ended() {
         "a blob no referrer holds is a collectable orphan"
     );
     assert!(matches!(
-        backend.get(&orphan.id).await,
+        backend.get(&orphan.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
     assert!(manifest.live_ids().is_empty());
@@ -931,7 +989,11 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
         ) -> Result<AttachmentRef, AttachmentStoreError> {
             unreachable!("test does not put through this store")
         }
-        async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        async fn get(
+            &self,
+            id: &AttachmentId,
+            _max_bytes: u64,
+        ) -> Result<StoredAttachment, AttachmentStoreError> {
             Err(AttachmentStoreError::NotFound(id.clone()))
         }
         async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -1011,7 +1073,11 @@ impl AttachmentStore for StaleHeadStore {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         unreachable!("test does not put through this store")
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        _max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(id.clone()))
     }
     async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -1043,8 +1109,12 @@ struct ScriptedRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for ScriptedRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(BTreeSet::new())
+    async fn attachment_root_page(
+        &self,
+        _source: crate::attachments::AttachmentRootSource,
+        _after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        crate::attachments::AttachmentRootPage::from_rows(Vec::new())
     }
 
     async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
@@ -1186,8 +1256,12 @@ impl AttachmentStore for WindowHookedStore {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         self.inner.put(bytes, meta).await
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.inner.get(id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id, max_bytes).await
     }
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         *self.delete_calls.lock_recover() += 1;
@@ -1214,7 +1288,7 @@ struct FencedFixture {
 }
 
 async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
-    let substrate = crate::testing::memory_store_set().await;
+    let substrate = crate::testing::sqlite_memory_store_set().await;
     let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
@@ -1415,7 +1489,7 @@ async fn same_content_put_inside_the_delete_window_survives() {
     assert_eq!(
         fixture
             .backend
-            .get(&id)
+            .get(&id, 32 * 1024 * 1024)
             .await
             .expect("the write that landed in the delete window survives")
             .bytes,
@@ -1488,7 +1562,12 @@ async fn writer_after_delete_arming_restores_the_deleted_digest() {
         report.deleted_while_referenced
     );
     assert_eq!(
-        fixture.backend.get(&id).await.expect("survives").bytes,
+        fixture
+            .backend
+            .get(&id, 32 * 1024 * 1024)
+            .await
+            .expect("survives")
+            .bytes,
         bytes
     );
 }
@@ -1542,7 +1621,7 @@ async fn a_live_peers_condemnation_defers_and_a_dead_peers_is_adopted() {
     assert_eq!(*backend.delete_calls.lock_recover(), 0);
     fixture
         .backend
-        .get(&id)
+        .get(&id, 32 * 1024 * 1024)
         .await
         .expect("a deferred digest keeps its bytes");
 
@@ -1610,7 +1689,7 @@ async fn a_stuck_execution_retains_the_blob() {
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     fixture
         .backend
-        .get(&reference.id)
+        .get(&reference.id, 32 * 1024 * 1024)
         .await
         .expect("the blob a stuck execution roots survives");
 }
@@ -1619,7 +1698,9 @@ async fn a_stuck_execution_retains_the_blob() {
 async fn a_bound_execution_holds_its_puts_and_an_unbound_put_its_upload() {
     let manifest = Arc::new(RecordingReferrers::default());
     let store = Arc::new(RuntimeAttachmentStore::new(
-        crate::testing::memory_store_set().await.attachment_store(),
+        crate::testing::sqlite_memory_store_set()
+            .await
+            .attachment_store(),
         manifest.clone(),
         session_owner("session-1"),
     ));
@@ -1658,7 +1739,9 @@ async fn a_process_runtime_put_is_held_by_its_record() {
     let manifest = Arc::new(RecordingReferrers::default());
     let process_id = crate::ProcessId::fixture("process-1");
     let store = Arc::new(RuntimeAttachmentStore::new(
-        crate::testing::memory_store_set().await.attachment_store(),
+        crate::testing::sqlite_memory_store_set()
+            .await
+            .attachment_store(),
         manifest.clone(),
         RuntimeOwner::Process(process_id.clone()),
     ));
@@ -1683,7 +1766,9 @@ async fn a_process_runtime_put_is_held_by_its_record() {
 #[tokio::test]
 async fn ephemeral_facade_passes_reads_through_without_a_guard() {
     let store = RuntimeAttachmentStore::ephemeral(
-        crate::testing::memory_store_set().await.attachment_store(),
+        crate::testing::sqlite_memory_store_set()
+            .await
+            .attachment_store(),
     );
     let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
     assert_eq!(
@@ -2133,7 +2218,9 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
         // would leave the worker free and prove nothing.
         let worker = crate::task::spawn(async move {
             let session = RuntimeAttachmentStore::new(
-                crate::testing::memory_store_set().await.attachment_store(),
+                crate::testing::sqlite_memory_store_set()
+                    .await
+                    .attachment_store(),
                 Arc::new(SlowManifest {
                     inner: NoopAttachmentReferrers,
                     delay: std::time::Duration::from_millis(300),

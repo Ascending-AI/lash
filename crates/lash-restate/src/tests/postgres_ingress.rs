@@ -235,3 +235,82 @@ async fn a_reattached_emission_reports_the_deliveries_its_committed_attempt_star
             .await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: kiln gate with pg16"]
+async fn remote_after_step_waits_for_committed_boundary_postgres() {
+    let url = database_url().expect("PostgreSQL service is required");
+    let _lock = DatabaseLock::acquire(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(&url)
+        .await
+        .expect("connect PostgreSQL");
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let double = lash_restate_test::backend_with_store_set(
+        0x4282,
+        lash_restate_test::ServerConfig::default(),
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async {
+            Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+                lash_core::WakeDeliveryConfig::default(),
+                clock,
+            )) as Arc<dyn lash_core::StoreSet>)
+        },
+    )
+    .await
+    .expect("start the PostgreSQL Restate double");
+    super::remote_turn_cancel::held_step_law(
+        double.lash_backend(),
+        super::remote_turn_cancel::TurnRunner::Double(double),
+        "remote-postgres",
+    )
+    .await;
+}
+
+/// A process registry over a freshly reset PostgreSQL database, and the
+/// attachment directory its store set holds.
+async fn postgres_process_registry(url: &str) -> (Arc<dyn ProcessRegistry>, tempfile::TempDir) {
+    let storage = lash_postgres_store::PostgresStorage::connect(url)
+        .await
+        .expect("connect PostgreSQL signal admission store");
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let stores = lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    );
+    (stores.process_registry(), attachments)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn duplicate_signal_after_wait_advances_does_not_resolve_next_wait_on_postgres() {
+    use super::process_signal_admission::{
+        duplicate_signal_after_append_to_journal_crash_law,
+        duplicate_signal_after_wait_advances_law,
+    };
+
+    let url = database_url().expect("the PostgreSQL signal laws require a database");
+    let _lock = DatabaseLock::acquire(&url).await;
+    let (registry, _attachments) = postgres_process_registry(&url).await;
+    duplicate_signal_after_wait_advances_law(registry).await;
+    let (registry, _attachments) = postgres_process_registry(&url).await;
+    duplicate_signal_after_append_to_journal_crash_law(registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn partial_signal_replay_rejects_changed_request_before_resolution_on_postgres() {
+    use super::process_signal_admission::partial_signal_replay_rejects_changed_request_law;
+
+    let url = database_url().expect("the PostgreSQL signal laws require a database");
+    let _lock = DatabaseLock::acquire(&url).await;
+    let (registry, _attachments) = postgres_process_registry(&url).await;
+    partial_signal_replay_rejects_changed_request_law(registry).await;
+}

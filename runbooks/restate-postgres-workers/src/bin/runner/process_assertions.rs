@@ -458,7 +458,7 @@ pub(super) async fn assert_failover(
         // completion, against exactly one acceptance, settled once. The
         // failover residual is the engine's redelivery cadence: the re-invoked
         // drive seals a new session drive epoch and supersedes the dead owner's
-        // claims (ADR 0080's lease-TTL regime is retired).
+        // claims (ADR 0101).
         //
         // The crash still has to happen — the marker read below fails the gate
         // if no worker ever exited for this workflow.
@@ -780,7 +780,10 @@ pub(super) async fn assert_attachments_round_trip(
         // Blob storage is flat and content-addressed; the committing session's
         // hold is asserted through its referrer edge below, not the object key.
         let stored = store
-            .get(&id)
+            .get(
+                &id,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            )
             .await
             .with_context(|| format!("read worker attachment `{id}` from S3"))?;
         anyhow::ensure!(
