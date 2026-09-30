@@ -61,8 +61,9 @@ lash_rust_unit_test(
     ],
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
@@ -170,12 +171,13 @@ lash_rust_feature_test(
     ],
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
-    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",
@@ -202,12 +204,13 @@ lash_rust_feature_test(
     ],
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
-    test_env = {"LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "LASH_WORKBENCH_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",

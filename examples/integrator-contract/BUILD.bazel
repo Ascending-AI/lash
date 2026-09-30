@@ -47,8 +47,12 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = sized_exec_properties("integrator-contract", "integrator_contract", "//examples/integrator-contract:integrator-contract__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "examples/integrator-contract",
     package_name = "integrator-contract",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )

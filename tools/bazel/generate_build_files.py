@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass, field
 
 import feature_variants
+import vm_worker_runfiles
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -823,7 +824,7 @@ def filegroups(package_name: str) -> str:
     return "".join(chunks)
 
 
-def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
+def render_package(package: dict, features: list[str], worker_tests: bool = False) -> tuple[str, dict]:
     manifest = relative(package["manifest_path"])
     package_dir = pathlib.PurePosixPath(manifest).parent.as_posix()
     version = package["version"]
@@ -977,7 +978,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 + ")\n\n"
             )
             if (
-                not unit_args
+                not worker_tests
+                and not unit_args
                 and not unit_test_env
                 and not unit_shards
                 and not unit_timeout
@@ -1129,6 +1131,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             )
         if (
             kind == "test"
+            and not worker_tests
             and not target_args
             and not test_env
             and not target_shards
@@ -1206,7 +1209,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
             if (
-                not bin_unit_policy.data
+                not worker_tests
+                and not bin_unit_policy.data
                 and not bin_unit_policy.env
                 and not bin_unit_tags
                 and batchable_run(package["name"], crate_name)
@@ -1286,6 +1290,16 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     RESOLVED_TEST_RUNS.clear()
     RESOLVED_BATCH_BUDGETS.clear()
     features = package_features(metadata)
+    # Discover helper users from the ordinary emitted graph before choosing
+    # batches. A batch runs executables directly and drops each test's env.
+    ordinary = {
+        pathlib.Path(package["manifest_path"]).parent / "BUILD.bazel": render_package(package, features[package["id"]])[0]
+        for package in metadata["packages"] if package["id"] in set(metadata["workspace_members"])
+    }
+    worker_packages = vm_worker_runfiles.Graph(metadata, ordinary, ROOT).test_packages()
+    EMITTED_TEST_LABELS.clear()
+    RESOLVED_TEST_RUNS.clear()
+    RESOLVED_BATCH_BUDGETS.clear()
     outputs = {}
     inventory = []
     workspace_members = set(metadata["workspace_members"])
@@ -1293,7 +1307,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         manifest = pathlib.Path(package["manifest_path"]).resolve()
         if package["id"] not in workspace_members:
             continue
-        content, item = render_package(package, features[package["id"]])
+        content, item = render_package(package, features[package["id"]], package["id"] in worker_packages)
         outputs[manifest.parent / "BUILD.bazel"] = content
         inventory.append(item)
     inventory.sort(key=lambda item: item["manifest"])
@@ -1517,6 +1531,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     outputs[ROOT / "tools/bazel/opt_levels.bazelrc"] = opt_levels_bazelrc(metadata)
     outputs[ROOT / "tools/bazel/opt_levels.MODULE.bazel"] = opt_levels_module(metadata)
     validate_test_run_sizes()
+    vm_worker_runfiles.add(metadata, outputs, ROOT)
     return outputs, inventory
 
 
@@ -2808,6 +2823,7 @@ def main() -> int:
             ],
         )
         failures.extend(reconcile_vm_worker_variants(outputs))
+        failures.extend(vm_worker_runfiles.check(metadata, outputs, ROOT))
         if failures:
             print("feature-lane graph does not match Cargo:", file=sys.stderr)
             for failure in failures:

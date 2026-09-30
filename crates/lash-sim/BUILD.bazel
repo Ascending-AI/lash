@@ -92,9 +92,6 @@ lash_rust_unit_test(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-sim", "lash_sim", "//crates/lash-sim:lash-sim__bin__unit_test"),
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
     test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
@@ -102,6 +99,9 @@ lash_rust_unit_test(
     package_name = "lash-sim",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_integration_test(

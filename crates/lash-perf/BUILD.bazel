@@ -123,12 +123,16 @@ lash_rust_unit_test(
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_binary(
@@ -175,12 +179,16 @@ lash_rust_unit_test(
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_binary(
@@ -225,6 +233,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -232,19 +244,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-perf:test_batch"),
-    jobs = 2,
-    tests = [
-        ":lash-perf__bin__unit_test",
-        ":tool_batch_baseline__bin__unit_test",
-        ":workload__test",
-    ],
 )
 
 filegroup(
@@ -346,6 +345,10 @@ lash_rust_feature_test(
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_1555065c",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -374,6 +377,10 @@ lash_rust_feature_test(
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_2decc7a3",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -648,6 +655,10 @@ lash_rust_feature_test(
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_1555065c",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -676,6 +687,10 @@ lash_rust_feature_test(
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_2decc7a3",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -765,11 +780,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_1555065c"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-perf:lash-perf__fv_1555065c",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -791,11 +810,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_2decc7a3"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-perf:lash-perf__fv_2decc7a3",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

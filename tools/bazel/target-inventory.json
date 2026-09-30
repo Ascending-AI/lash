@@ -26575,12 +26575,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-perf:test_batch",
-        "members": [
-          "//crates/lash-perf:lash-perf__bin__unit_test",
-          "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
-          "//crates/lash-perf:workload__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -27191,13 +27187,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-provider-google:test_batch",
-        "members": [
-          "//crates/lash-provider-google:block_identity__test",
-          "//crates/lash-provider-google:charge_safety__test",
-          "//crates/lash-provider-google:lash-provider-google__unit_test",
-          "//crates/lash-provider-google:property__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -27253,11 +27244,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-provider-openai:test_batch",
-        "members": [
-          "//crates/lash-provider-openai:codex_websocket_runtime__test",
-          "//crates/lash-provider-openai:lash-provider-openai__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -27596,29 +27584,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-restate-test:test_batch",
-        "members": [
-          "//crates/lash-restate-test:admission_invariant__test",
-          "//crates/lash-restate-test:crash_windows__test",
-          "//crates/lash-restate-test:drop__test",
-          "//crates/lash-restate-test:follow_on_crash_replay__test",
-          "//crates/lash-restate-test:host_send_wait__test",
-          "//crates/lash-restate-test:journal_verdict__test",
-          "//crates/lash-restate-test:lash-restate-test__unit_test",
-          "//crates/lash-restate-test:namespaces__test",
-          "//crates/lash-restate-test:one_driver__test",
-          "//crates/lash-restate-test:process_crash_replay__test",
-          "//crates/lash-restate-test:process_successor_after_prune__test",
-          "//crates/lash-restate-test:root_close__test",
-          "//crates/lash-restate-test:server_semantics__test",
-          "//crates/lash-restate-test:session_driver__test",
-          "//crates/lash-restate-test:session_send__test",
-          "//crates/lash-restate-test:start_gate_peek__test",
-          "//crates/lash-restate-test:substrate_lost_zombie__test",
-          "//crates/lash-restate-test:suspended_turn__test",
-          "//crates/lash-restate-test:tool_child_drift__test",
-          "//crates/lash-restate-test:turn_crash_replay__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -28110,11 +28077,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-subagents:test_batch",
-        "members": [
-          "//crates/lash-subagents:declared_start__test",
-          "//crates/lash-subagents:lash-subagents__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -28407,13 +28371,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-upgrade-harness:test_batch",
-        "members": [
-          "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
-          "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
-          "//crates/lash-upgrade-harness:phase_a__test",
-          "//crates/lash-upgrade-harness:rolling__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -28635,11 +28594,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-vm-worker:test_batch",
-        "members": [
-          "//crates/lash-vm-worker:build_identity_laws__test",
-          "//crates/lash-vm-worker:lash-vm-worker__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -29477,12 +29433,8 @@
         }
       ],
       "test_batch": {
-        "label": "//examples/workflow-graph-roundtrip:test_batch",
-        "members": [
-          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
-          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
-          "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -29611,12 +29563,8 @@
         }
       ],
       "test_batch": {
-        "label": "//runbooks/restate-postgres-workers:test_batch",
-        "members": [
-          "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
-          "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
-          "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {

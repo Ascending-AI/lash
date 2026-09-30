@@ -59,8 +59,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-openai", "lash_provider_openai", "//crates/lash-provider-openai:lash-provider-openai__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-provider-openai",
     package_name = "lash-internal-provider-openai",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -79,6 +83,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-openai", "codex_websocket_runtime", "//crates/lash-provider-openai:codex_websocket_runtime__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-provider-openai",
     library_crate_name = "lash_provider_openai",
     manifest_dir = "crates/lash-provider-openai",
@@ -86,18 +94,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-provider-openai:test_batch"),
-    jobs = 2,
-    tests = [
-        ":codex_websocket_runtime__test",
-        ":lash-provider-openai__unit_test",
-    ],
 )
 
 filegroup(
@@ -136,11 +132,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-openai", "codex_websocket_runtime", "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_5d5669b4"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-provider-openai:lash-provider-openai__fv_9791aa0a",
     library_crate_name = "lash_provider_openai",
     manifest_dir = "crates/lash-provider-openai",
     package_name = "lash-internal-provider-openai",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -329,8 +329,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-openai", "lash_provider_openai", "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_5d5669b4"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-provider-openai",
     package_name = "lash-internal-provider-openai",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

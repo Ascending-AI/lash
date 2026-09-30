@@ -10,6 +10,7 @@ import io
 import os
 import pathlib
 import socket
+import subprocess
 import stat
 import sys
 import tempfile
@@ -198,6 +199,35 @@ filters = ["tests::"]
 
 
 class StageBinariesTests(unittest.TestCase):
+    def test_cargo_agent_service_supplies_a_testing_helper(self) -> None:
+        recipe = subprocess.run(
+            ["just", "--show", "agent-service-restate-e2e"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        build = "cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing"
+        self.assertIn(build, recipe)
+        self.assertIn('export LASH_VM_WORKER="$(cd "$(dirname "$worker")" && pwd)/lash-vm-worker"', recipe)
+        self.assertLess(recipe.index(build), recipe.index("cargo test -p agent-service"))
+        self.assertNotIn("kiln", recipe)
+
+    def test_cargo_segment_artifacts_include_the_vm_worker(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        producer = workflow["jobs"]["worker-artifacts"]
+        build = next(step["run"] for step in producer["steps"] if step["name"] == "Build worker binaries once")
+        self.assertIn("cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker", build)
+        self.assertIn('cp target/release/lash-vm-worker "${RUNNER_TEMP}/worker-artifacts/"', build)
+
+    def test_segment_hosts_mount_the_staged_vm_worker(self) -> None:
+        import yaml
+
+        compose = yaml.safe_load((ROOT / "runbooks/restate-postgres-workers/docker-compose.yml").read_text())
+        for name in ("worker-a", "worker-b", "runner"):
+            with self.subTest(service=name):
+                mounts = compose["services"][name]["volumes"]
+                self.assertTrue(any("/lash-vm-worker:/usr/local/bin/lash-vm-worker:ro" in mount for mount in mounts))
+
     def test_the_workers_package_stages_every_cargo_binary(self) -> None:
         import tomllib
 

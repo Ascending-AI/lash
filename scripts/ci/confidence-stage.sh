@@ -12,6 +12,7 @@ case "$LASH_CONFIDENCE_STAGE" in
     cargo build --workspace --bins --locked
     cargo build --workspace --examples --locked
     cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+    cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
     ;;
   harnesses)
     run_scenario_harnesses

@@ -58,12 +58,8 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-conformance", "lash_conformance", "//crates/lash-conformance:lash-conformance__unit_test"),
     extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",
-    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )

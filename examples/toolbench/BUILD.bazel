@@ -46,6 +46,10 @@ lash_rust_unit_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/toolbench",

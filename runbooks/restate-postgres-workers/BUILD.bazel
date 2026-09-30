@@ -51,8 +51,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e", "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0",
 )
@@ -126,12 +130,16 @@ lash_rust_unit_test(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_mock_provider", "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":restate-postgres-workers",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     tags = [],
     version = "0.0.0",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_binary(
@@ -183,12 +191,16 @@ lash_rust_unit_test(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_runner", "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":restate-postgres-workers",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     tags = [],
     version = "0.0.0",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_binary(
@@ -261,9 +273,13 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "provider_stream_bounds", "//runbooks/restate-postgres-workers:provider_stream_bounds__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     args = [
         "--ignored",
     ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":restate-postgres-workers",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -274,19 +290,6 @@ lash_rust_integration_test(
         "manual",
     ],
     version = "0.0.0",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//runbooks/restate-postgres-workers:test_batch"),
-    jobs = 2,
-    tests = [
-        ":lash-e2e-mock-provider__bin__unit_test",
-        ":lash-e2e-runner__bin__unit_test",
-        ":restate-postgres-workers__unit_test",
-    ],
 )
 
 filegroup(
@@ -469,6 +472,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_mock_provider", "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_81d9cfdc"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_81d9cfdc",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -493,6 +500,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_mock_provider", "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_b84e3d4e"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_b84e3d4e",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -615,6 +626,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_runner", "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_81d9cfdc"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_81d9cfdc",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -639,6 +654,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_runner", "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_b84e3d4e"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_b84e3d4e",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -814,11 +833,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "provider_stream_bounds", "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_81d9cfdc"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_81d9cfdc",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -842,11 +865,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "provider_stream_bounds", "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_b84e3d4e"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_b84e3d4e",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -908,8 +935,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e", "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_81d9cfdc"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -931,8 +962,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e", "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_b84e3d4e"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

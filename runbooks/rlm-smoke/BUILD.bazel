@@ -41,12 +41,16 @@ lash_rust_unit_test(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("rlm-smoke-host", "rlm_smoke_host", "//runbooks/rlm-smoke:rlm-smoke__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "runbooks/rlm-smoke",
     package_name = "rlm-smoke-host",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 filegroup(

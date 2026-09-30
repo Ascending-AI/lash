@@ -59,8 +59,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-plugin-mcp", "lash_plugin_mcp", "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-plugin-mcp",
     package_name = "lash-internal-plugin-mcp",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -278,8 +282,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-plugin-mcp", "lash_plugin_mcp", "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_6f437b1d"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-plugin-mcp",
     package_name = "lash-internal-plugin-mcp",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -303,8 +311,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-plugin-mcp", "lash_plugin_mcp", "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_b01c73b5"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-plugin-mcp",
     package_name = "lash-internal-plugin-mcp",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

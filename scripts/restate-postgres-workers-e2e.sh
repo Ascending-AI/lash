@@ -8,7 +8,7 @@ cd "$repo"
 source "$repo/scripts/worktree-gate-env.sh"
 
 # The compose file bind-mounts each of these host binaries into its services.
-e2e_bin_names=(lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-await-event-helper)
+e2e_bin_names=(lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-await-event-helper lash-vm-worker)
 if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   LASH_E2E_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
   export LASH_E2E_BIN_DIR
@@ -99,6 +99,7 @@ test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e-${LASH_
 # glibc compatibility note.
 if [ -z "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+  cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
 fi
 # Re-check before the first compose call that could create a missing bind
 # source (config --images, up, run); the earlier `down` creates nothing.

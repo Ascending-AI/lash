@@ -118,6 +118,10 @@ agent-service-restate-e2e:
   ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
   run_token="$(date +%s)-$$"
 
+  cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing
+  worker="${CARGO_TARGET_DIR:-{{repo}}/target}/debug/lash-vm-worker"
+  export LASH_VM_WORKER="$(cd "$(dirname "$worker")" && pwd)/lash-vm-worker"
+
   cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
     lash_gate_cleanup

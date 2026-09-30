@@ -59,8 +59,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "lash_provider_google", "//crates/lash-provider-google:lash-provider-google__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-provider-google",
     package_name = "lash-internal-provider-google",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -79,6 +83,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "block_identity", "//crates/lash-provider-google:block_identity__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-provider-google",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
@@ -102,6 +110,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "charge_safety", "//crates/lash-provider-google:charge_safety__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-provider-google",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
@@ -125,6 +137,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "property", "//crates/lash-provider-google:property__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-provider-google",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
@@ -132,20 +148,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-provider-google:test_batch"),
-    jobs = 2,
-    tests = [
-        ":block_identity__test",
-        ":charge_safety__test",
-        ":lash-provider-google__unit_test",
-        ":property__test",
-    ],
 )
 
 filegroup(
@@ -184,11 +186,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "block_identity", "//crates/lash-provider-google:block_identity__test__fv_47d4d6e6"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-provider-google:lash-provider-google__fv_155794c9",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
     package_name = "lash-internal-provider-google",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -214,11 +220,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "charge_safety", "//crates/lash-provider-google:charge_safety__test__fv_47d4d6e6"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-provider-google:lash-provider-google__fv_155794c9",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
     package_name = "lash-internal-provider-google",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -359,8 +369,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "lash_provider_google", "//crates/lash-provider-google:lash-provider-google__unit_test__fv_47d4d6e6"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-provider-google",
     package_name = "lash-internal-provider-google",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -386,11 +400,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-provider-google", "property", "//crates/lash-provider-google:property__test__fv_47d4d6e6"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-provider-google:lash-provider-google__fv_155794c9",
     library_crate_name = "lash_provider_google",
     manifest_dir = "crates/lash-provider-google",
     package_name = "lash-internal-provider-google",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

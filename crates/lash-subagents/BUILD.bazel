@@ -47,8 +47,12 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-subagents", "lash_subagents", "//crates/lash-subagents:lash-subagents__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-subagents",
     package_name = "lash-internal-subagents",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -61,6 +65,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-subagents", "declared_start", "//crates/lash-subagents:declared_start__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-subagents",
     library_crate_name = "lash_subagents",
     manifest_dir = "crates/lash-subagents",
@@ -68,18 +76,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-subagents:test_batch"),
-    jobs = 2,
-    tests = [
-        ":declared_start__test",
-        ":lash-subagents__unit_test",
-    ],
 )
 
 filegroup(

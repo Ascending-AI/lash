@@ -64,10 +64,11 @@ lash_rust_unit_test(
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
         "//examples/slack-clone:package_files",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
-    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -190,7 +191,10 @@ lash_rust_integration_test(
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin",
     ],
-    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin)"},
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -234,13 +238,16 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_2e70d8e3",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//examples/slack-clone:slack-clone__fv_d1d2aefa",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     rustc_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_2e70d8e3)"},
-    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_2e70d8e3)"},
+    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_2e70d8e3)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -265,13 +272,16 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_4c1e7b8b",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//examples/slack-clone:slack-clone__fv_9af5e9f5",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     rustc_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_4c1e7b8b)"},
-    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_4c1e7b8b)"},
+    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_4c1e7b8b)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -296,13 +306,16 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_bffc6554",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//examples/slack-clone:slack-clone__fv_83a127f1",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     rustc_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_bffc6554)"},
-    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_bffc6554)"},
+    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin__fv_bffc6554)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -452,6 +465,10 @@ lash_rust_feature_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//examples/slack-clone:slack-clone__fv_9af5e9f5",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -846,10 +863,11 @@ lash_rust_feature_test(
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
         "//examples/slack-clone:package_files",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
-    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -878,10 +896,11 @@ lash_rust_feature_test(
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
         "//examples/slack-clone:package_files",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
-    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -910,10 +929,11 @@ lash_rust_feature_test(
     extra_data = [
         "@workbench_node_linux_x64//:bin/node",
         "//examples/slack-clone:package_files",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
-    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)", "LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

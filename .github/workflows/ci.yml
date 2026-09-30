@@ -2072,9 +2072,11 @@ jobs:
               //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
           else
             cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+            cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
             mkdir -p "${RUNNER_TEMP}/worker-artifacts"
             find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
               -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+            cp target/release/lash-vm-worker "${RUNNER_TEMP}/worker-artifacts/"
           fi
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
 

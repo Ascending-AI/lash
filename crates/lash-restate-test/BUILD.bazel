@@ -47,8 +47,12 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test", "//crates/lash-restate-test:lash-restate-test__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -61,6 +65,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "admission_invariant", "//crates/lash-restate-test:admission_invariant__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -78,6 +86,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "crash_windows", "//crates/lash-restate-test:crash_windows__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -95,6 +107,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "drop", "//crates/lash-restate-test:drop__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -112,6 +128,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "follow_on_crash_replay", "//crates/lash-restate-test:follow_on_crash_replay__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -129,6 +149,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "host_send_wait", "//crates/lash-restate-test:host_send_wait__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -146,6 +170,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "journal_verdict", "//crates/lash-restate-test:journal_verdict__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -163,6 +191,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "namespaces", "//crates/lash-restate-test:namespaces__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -180,6 +212,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "one_driver", "//crates/lash-restate-test:one_driver__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -197,6 +233,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "process_crash_replay", "//crates/lash-restate-test:process_crash_replay__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -214,6 +254,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "process_successor_after_prune", "//crates/lash-restate-test:process_successor_after_prune__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -231,6 +275,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "root_close", "//crates/lash-restate-test:root_close__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -248,6 +296,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "server_semantics", "//crates/lash-restate-test:server_semantics__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -265,6 +317,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "session_driver", "//crates/lash-restate-test:session_driver__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -282,6 +338,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "session_send", "//crates/lash-restate-test:session_send__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -299,6 +359,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "start_gate_peek", "//crates/lash-restate-test:start_gate_peek__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -316,6 +380,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "substrate_lost_zombie", "//crates/lash-restate-test:substrate_lost_zombie__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -333,6 +401,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "suspended_turn", "//crates/lash-restate-test:suspended_turn__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -350,6 +422,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "tool_child_drift", "//crates/lash-restate-test:tool_child_drift__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -367,6 +443,10 @@ lash_rust_integration_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "turn_crash_replay", "//crates/lash-restate-test:turn_crash_replay__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
     manifest_dir = "crates/lash-restate-test",
@@ -374,36 +454,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/bazel:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-restate-test:test_batch"),
-    jobs = 2,
-    tests = [
-        ":admission_invariant__test",
-        ":crash_windows__test",
-        ":drop__test",
-        ":follow_on_crash_replay__test",
-        ":host_send_wait__test",
-        ":journal_verdict__test",
-        ":lash-restate-test__unit_test",
-        ":namespaces__test",
-        ":one_driver__test",
-        ":process_crash_replay__test",
-        ":process_successor_after_prune__test",
-        ":root_close__test",
-        ":server_semantics__test",
-        ":session_driver__test",
-        ":session_send__test",
-        ":start_gate_peek__test",
-        ":substrate_lost_zombie__test",
-        ":suspended_turn__test",
-        ":tool_child_drift__test",
-        ":turn_crash_replay__test",
-    ],
 )
 
 filegroup(

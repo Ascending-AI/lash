@@ -16,6 +16,7 @@ import pathlib
 import re
 import sys
 import unittest
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -566,18 +567,18 @@ class TestRunRequestTest(unittest.TestCase):
         )
 
     def test_a_pinned_label_asks_for_its_pin(self) -> None:
-        label = "//crates/lash-restate-test:test_batch"
+        label = "//crates/lash-typescript:test_batch"
         pin = generator.PINNED_TEST_RUNS[label]
         self.assertEqual(
             generator.test_run_request(
-                "lash-internal-restate-test", "test_batch", label
+                "lash-internal-typescript", "test_batch", label
             ),
             dict(pin),
         )
         # The pin reaches the feature variant through the base label.
         self.assertEqual(
             generator.test_run_request(
-                "lash-internal-restate-test", "test_batch", f"{label}__fv_0123abcd"
+                "lash-internal-typescript", "test_batch", f"{label}__fv_0123abcd"
             ),
             dict(pin),
         )
@@ -748,18 +749,18 @@ class BatchBudgetTest(unittest.TestCase):
                 )
 
     def test_the_contention_floor_counts_once_per_batch(self) -> None:
-        # lash-sim's batch measured at one core: the floor lifts the batch to
+        # A batch measured at one core: the floor lifts the batch to
         # four, not two floored members to eight.
-        label = "//crates/lash-perf:test_batch"
-        measured = generator.TEST_RUN_SIZES[label]
-        self.assertLess(measured["cpu_count"], generator.CONTENTION_FLOOR["cpu_count"])
-        self.assertEqual(
-            generator.batch_budget("lash-perf", label, []),
-            {
-                "cpu_count": generator.CONTENTION_FLOOR["cpu_count"],
-                "memory_kb": measured["memory_kb"],
-            },
-        )
+        label = "//fixture:test_batch"
+        measured = {"cpu_count": 1, "memory_kb": 1048576}
+        with patch.dict(generator.TEST_RUN_SIZES, {label: measured}):
+            self.assertEqual(
+                generator.batch_budget("lash-perf", label, []),
+                {
+                    "cpu_count": generator.CONTENTION_FLOOR["cpu_count"],
+                    "memory_kb": measured["memory_kb"],
+                },
+            )
         # The unfloored member requests the callers pass keep the floor out of
         # the member sum of an unmeasured batch, too.
         members = [{"cpu_count": 1, "memory_kb": 1048576}] * 2
@@ -770,7 +771,6 @@ class BatchBudgetTest(unittest.TestCase):
 
     def test_a_pinned_batch_reserves_its_pin(self) -> None:
         for package, label in (
-            ("lash-internal-restate-test", "//crates/lash-restate-test:test_batch"),
             ("lash-internal-typescript", "//crates/lash-typescript:test_batch"),
         ):
             with self.subTest(label=label):

@@ -108,8 +108,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-client", "lash_vm_client", "//crates/lash-vm-client:lash-vm-client__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-vm-client",
     package_name = "lash-internal-vm-client",
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
