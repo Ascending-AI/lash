@@ -122,7 +122,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // and recreating pre-11 databases removes both hazards; the old `sessions/` blob
 // prefix is unreachable garbage operators delete manually.
 //
-// Bumped to 12 for claim generation fencing (ADR 0029): `lash_queued_work_batches`
+// Bumped to 12 for claim generation fencing: `lash_queued_work_batches`
 // and `lash_pending_turn_inputs` replace their per-claim claimed-at and expiry
 // columns with a single column pinning the session-execution-lease generation
 // the claim was taken under (since replaced by root admission, FIG-3927). This

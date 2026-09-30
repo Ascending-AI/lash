@@ -25,7 +25,7 @@
 //! entry under the same rule as the level-2 defect rulings.
 //!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
-//! follow ADR 0029's reclaim-mediated LAW/NON-LAW split, ADR 0045's stateless
+//! follow ADR 0101's root admission and stale-drive-fence rules, ADR 0045's stateless
 //! service rule, and the current-head CAS/floor semantics. In particular, a
 //! crash after an external effect but before its outcome reaches the runtime
 //! must re-execute that effect; this suite deliberately asserts at-least-once

@@ -72,23 +72,22 @@ The generated region below is checked against the live filenames and headings.
 | 0026 | [Model capability is host-supplied data and providers are executors](0026-model-capability-is-host-supplied-data.md) |
 | 0027 | [Process completion carries explicit authority](0027-unleased-completion-carries-explicit-authority.md) |
 | 0028 | [Attachments have blob storage, reference tracking and host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
-| 0029 | [Claim supersession is reclaim-mediated under the session lease](0029-claims-are-generation-fenced-under-the-session-lease.md) |
-| 0030 | [The session model is resolved once, at session construction](0030-the-session-model-is-resolved-once-at-open.md) |
-| 0031 | [Execution evidence is provider-reported fact, never echoed intent](0031-execution-evidence-is-provider-reported-fact.md) |
-| 0032 | [Attempt history rides inside the result, not a separate journal](0032-attempt-history-rides-inside-the-result.md) |
-| 0033 | [A turn has no single producing model; attribution is host policy](0033-final-output-attribution-is-host-policy.md) |
+| 0030 | [The session model is recorded at creation](0030-the-session-model-is-resolved-once-at-open.md) |
+| 0031 | [Execution evidence is provider-reported fact](0031-execution-evidence-is-provider-reported-fact.md) |
+| 0032 | [Attempt history rides inside the result](0032-attempt-history-rides-inside-the-result.md) |
+| 0033 | [Final-output attribution is host policy](0033-final-output-attribution-is-host-policy.md) |
 | 0034 | [Harness evolution lives outside the runtime repository](0034-harness-evolution-lives-outside-the-runtime-repository.md) |
-| 0035 | [Frontends are independent Host Applications](0035-frontends-are-independent-host-applications.md) |
+| 0035 | [Frontends are independent host applications](0035-frontends-are-independent-host-applications.md) |
 | 0036 | [Stream termination is explicit dialect policy](0036-stream-termination-is-explicit-dialect-policy.md) |
 | 0037 | [Lashlang workflows use a code-graph-code lens](0037-lashlang-workflows-use-a-code-graph-code-lens.md) |
 | 0038 | [Response metadata is allowlisted host-supplied capture](0038-response-metadata-is-allowlisted-host-supplied-capture.md) |
-| 0039 | [Turn cancellation is a first-party work-driver primitive on the keyed-promise seam](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) |
+| 0039 | [Turn cancellation is a first-party work-driver primitive](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) |
 | 0040 | [Retried model attempts retract live text by correlation](0040-retried-model-attempts-retract-live-text-by-correlation.md) |
 | 0041 | [Child-turn and driver stack growth have canonical seams](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) |
 | 0042 | [Tool attempts are atomic](0042-tool-attempts-are-atomic.md) |
 | 0043 | [Hosts register immutable deployments](0043-hosts-register-immutable-deployments.md) |
 | 0044 | [Tests must be independent of what they test](0044-tests-must-be-independent-of-what-they-test.md) |
-| 0045 | [Services are stateless; substrates own continuation](0045-services-are-stateless-substrates-own-continuation.md) |
+| 0045 | [Services are stateless; engines own continuation](0045-services-are-stateless-substrates-own-continuation.md) |
 | 0046 | [Process transitions are events; the record is a fold](0046-process-transitions-are-events-record-is-a-fold.md) |
 | 0047 | [History is shared; branches are sessions](0047-history-is-shared-branches-are-sessions.md) |
 | 0048 | [Checkpoint component identity is a backend contract](0048-checkpoint-component-identity-is-a-backend-contract.md) |

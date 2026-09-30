@@ -78,9 +78,9 @@ structure rather than exact assistant wording.
   messages, before scoring any exactly-once gate.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
   active input id completes exactly once under the in-flight turn, the queued draft
-  dispatches only after settle, and runs Lash core's ADR 0029 reclaim-mediated
-  claim-supersession test — that ADR 0029 contribution is the
-  `turn_input_claims_supersede_across_session_lease_generations` case. The unfiltered suite
+  dispatches only after settle. ADR 0101 defines current root admission and
+  drive-fence settlement; its store-law evidence lives in
+  `crates/lash-conformance/src/conformance/runtime_persistence/root_admissions.rs`. The unfiltered suite
   is roughly 45 live Restate tests behind a cold workspace build, which is tens of minutes
   before the one test this row needs even starts; run it as
   `AGENT_WORKBENCH_E2E_TEST_FILTER=live_restate_turn_input_ingress just agent-workbench-restate-e2e`

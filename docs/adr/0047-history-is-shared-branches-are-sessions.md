@@ -2,220 +2,106 @@
 
 ## Status
 
-accepted. Shipped mechanics are stated in the present tense. Rulings whose
-implementation remains pending are labelled as such and name their owning
-ticket.
+Accepted.
 
 ## Context
 
-Session history used to mix two different kinds of state. Immutable transcript
-nodes belonged to one session, while the same session row also carried mutable
-execution state and replacement operations over those nodes. Retries could
-therefore agree on semantic content while realizing different graph topology,
-SQLite could only isolate sessions by putting them in separate files, and a
-branch either copied history or weakened the session-level fences that make
-execution replayable.
-
-The concrete correctness failure was a phantom graph: a retried commit found a
-successful receipt while performing no write, then the runtime adopted its new
-proposal's node ids even though those rows had never been realized. The next
-append targeted a leaf that did not exist.
-
-The durable-core cutover adopts one model:
-
-> A node is history. A session is execution. History is shared; execution never
-> is. A branch is another session over the same history.
-
-This is one decision, not independent storage refinements. Shared history
-requires globally sound node identity and reachability. Keeping execution
-private to a session preserves the head-revision fence, claims, queues, effect
-replay, waits, and usage accounting when a branch is created.
+Immutable history and mutable execution state need different ownership.
+A branch must share retained transcript nodes without sharing another
+session's admission, usage or continuation. A retry must adopt the topology
+that storage actually realizes, not a fresh proposal beside a matching receipt.
 
 ## Decision
 
 History is a shared immutable object graph. A session is a mutable execution
-head over that graph, and a branch is a new session whose head points at an
-existing retained node. Nodes are never copied for a branch, and execution
-state is never shared between sessions.
+head over it. A branch is another session whose head points at a retained
+node. Forking copies no history nodes and shares no mutable execution state.
 
-Every retryable history mutation carries an operation identity. Ordinary
-history-node ids derive from the session id, operation id, and append ordinal;
-structural `FrameOpen` nodes use their deterministic session-and-frame-key
-identity because process provenance must be able to name a frame before its
-surrounding commit is realized. The commit intent is hashed through the typed,
-allowlisted `lash-intent/v2` projection. Topology and semantic payload enter the
-projection. Transport authority, fencing tokens, store-assigned facts, snapshot
-bytes, and clock observations do not.
+Retryable history mutations carry `OperationId`. Ordinary node ids derive
+from session id, operation id and append ordinal. Structural `FrameOpen` ids
+derive from session id and frame key so process provenance can name a frame
+before its surrounding commit. Intent hashing uses the typed
+`lash-intent/v2` projection. Semantic content and topology participate;
+transport authority, fencing and clock observations do not.
 
-The intent hash detects divergence of **intent, not observation**. Each store
-derives that hash from the typed commit content it receives; callers supply
-only the operation identity and cannot stamp a hash over a different proposal.
-On a receipt hit, the store compares its newly derived hash with the persisted
-hash before returning the stored result. On the write path it also re-derives
-operation-derived node ids, then writes nodes, head, and receipt atomically.
-The former caller-supplied hash and redundant `realization_digest` echo are
-removed.
+Stores derive commit identity from received content rather than accepting a
+caller-supplied intent hash. Receipt replay validates the appropriate commit
+and append identity and returns stored realization. Graph rows, head and
+receipt publish atomically. The runtime adopts that realization, including
+store-observed values, rather than its retry proposal.
 
-Clock-derived values remain outside intent. Stores realize those observations,
-return them on the receipt, and the runtime rehydrates them so resident and
-durable state converge.
+`GraphAppend::Extend` appends create-only nodes; `PreserveHead` leaves graph
+position unchanged. Agent Frames are immutable `FrameOpen` nodes. Parent ids
+are stored edges, and the current frame is the nearest frame ancestor. A host
+rewinds by retaining a target, creating another session there and switching
+to it, rather than mutating immutable history.
 
-The graph mutation algebra is append-only. `GraphAppend::Extend` is the
-only graph-changing variant; `GraphAppend::PreserveHead` represents a commit
-whose history head does not move. Appends are create-only and validate their leaf before writing.
-Full replacement, session reset, fresh-open replacement, orphan healing, and
-in-place rewind are removed rather than emulated. A host rewinds by retaining a
-target, creating a session there, switching to it, and deleting the old session
-when the host no longer wants that execution.
+SQLite uses one factory-wide durable-core database for atomic shared-history
+head changes. Commit budgets are explicit host policy under ADR 0058, not a
+backend's unconditional fixed cap. Checkpoints replace resumable state rather
+than accumulate observation history (ADR 0048).
 
-Agent Frames are immutable `FrameOpen` nodes. `parent_node_id` is a real indexed
-edge, and the current frame is derived from the nearest `FrameOpen` ancestor
-rather than from a mutable frame vector. A turn commits its graph exactly once.
-The runtime durability tier on effect hosts, process engines, and cancellation
-receipts is removed. `EffectReplayOwnership` replaces it with the mechanical
-fact of whether the runtime or its controller owns replay; any end-to-end
-durability claim belongs to the Host Application.
-*(Superseded: FIG-2226 made this the one sync `effect_journaling()` fact, and FIG-3585 deleted that fact because every host journals.)*
+Reachability comes from parent edges, session heads and retained anchors.
+A fork adds a root over the shared prefix. A process registry row does not
+implicitly root stored history; retained anchors remain explicit. Effect journals
+are owned by the configured engine, with stable identities joining their outcomes to
+session commits across transaction domains.
 
-SQLite uses one factory-wide durable-core database so a new session head and
-its references to shared history can change atomically. Because that topology
-widens the blast radius of a writer lock, commits are rejected before opening a
-transaction when they exceed the measured 512-node or 1 MiB logical-payload
-budget. A realistic fully captured session checkpoint measures 2.3–4.4 KiB and
-stays flat across 100 turns: it is a replacement snapshot at each boundary and
-can shrink, not an accumulator. Reaching the 1 MiB cap requires roughly 1 MB of
-live globals in one turn. The cap is a live-state capacity limit, not a
-time-dependent failure.
-
-The preceding paragraph's budget-authority claim is superseded by [ADR 0058](0058-runtime-commit-budgets-are-explicit-host-policy.md).
-
-Reachability is defined by stored edges. Session heads, child nodes, and retained
-continuation anchors keep history alive. Forking adds a new session root and
-shares the prefix. Ownership is therefore reachability, not producer-session
-exclusivity. Processes remain independent durable objects and stay outside
-stored history-node reachability.
-
-Effect-journal identity and lifecycle retirement are implemented as recorded by
-ADR 0025. FIG-2501 removes the attachment membership read probe and protects
-manifest roots with graph retention (see below). FIG-2502 supplies terminal-gated `RetentionBound` receipt reclamation; live
-turn intents still use unprunable live-session receipts for supersession.
+A session id is host-provided and single-use in its store (ADR 0049).
+History and frame identity therefore use that id directly. Ingress admission
+and settlement use root bindings under the sealed drive fence (ADR 0101).
 
 ## Store leaf validation versus caller branch liveness
 
-The store's leaf validation is strict and unconditional: a commit carries the
-head revision it expects, and its first appended node must parent on the stored
-leaf. The runtime satisfies that fence by construction — it reloads the head and
-builds the append from the leaf it just read.
+Store commits validate the expected head revision and parent the first append
+on the stored leaf. Runtime preparation reloads that head before constructing
+its append.
 
-The precondition a *caller* supplies is a different question and is answered
-differently on purpose. `AppendSessionNodesRequest::requires_ancestor_node_id`
-asks whether the branch the caller read is still the branch this session
-executes. It is accepted whenever the named node is anywhere on the active path
-and refused only once that node has left it. It is not a compare-and-swap on the
-head, and it does not report concurrent appends. That is what the
-derive-then-append pattern needs — read history up to a node, spend seconds
-deriving something from it, then append the result — because such a caller has
-to distinguish content merely arriving after its read (harmless: the derivation
-still describes the prefix it read) from its base leaving this session's line of
-execution (fatal: the base is gone). A strict head fence at that seam would
-discard expensive derived work every time an unrelated writer committed first.
-
-Graph position therefore carries no derivation claim. A node appended after an
-advanced head sits after content its author never read, so anything that needs
-to know what a node was derived from records that in the node's own payload and
-never infers it from position.
+A caller's `requires_ancestor_node_id` asks whether the base it read is still
+on the active path. It is not a head compare-and-swap. Concurrent content can
+arrive after the base without invalidating work derived from that prefix.
+The caller records any derivation claim in its payload rather than inferring
+it from the new node's position.
 
 ## ADR 0024 applies directly at deletion
 
-History retirement is the plain agreement required by
-`docs/adr/0024-drainage-reads-over-artifact-refcounts.md`, not an exception to
-it. Parent edges, live session heads, and continuation anchors are the only
-reachability truth. There is no `incoming_refs` cache, drift error, or scrub
-API.
+Destructive decisions derive live children, session heads and anchors in the
+same transaction. Removing a head reclaims only ancestry that has no remaining
+root or child. The walk stops at a shared prefix. There is no cached incoming
+reference count or scrub authority. PostgreSQL serializes affected graph rows
+and root changes with row locks.
 
-Every destructive decision derives live children, heads, and anchors in the
-same transaction. Deleting a session removes its head, then reclaims only its
-producer nodes that no child, head, or anchor can still reach; the ancestry
-walk stops at a shared prefix. PostgreSQL locks affected node rows so commits,
-forks, pin changes, and deletion serialize their root and edge mutations.
-
-Process roots are deliberately excluded from stored history reachability. They
-live in a different store family, so their liveness continues to be recomputed
-from process truth on demand, exactly as ADR 0024 requires.
-
-## Session identity amendment
-
-[ADR-0049](0049-session-ids-are-used-once.md) supersedes the lifetime
-discriminator used by the first implementation of this decision. A session id
-cannot be reused after deletion, so history-node preimages, frame identity,
-fork admission, and session-owned lifecycle state use the host-provided session
-id directly. The shared-history and branch-as-session rulings are unchanged.
+Processes belong to a different store family. Their liveness comes from
+process truth rather than an implicit stored-history root.
 
 ## Consequences
 
-- Forking does not copy nodes, usage, claims, queues, waits, effect-journal
-  entries, or mutable Agent Frame state. The new session gets an independent
-  host-provided id and ledger over a shared historical prefix.
-- A receipt match is permission to adopt only the store-recorded result. The
-  store derives the retry's intent hash from the received commit and rejects a
-  different proposal under the same operation identity.
-- A missing leaf, parent, or frame ancestor is corruption, not a repair
-  invitation. Append conflicts are typed and never become upserts.
-- Caller-supplied append preconditions are branch-liveness checks, not head
-  compare-and-swaps. A plugin needing exclusivity against concurrent appends
-  does not get it from `requires_ancestor_node_id`.
-- Reclamation remains host-scheduled. Effect-journal retirement is shipped and
-  lifecycle-gated. FIG-2502 adds the explicit terminal-session receipt/usage
-  horizon with atomic dependent-root reconciliation (ADR 0023). Existing vacuum
-  and attachment-GC policies retain their separate lifecycle contracts.
-- Lash owns the effect-journal contract while the configured substrate owns the
-  journal. The session commit and effect journal remain separate transactions
-  joined by stable operation identity.
-- [ADR-0026](0026-model-capability-is-host-supplied-data.md) needs no amendment.
-  Removing component-declared durability is its host-supplied-capability
-  doctrine reaching the last runtime exception.
-- [ADR-0029](0029-claims-are-generation-fenced-under-the-session-lease.md)
-  defines reclaim-mediated claim supersession. A newer lease generation makes
-  old claims reclaimable. After a successor re-claims a batch, a superseded
-  commit fails without mutation: with a current head it reports the claim's
-  supersession, while a successor-advanced head may report a head conflict
-  first.
-- [ADR-0046](0046-process-transitions-are-events-record-is-a-fold.md) needs no
-  amendment. Process event folding and weak observation are orthogonal to
-  immutable session history, and processes remain outside stored history
-  reachability.
+A fork has its own session id, ledger, ingress and mutable continuation over
+shared history. A receipt match permits adoption only of the recorded result.
+Missing leaves or frame ancestors are typed corruption or conflicts, not an
+upsert invitation. Caller branch-liveness checks permit concurrent appends and
+do not grant exclusivity. Full graph replacement and in-place rewind are
+rejected because they weaken immutable identity and branch fencing.
 
-## Attachment prefix retention (FIG-2501 / FIG-653)
+Reclamation is host-scheduled and lifecycle-gated. SQL session commits and
+engine journals remain separate transactions with explicit stable identities.
 
-Attachment reads resolve content addresses directly; hosts own authorization.
-History point reads retain fork-lineage graph membership, and process waits
-retain observer subscription semantics. Neither relationship gate is authorization.
+## Attachment prefix retention
 
-Committing a stored attachment reference acquires a manifest root for the
-committing session, including references first put by another session. The
-boundary transaction owns this acquisition and its attachment GC fence, so
-successful adoption cannot be separated from publication of its receiver root.
-FIG-2795 gates that adoption on positive upload evidence: a digest is adoptable
-only while some manifest row carries `written_at_ms` for it and no physical
-delete is in flight, and condemnation clears every such row for the digest under
-the same fence. Adoption without evidence fails atomically with
-`StoreError::UnknownAttachment`; a fresh put mints a new attempt, restores the
-bytes, and stamps the evidence through its own id-matched completion. This is a
-pure store fact and never calls host blob code from the transaction.
+Attachment reads address bytes directly; the host owns authorization.
+Publishing committed attachment references acquires durable referrer edges in
+the boundary transaction. Acquisition requires positive upload evidence and
+no physical deletion in flight; absence fails atomically with
+`UnknownAttachment`. The transaction does not invoke host blob code.
 
-Committed attachment manifest rows survive owner deletion while any of that
-owner's graph nodes remain retained. The graph's existing head/child/pin
-retirement protocol supplies the prune precondition. A deleted owner's
-uncommitted intents are removed, and GC reconciles committed roots after the
-last retained node disappears, including after unpin. No schema bump is needed.
-This deliberately retains all of the owner's committed attachments while any
-prefix survives: the manifest has no exact node-to-attachment edge. The
-write-token lifecycle requires the PostgreSQL component-84 and SQLite session-55
-reject-and-recreate schema boundaries; the reachability retention rule itself
-does not change.
+Session attachment edges remain live while retained history from that session
+survives. This is conservative at session granularity rather than an exact
+node-to-attachment map. ADR 0124 governs the explicit referrer-edge and byte
+reclamation contract, including other referrer kinds. Graph retirement does
+not make a still-live attachment referrer disappear.
 
-## Amendment (FIG-4125, 2026-09-29)
+## Implementation
 
-Item 7: The lease-generation reclaim prescription above is superseded by
-[ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s drive
-fence. A newer lease generation alone does not authorize reclaim.
+- [Commit and node identity](../../crates/lash-core-store/src/store/commit_identity.rs) and [graph append algebra](../../crates/lash-core-store/src/store/mod.rs).
+- [SQLite commit](../../crates/lash-sqlite-store/src/persistence/session_commit.rs) and [PostgreSQL commit](../../crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs).
+- [Reachability retirement](../../crates/lash-sqlite-store/src/persistence/mod.rs) and [attachment edge acquisition](../../crates/lash-sqlite-store/src/attachments.rs).

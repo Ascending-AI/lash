@@ -90,8 +90,8 @@ pub enum RuntimeErrorCode {
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
-    /// re-establish current lease and claim authority before building new work
-    /// (ADR 0029).
+    /// re-establish current drive and root authority before building new work
+    /// (ADR 0101).
     StoreCommitSuperseded,
     /// The session was deleted before its final runtime commit could publish.
     /// The session id is also retained in [`RuntimeErrorCause::SessionDeleted`]

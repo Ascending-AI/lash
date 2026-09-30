@@ -519,8 +519,8 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             .is_empty()
     );
 
-    // Consuming the exact authorization is the durable fence. Lease takeover
-    // alone cannot veto final settlement under ADR 0029.
+    // Consuming the exact authorization is the durable fence. Its authorizing
+    // drive epoch alone cannot veto final settlement under ADR 0039.
     let stale_state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.config.session_policy())

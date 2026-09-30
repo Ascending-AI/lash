@@ -743,7 +743,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// at open and recreated; the old `sessions/` blob trees are unreachable garbage
 /// operators delete manually.
 ///
-/// Bumped to 11 for claim generation fencing (ADR 0029): queued-work and
+/// Bumped to 11 for claim generation fencing: queued-work and
 /// pending-turn-input rows replace their per-claim claimed-at and expiry
 /// columns with a single column pinning the session-execution-lease generation
 /// the claim was taken under (since replaced by root admission, FIG-3927).

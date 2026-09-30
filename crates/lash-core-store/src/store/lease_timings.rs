@@ -18,7 +18,7 @@ const MIN_TTL_TO_RENEW_RATIO: u32 = 3;
 /// Queued-work and turn-input claims are deliberately *not* governed by this
 /// type: they are not leases, carry no TTL, and are never renewed. They pin a
 /// session-execution-lease generation so a successor can re-claim them after
-/// handoff (ADR 0029); settlement authority remains claim ownership, not time.
+/// handoff; settlement authority remains claim ownership, not time.
 ///
 /// The TTL is the failover-latency vs false-takeover-risk knob: a shorter TTL
 /// lets a peer reclaim work from a crashed owner sooner, while a longer TTL
