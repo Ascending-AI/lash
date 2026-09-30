@@ -168,17 +168,64 @@ already materialized and no compilation:
 | Warm daemon, initial graph check | 5.517 | 8.279 | 3.62 | 2.28 | 1428.14 | 299.44 |
 | Warm daemon, verified graph receipt | 5.517 | 3.495 | 3.62 | 1.40 | 1428.14 | 281.15 |
 
-These single observations show lower coordinator memory and CPU for analysis.
-The initial warm observation regressed in wall time because the driver recomputed
-Cargo/Reindeer and source-ownership reconciliation on every invocation. Profiling that stage found
-6.5 seconds under instrumentation, including 3.5 seconds in generated-model
-work and 2.6 seconds waiting for subprocesses. A private verified receipt now checks graph inputs and generated output identities
-before reusing that result. After the necessary owned-daemon configuration restart,
-a retained-daemon repeat took 3.495 seconds with 281.15 MiB peak RSS. Graph changes
-still require full generation and drift checking. These are different candidate
-stages, recorded in the measurements file; the final candidate still needs a
-matched re-measurement. No build or test speedup has been established; matched cold, warm, edit and concurrent runs remain
-outstanding. Re-measure the final candidate after those changes.
+These analysis observations show lower coordinator memory and CPU. The first
+warm observation included dependency generation on every invocation. A private
+receipt now validates the generator inputs and checked-in outputs before
+reusing the graph. Rust bodies contribute their `CARGO_BIN_EXE_*` references;
+new source paths, manifests, dependencies, features, policy and lint
+configuration still invalidate generation. Ordinary compiler edits are checked
+by Buck2 without regenerating dependencies.
+
+The final small-target and concurrent observations are below. Both engines used
+the frozen source revision above. Buck2's first single-target measurements used
+candidate `86f1e1ae`; the receipt correction is `1309acacf8`. Compilation,
+linking and test execution used NativeLink with zero local execution actions.
+Buck2 single-target runs used one action slot alongside the independent one-slot
+UI proof; the earlier single-target Bazel runs used two slots. Tools were already
+bootstrapped. These are single observations on a shared pool.
+
+| Workload | Bazel wall s | Buck2 wall s | Bazel daemon CPU s | Buck2 daemon CPU s | Bazel peak RSS MiB | Buck2 peak RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Warm SQL build | 10.380 | 2.485 | 20.40 | 0.11 | 1199.88 | 236.98 |
+| First SQL test | 69.167 | 43.189 | 105.70 | 1.01 | 2522.68 | 250.73 |
+| Warm SQL test | not measured | 3.543 | not measured | 0.19 | not measured | 239.23 |
+| Edited SQL check, initial receipt | 11.457 | 17.871 | 2.84 | 0.36 | 1678.89 | 240.77 |
+| Edited SQL check, corrected receipt | 11.457 | 10.953 | 2.84 | 1.60 | 1678.89 | 281.01 |
+| Edited SQL test, corrected receipt | 35.805 | 22.280 | 98.64 | 1.18 | 2419.42 | 279.32 |
+| Two fresh workspace analyses | 108.153 | 7.986 | 558.18 | 6.15 | 4076.48 | 458.63 |
+| Two warm workspace analyses | not measured | 4.516 | not measured | 1.36 | not measured | 512.31 |
+
+The first Bazel test reused a cached verdict; Buck2's first test actually ran
+all 31 cases remotely. Both are successful developer invocations, but this is
+not a controlled comparison of uncached test execution. The warm Buck2 verdict
+and all 31 JUnit cases were downloaded into a new report directory.
+
+The initial edited check was slower because it spent about 12 client CPU seconds
+regenerating Cargo/Reindeer. After narrowing receipt inputs it spent 4.99 client
+CPU seconds and returned in 10.95 seconds. This is close to the earlier Bazel
+observation, rather than evidence of a large check speedup. The corrected
+check/test pair followed whole-workspace analysis, so its retained coordinator
+had higher RSS than the earlier small-target-only run. Both edits were restored
+byte-for-byte. A separate temporary test-only `compile_error!` failed native
+metadata check and passed after exact source restoration.
+
+The cold Buck2 SQL build took 14.081 seconds, 2.53 daemon CPU seconds and
+280.36 MiB RSS, with two remote actions and final output materialization. The
+Bazel cold build took 780.092 seconds and executed 341 remote actions including
+LLVM/toolchain compilation. Buck2 uses checksum-pinned prebuilt toolchains and
+its bootstrap was completed before timing. These cold wall times have different
+toolchain preparation and action sets; they do not establish a 55-fold compiler
+speedup. Bootstrap/download costs and a genuinely empty remote pool were not
+benchmarked together.
+
+Both fresh Buck2 worktrees had their own idle coordinator and output state
+cleaned before concurrent analysis. Shared pool caches and other worktrees were
+untouched. The slowest Buck2 worktree took 7.91 seconds; the corresponding
+Bazel observation was 107.78 seconds. RSS totals include the two daemons and two
+forkservers. The strongest current result is lower coordinator overhead for
+independent worktrees. Full-workspace build/test latency remains a separate
+acceptance measurement, and source revisions after the frozen benchmark are
+validated for correctness rather than mixed into the comparison.
 
 ## Remaining delivery gates
 
@@ -191,7 +238,7 @@ outstanding. Re-measure the final candidate after those changes.
 - Kiln generation/dispatch for Lash/Buck2 and Figments's existing backend.
 - Matched coordinator benchmarks with compilation work reported separately.
 - Final stale-command audit, removal of superseded build configuration and rules,
-  independent review and cross-linked unmerged Lash/Kiln PRs.
+  source review and cross-linked unmerged Lash/Kiln PRs.
 
 The Kiln implementation at `08481af66c9ef822c760c883608bcf6c7ac2d43f` passed
 its four required batteries and independent review after correcting orphan

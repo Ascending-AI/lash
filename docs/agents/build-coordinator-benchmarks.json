@@ -20,7 +20,11 @@
     "Cold baseline builds LLVM/toolchain actions; bootstrap differs between engines and must be reported separately.",
     "Client and daemon CPU must not be summed without checking process accounting.",
     "RSS samples can miss transient peaks.",
-    "Buck2 analysis observations are preliminary; matched build, test, edit and concurrent comparisons remain outstanding."
+    "SQL builds and tests are small-target observations, not a full-workspace speedup claim.",
+    "Buck2 single-build/test/edit runs used one remote action slot while an independent UI proof used one; prior Bazel single-target runs used two.",
+    "The Buck2 cold SQL run executed two remote actions after pinned tool bootstrap; the Bazel cold run executed 341 remote actions including LLVM/toolchain compilation.",
+    "Source-edit observations include both the initial regeneration regression and its subsequent receipt fix; shared pool load changed between runs.",
+    "Fresh two-worktree analysis performs no compiler execution. Both owning coordinators/output states were cleaned privately before measurement; shared caches were retained."
   ],
   "results": [
     {
@@ -183,6 +187,126 @@
       "entrypoint": "Kiln integration 08481af66c9ef822c760c883608bcf6c7ac2d43f",
       "bootstrap_included": false,
       "notes": "Fresh verified graph receipt, retained daemon and forkserver; first post-upgrade invocation restarted the owned daemon and is excluded from warm timing."
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 14.081005888991058,
+      "daemon_cpu_seconds": 2.53,
+      "client_cpu_seconds": 4.35347,
+      "peak_total_daemon_rss_bytes": 293974016,
+      "end_total_daemon_rss_bytes": 254320640,
+      "engine": "buck2",
+      "workload": "leaf-cold",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 2.485291781835258,
+      "daemon_cpu_seconds": 0.11,
+      "client_cpu_seconds": 2.574858,
+      "peak_total_daemon_rss_bytes": 248492032,
+      "end_total_daemon_rss_bytes": 247959552,
+      "engine": "buck2",
+      "workload": "leaf-warm",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 43.18934434931725,
+      "daemon_cpu_seconds": 1.01,
+      "client_cpu_seconds": 7.493142,
+      "peak_total_daemon_rss_bytes": 262909952,
+      "end_total_daemon_rss_bytes": 249651200,
+      "engine": "buck2",
+      "workload": "leaf-test-first",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 3.5425161346793175,
+      "daemon_cpu_seconds": 0.19,
+      "client_cpu_seconds": 2.9576209999999996,
+      "peak_total_daemon_rss_bytes": 250847232,
+      "end_total_daemon_rss_bytes": 249393152,
+      "engine": "buck2",
+      "workload": "leaf-test-warm",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 17.871090315282345,
+      "daemon_cpu_seconds": 0.36,
+      "client_cpu_seconds": 12.007147,
+      "peak_total_daemon_rss_bytes": 252461056,
+      "end_total_daemon_rss_bytes": 250503168,
+      "engine": "buck2",
+      "workload": "leaf-edit-check-before-rust-receipt-fix",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 13.188000043854117,
+      "daemon_cpu_seconds": 0.3,
+      "client_cpu_seconds": 4.307252,
+      "peak_total_daemon_rss_bytes": 254427136,
+      "end_total_daemon_rss_bytes": 252264448,
+      "engine": "buck2",
+      "workload": "leaf-edit-test-before-rust-receipt-fix",
+      "candidate_revision": "86f1e1ae"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 10.953005209099501,
+      "daemon_cpu_seconds": 1.6,
+      "client_cpu_seconds": 4.993302999999999,
+      "peak_total_daemon_rss_bytes": 294662144,
+      "end_total_daemon_rss_bytes": 292888576,
+      "engine": "buck2",
+      "workload": "leaf-edit-check",
+      "candidate_revision": "1309acacf8"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 22.279882224742323,
+      "daemon_cpu_seconds": 1.18,
+      "client_cpu_seconds": 7.145959,
+      "peak_total_daemon_rss_bytes": 292888576,
+      "end_total_daemon_rss_bytes": 271613952,
+      "engine": "buck2",
+      "workload": "leaf-edit-test",
+      "candidate_revision": "1309acacf8"
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 7.985916293691844,
+      "daemon_cpu_seconds": 6.1499999999999995,
+      "client_cpu_seconds": 6.482254,
+      "peak_total_daemon_rss_bytes": 480907264,
+      "end_total_daemon_rss_bytes": 480907264,
+      "engine": "buck2",
+      "workload": "workspace-pair-analyze-first",
+      "candidate_revision": "86f1e1ae",
+      "worktree_wall_seconds": [
+        4.480565419886261,
+        7.910773676354438
+      ],
+      "slowest_wall_seconds": 7.910773676354438
+    },
+    {
+      "exit_code": 0,
+      "wall_seconds": 4.516183063853532,
+      "daemon_cpu_seconds": 1.36,
+      "client_cpu_seconds": 6.0958559999999995,
+      "peak_total_daemon_rss_bytes": 537194496,
+      "end_total_daemon_rss_bytes": 537194496,
+      "engine": "buck2",
+      "workload": "workspace-pair-analyze-warm",
+      "candidate_revision": "86f1e1ae",
+      "worktree_wall_seconds": [
+        3.0404667872935534,
+        3.9028477952815592
+      ],
+      "slowest_wall_seconds": 3.9028477952815592
     }
   ],
   "candidate_engine": "Buck2 2026-09-15 (official release)"
