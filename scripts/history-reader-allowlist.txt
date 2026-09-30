@@ -8,6 +8,7 @@ crates/lash-sim/src/content_oracle.rs  |  .load_ancestors(  |  1  # PAGED simula
 crates/lash-sim/src/content_oracle.rs  |  .load_usage_ledger_page(  |  1  # PAGED simulator oracle folds reported usage in bounded pages
 runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs  |  .load_session_window(  |  1  # WINDOW read-view runbook assertion reads current frame
 crates/lash-sim/src/crash_matrix/invariants.rs  |  .load_ancestors(  |  1  # PAGED crash matrix reconstructs committed transcript across frames
+crates/lash-sim/src/crash_matrix/cases/definition_create.rs  |  .load_ancestors(  |  1  # PAGED crash create oracle reads the committed frame in a bounded page
 crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Current)  |  1  # WINDOW read-view session API reads current frame
 crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Admitted(base.clone()))  |  1  # WINDOW turn session API reads admitted frame
 crates/lash-core/src/runtime/session_manager/mod.rs  |  .load_session_window(crate::store::WindowSelector::Current)  |  1  # WINDOW reopen session manager reads current frame
