@@ -1,0 +1,55 @@
+FIG-4241 bounded kind smoke without fault injection; final code on base 5a924eceaf.
+load=smoke-v1-20260930055128
+source=target/fig-3790/lash-fig-4241-20260930T054634Z
+This run isolates the strict workload checks from the named FIG-4260 restart failure. FIG-4259 owns missing final collection; the overall gate is never claimed green for a gap.
+No baseline; 4 actors x 24 primary inputs.
+
+load witness class=admin-compaction witnessed=1 violations=0
+load witness class=attachment-puts witnessed=91 violations=0
+load witness class=attachment-reads witnessed=91 violations=0
+load witness class=auxiliary-requests witnessed=1 violations=0
+load witness class=cells witnessed=81 violations=0
+load witness class=child-processes witnessed=80 violations=0
+load witness class=context-pressure witnessed=1 violations=0
+load witness class=cron-closed-after-delete witnessed=2 violations=0
+load witness class=cron-setup witnessed=1 violations=0
+load witness class=cron-ticks witnessed=20 violations=0
+load witness class=deletes witnessed=33 violations=0
+load witness class=external-occurrences witnessed=1 violations=0
+load witness class=history-prefill witnessed=1 violations=0
+load witness class=host-cancels witnessed=9 violations=0
+load witness class=host-processes witnessed=38 violations=0
+load witness class=host-signals witnessed=30 violations=0
+load witness class=peer-reads witnessed=91 violations=0
+load witness class=promotion-reads witnessed=1 violations=0
+load witness class=provider-retries witnessed=9 violations=0
+load witness class=provider-streams witnessed=39 violations=0
+load witness class=queued-cancels witnessed=15 violations=0
+load witness class=queued-inputs witnessed=38 violations=0
+load witness class=shared-attachments witnessed=4 violations=0
+load witness class=tools witnessed=119 violations=0
+load witness class=trigger-edits witnessed=1 violations=0
+load witness class=turn-cancels witnessed=15 violations=0
+load witness class=turns witnessed=96 violations=0
+load witness verdict=passed run=smoke-v1-20260930055128 classes=27 covered=27 violations=0 absorbed_effect_attempts=6
+load red-side class=provider-streams planted=1 caught=39 verdict=failed
+load red-side class=history-prefill planted=1 caught=1 verdict=failed
+load red-side class=admin-compaction planted=1 caught=1 verdict=failed
+load red-side class=context-pressure planted=1 caught=1 verdict=failed
+load red-side class=auxiliary-requests planted=1 caught=1 verdict=failed
+load red-side class=external-occurrences planted=1 caught=1 verdict=failed
+load red-side class=trigger-edits planted=1 caught=1 verdict=failed
+load red-side class=promotion-reads planted=1 caught=1 verdict=failed
+load turn operation=smoke-v1-20260930055128/0/16 status=Answered credits_input=true root=load-smoke-v1-20260930055128-0-16
+load turn operation=smoke-v1-20260930055128/0/17 status=Answered credits_input=true root=load-smoke-v1-20260930055128-0-17
+load turn operation=smoke-v1-20260930055128/1/7 status=Answered credits_input=true root=load-smoke-v1-20260930055128-1-7
+load turn operation=smoke-v1-20260930055128/2/9 status=Answered credits_input=true root=load-smoke-v1-20260930055128-2-9
+load turn operation=smoke-v1-20260930055128/3/17 status=Answered credits_input=true root=load-smoke-v1-20260930055128-3-17
+load turn operation=smoke-v1-20260930055128/3/22 status=Answered credits_input=true root=load-smoke-v1-20260930055128-3-22
+load turn operation=smoke-v1-20260930055128/3/6 status=Answered credits_input=true root=load-smoke-v1-20260930055128-3-6
+load turn operation=smoke-v1-20260930055128/3/7 status=Answered credits_input=true root=load-smoke-v1-20260930055128-3-7
+load turn operation=smoke-v1-20260930055128/2/17 status=Answered credits_input=true root=load-smoke-v1-20260930055128-2-17
+load turn operation=smoke-v1-20260930055128/2/18 status=Answered credits_input=true root=load-smoke-v1-20260930055128-2-18
+load witness summary {"run":"smoke-v1-20260930055128","classes":{"admin-compaction":{"witnessed":1,"violations":[]},"attachment-puts":{"witnessed":91,"violations":[]},"attachment-reads":{"witnessed":91,"violations":[]},"auxiliary-requests":{"witnessed":1,"violations":[]},"cells":{"witnessed":81,"violations":[]},"child-processes":{"witnessed":80,"violations":[]},"context-pressure":{"witnessed":1,"violations":[]},"cron-closed-after-delete":{"witnessed":2,"violations":[]},"cron-setup":{"witnessed":1,"violations":[]},"cron-ticks":{"witnessed":20,"violations":[]},"deletes":{"witnessed":33,"violations":[]},"external-occurrences":{"witnessed":1,"violations":[]},"history-prefill":{"witnessed":1,"violations":[]},"host-cancels":{"witnessed":9,"violations":[]},"host-processes":{"witnessed":38,"violations":[]},"host-signals":{"witnessed":30,"violations":[]},"peer-reads":{"witnessed":91,"violations":[]},"promotion-reads":{"witnessed":1,"violations":[]},"provider-retries":{"witnessed":9,"violations":[]},"provider-streams":{"witnessed":39,"violations":[]},"queued-cancels":{"witnessed":15,"violations":[]},"queued-inputs":{"witnessed":38,"violations":[]},"shared-attachments":{"witnessed":4,"violations":[]},"tools":{"witnessed":119,"violations":[]},"trigger-edits":{"witnessed":1,"violations":[]},"turn-cancels":{"witnessed":15,"violations":[]},"turns":{"witnessed":96,"violations":[]}},"absorbed_effect_attempts":6}
+topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1
+topology_exit=1 evidence=/workspace/kiln/lash/forks/fig-4241/target/fig-3790/lash-fig-4241-20260930T054634Z

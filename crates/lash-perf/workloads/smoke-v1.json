@@ -11,16 +11,8 @@
   "rotate_after_turns": 4,
   "history_prefill_turns": [
     [
-      0,
-      0.5
-    ],
-    [
-      50,
-      0.4
-    ],
-    [
-      500,
-      0.1
+      2,
+      1.0
     ]
   ],
   "compact_every_turns": 50,
@@ -298,7 +290,7 @@
       "/turns_per_session_s": "I: synthetic default from FIG-3790 section 2",
       "/arrival": "I: synthetic default from FIG-3790 section 2",
       "/rotate_after_turns": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/history_prefill_turns": "I: synthetic default from FIG-3790 section 2",
+      "/history_prefill_turns": "I: two history turns bound the FIG-4241 smoke prefill",
       "/compact_every_turns": "I: synthetic default from FIG-3790 section 2",
       "/warmup_s": "I: fault smoke override of figments-v1 for the FIG-4169 fault-controller pipeline proof",
       "/steady_s": "I: synthetic default from FIG-3790 section 2",

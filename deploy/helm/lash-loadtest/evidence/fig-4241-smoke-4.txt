@@ -1,0 +1,54 @@
+FIG-4241 fourth short fault campaign. Eight new classes pass; aggregate fails strictly.
+base=280fb4848a load=smoke-v1-fault-20260930050001
+source=target/fig-3790/lash-fig-4241-20260930T045543Z
+
+load witness class=admin-compaction witnessed=1 violations=0
+load witness class=attachment-puts witnessed=146 violations=0
+load witness class=attachment-reads witnessed=146 violations=0
+load witness class=auxiliary-requests witnessed=1 violations=0
+load witness class=cells witnessed=130 violations=0
+load witness class=child-processes witnessed=116 violations=0
+load witness class=context-pressure witnessed=1 violations=0
+load witness class=cron-closed-after-delete witnessed=2 violations=0
+load witness class=cron-setup witnessed=1 violations=0
+load witness class=cron-ticks witnessed=26 violations=0
+load witness class=deletes witnessed=52 violations=0
+load witness class=external-occurrences witnessed=1 violations=0
+load witness class=fault-campaign witnessed=1 violations=0
+load witness class=history-prefill witnessed=1 violations=0
+load witness class=host-cancels witnessed=18 violations=0
+load witness class=host-processes witnessed=53 violations=0
+load witness class=host-signals witnessed=42 violations=0
+load witness class=peer-reads witnessed=157 violations=0
+load witness class=promotion-reads witnessed=1 violations=0
+load witness class=provider-retries witnessed=16 violations=0
+load witness class=provider-streams witnessed=63 violations=0
+load witness class=queued-cancels witnessed=23 violations=0
+load witness class=queued-inputs witnessed=61 violations=2
+load witness class=restate-restart witnessed=2 violations=0
+load witness class=rolling-deploy witnessed=2 violations=0
+load witness class=shared-attachments witnessed=6 violations=0
+load witness class=tools witnessed=232 violations=0
+load witness class=trigger-edits witnessed=1 violations=0
+load witness class=turn-cancels witnessed=21 violations=0
+load witness class=turns witnessed=150 violations=4
+load witness class=worker-kill witnessed=2 violations=0
+load witness verdict=failed run=smoke-v1-fault-20260930050001 classes=31 covered=31 violations=6 absorbed_effect_attempts=90
+load red-side class=provider-streams planted=1 caught=63 verdict=failed
+load red-side class=history-prefill planted=1 caught=1 verdict=failed
+load red-side class=admin-compaction planted=1 caught=1 verdict=failed
+load red-side class=context-pressure planted=1 caught=1 verdict=failed
+load red-side class=auxiliary-requests planted=1 caught=1 verdict=failed
+load red-side class=external-occurrences planted=1 caught=1 verdict=failed
+load red-side class=trigger-edits planted=1 caught=1 verdict=failed
+load red-side class=promotion-reads planted=1 caught=1 verdict=failed
+load witness summary {"run":"smoke-v1-fault-20260930050001","classes":{"admin-compaction":{"witnessed":1,"violations":[]},"attachment-puts":{"witnessed":146,"violations":[]},"attachment-reads":{"witnessed":146,"violations":[]},"auxiliary-requests":{"witnessed":1,"violations":[]},"cells":{"witnessed":130,"violations":[]},"child-processes":{"witnessed":116,"violations":[]},"context-pressure":{"witnessed":1,"violations":[]},"cron-closed-after-delete":{"witnessed":2,"violations":[]},"cron-setup":{"witnessed":1,"violations":[]},"cron-ticks":{"witnessed":26,"violations":[]},"deletes":{"witnessed":52,"violations":[]},"external-occurrences":{"witnessed":1,"violations":[]},"fault-campaign":{"witnessed":1,"violations":[]},"history-prefill":{"witnessed":1,"violations":[]},"host-cancels":{"witnessed":18,"violations":[]},"host-processes":{"witnessed":53,"violations":[]},"host-signals":{"witnessed":42,"violations":[]},"peer-reads":{"witnessed":157,"violations":[]},"promotion-reads":{"witnessed":1,"violations":[]},"provider-retries":{"witnessed":16,"violations":[]},"provider-streams":{"witnessed":63,"violations":[]},"queued-cancels":{"witnessed":23,"violations":[]},"queued-inputs":{"witnessed":61,"violations":["queued input `smoke-v1-fault-20260930050001/2/16/queued/0` ended Failed under root Some(\"load-smoke-v1-fault-20260930050001-2-16-queued-0\") with final value null and provider receipts Some([\"load_queued\", \"load_stream_chunks_8\", \"load_queued\", \"load_stream_chunks_8\", \"load_queued\", \"load_stream_chunks_8\"])","queued input `smoke-v1-fault-20260930050001/3/5/queued/0` ended Failed under root Some(\"load-smoke-v1-fault-20260930050001-3-5-queued-0\") with final value null and provider receipts Some([\"load_queued\", \"load_queued\", \"load_stream_chunks_8\"])"]},"restate-restart":{"witnessed":2,"violations":[]},"rolling-deploy":{"witnessed":2,"violations":[]},"shared-attachments":{"witnessed":6,"violations":[]},"tools":{"witnessed":232,"violations":[]},"trigger-edits":{"witnessed":1,"violations":[]},"turn-cancels":{"witnessed":21,"violations":[]},"turns":{"witnessed":150,"violations":["turn `smoke-v1-fault-20260930050001/2/17` ended Failed (cancel planned: false): {\"stopped\":\"runtime_error\"}","turn `smoke-v1-fault-20260930050001/2/18` ended Failed (cancel planned: false): {\"stopped\":\"runtime_error\"}","turn `smoke-v1-fault-20260930050001/3/6` ended Failed (cancel planned: false): {\"stopped\":\"runtime_error\"}","turn `smoke-v1-fault-20260930050001/3/7` ended Failed (cancel planned: false): {\"stopped\":\"runtime_error\"}"]},"worker-kill":{"witnessed":2,"violations":[]}},"absorbed_effect_attempts":90}
+load turn operation=smoke-v1-fault-20260930050001/0/16 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-0-16
+load turn operation=smoke-v1-fault-20260930050001/0/17 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-0-17
+load turn operation=smoke-v1-fault-20260930050001/1/7 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-1-7
+load turn operation=smoke-v1-fault-20260930050001/2/9 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-2-9
+load turn operation=smoke-v1-fault-20260930050001/3/17 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-3-17
+load turn operation=smoke-v1-fault-20260930050001/3/22 status=Answered credits_input=true root=load-smoke-v1-fault-20260930050001-3-22
+Captured diagnostic (before FIG-4258 rebase; a different code from stale fences):
+2026-09-30T05:01:59.820722Z ERROR lash_restate_postgres_workers_e2e::load::behavior: load turn failed session_id=load-smoke-v1-fault-20260930050001-3-g2 errors=[TurnIssue { severity: Blocking, kind: RuntimeEffectController, code: Some(FailureCode(FailureCodePair { namespace: Namespace("lash"), spelling: "effect_panicked" })), terminal_reason: None, message: "confidence execution exhausted a required Lashlang bound: lashlang instruction budget of 1000000 instructions exceeded", raw: None, retryable: None, provider_failure_kind: None }] outcome=Stopped(RuntimeError)
+2026-09-30T05:02:39.922366Z ERROR lash_restate_postgres_workers_e2e::load::behavior: load turn failed session_id=load-smoke-v1-fault-20260930050001-3-g2 errors=[TurnIssue { severity: Blocking, kind: RuntimeEffectController, code: Some(FailureCode(FailureCodePair { namespace: Namespace("lash"), spelling: "effect_panicked" })), terminal_reason: None, message: "confidence execution exhausted a required Lashlang bound: lashlang instruction budget of 1000000 instructions exceeded", raw: None, retryable: None, provider_failure_kind: None }] outcome=Stopped(RuntimeError)

@@ -61,6 +61,19 @@ def witness_evidence(operations=None):
 
 
 class MeasurementsTests(unittest.TestCase):
+    def test_all_behavior_classes_are_required(self):
+        required = ('provider-streams', 'history-prefill', 'admin-compaction', 'context-pressure',
+                    'auxiliary-requests', 'external-occurrences', 'trigger-edits', 'promotion-reads')
+        run, operations, samples, witness = evidence()
+        m.summarize(run, operations, samples, witness)
+        for name in required:
+            with self.subTest(name=name):
+                self.assertIn(name, witness['verdict']['classes'])
+                missing = copy.deepcopy(witness)
+                del missing['verdict']['classes'][name]
+                with self.assertRaisesRegex(ValueError, 'missing or unknown durable evidence classes'):
+                    m.summarize(run, operations, samples, missing)
+
     def test_cancellation_and_timeout_are_retained(self):
         result = m.populations([operation(), operation('two', 'cancelled'), operation('three', 'timeout')])
         self.assertEqual(result['offered'], 3)

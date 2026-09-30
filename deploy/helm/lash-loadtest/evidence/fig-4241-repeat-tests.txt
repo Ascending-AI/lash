@@ -1,0 +1,18 @@
+FIG-4241 exact full-path laws. Rust: --runs_per_test=20 --test_sharding_strategy=disabled --test_arg=--exact.
+Every distinct run log was checked for each exact test name followed by ok.
+an_admitted_turn_and_an_earlier_queued_input_keep_every_tool_plan: 20/20 actually ran and passed
+provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency: 20/20 actually ran and passed
+tests::every_load_marker_names_its_operation_and_workload: 20/20 actually ran and passed
+load::tests::admitted_prefix_excludes_history_and_includes_every_batched_input: 20/20 actually ran and passed
+load::verify::tests::a_correct_smoke_run_witnesses_every_class_without_violations: 20/20 actually ran and passed
+load::verify::behavior_tests::missing_provider_chunks_are_a_stream_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::lost_prefill_is_a_history_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::an_admin_compaction_without_a_new_frame_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::pressure_without_a_summary_frame_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::a_wrong_auxiliary_completion_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::an_external_occurrence_without_a_target_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::a_deleted_trigger_that_still_starts_work_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::a_promotion_read_of_another_process_is_a_violation: 20/20 actually ran and passed
+load::verify::behavior_tests::a_batched_turn_keeps_full_tool_coverage_and_zero_violations: 20/20 actually ran and passed
+test_loadtest_measurements.MeasurementsTests.test_all_behavior_classes_are_required: 20/20 exact unittest invocations; each log says Ran 1 test and OK.
+Total: 15 laws, 300 successful law executions, 60 Rust run logs plus 20 Python run logs.

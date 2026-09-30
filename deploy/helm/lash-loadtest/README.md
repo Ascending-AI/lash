@@ -140,10 +140,27 @@ back through their `/load/attachments` endpoint, rotating so a peer reads what
 another worker put. Deleting the cron owner ends its subscriptions; one more
 emission per schedule must start nothing.
 
+Before the open-loop actors start, a bounded workflow drives FIG-4241's
+additional operations. It appends the generated history and reopens the session,
+opens an administrative summary frame, then reaches the context-pressure
+threshold and checks that the next turn runs in a separate summary frame. It
+runs an auxiliary `llm.query`, registers a non-cron external subscription,
+emits and awaits its target, updates and reads its revision, and deletes it
+before a final emission. Promotion discovery reads the session-originated
+process record and resolves its module artifact and process reference. Each
+operation has its own witness class and checks. The smoke uses two prefill
+turns; it performs no baseline measurement.
+
+The provider sends the planned streamed replies as timed SSE chunks. A root
+that admits several inputs gets one cell containing every admitted turn's tool,
+attachment and child-process plan. Its finish value lists those input keys,
+and the provider receipts each input. The witness checks every turn's tool
+coverage, including when it shares a root with an earlier queued input.
+
 The evidence lives in the witness database, outside lash's store: the driver's
 sent and terminal rows, the provider's receipts, the synthetic tools' effect
 attempts and commits, and the exact blob bytes put and read (digested by the
-witness). The driver then reconciles 19 evidence classes against the plan the
+witness). The driver then reconciles 27 workload evidence classes against the plan the
 workload regenerates and prints one `load witness class=...` line per class.
 Any violation, and any class with no evidence, fails the run. The measurements
 collector archives the independent ledgers and reconciles them against the

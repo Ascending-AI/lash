@@ -9,9 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_restate_postgres_workers_e2e::load::{
-    CRON_SETUP_MARKER, LoadContext, QUEUED_MARKER, TURN_MARKER, WORKLOAD_MARKER,
-};
+use lash_restate_postgres_workers_e2e::load::LoadContext;
 use lash_restate_postgres_workers_e2e::{
     EXPECTED_ASYNC_TEXT, EXPECTED_DURABLE_INPUT_TEXT, EXPECTED_FINAL_TEXT,
     EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
@@ -64,10 +62,16 @@ async fn chat_completion(
     let request_id = format!("chatcmpl-e2e-{n}");
     let latest_user = latest_user_text(&request);
     let full_text = request.to_string();
-    if let Some(load) = &state.load
-        && let Some(operation) = load_operation(&latest_user).or_else(|| load_operation(&full_text))
-    {
-        return load_completion(&state, load, operation, &request, &request_id).await;
+    if let Some(load) = &state.load {
+        if let Some(response) =
+            load::behavior_completion(&state, load, &request, &request_id).await?
+        {
+            return Ok(response);
+        }
+        let operations = load::admitted_operations(&request);
+        if !operations.is_empty() {
+            return load::completion(&state, load, operations, &request, &request_id).await;
+        }
     }
     let workflow_id = extract_latest_marker(&latest_user, "workflow_id=")
         .or_else(|| extract_latest_marker(&full_text, "workflow_id="))
@@ -212,165 +216,10 @@ async fn chat_completion(
     Ok(Json(response).into_response())
 }
 
-/// The load operation a request asks for: the latest load marker in `text`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum LoadOperation {
-    Turn { key: String, workload: String },
-    Queued { key: String, workload: String },
-    CronSetup { run: String, workload: String },
-}
-
-fn load_operation(text: &str) -> Option<LoadOperation> {
-    let (position, marker) = [TURN_MARKER, QUEUED_MARKER, CRON_SETUP_MARKER]
-        .into_iter()
-        .filter_map(|marker| text.rfind(marker).map(|position| (position, marker)))
-        .max_by_key(|(position, _)| *position)?;
-    let tail = &text[position..];
-    let value = load_marker_value(tail, marker)?;
-    let workload = load_marker_value(tail, WORKLOAD_MARKER)?;
-    Some(match marker {
-        TURN_MARKER => LoadOperation::Turn {
-            key: value,
-            workload,
-        },
-        QUEUED_MARKER => LoadOperation::Queued {
-            key: value,
-            workload,
-        },
-        _ => LoadOperation::CronSetup {
-            run: value,
-            workload,
-        },
-    })
-}
-
-/// The value after the first `marker` in `text`: a load key's characters.
-fn load_marker_value(text: &str, marker: &str) -> Option<String> {
-    let start = text.find(marker)? + marker.len();
-    let value: String = text[start..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/'))
-        .collect();
-    (!value.is_empty()).then_some(value)
-}
-
-/// Serve the cell the workload generates for `operation`. The receipt is
-/// witnessed before the scripted latency, so a worker waiting for a running
-/// root sees the request while it is in flight. A plan's retryable first
-/// attempt answers 429, and the provider client's retry gets the cell.
-async fn load_completion(
-    state: &AppState,
-    load: &LoadContext,
-    operation: LoadOperation,
-    request: &Value,
-    request_id: &str,
-) -> Result<axum::response::Response, (StatusCode, String)> {
-    let internal = |error: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}"));
-    let (key, workload) = match &operation {
-        LoadOperation::Turn { key, workload } | LoadOperation::Queued { key, workload } => {
-            (key.clone(), workload)
-        }
-        LoadOperation::CronSetup { run, workload } => (format!("{run}/cron"), workload),
-    };
-    load.require_workload(workload).map_err(internal)?;
-    let attempt = 1 + sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM witness_provider_receipts WHERE workflow_id = $1",
-    )
-    .bind(&key)
-    .fetch_one(&state.witness)
-    .await
-    .map_err(|error| internal(error.into()))?;
-    let attempt = u32::try_from(attempt).map_err(|error| internal(error.into()))?;
-    let (scenario, response, latency_ms) = match &operation {
-        LoadOperation::Turn { key, .. } => {
-            let (id, _) = lash_perf::workload::OperationId::parse(key).map_err(internal)?;
-            let generator = load.generator(&id.run).map_err(internal)?;
-            let plan = generator.plan(id.actor, id.ordinal).map_err(internal)?;
-            let response = generator
-                .provider_response(&plan, attempt)
-                .map_err(internal)?;
-            ("load_turn", response, plan.provider_latency_ms)
-        }
-        LoadOperation::Queued { key, .. } => {
-            let (id, _) = lash_perf::workload::OperationId::parse(key).map_err(internal)?;
-            let generator = load.generator(&id.run).map_err(internal)?;
-            let plan = generator.plan(id.actor, id.ordinal).map_err(internal)?;
-            let queued = plan
-                .queued_inputs
-                .iter()
-                .find(|queued| &queued.idempotency_key == key)
-                .ok_or_else(|| {
-                    internal(anyhow::anyhow!("`{key}` is not a planned queued input"))
-                })?;
-            let response = generator.queued_response(&plan, queued).map_err(internal)?;
-            ("load_queued", response, plan.provider_latency_ms)
-        }
-        LoadOperation::CronSetup { run, .. } => {
-            let generator = load.generator(run).map_err(internal)?;
-            let response = generator.cron_setup_response().map_err(internal)?;
-            ("load_cron_setup", response, 0)
-        }
-    };
-    let model = request
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    if response.retryable {
-        let body = json!({
-            "error": {
-                "message": "synthetic retryable first attempt",
-                "type": "rate_limit_exceeded",
-                "code": "rate_limit_exceeded"
-            }
-        });
-        witness::record_provider_receipt(
-            &state.witness,
-            request_id,
-            "load_retryable",
-            &key,
-            model,
-            request,
-            &body,
-        )
-        .await
-        .map_err(internal)?;
-        return Ok((
-            StatusCode::TOO_MANY_REQUESTS,
-            [("retry-after", "0")],
-            Json(body),
-        )
-            .into_response());
-    }
-    let completion = json!({
-        "id": request_id,
-        "object": "chat.completion",
-        "created": 0,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "finish_reason": "stop",
-            "message": { "role": "assistant", "content": response.text }
-        }],
-        "usage": {
-            "prompt_tokens": 17,
-            "completion_tokens": 31,
-            "total_tokens": 48
-        }
-    });
-    witness::record_provider_receipt(
-        &state.witness,
-        request_id,
-        scenario,
-        &key,
-        model,
-        request,
-        &completion,
-    )
-    .await
-    .map_err(internal)?;
-    tokio::time::sleep(std::time::Duration::from_millis(u64::from(latency_ms))).await;
-    Ok(Json(completion).into_response())
-}
+#[path = "mock_provider/load.rs"]
+mod load;
+#[cfg(test)]
+use load::{LoadOperation, load_operations_text};
 
 async fn responses(State(state): State<AppState>, Json(request): Json<Value>) -> Json<Value> {
     let n = state.calls.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1028,10 +877,10 @@ finish({{
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_latest_load_marker_names_the_operation_and_its_workload() {
+    fn every_load_marker_names_its_operation_and_workload() {
         let turn = "Run the synthetic load turn. load_turn=smoke-1/0/3 load_workload=abc\n{\"payload\":\"oak\"}";
         assert_eq!(
-            load_operation(turn),
+            load_operations_text(turn).last().cloned(),
             Some(LoadOperation::Turn {
                 key: "smoke-1/0/3".into(),
                 workload: "abc".into()
@@ -1040,27 +889,37 @@ mod tests {
         let merged = format!(
             "{turn}\nRun the synthetic queued input. load_queued=smoke-1/0/3/queued/0 load_workload=abc"
         );
+        assert_eq!(load_operations_text(&merged).len(), 2);
         assert_eq!(
-            load_operation(&merged),
+            load_operations_text(&merged).last().cloned(),
             Some(LoadOperation::Queued {
                 key: "smoke-1/0/3/queued/0".into(),
                 workload: "abc".into()
             })
         );
         assert_eq!(
-            load_operation(
+            load_operations_text(
                 "Register the synthetic cron schedules. load_cron_setup=smoke-1 load_workload=abc"
-            ),
+            )
+            .last()
+            .cloned(),
             Some(LoadOperation::CronSetup {
                 run: "smoke-1".into(),
                 workload: "abc".into()
             })
         );
         assert_eq!(
-            load_operation("load_turn=smoke-1/0/3 without a workload"),
+            load_operations_text("load_turn=smoke-1/0/3 without a workload")
+                .last()
+                .cloned(),
             None
         );
-        assert_eq!(load_operation("workflow_id=e2e kitchen_sink=true"), None);
+        assert_eq!(
+            load_operations_text("workflow_id=e2e kitchen_sink=true")
+                .last()
+                .cloned(),
+            None
+        );
     }
 
     use super::*;

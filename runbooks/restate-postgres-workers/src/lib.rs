@@ -575,6 +575,8 @@ impl PluginFactory for E2ePluginFactory {
             )
             .expect("valid e2e button trigger source");
         load::register_cron_trigger_source(&mut resources);
+        load::behavior::register_source(&mut resources)
+            .expect("valid load external trigger source");
         vec![
             PluginExtensionContribution::new(
                 LASHLANG_SURFACE_EXTENSION_ID,
@@ -628,6 +630,9 @@ impl SessionPlugin for E2eSessionPlugin {
             button_pressed_payload_schema(),
         ))?;
         reg.triggers().declare(load::cron_trigger_event())?;
+        if self.load.is_some() {
+            load::behavior::register(reg)?;
+        }
         reg.tools()
             .provider(e2e_tool_provider(
                 self.pool.clone(),

@@ -12,7 +12,9 @@ TERMINAL = {'answered', 'failed', 'cancelled', 'completed'}
 WITNESS_CLASSES = ('turns', 'cells', 'provider-retries', 'tools', 'child-processes', 'host-processes',
                    'host-signals', 'host-cancels', 'queued-inputs', 'queued-cancels', 'turn-cancels',
                    'deletes', 'attachment-puts', 'attachment-reads', 'shared-attachments', 'peer-reads',
-                   'cron-setup', 'cron-ticks', 'cron-closed-after-delete')
+                   'cron-setup', 'cron-ticks', 'cron-closed-after-delete',
+                   'provider-streams', 'history-prefill', 'admin-compaction', 'context-pressure',
+                   'auxiliary-requests', 'external-occurrences', 'trigger-edits', 'promotion-reads')
 FAULT_CLASSES = ('fault-campaign', 'worker-kill', 'restate-restart', 'rolling-deploy')
 OUTCOMES = TERMINAL | {'parked', 'stalled', 'unrecognized', 'timeout', 'client_error'}
 LEDGERS = {'witness_load_events', 'witness_provider_receipts', 'witness_effect_attempts',

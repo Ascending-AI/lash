@@ -85,7 +85,7 @@ impl Delivery {
 
 /// What one HTTP exchange with the ingress answered.
 enum Exchange {
-    Answer(LoadResponse),
+    Answer(Box<LoadResponse>),
     /// The workflow ended with a failure the ingress reports again on attach.
     Failed(String),
     /// The workflow already runs under this key: attach to it.
@@ -186,7 +186,7 @@ impl Driver {
         }
         if status.is_success() {
             return match serde_json::from_slice::<LoadResponse>(&body) {
-                Ok(response) => Exchange::Answer(response),
+                Ok(response) => Exchange::Answer(Box::new(response)),
                 Err(error) => Exchange::Failed(format!("undecodable answer ({error}): {}", text())),
             };
         }
@@ -212,7 +212,7 @@ impl Driver {
             delivery.attempts += 1;
             delivery.reattached |= attach;
             let retry = match self.exchange(request, attach, &mut delivery).await {
-                Exchange::Answer(response) => return (Ok(response), delivery),
+                Exchange::Answer(response) => return (Ok(*response), delivery),
                 Exchange::Failed(error) => return (Err(error), delivery),
                 Exchange::Accepted => {
                     attach = true;
@@ -241,6 +241,7 @@ impl Driver {
 
     fn subject(&self, request: &LoadRequest) -> Result<String> {
         Ok(match request {
+            LoadRequest::Behaviors { run, .. } => format!("{run}/behaviors"),
             LoadRequest::Turn { actor, ordinal, .. } => self
                 .load
                 .generator(&self.run)?
@@ -319,6 +320,7 @@ impl Driver {
             | LoadRequest::CronSetup { session_id, .. }
             | LoadRequest::DeleteSession { session_id, .. } => session_id.clone(),
             LoadRequest::CronTick { run, .. } => cron_session_id(run),
+            LoadRequest::Behaviors { run, .. } => format!("load-{run}-behaviors"),
         };
         lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
             "schema_version": 1, "record": "operation", "run": self.run,
@@ -366,7 +368,18 @@ impl Driver {
         )
         .await?;
         match answer {
-            Ok(response) => Ok(Some(response)),
+            Ok(response) => {
+                if let LoadResponse::Turn(report) = &response {
+                    println!(
+                        "load turn operation={} status={:?} credits_input={} root={}",
+                        report.operation,
+                        report.outcome.status,
+                        report.outcome.credits_input(&report.operation),
+                        report.outcome.root.as_deref().unwrap_or("none")
+                    );
+                }
+                Ok(Some(response))
+            }
             Err(error) => {
                 eprintln!("load operation {subject} failed: {error}");
                 Ok(None)
@@ -811,6 +824,16 @@ async fn main() -> Result<()> {
         driver.campaign.is_some()
     );
 
+    driver
+        .submit(
+            LoadRequest::Behaviors {
+                workload_sha256: driver.load.sha256().to_owned(),
+                run: run.clone(),
+            },
+            0,
+            false,
+        )
+        .await?;
     let cron_session = cron_session_id(&run);
     driver
         .submit(
@@ -867,7 +890,18 @@ async fn main() -> Result<()> {
     // final census after that work settles, bounded to keep this a short smoke.
     let drain_deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let sample = driver.collector.sample().await?;
+        let sample = match driver.collector.sample().await {
+            Ok(sample) => sample,
+            Err(error) => {
+                // Retain the gap and the independent witness. Measurement
+                // reconciliation rejects sample_error records.
+                lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+                    "schema_version": 1, "record": "sample_error", "run": run,
+                    "monotonic_ns": driver.elapsed_ns(), "error": format!("{error:#}"),
+                }))?;
+                break;
+            }
+        };
         let owned: std::collections::BTreeSet<_> = sample["journals"]
             .as_array()
             .context("sample has no journals")?
@@ -910,6 +944,12 @@ async fn main() -> Result<()> {
         "provider_retryable_failures": snapshot.receipts.iter().filter(|(_, scenario)| scenario == "load_retryable").count(),
         "effect_commits": snapshot.commits.len(),
     }))?;
+    for line in
+        lash_restate_postgres_workers_e2e::load::red_side::checks(&driver.load, &run, &snapshot)?
+    {
+        println!("{line}");
+    }
+
     println!("load witness summary {}", serde_json::to_string(&verdict)?);
     // The controller copies this file while the container is still alive.
     // Kubernetes only exposes the current rotated log, so stdout cannot be

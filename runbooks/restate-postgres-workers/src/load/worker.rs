@@ -173,6 +173,19 @@ impl E2eLoadWorkflow for LoadWorker {
     ) -> HandlerResult<Json<LoadResponse>> {
         let _running = self.active.enter(request.workflow_key());
         let response = match request {
+            LoadRequest::Behaviors {
+                workload_sha256,
+                run,
+            } => {
+                self.load
+                    .require_workload(&workload_sha256)
+                    .map_err(terminal_chain)?;
+                let controller =
+                    RestateRuntimeEffectController::new(ctx, self.restate_authority_id.clone());
+                LoadResponse::Behaviors(Box::new(
+                    Box::pin(self.behaviors(&controller, &run)).await?,
+                ))
+            }
             LoadRequest::Turn {
                 workload_sha256,
                 run,
@@ -767,3 +780,5 @@ mod cleanup_tests {
         Ok(())
     }
 }
+#[path = "behaviors.rs"]
+mod behaviors;

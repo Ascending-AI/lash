@@ -83,6 +83,72 @@ impl Generator<'_> {
         })
     }
 
+    /// One cell executes every input admitted by a root. Each plan has its
+    /// own lexical scope, and only the combined cell finishes the root.
+    pub fn admitted_response(&self, keys: &[String], attempt: u32) -> Result<ProviderResponse> {
+        ensure!(!keys.is_empty(), "no admitted inputs");
+        if let [key] = keys {
+            let (id, suffix) = super::OperationId::parse(key)?;
+            ensure!(id.run == self.run(), "input belongs to another run");
+            let plan = self.plan(id.actor, id.ordinal)?;
+            return if suffix.is_empty() {
+                self.provider_response(&plan, attempt)
+            } else {
+                let input = plan
+                    .queued_inputs
+                    .iter()
+                    .find(|input| &input.idempotency_key == key)
+                    .ok_or_else(|| anyhow::anyhow!("unplanned queued input {key}"))?;
+                self.queued_response(&plan, input)
+            };
+        }
+        let mut source = String::new();
+        let mut retryable = false;
+        let mut latency = 0;
+        let mut chunks = 1;
+        for key in keys {
+            let (id, suffix) = super::OperationId::parse(key)?;
+            ensure!(id.run == self.run(), "input belongs to another run");
+            let plan = self.plan(id.actor, id.ordinal)?;
+            latency = latency.max(plan.provider_latency_ms);
+            if plan.provider_streamed {
+                chunks = chunks.max(plan.provider_chunks);
+            }
+            if suffix.is_empty() {
+                let cell = cell_source(&plan, self.tool_word(id.actor, id.ordinal))?;
+                let body = cell
+                    .strip_suffix("finish({synthetic:true,operation:op});")
+                    .ok_or_else(|| anyhow::anyhow!("turn cell has no terminal"))?;
+                source.push_str(&format!(
+                    "{{
+{body}
+}}
+"
+                ));
+                retryable |= plan.retryable_first_attempt && attempt == 1;
+            } else {
+                ensure!(
+                    plan.queued_inputs.iter().any(|q| &q.idempotency_key == key),
+                    "unplanned queued input {key}"
+                );
+            }
+        }
+        let operation = keys.last().ok_or_else(|| anyhow::anyhow!("no inputs"))?;
+        source.push_str(&format!(
+            "finish({{synthetic:true,operation:{},operations:{}}});",
+            serde_json::to_string(operation)?,
+            serde_json::to_string(keys)?
+        ));
+        let text = format!("<typescript>\n{source}\n</typescript>");
+        Ok(ProviderResponse {
+            operation_id: operation.clone(),
+            retryable,
+            chunks: stream_chunks(&text, latency, chunks)?,
+            text,
+            cell_source: Some(source),
+        })
+    }
+
     /// A queued input's own turn: a cell that finishes with the input's key,
     /// so the terminal proves which input the turn answered.
     pub fn queued_response(
@@ -216,22 +282,24 @@ fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
         ));
     }
     if !plan.tool_batches.is_empty() {
-        // Each call is [padding, result_bytes, callback_ms]; its key is
+        // Each call is [whole_words, result_bytes, callback_ms, tail_bytes]; its key is
         // `op/tool/batch/index`, the plan's idempotency key.
         let mut batches = Vec::new();
         for calls in &plan.tool_batches {
             let mut batch = Vec::new();
             for call in calls {
+                let padding = super::payload::tool_argument_padding(call)?;
                 batch.push([
-                    super::payload::tool_argument_padding(call)? as u64,
+                    (padding / word.len()) as u64,
                     u64::from(call.result_bytes),
                     u64::from(call.callback_ms),
+                    (padding % word.len()) as u64,
                 ]);
             }
             batches.push(batch);
         }
         code.push_str(&format!(
-            "const w={};\nconst arg=(k,c)=>({{record:{{kind:\"synthetic\",key:k,result_bytes:c[1],callback_ms:c[2]}},payload:w.repeat(c[0]).slice(0,c[0])}});\nconst batches={};\n",
+            "const w={};\nconst arg=(k,c)=>({{record:{{kind:\"synthetic\",key:k,result_bytes:c[1],callback_ms:c[2]}},payload:w.repeat(c[0])+w.slice(0,c[3])}});\nconst batches={};\n",
             serde_json::to_string(word)?,
             serde_json::to_string(&batches)?
         ));

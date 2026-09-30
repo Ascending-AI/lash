@@ -102,3 +102,11 @@ retries with the existing TypeScript frontend. These are input-generation
 checks. `runbooks/restate-postgres-workers/src/load` executes them through
 lash's public API with independent witness evidence (FIG-4168); the
 measurement lane owns clocks, counters and proof of model-code pool execution.
+
+The FIG-4241 smoke prefill uses two turns. The live driver adds a bounded
+operation workflow for administrative and pressure compaction, an auxiliary
+request, external occurrences, trigger edits and promotion discovery.
+`admitted_response` combines the plans of every input admitted by a root into
+one cell, with one finish value listing all input keys. Each turn's tool,
+attachment and child-process plan still executes when it is batched with a
+queued input. The provider implements the generated chunk deadlines with SSE.

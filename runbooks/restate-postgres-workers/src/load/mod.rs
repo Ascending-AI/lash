@@ -15,9 +15,12 @@
 //! read endpoint witness the exact blob bytes they put and read. [`verify`]
 //! reconciles all of it against the plan the workload regenerates.
 
+pub mod behavior;
+mod behavior_verify;
 pub mod control;
 mod fault_verify;
 pub mod measurements;
+pub mod red_side;
 pub mod tools;
 pub mod verify;
 pub mod worker;
@@ -151,6 +154,10 @@ impl Drop for ActiveOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum LoadRequest {
+    Behaviors {
+        workload_sha256: String,
+        run: String,
+    },
     /// Primary turn `ordinal` of `actor`, with its queued inputs, cancels and
     /// host process starts, in session `session_id`.
     Turn {
@@ -182,6 +189,7 @@ impl LoadRequest {
     /// submission attaches to the same invocation.
     pub fn workflow_key(&self) -> String {
         match self {
+            Self::Behaviors { run, .. } => format!("load-{run}-behaviors"),
             Self::Turn {
                 run,
                 actor,
@@ -201,7 +209,8 @@ impl LoadRequest {
 
     pub fn run(&self) -> &str {
         match self {
-            Self::Turn { run, .. }
+            Self::Behaviors { run, .. }
+            | Self::Turn { run, .. }
             | Self::CronSetup { run, .. }
             | Self::CronTick { run, .. }
             | Self::DeleteSession { run, .. } => run,
@@ -264,6 +273,15 @@ pub struct InputOutcome {
 
 impl InputOutcome {
     /// The operation key the answering cell finished with.
+    pub fn credits_input(&self, key: &str) -> bool {
+        self.finished_operation() == Some(key)
+            || self
+                .final_value
+                .get("operations")
+                .and_then(Value::as_array)
+                .is_some_and(|keys| keys.iter().any(|input| input.as_str() == Some(key)))
+    }
+
     pub fn finished_operation(&self) -> Option<&str> {
         self.final_value.get("operation").and_then(Value::as_str)
     }
@@ -353,6 +371,7 @@ pub struct DeleteReport {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum LoadResponse {
+    Behaviors(Box<behavior::BehaviorReport>),
     Turn(TurnReport),
     CronSetup(CronSetupReport),
     CronTick(CronTickReport),
@@ -362,6 +381,7 @@ pub enum LoadResponse {
 /// The operation a witness row describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WitnessedOperation {
+    Behaviors,
     Turn,
     DeleteSession,
     CronSetup,
@@ -372,6 +392,7 @@ pub enum WitnessedOperation {
 impl WitnessedOperation {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Behaviors => "behaviors",
             Self::Turn => "turn",
             Self::DeleteSession => "delete-session",
             Self::CronSetup => "cron-setup",
@@ -382,6 +403,7 @@ impl WitnessedOperation {
 
     pub fn of(request: &LoadRequest) -> Self {
         match request {
+            LoadRequest::Behaviors { .. } => Self::Behaviors,
             LoadRequest::Turn { .. } => Self::Turn,
             LoadRequest::CronSetup { .. } => Self::CronSetup,
             LoadRequest::CronTick { .. } => Self::CronTick,

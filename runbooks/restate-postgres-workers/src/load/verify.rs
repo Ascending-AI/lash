@@ -19,7 +19,7 @@ use sqlx::PgPool;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Every evidence class a load run must witness at least once.
-pub const CLASSES: [&str; 19] = [
+pub const CLASSES: [&str; 27] = [
     "turns",
     "cells",
     "provider-retries",
@@ -39,6 +39,14 @@ pub const CLASSES: [&str; 19] = [
     "cron-setup",
     "cron-ticks",
     "cron-closed-after-delete",
+    "provider-streams",
+    "history-prefill",
+    "admin-compaction",
+    "context-pressure",
+    "auxiliary-requests",
+    "external-occurrences",
+    "trigger-edits",
+    "promotion-reads",
 ];
 
 /// The classes a run under a fault campaign must also witness: the campaign
@@ -400,12 +408,28 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
         if status == ReportedStatus::Answered {
             note(
                 "cells",
-                if report.outcome.finished_operation() == Some(subject) {
+                if report.outcome.credits_input(subject) {
                     Ok(())
                 } else {
                     Err(format!(
                         "turn `{subject}` finished with {} instead of its own cell",
                         report.outcome.final_value
+                    ))
+                },
+            );
+        }
+        if plan.provider_streamed && status == ReportedStatus::Answered {
+            note(
+                "provider-streams",
+                if evidence.receipted(
+                    subject,
+                    &format!("load_stream_chunks_{}", plan.provider_chunks),
+                ) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "streamed turn `{subject}` has no receipt for all {} chunks",
+                        plan.provider_chunks
                     ))
                 },
             );
@@ -523,6 +547,7 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
         super::fault_verify::verify_faults(snapshot, &mut note);
     }
 
+    super::behavior_verify::verify(load, run, snapshot, &mut classes)?;
     let committed = snapshot.commits.len() as u64;
     Ok(Verdict {
         run: run.to_owned(),
@@ -640,11 +665,10 @@ fn answered_inputs(evidence: &Evidence<'_>) -> BTreeMap<String, AnsweredInput> {
 /// admits the open prefix of accepted inputs, up to the turn-input admission
 /// bound, and a running root admits inputs at its checkpoints. The driver's
 /// sessions are open-loop, so a later turn's input can wait beside an earlier
-/// turn's queued input and share its root. The provider serves that root's
-/// call for the latest load marker its request carries, and the served cell
-/// finishes with that input's key, so only that input is receipted. `key` is
-/// then witnessed by the input its root's cell finished with: answered under
-/// the same root, with the provider receipt of its own model call.
+/// turn's queued input and share its root. Every input in a model request
+/// receives its own receipt and tool plan. An input admitted afterward at a
+/// checkpoint may share the completed cell without appearing in that request;
+/// it is witnessed by the receipted input answered under the same root.
 fn answered_by_a_receipted_input(
     evidence: &Evidence<'_>,
     answered_inputs: &BTreeMap<String, AnsweredInput>,
@@ -922,7 +946,7 @@ pub(super) mod tests {
     };
     use serde_json::json;
 
-    const RUN: &str = "verify";
+    pub(crate) const RUN: &str = "verify";
 
     fn event(
         operation: &str,
@@ -1179,6 +1203,7 @@ pub(super) mod tests {
                 );
             }
         }
+        super::behavior_tests::add(&mut snapshot);
         snapshot
     }
 
@@ -1336,7 +1361,7 @@ pub(super) mod tests {
 
     /// Point the reported outcome of input `key` (a turn's own input or one
     /// of its queued inputs) at `root`, answered by the cell of `operation`.
-    fn answer(snapshot: &mut WitnessSnapshot, key: &str, root: &str, operation: &str) {
+    pub(crate) fn answer(snapshot: &mut WitnessSnapshot, key: &str, root: &str, operation: &str) {
         let answered = json!({ "operation": operation, "synthetic": true });
         for event in &mut snapshot.events {
             if event.operation != "turn" || event.phase != "terminal" {
@@ -1445,3 +1470,7 @@ pub(super) mod tests {
         assert!(violated(&verdict(&unanswered), "queued-inputs"));
     }
 }
+
+#[cfg(test)]
+#[path = "behavior_tests.rs"]
+mod behavior_tests;

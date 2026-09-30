@@ -136,7 +136,7 @@ CREATE TABLE witness_load_events (
     run_id TEXT NOT NULL,
     subject TEXT NOT NULL,
     operation TEXT NOT NULL CHECK (
-        operation IN ('turn', 'delete-session', 'cron-setup', 'cron-tick', 'attachment')
+        operation IN ('turn', 'delete-session', 'cron-setup', 'cron-tick', 'attachment', 'behaviors')
     ),
     phase TEXT NOT NULL CHECK (phase IN ('sent', 'terminal', 'put', 'read')),
     observer TEXT NOT NULL,
