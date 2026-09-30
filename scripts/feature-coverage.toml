@@ -440,6 +440,7 @@ features = [
 commands = [
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-remote-protocol", "--test", "decode_limits", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],

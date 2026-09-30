@@ -77,11 +77,31 @@ impl RemoteTurnInput {
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let envelope = crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?;
+        Self::decode_json_with_limits(bytes, crate::JsonDecodeLimits::default())
+    }
+
+    pub fn decode_json_with_limits(
+        bytes: &[u8],
+        limits: crate::JsonDecodeLimits,
+    ) -> Result<Self, RemoteProtocolError> {
+        let envelope = crate::Envelope::<Self>::decode_json_with_limits(
+            bytes,
+            crate::REMOTE_PROTOCOL,
+            limits,
+        )?;
         let version = envelope.protocol_version();
-        let input = envelope.into_body().at_version(version).into_owned();
+        let mut input = envelope.into_body();
+        input.retain_version(version);
         input.validate()?;
         Ok(input)
+    }
+
+    fn retain_version(&mut self, version: u32) {
+        #[cfg(feature = "synthetic-next")]
+        if version <= crate::REMOTE_PROTOCOL_VERSION {
+            self.synthetic_next_note = None;
+        }
+        let _ = version;
     }
 
     /// This input as `version` carries it: the synthetic N+1's added field
@@ -155,9 +175,21 @@ impl RemoteTurnRequest {
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let envelope = crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?;
+        Self::decode_json_with_limits(bytes, crate::JsonDecodeLimits::default())
+    }
+
+    pub fn decode_json_with_limits(
+        bytes: &[u8],
+        limits: crate::JsonDecodeLimits,
+    ) -> Result<Self, RemoteProtocolError> {
+        let envelope = crate::Envelope::<Self>::decode_json_with_limits(
+            bytes,
+            crate::REMOTE_PROTOCOL,
+            limits,
+        )?;
         let version = envelope.protocol_version();
-        let request = envelope.into_body().at_version(version).into_owned();
+        let mut request = envelope.into_body();
+        request.input.retain_version(version);
         request.validate()?;
         Ok(request)
     }
@@ -179,5 +211,32 @@ impl RemoteTurnRequest {
         self.input.validate()?;
         RemoteToolGrant::validate_all(&self.tool_grants)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[test]
+    fn version_retention_preserves_owned_items() {
+        let mut input = RemoteTurnInput::text("owned text");
+        #[cfg(feature = "synthetic-next")]
+        {
+            input.synthetic_next_note = Some("drop at N".into());
+        }
+        let items = input.items.as_ptr();
+        let RemoteInputItem::Text { text } = &input.items[0] else {
+            panic!("text")
+        };
+        let text_ptr = text.as_ptr();
+        input.retain_version(crate::REMOTE_PROTOCOL_VERSION);
+        assert_eq!(items, input.items.as_ptr());
+        let RemoteInputItem::Text { text } = &input.items[0] else {
+            panic!("text")
+        };
+        assert_eq!(text_ptr, text.as_ptr());
+        #[cfg(feature = "synthetic-next")]
+        assert!(input.synthetic_next_note.is_none());
     }
 }

@@ -10,6 +10,7 @@ mod frame_key;
 pub mod future;
 pub mod handle;
 pub mod identity;
+pub mod json_decode;
 pub mod llm;
 pub mod plugin;
 pub mod process_cursor;

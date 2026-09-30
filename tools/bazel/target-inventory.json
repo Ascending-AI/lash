@@ -1,7 +1,7 @@
 {
-  "cargo_only_target_count": 1,
+  "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 212,
+  "cargo_target_count": 213,
   "feature_lane_units": [
     {
       "features": [],
@@ -436,6 +436,15 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-effect:lash-core-effect__fv_8849d4b8",
+      "package": "lash-internal-core-effect"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-effect:lash-core-effect__fv_955befbe",
       "package": "lash-internal-core-effect"
     },
     {
@@ -2058,6 +2067,15 @@
     {
       "features": [
         "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-execution:lash-core-execution__fv_8d1fb13a",
+      "package": "lash-internal-core-execution"
+    },
+    {
+      "features": [
+        "default",
         "synthetic-next"
       ],
       "kind": "lib",
@@ -2702,6 +2720,15 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-ids:lash-core-ids__fv_76ece385",
+      "package": "lash-internal-core-ids"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150",
       "package": "lash-internal-core-ids"
     },
     {
@@ -4949,6 +4976,15 @@
         "testing"
       ],
       "kind": "lib",
+      "label": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e",
+      "package": "lash-internal-core-llm"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
       "label": "//crates/lash-core-llm:lash-core-llm__fv_ab87ac69",
       "package": "lash-internal-core-llm"
     },
@@ -5469,6 +5505,15 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-store:lash-core-store__fv_7ca43454",
+      "package": "lash-internal-core-store"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-store:lash-core-store__fv_9128f003",
       "package": "lash-internal-core-store"
     },
     {
@@ -7618,6 +7663,15 @@
     },
     {
       "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core:lash-core__fv_103e7fe9",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
         "perf-witness"
       ],
       "kind": "lib",
@@ -8216,6 +8270,12 @@
       "kind": "test",
       "label": "//crates/lash-core:turn_event_schema__test__fv_f0c7f578",
       "package": "lash-internal-core"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-http-transport:lash-http-transport",
+      "package": "lash-internal-http-transport"
     },
     {
       "features": [],
@@ -13481,6 +13541,14 @@
     },
     {
       "features": [
+        "synthetic-next"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-remote-protocol:decode_limits__test__fv_c9b16867",
+      "package": "lash-internal-remote-protocol"
+    },
+    {
+      "features": [
         "core-conversions",
         "default"
       ],
@@ -14056,6 +14124,14 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_9f56102e",
+      "package": "lash-internal-remote-protocol"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_c9b16867",
       "package": "lash-internal-remote-protocol"
     },
     {
@@ -15465,6 +15541,15 @@
       "kind": "lib",
       "label": "//crates/lash-s3-store:lash-s3-store__fv_e716bd65",
       "package": "lash-internal-s3-store"
+    },
+    {
+      "features": [
+        "default",
+        "schema-validation"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sansio:lash-sansio",
+      "package": "lash-internal-sansio"
     },
     {
       "features": [
@@ -18706,6 +18791,14 @@
       "kind": "lib",
       "label": "//crates/lash-tool-support:lash-tool-support__fv_f20b59c2",
       "package": "lash-internal-tool-support"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-trace:lash-trace",
+      "package": "lash-internal-trace"
     },
     {
       "features": [
@@ -26397,6 +26490,19 @@
           "kind": "bin-unit-test",
           "label": "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "decode_limits",
+          "cargo_only": "required features are outside the resolved default workspace graph",
+          "kind": "test",
+          "label": null,
+          "required_features": [
+            "synthetic-next"
+          ],
+          "tags": [
+            "cargo-feature-gate",
+            "manual"
+          ]
         }
       ],
       "test_batch": {

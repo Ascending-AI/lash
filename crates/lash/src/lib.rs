@@ -753,8 +753,8 @@ pub mod secrets {
 /// home in a domain sub-namespace.
 pub mod remote {
     pub use lash_remote_protocol::{
-        Envelope, Negotiated, Negotiation, REMOTE_PROTOCOL, REMOTE_PROTOCOL_VERSION,
-        RemoteProtocolError, answer,
+        Envelope, JsonDecodeError, JsonDecodeLimits, JsonDecodeUsage, Negotiated, Negotiation,
+        REMOTE_PROTOCOL, REMOTE_PROTOCOL_VERSION, RemoteProtocolError, answer,
     };
 
     /// LLM request/response envelopes: messages, attachments, tool specs,

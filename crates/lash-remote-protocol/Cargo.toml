@@ -46,3 +46,8 @@ required-features = ["core-conversions"]
 jsonschema = { workspace = true, default-features = false }
 lash-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["rt"] }
+
+[[test]]
+name = "decode_limits"
+path = "tests/decode_limits.rs"
+required-features = ["synthetic-next"]

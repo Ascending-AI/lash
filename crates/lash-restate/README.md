@@ -193,3 +193,15 @@ Process rows carry the process input plus `ProcessProvenance`: originator
 and optional causal parent. Tool and Lashlang rows also carry a
 captured execution-environment reference, so workers do not parse grant keys or
 rebuild origin sessions to recover execution context.
+
+`Call<T>` also checks JSON structure before the SDK constructs `T`. Its default
+allowances are 32 MiB of encoded bytes, 1,000,000 nodes, depth 64, and 128 MiB of
+estimated allocation bytes. Object keys and values each count as nodes; the
+root has depth one. The estimate charges 64 bytes per node plus each string's
+encoded content length. It estimates JSON storage, not arbitrary allocations a
+custom deserializer may perform. The iterative preflight holds only counters,
+then checks syntax without constructing a value tree. The wire probe skips the
+body, so an unsupported range never materializes it. Direct callers can choose
+all four allowances with `Call::decode_json_with_limits`; SDK ingress uses the
+default allowances. Remote envelopes and turn inputs use the same preflight
+through their `decode_json_with_limits` methods.

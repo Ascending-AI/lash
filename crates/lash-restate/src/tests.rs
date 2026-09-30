@@ -1774,3 +1774,5 @@ pub(crate) async fn created_session(
 
 mod admin_namespace_filters;
 mod lost_run_recovery;
+
+mod json_decode_ingress;

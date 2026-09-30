@@ -329,6 +329,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-regress:unicodesets__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-regress:unicodesets__test__fv_419bd085": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-regress:unicodesets__test__fv_7f10c809": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-remote-protocol:decode_limits__test__fv_c9b16867": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-remote-protocol:lash-remote-protocol__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-remote-protocol:lash-remote-protocol__unit_test__fv_34a13f38": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-remote-protocol:remote_schema_generator__bin__unit_test": {"cpu_count": 1, "memory_kb": 1048576},

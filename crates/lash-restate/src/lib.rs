@@ -104,6 +104,7 @@ mod session_reconcile;
 mod turn;
 mod turn_handler;
 mod wire;
+pub use wire::{CallDecodeError, JsonDecodeError, JsonDecodeLimits};
 
 pub use restate_sdk;
 

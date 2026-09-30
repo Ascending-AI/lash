@@ -178,3 +178,11 @@ filters = ["live_replay_bounds::eviction_recovers_the_facade_on_native_restate_"
 endpoints = ["REPLAY_BOUNDS"]
 shards = 1
 timeout_seconds = 120
+
+[suites.json-decode]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::json_decode_ingress::live_call_decode_refuses_before_writes_on_sqlite_and_postgres"]
+endpoints = ["JSON_MEM", "JSON_FILE", "JSON_PG"]
+shards = 1
+timeout_seconds = 120
