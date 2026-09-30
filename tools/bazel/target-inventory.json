@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 50,
-  "cargo_target_count": 194,
+  "cargo_package_count": 52,
+  "cargo_target_count": 196,
   "feature_lane_units": [
     {
       "features": [],
@@ -19795,7 +19795,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 256,
+  "generated_label_count": 260,
   "packages": [
     {
       "declared_features": [
@@ -22960,6 +22960,33 @@
       }
     },
     {
+      "declared_features": [],
+      "dependencies": [
+        "lash-runtime"
+      ],
+      "doc": "//examples/integrator-contract:integrator-contract__doc",
+      "manifest": "examples/integrator-contract/Cargo.toml",
+      "package": "integrator-contract",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "integrator_contract",
+          "kind": "lib",
+          "label": "//examples/integrator-contract:integrator-contract"
+        },
+        {
+          "cargo": "integrator_contract",
+          "kind": "unit-test",
+          "label": "//examples/integrator-contract:integrator-contract__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
       "declared_features": [
         "e2e",
         "live-e2e"
@@ -23090,6 +23117,34 @@
           "cargo": "toolbench",
           "kind": "bin-unit-test",
           "label": "//examples/toolbench:toolbench__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "insta",
+        "serde_json"
+      ],
+      "doc": "//examples/transcript-contract:transcript-contract__doc",
+      "manifest": "examples/transcript-contract/Cargo.toml",
+      "package": "transcript-contract",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "transcript_contract",
+          "kind": "lib",
+          "label": "//examples/transcript-contract:transcript-contract"
+        },
+        {
+          "cargo": "transcript_contract",
+          "kind": "unit-test",
+          "label": "//examples/transcript-contract:transcript-contract__unit_test",
           "tags": []
         }
       ],

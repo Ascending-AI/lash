@@ -373,6 +373,7 @@ pub(super) fn typescript_block(source: &str) -> String {
 pub(super) async fn run_agent_turn_scenario(case: AgentScenario) -> Result<AgentScenarioRun> {
     let run = run_agent_turn_scenario_without_success_assertions(case).await?;
     assert_successful_agent_scenario(&run);
+    super::transcript::assert_typed_checkpoint_transcript(&run.checkpoint_writes);
     Ok(run)
 }
 
@@ -545,6 +546,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         case.expected_contracts
             .min_completed_child_session_exec_graphs,
     );
+    super::transcript::assert_typed_checkpoint_transcript(&run.checkpoint_writes);
     Ok(run)
 }
 
@@ -865,6 +867,7 @@ impl AgentSessionTurnProcessScenario {
         session.refresh_background_graph().await?;
         self.assert_process_output(&runtime, &process_id).await?;
         self.assert_agent_contracts(&runtime, &process_id).await?;
+        super::transcript::assert_typed_checkpoint_transcript(&runtime.checkpoint_writes.events());
         Ok(())
     }
 
@@ -1024,6 +1027,7 @@ impl AgentDurableInputSuspensionScenario {
 
         self.assert_turn_completed(&turn_output, tools.as_ref());
         self.assert_agent_contracts(&runtime).await?;
+        super::transcript::assert_typed_checkpoint_transcript(&runtime.checkpoint_writes.events());
         Ok(())
     }
 

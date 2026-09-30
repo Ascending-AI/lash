@@ -1828,6 +1828,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "integrator-contract"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-runtime",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5514,6 +5521,14 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "transcript-contract"
+version = "0.0.0-dev"
+dependencies = [
+ "insta",
+ "serde_json",
 ]
 
 [[package]]

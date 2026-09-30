@@ -380,6 +380,8 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     pub use lash_core::CheckpointKind;
+    /// Logical root references returned by a root store.
+    pub use lash_core::engine::RootRef;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
@@ -396,6 +398,12 @@ pub mod persistence {
         TurnLaneAdmissionPolicy, TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    /// The current state of an obligation a custom ledger exposes.
+    pub use lash_core::store::ObligationStanding;
+    /// A process park write accepted by a custom registry.
+    pub use lash_core::store::ProcessParkWrite;
+    /// Head and usage values returned by custom session stores.
+    pub use lash_core::store::SessionHeadRef;
     /// A build generation's drain marks and remaining work (FIG-3799): the
     /// store half a [`StoreSet`](crate::StoreSet) supplies for
     /// [`LashCore::drain_generation`](crate::LashCore::drain_generation).
@@ -411,9 +419,12 @@ pub mod persistence {
         SettleOutcome,
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
+    /// Artifact ownership supplied to protocol engines and effect controllers.
+    pub use lash_core::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };
+    pub use lash_core::{RunSpecHash, SessionUsageTotals};
     /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.
@@ -466,8 +477,8 @@ pub mod persistence {
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
         ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentSettle,
-        RootIntentRefused, RootIntentRequest, RootStore, RootTerminal, RootTerminalCause,
-        RootTerminalKind, RootTerminalWrite, RootVerb, TurnCommitId,
+        RefusedRootEnd, RootIntentRefused, RootIntentRequest, RootStore, RootTerminal,
+        RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootVerb, TurnCommitId,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
@@ -606,6 +617,8 @@ pub mod plugins {
     pub use lash_core::{
         CellFailure, CellFailureKind, ExecRequest, ExecResponse, RuntimeExecutionContext,
     };
+    /// Executable identity and terminal rendering returned by protocol integrators.
+    pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
         PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
         facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,
@@ -652,6 +665,8 @@ pub mod messages {
         Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
         facade_support::MessageSequence, session_model::message::PartAttachment,
     };
+    /// JSON value in integrator signatures, without a second direct dependency.
+    pub use serde_json::Value as JsonValue;
 }
 
 /// Attachment values: identity, media type, and the metadata that travels with
@@ -858,6 +873,8 @@ pub mod process {
         ProcessObservationHub, ProcessObservationItem, ProcessObservationProjection,
         ProcessObservationSnapshot, ProcessObservationSubscription,
     };
+    /// The origin of a lifecycle cancellation submitted to a registry.
+    pub use lash_core::CancelOrigin;
     pub use lash_core::SessionTurnOutcome;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
@@ -868,6 +885,10 @@ pub mod process {
         ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
         WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
         WakeDiscardReason,
+    };
+    /// Registry admission receipts and lifecycle write outcomes.
+    pub use lash_core::runtime::{
+        ProcessRegistrationReceipt, ProcessRegistryBinding, StoreRealization,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
@@ -939,6 +960,10 @@ pub mod process {
 
 /// Durability configuration and backend contracts.
 pub mod durability {
+    /// Child execution hosts and atomic group completion inputs.
+    pub use lash_core::facade_support::{
+        EffectGroupChildCommitOutcome, GroupChildFinalCommit, ToolChildHost,
+    };
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
@@ -946,6 +971,11 @@ pub mod durability {
         ProcessOutcomeObserver, ProcessTurnCancellation, RuntimeAwaitEventOptions,
         RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
+    };
+    /// Durable group and journal values returned by effect-host implementors.
+    pub use lash_core::runtime::{
+        GroupChildBinding, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
+        RankedGroupSettlement, RecordedJournal, RecordedKeyRange,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,

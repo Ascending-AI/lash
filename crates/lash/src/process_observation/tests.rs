@@ -969,3 +969,46 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
         Some(committed.sequence)
     );
 }
+
+#[derive(Default)]
+pub(super) struct SnapshotCapturePause {
+    pub(super) captured: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
+}
+
+#[tokio::test]
+async fn process_snapshot_capture_race_delivers_each_observation_once() {
+    for engine_owned in [false, true] {
+        let fixture = Fixture::new("initial-capture-race", engine_owned).await;
+        fixture.live(1, 0);
+        let pause = Arc::new(SnapshotCapturePause::default());
+        *fixture.hub.snapshot_capture_pause.lock_recover() = Some(Arc::clone(&pause));
+        let acquire = fixture.subscribe(None);
+        let interleave = async {
+            tokio::time::timeout(Duration::from_secs(5), pause.captured.notified())
+                .await
+                .expect("live capture completed");
+            let event = fixture.commit(true).await;
+            fixture.live(1, 1);
+            pause.release.notify_one();
+            event
+        };
+        let (mut subscription, event) = tokio::join!(acquire, interleave);
+        let ProcessObservationItem::Snapshot { cursor, snapshot } = next(&mut subscription).await
+        else {
+            panic!("initial snapshot");
+        };
+        assert_eq!(cursor.sequence(), event.sequence);
+        assert_eq!(durable_sequence(&snapshot), event.sequence);
+        let ProcessObservationItem::Event {
+            record: observed, ..
+        } = next(&mut subscription).await
+        else {
+            panic!("the buffered commit was folded, only the live record remains");
+        };
+        assert_eq!(observed.event, record(&fixture.process_id, 1, 1).event);
+        let after = fixture.commit(true).await;
+        expect_committed(&next(&mut subscription).await, after.sequence);
+        quiet(&mut subscription).await;
+    }
+}

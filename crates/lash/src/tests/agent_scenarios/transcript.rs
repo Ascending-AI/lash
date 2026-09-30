@@ -75,6 +75,50 @@ pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> S
 }
 
 #[cfg(feature = "rlm")]
+pub(super) fn assert_typed_checkpoint_transcript(writes: &[CheckpointWriteEvent]) {
+    assert!(
+        !writes.is_empty(),
+        "scenario did not observe any accepted commits"
+    );
+    let mut transcript = lash_core::testing::behavior_transcript::Transcript::new()
+        .with_review_budget(writes.len() * 20);
+    for write in writes {
+        transcript.record(commit_entry(write));
+    }
+    let rendered = transcript.render();
+    let usage = rendered
+        .lines()
+        .filter_map(|line| {
+            line.split_once("usage                 ")
+                .map(|(_, value)| value)
+        })
+        .collect::<Vec<_>>();
+    let expected = writes
+        .iter()
+        .map(|write| {
+            let u = &write.usage;
+            format!(
+                "entries={} input={} output={} cache_read={} cache_write={} reasoning={} total={}",
+                u.entries,
+                u.input_tokens,
+                u.output_tokens,
+                u.cache_read_input_tokens,
+                u.cache_write_input_tokens,
+                u.reasoning_output_tokens,
+                i128::from(u.input_tokens)
+                    + i128::from(u.output_tokens)
+                    + i128::from(u.cache_read_input_tokens)
+                    + i128::from(u.cache_write_input_tokens)
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        usage, expected,
+        "every accepted commit must emit its observed usage"
+    );
+}
+
+#[cfg(feature = "rlm")]
 fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Option<Entry> {
     let actor = || Actor::session(session_id.to_string());
     Some(match event {

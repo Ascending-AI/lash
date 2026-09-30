@@ -89,7 +89,7 @@ pub const JSON_BUDGET_CHARS: usize = 96;
 pub const DURABLE_WRITE_EVENTS: &[&str] = &[
     CHECKPOINT_COMMIT_EVENT,
     DURABLE_EFFECT_EVENT,
-    super::sansio_transcript::CHECKPOINT_REQUEST_EVENT,
+    CHECKPOINT_REQUEST_EVENT,
 ];
 
 /// Event name for a successful runtime-checkpoint commit.
@@ -97,6 +97,9 @@ pub const CHECKPOINT_COMMIT_EVENT: &str = "checkpoint.commit";
 
 /// Event name for a journaled durable effect.
 pub const DURABLE_EFFECT_EVENT: &str = "durable.effect";
+
+/// Event name for a protocol checkpoint request, before storage accepts it.
+pub const CHECKPOINT_REQUEST_EVENT: &str = "checkpoint.request";
 
 const ACTOR_WIDTH: usize = 11;
 const KIND_WIDTH: usize = 8;

@@ -322,6 +322,25 @@ impl StandardProtocolScenario {
         }
 
         self.expectations.assert(self.name, &observed, &machine);
+        let rendered = observed.transcript.render();
+        assert_eq!(
+            rendered
+                .lines()
+                .filter(|line| line.contains("checkpoint.request"))
+                .count(),
+            observed.checkpoints.len()
+        );
+        assert_eq!(
+            rendered
+                .lines()
+                .filter(|line| line.contains("  commit    "))
+                .count(),
+            rendered
+                .lines()
+                .filter(|line| line.contains("  usage                 entries="))
+                .count(),
+            "every checkpoint line carries typed usage"
+        );
         observed
     }
 }
@@ -1413,5 +1432,30 @@ fn public_effect_emission_contract_matrix() {
                 .collect::<Vec<_>>()
         };
         assert_eq!(ids(&first), ids(&replayed));
+    }
+}
+
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "isolated test processes keep inline snapshots independent"
+)]
+fn registered_scenarios_emit_typed_transcripts_with_usage() {
+    for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
+        let path = coverage.test_name.to_owned();
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([&path, "--exact", "--nocapture"])
+            .output()
+            .expect("run registered scenario");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{path}: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains("1 passed; 0 failed"),
+            "{path} did not execute: {stdout}"
+        );
     }
 }

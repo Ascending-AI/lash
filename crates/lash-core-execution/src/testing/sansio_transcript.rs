@@ -29,7 +29,7 @@ use crate::{SessionStreamEvent, TurnFinish, TurnOutcome, TurnStop};
 /// carries no revision transition. Where the protocol asks for a checkpoint is
 /// still durable semantics, so the name is listed in
 /// [`super::behavior_transcript::DURABLE_WRITE_EVENTS`].
-pub const CHECKPOINT_REQUEST_EVENT: &str = "checkpoint.request";
+pub use super::behavior_transcript::CHECKPOINT_REQUEST_EVENT;
 
 /// Call once per drain, in drain order, so the transcript's line order is the
 /// machine's effect order.

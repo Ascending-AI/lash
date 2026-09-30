@@ -651,6 +651,25 @@ impl RlmProtocolScenario {
         }
 
         self.expectations.assert(self.name, &observed, &machine);
+        let rendered = observed.transcript.render();
+        assert_eq!(
+            rendered
+                .lines()
+                .filter(|line| line.contains("checkpoint.request"))
+                .count(),
+            observed.checkpoints.len()
+        );
+        assert_eq!(
+            rendered
+                .lines()
+                .filter(|line| line.contains("  commit    "))
+                .count(),
+            rendered
+                .lines()
+                .filter(|line| line.contains("  usage                 entries="))
+                .count(),
+            "every checkpoint line carries typed usage"
+        );
         observed
     }
 }

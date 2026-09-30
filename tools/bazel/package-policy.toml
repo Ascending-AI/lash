@@ -480,3 +480,7 @@ rlm_gated = [
 store_seam = [
   "attachment_store_head_has_no_default",
 ]
+
+[[rule]]
+packages = ["transcript-contract"]
+compile_data = ["//crates/lash-core-execution:rust_sources"]

@@ -990,3 +990,28 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     rlm          provider  model.request           messages=2 tools=0
     "#);
 }
+
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "isolated test processes keep inline snapshots independent"
+)]
+fn registered_scenarios_emit_typed_transcripts_with_usage() {
+    for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
+        let path = format!("scenarios::{}", coverage.test_name);
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([&path, "--exact", "--nocapture"])
+            .output()
+            .expect("run registered scenario");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{path}: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains("1 passed; 0 failed"),
+            "{path} did not execute: {stdout}"
+        );
+    }
+}

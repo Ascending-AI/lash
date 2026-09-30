@@ -1234,6 +1234,8 @@ pub(crate) use harness::{
     redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
     serve_processes, settle_session_drive, store_backend_with_clock, turn_input_states,
 };
+#[cfg(feature = "rlm")]
+mod adr_claims;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;

@@ -778,3 +778,35 @@ fn legacy_scenario_seeds_remain_registered() {
         );
     }
 }
+
+#[cfg(feature = "rlm")]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "isolated test processes keep inline snapshots independent"
+)]
+fn registered_scenarios_emit_typed_transcripts_with_usage() -> Result<()> {
+    for coverage in AGENT_SCENARIO_COVERAGE {
+        let module = if coverage.test_name == PLUGIN_OPERATIONS.test_name {
+            "plugin_operations"
+        } else {
+            "cases"
+        };
+        let path = format!("tests::agent_scenarios::{module}::{}", coverage.test_name);
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([&path, "--exact", "--nocapture"])
+            .output()
+            .expect("run registered scenario");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{path}: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains("1 passed; 0 failed"),
+            "{path} did not execute: {stdout}"
+        );
+    }
+    Ok(())
+}

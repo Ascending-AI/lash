@@ -49,6 +49,8 @@ members = [
     "examples/toolbench",
     "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
+    "examples/integrator-contract",
+    "examples/transcript-contract",
     "runbooks/restate-postgres-workers",
     "runbooks/rlm-smoke",
 ]

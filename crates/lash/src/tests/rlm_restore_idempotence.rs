@@ -239,11 +239,18 @@ async fn durable_globals(store: &FaultStore, name: &str) -> (Vec<String>, Option
 
 /// The RLM plugin, its artifacts in a fresh memory backend, plus any extra
 /// plugin factories.
-async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginHost {
+async fn plugin_host_with_plugins(
+    extra_plugins: &[Arc<dyn PluginFactory>],
+    native: bool,
+) -> PluginHost {
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
-                .channel(crate::rlm::RlmChannel::Cell)
+                .channel(if native {
+                    crate::rlm::RlmChannel::NativeTool
+                } else {
+                    crate::rlm::RlmChannel::Cell
+                })
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
@@ -260,6 +267,8 @@ async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> P
 /// model actually saw.
 #[derive(Default)]
 struct Script {
+    native: bool,
+    reported_usage: bool,
     responses: Vec<String>,
     requests: Mutex<Vec<String>>,
     calls: AtomicUsize,
@@ -290,10 +299,28 @@ fn provider(
                     .cloned()
                     .unwrap_or_default();
                 Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text,
-                        response_meta: None,
-                    }],
+                    parts: if script.native {
+                        vec![LlmOutputPart::ToolCall {
+                            call_id: "cold-exec".into(),
+                            tool_name: "execute_code".into(),
+                            input_json: serde_json::json!({"code": text}).to_string(),
+                            replay: None,
+                        }]
+                    } else {
+                        vec![LlmOutputPart::Text {
+                            text,
+                            response_meta: None,
+                        }]
+                    },
+                    usage: if script.reported_usage {
+                        lash_core::llm::types::LlmUsage {
+                            input_tokens: 11,
+                            output_tokens: 7,
+                            ..Default::default()
+                        }
+                    } else {
+                        Default::default()
+                    },
                     ..Default::default()
                 })
             }
@@ -309,7 +336,7 @@ async fn open_with_plugins(
     state: RuntimeSessionState,
     extra_plugins: &[Arc<dyn PluginFactory>],
 ) -> (LashRuntime, Arc<PluginSession>) {
-    let host = plugin_host_with_plugins(extra_plugins).await;
+    let host = plugin_host_with_plugins(extra_plugins, script.native).await;
     let plugins = if let Some(snapshot) = state.plugin_state() {
         host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
@@ -1687,4 +1714,169 @@ async fn rlm_message_append_keeps_the_committed_execution_on_sqlite() {
         Backend::sqlite().await,
     ))
     .await;
+}
+
+struct TerminalPayloadTool {
+    payload: serde_json::Value,
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for TerminalPayloadTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![super::app_tool_definition().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "app_lookup").then(|| Arc::new(super::app_tool_definition().contract()))
+    }
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolOutcome::ok(self.payload.clone())
+            .with_control(lash_core::ToolControl::Finish {
+                value: lash_core::ToolValue::untrusted_json(self.payload.clone()),
+            })
+            .into()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
+    for sqlite in [false, true] {
+        for native in [false, true] {
+            let backend = if sqlite {
+                Backend::sqlite().await
+            } else {
+                Backend::memory().await
+            };
+            let script = Arc::new(Script {
+                native,
+                reported_usage: true,
+                responses: vec![if native {
+                    "await tools.app_lookup({}); finish(\"unreachable\");".into()
+                } else {
+                    typescript_block("await tools.app_lookup({}); finish(\"unreachable\");")
+                }],
+                ..Default::default()
+            });
+            let calls = Arc::new(AtomicUsize::new(0));
+            let payload = serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
+            let tool = Arc::new(TerminalPayloadTool {
+                payload: payload.clone(),
+                calls: Arc::clone(&calls),
+            });
+            let finalize = Arc::new(AtomicUsize::new(0));
+            let fail = Arc::clone(&finalize);
+            let plugins: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
+                "cold-terminal-fixture",
+                PluginSpec::new()
+                    .with_tool_provider(tool)
+                    .with_after_turn(Arc::new(move |_| {
+                        let fail = Arc::clone(&fail);
+                        Box::pin(async move {
+                            if fail.fetch_add(1, Ordering::SeqCst) == 0 {
+                                return Err(lash_core::PluginError::Session(
+                                    "lose the resident runtime before commit".into(),
+                                ));
+                            }
+                            Ok(Vec::new())
+                        })
+                    })),
+            ))];
+            let seeded = Box::pin(backend.seeded_session_with_plugins(
+                "cold-terminal",
+                Arc::clone(&script),
+                &plugins,
+            ))
+            .await;
+            let id = SessionId::from(seeded.runtime.session_id());
+            let store = Arc::clone(&seeded.store);
+            Box::pin(seeded.runtime.park())
+                .await
+                .expect("release seeded runtime");
+            drop(seeded.plugins);
+            let turns = Arc::new(Mutex::new(Vec::new()));
+            let attempt: lash_restate_test::HandlerAttempt = {
+                let backend = backend.backend.clone();
+                let script = Arc::clone(&script);
+                let store = Arc::clone(&store);
+                let turns = Arc::clone(&turns);
+                Arc::new(move |controller| {
+                    let backend = backend.clone();
+                    let script = Arc::clone(&script);
+                    let store = Arc::clone(&store);
+                    let turns = Arc::clone(&turns);
+                    let plugins = plugins.clone();
+                    Box::pin(async move {
+                        let state = lash_core::store::load_session_window_state(
+                            &store.base,
+                            lash_core::store::WindowSelector::Current,
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .state;
+                        let (mut runtime, _plugins) =
+                            open_with_plugins(&backend, store, script, state, &plugins).await;
+                        let result = runtime
+                            .drive_turn(
+                                TurnInput::text("finish with the full tool payload"),
+                                lash_core::facade_support::TurnOptions::new(
+                                    tokio_util::sync::CancellationToken::new(),
+                                    controller,
+                                ),
+                            )
+                            .await;
+                        match result {
+                            Ok(turn) => turns.lock_recover().push(turn),
+                            Err(error) => {
+                                panic!("cold restart after the journaled terminal: {error}")
+                            }
+                        }
+                    })
+                })
+            };
+            backend
+                ._double
+                .run_crashed_then_redriven(
+                    lash_core::AdmittedScope::turn(&id, TurnId::from("cold-terminal-root")),
+                    Arc::clone(&attempt),
+                    attempt,
+                )
+                .await
+                .expect("redrive on a fresh runtime");
+            let turns = turns.lock_recover();
+            assert_eq!(turns.len(), 1);
+            let turn = &turns[0];
+            assert_eq!(
+                turn.outcome,
+                TurnOutcome::Finished(TurnFinish::ToolValue {
+                    tool_name: "app_lookup".into(),
+                    value: payload
+                })
+            );
+            assert_eq!(
+                script.calls.load(Ordering::SeqCst),
+                1,
+                "the model call replayed"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "the tool call replayed");
+            assert_eq!(finalize.load(Ordering::SeqCst), 2, "one cold retry");
+            assert_eq!(turn.llm_calls.len(), 1, "exec adds no model ledger row");
+            assert_eq!(turn.llm_calls[0].attempts.len(), 1);
+            assert_eq!(turn.token_usage.input_tokens, 11);
+            assert_eq!(turn.token_usage.output_tokens, 7);
+            assert_eq!(
+                turn.tool_calls.len(),
+                1,
+                "cold exec replay rebuilds tool accounting"
+            );
+            assert_eq!(turn.tool_calls[0].tool, "app_lookup");
+            let accounted = serde_json::to_value(&turn.tool_calls[0].output).unwrap();
+            assert!(
+                accounted.to_string().contains("omitted_bytes"),
+                "exec accounting bounds the payload: {accounted}"
+            );
+            assert!(!accounted.to_string().contains(&"x".repeat(80_000)));
+        }
+    }
 }

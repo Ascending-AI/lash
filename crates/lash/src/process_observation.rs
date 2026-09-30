@@ -510,6 +510,8 @@ pub struct ProcessObservationHub {
     config: ProcessObservationConfig,
     states: Mutex<HashMap<ProcessId, Arc<Mutex<ProcessState>>>>,
     last_sweep: Mutex<Instant>,
+    #[cfg(test)]
+    snapshot_capture_pause: Mutex<Option<Arc<tests::SnapshotCapturePause>>>,
 }
 
 impl Default for ProcessObservationHub {
@@ -524,6 +526,8 @@ impl ProcessObservationHub {
             config,
             states: Mutex::new(HashMap::new()),
             last_sweep: Mutex::new(Instant::now()),
+            #[cfg(test)]
+            snapshot_capture_pause: Mutex::new(None),
         }
     }
 
@@ -944,6 +948,14 @@ impl ProcessObservationSubscription {
             Err(error) => return Err(error),
         };
         let capture = current.then(|| self.hub.capture(&self.process_id, None));
+        #[cfg(test)]
+        {
+            let pause = self.hub.snapshot_capture_pause.lock_recover().take();
+            if let Some(pause) = pause {
+                pause.captured.notify_one();
+                pause.release.notified().await;
+            }
+        }
         let durable =
             acquire_durable(self.registry.as_ref(), &self.process_id, self.hub.config).await?;
         let lifetime_gap = durable.gap_reason();

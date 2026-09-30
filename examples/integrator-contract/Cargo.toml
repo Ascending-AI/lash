@@ -1,0 +1,15 @@
+[package]
+name = "integrator-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash = { workspace = true, features = ["testing"] }

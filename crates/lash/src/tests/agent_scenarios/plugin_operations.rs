@@ -58,7 +58,17 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                 }
             });
         let double = restate_double(SEED).await;
-        let backend = double.lash_backend();
+        let writes = lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
+        let observed = writes.clone();
+        let backend = DecoratedBackend::over(double.lash_backend())
+            .session_store_factory(move |inner| {
+                Arc::new(
+                    lash_core::testing::checkpoint_observer::ObservedDeploymentStore::new(
+                        inner, observed,
+                    ),
+                )
+            })
+            .into();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             backend,
             crate::TurnBudget::Unbounded,
@@ -160,6 +170,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             "query:cobalt-583",
             "writer released after cancellation"
         );
+        super::transcript::assert_typed_checkpoint_transcript(&writes.events());
         Ok(())
     })
 }
