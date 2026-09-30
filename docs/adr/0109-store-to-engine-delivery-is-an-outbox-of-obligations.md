@@ -177,6 +177,11 @@ Recovery follows a 10-second fixed grid. Each kind's pass runs on its own
 before running leader duties, and each delivery has a 30-second budget.
 A busy kind is skipped until its pass finishes. Rows in one claimed page
 run together, rather than waiting behind each other's delivery budgets.
+Leader recovery arms run concurrently under an outer guard of `2W`, where
+`W` is the host's tick wait (default 1 second). Each Restate paused-work,
+lost-process and lost-root page shares one `W` deadline across its store
+read, queries, outcomes and durable writes. A slow repair cannot hold drain
+handover or the next interval tick beyond that guard.
 
 With tick interval `T`, budget `B`, page store latency `S` and a free lane,
 a due row is claimed within `T` of its due time. A busy lane can add `B + S`.
@@ -261,7 +266,11 @@ for a redrive that then settles. A drive with no resumable root or deleted
 session is killed. Accepted ingress retains its obligation for a fresh drive.
 Engine-owned lost-run recovery also checks non-terminal session roots and
 ends failed runs with durable loss or cancellation evidence, settling their
-ingress and arming `ScopeClose` atomically.
+ingress and arming `ScopeClose` atomically. Lost-process and lost-root scans
+each inspect at most one page per tick, including healthy and failed rows,
+and retain separate cursors across ticks. Cursors advance before engine
+requests, so failed or timed-out items cannot pin a page; an exhausted
+catalog wraps and retries them.
 
 Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148`,
 `crates/lash-core-execution/src/runtime/trigger_delivery.rs:50`,

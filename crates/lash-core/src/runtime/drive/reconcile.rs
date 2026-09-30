@@ -128,18 +128,39 @@ pub async fn reconcile_once(
     }
     let control = parts.work.control();
 
-    // 1. Parks: the engine's stalled work becomes lash parks.
+    // Each leader arm runs independently. The engine spends one page budget
+    // on each of its recovery catalogs; the outer guard leaves another
+    // budget for it to return the report, and bounds an unresponsive engine.
+    let budget = parts.lanes.tick_wait();
+    let deadline = parts.clock.now() + budget.saturating_mul(2);
     let recovery = StoreParkRecovery::new(parts.sessions, parts.clock);
-    match control
-        .reconcile_parks(
+    let parks = bounded_arm(
+        parts.clock,
+        deadline,
+        control.reconcile_parks(
             &recovery,
             EnginePage {
                 after: cursor.parks.clone(),
                 limit: page,
+                budget,
             },
-        )
-        .await
-    {
+        ),
+    );
+    let drain = async {
+        match parts.processes {
+            Some(processes) => Some(
+                bounded_arm(
+                    parts.clock,
+                    deadline,
+                    drain_hand_over_slot(&processes, cursor.drain.as_ref(), page),
+                )
+                .await,
+            ),
+            None => None,
+        }
+    };
+    let (parks, drain) = tokio::join!(parks, drain);
+    match parks {
         Ok(parks) => {
             report.next.parks = parks.next.clone();
             report
@@ -159,14 +180,13 @@ pub async fn reconcile_once(
             report.next.parks = cursor.parks.clone();
             report.failures.push(ReconcileFailure {
                 arm: ReconcileArm::Parks,
-                error: error.to_string(),
+                error,
             });
         }
     }
 
-    // 2. The slot other slices fill.
-    if let Some(processes) = parts.processes {
-        match drain_hand_over_slot(&processes, cursor.drain.as_ref(), page).await {
+    if let Some(drain) = drain {
+        match drain {
             Ok(hand_over) => {
                 report.drain_hand_over = hand_over.pass;
                 report.next.drain = hand_over.next;
@@ -175,12 +195,23 @@ pub async fn reconcile_once(
                 report.next.drain = cursor.drain.clone();
                 report.failures.push(ReconcileFailure {
                     arm: ReconcileArm::DrainHandOver,
-                    error: error.to_string(),
+                    error,
                 });
             }
         }
     }
     report
+}
+
+async fn bounded_arm<T, E: std::fmt::Display>(
+    clock: &dyn Clock,
+    deadline: std::time::Instant,
+    arm: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, String> {
+    tokio::select! {
+        result = arm => result.map_err(|error| error.to_string()),
+        () = clock.sleep_until(deadline) => Err("recovery arm time budget exhausted".into()),
+    }
 }
 
 /// What one pass of the drain hand-over slot did, and where the next resumes.

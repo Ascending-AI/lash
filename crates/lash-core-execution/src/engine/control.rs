@@ -154,10 +154,13 @@ pub trait SessionControlEngine: Send + Sync {
     /// behind a redrive that has since settled is resumed, and one whose
     /// session's next work names no root is released (ADR 0109 §3).
     ///
-    /// Bounded: at most `page.limit` executions after `page.after`, in the
-    /// engine's own order; the report's `next` resumes the listing, and
-    /// `None` means it ran out. Idempotent: a second pass over the same
-    /// stalled execution records nothing new.
+    /// Each recovery catalog inspects at most `page.limit` records under
+    /// `page.budget`. The stalled-work listing resumes after `page.after`
+    /// in the engine's order; the report's `next` continues it, and `None`
+    /// wraps it. An engine that also repairs lost runs keeps independent
+    /// process and root cursors across calls. Failed items advance their
+    /// cursor and are retried when that catalog wraps.
+    /// Idempotent: a second pass over the same execution records nothing new.
     async fn reconcile_parks(
         &self,
         parks: &dyn ParkRecoveryWriter,
@@ -256,6 +259,9 @@ pub struct EnginePage {
     pub after: Option<EngineCursor>,
     /// Read at most this many executions.
     pub limit: NonZeroUsize,
+    /// Time available to each independent recovery page, including its
+    /// store read and engine requests.
+    pub budget: std::time::Duration,
 }
 
 /// The work a park holds, as the engine names it to the park writer.

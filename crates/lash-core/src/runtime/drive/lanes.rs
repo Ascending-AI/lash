@@ -64,6 +64,12 @@ pub struct RelayLanes {
 }
 
 impl RelayLanes {
+    /// The wait budget shared by the tick's independent recovery arms.
+    #[must_use]
+    pub(crate) fn tick_wait(&self) -> Duration {
+        self.tick_wait
+    }
+
     /// Lanes whose passes run on `clock`, a tick waiting on them for at
     /// most `budget`'s [`tick_wait`](RecoveryPassBudget::tick_wait).
     #[must_use]

@@ -167,13 +167,12 @@ pub(crate) struct LostRunPass {
     pub failed: Vec<(String, String)>,
 }
 
-/// End every live process whose current segment's `run` the engine finished
-/// with a failure, and resubmit every one whose current segment Restate no
-/// longer holds.
+/// Inspect one page of live processes, ending failed current runs and
+/// resubmitting current segments Restate no longer holds.
 ///
 /// The scan is bounded by the live processes lash still waits on, never by
 /// the engine's retained history: it reads the registry's non-terminal
-/// records in pages of `limit`, and asks Restate once per page about those
+/// records in one page of `limit`, and asks Restate once about those
 /// processes' current segments' `run` invocations. A segment's external
 /// reference names its workflow key (a handover's reference carries no
 /// invocation id — the key is the owner), and a key's `run` executes once,
@@ -190,22 +189,30 @@ pub(crate) struct LostRunPass {
 /// never started, and ignores one that already handed over. A key the query
 /// missed only because Restate had not yet applied its run coalesces onto
 /// that run, so a resubmission is never a second execution. At most `limit`
-/// processes are resubmitted per pass; the rest wait for the next one.
+/// records are inspected per pass, including healthy and failed rows.
+/// `continuation` advances before engine requests, so a failed or timed-out
+/// page cannot pin the next tick. All requests share one deadline; failed items
+/// are retried when the bounded catalog scan wraps.
 ///
 /// Idempotent: a process this pass ended is terminal, so the next pass that
 /// reads the same run leaves it. One run that fails to settle never fails
 /// the pass.
 ///
 /// # Errors
-/// When the registry page read or Restate's admin query fails.
+/// When the registry page read fails. Engine failures stay in the report.
 pub(crate) async fn end_lost_process_runs(
     admin: &RestateAdminClient,
     ingress: &RestateIngressClient,
     namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
-    limit: std::num::NonZeroUsize,
+    scan: crate::session_control::RecoveryScan<'_, lash_core::ProcessRegistryCursor>,
 ) -> Result<LostRunPass, PluginError> {
+    let crate::session_control::RecoveryScan {
+        limit,
+        after: continuation,
+        deadline,
+    } = scan;
     let starts = super::RestateProcessIngressRunner::over_ingress(
         ingress.clone(),
         namespace.clone(),
@@ -213,59 +220,75 @@ pub(crate) async fn end_lost_process_runs(
         Arc::clone(continuations),
     );
     let mut pass = LostRunPass::default();
-    let mut continuation = None;
-    loop {
-        let page = registry
-            .list_non_terminal_processes_page(limit, continuation)
-            .await?;
-        continuation = page.continuation;
-        let segments: Vec<(String, &ProcessRecord)> = page
-            .records
-            .iter()
-            .filter(|record| !record.input.is_externally_owned() && !record.is_refusing_park())
-            .filter_map(|record| {
-                let reference = record.external_ref.as_ref()?;
-                (reference.backend == "restate").then(|| {
-                    (
-                        super::process_segment_workflow_key(
-                            &record.id,
-                            reference.segment_ordinal(),
-                        ),
-                        record,
-                    )
-                })
-            })
-            .collect();
-        let segment_keys: Vec<String> = segments.iter().map(|(key, _)| key.clone()).collect();
-        let runs = admin
-            .segment_runs(namespace, &segment_keys)
-            .await
-            .map_err(|error| {
-                PluginError::Session(format!("read process runs from Restate: {error}"))
-            })?;
-        for run in runs.iter().filter(|run| run.completed_with_failure()) {
-            match end_lost_run(registry, continuations, run).await {
-                Ok(Some(process_id)) => pass.ended.push(process_id),
-                Ok(None) => pass.unchanged += 1,
-                Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
-            }
-        }
-        for (key, record) in segments {
-            let held = runs
-                .iter()
-                .any(|run| run.target_service_key.as_deref() == Some(key.as_str()));
-            if held || pass.resubmitted.len() >= limit.get() {
-                continue;
-            }
-            match starts.submit_record(record).await {
-                Ok(()) => pass.resubmitted.push(record.id.clone()),
-                Err(error) => pass.failed.push((key, error.to_string())),
-            }
-        }
-        if continuation.is_none() {
+    let page = match crate::session_control::recovery_request(
+        deadline,
+        registry.list_non_terminal_processes_page(limit, continuation.clone()),
+    )
+    .await
+    {
+        Ok(page) => page,
+        Err(crate::session_control::RecoveryRequestError::Failed(error)) => return Err(error),
+        Err(error) => {
+            pass.failed
+                .push(("lost-process-page".into(), error.to_string()));
             return Ok(pass);
         }
+    };
+    *continuation = page.continuation;
+    let segments: Vec<(String, &ProcessRecord)> = page
+        .records
+        .iter()
+        .filter(|record| !record.input.is_externally_owned() && !record.is_refusing_park())
+        .filter_map(|record| {
+            let reference = record.external_ref.as_ref()?;
+            (reference.backend == "restate").then(|| {
+                (
+                    super::process_segment_workflow_key(&record.id, reference.segment_ordinal()),
+                    record,
+                )
+            })
+        })
+        .collect();
+    let segment_keys: Vec<String> = segments.iter().map(|(key, _)| key.clone()).collect();
+    let runs = match crate::session_control::recovery_request(
+        deadline,
+        admin.segment_runs(namespace, &segment_keys),
+    )
+    .await
+    {
+        Ok(runs) => runs,
+        Err(error) => {
+            pass.failed
+                .push(("lost-process-page".into(), error.to_string()));
+            return Ok(pass);
+        }
+    };
+    for run in runs.iter().filter(|run| run.completed_with_failure()) {
+        match crate::session_control::recovery_request(
+            deadline,
+            end_lost_run(registry, continuations, run),
+        )
+        .await
+        {
+            Ok(Some(process_id)) => pass.ended.push(process_id),
+            Ok(None) => pass.unchanged += 1,
+            Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
+        }
     }
+    for (key, record) in segments {
+        let held = runs
+            .iter()
+            .any(|run| run.target_service_key.as_deref() == Some(key.as_str()));
+        if held {
+            continue;
+        }
+        match crate::session_control::recovery_request(deadline, starts.submit_record(record)).await
+        {
+            Ok(()) => pass.resubmitted.push(record.id.clone()),
+            Err(error) => pass.failed.push((key, error.to_string())),
+        }
+    }
+    Ok(pass)
 }
 
 /// End the process of failed segment `run`, when the run was its current

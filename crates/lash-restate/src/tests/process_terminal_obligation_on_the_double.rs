@@ -188,7 +188,11 @@ impl World {
             &crate::services::DEFAULT_NAMESPACE,
             &self.registry,
             &self.continuations,
-            std::num::NonZeroUsize::new(128).expect("nonzero"),
+            crate::session_control::RecoveryScan {
+                limit: std::num::NonZeroUsize::new(128).expect("nonzero"),
+                after: &mut None,
+                deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+            },
         )
         .await
         .expect("end lost process runs");
@@ -478,19 +482,31 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
         );
     }
 
-    let pass = crate::process::park_reconcile::end_lost_process_runs(
-        &world.admin,
-        &world.ingress,
-        &crate::services::DEFAULT_NAMESPACE,
-        &world.registry,
-        &world.continuations,
-        std::num::NonZeroUsize::new(64).expect("non-zero"),
-    )
-    .await
-    .expect("the lost-run pass");
+    let mut cursor = None;
+    let mut ended = Vec::new();
+    loop {
+        let pass = crate::process::park_reconcile::end_lost_process_runs(
+            &world.admin,
+            &world.ingress,
+            &crate::services::DEFAULT_NAMESPACE,
+            &world.registry,
+            &world.continuations,
+            crate::session_control::RecoveryScan {
+                limit: std::num::NonZeroUsize::new(64).expect("non-zero"),
+                after: &mut cursor,
+                deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+            },
+        )
+        .await
+        .expect("the bounded lost-run pass");
+        ended.extend(pass.ended);
+        if cursor.is_none() {
+            break;
+        }
+    }
     assert!(
-        pass.ended.contains(&process_id),
-        "the killed process ends however many newer failed runs are kept: {pass:?}"
+        ended.contains(&process_id),
+        "the killed process ends across bounded pages however many newer failed runs are kept: {ended:?}"
     );
 
     // Every ended process armed its `ProcessTerminal` obligation; the
@@ -568,7 +584,11 @@ pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lo
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
-        std::num::NonZeroUsize::new(16).expect("non-zero"),
+        crate::session_control::RecoveryScan {
+            limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
+            after: &mut None,
+            deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+        },
     )
     .await
     .expect("the lost-run pass");
@@ -609,7 +629,11 @@ pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lo
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
-        std::num::NonZeroUsize::new(16).expect("non-zero"),
+        crate::session_control::RecoveryScan {
+            limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
+            after: &mut None,
+            deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+        },
     )
     .await
     .expect("the next lost-run pass");

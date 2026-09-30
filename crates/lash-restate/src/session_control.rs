@@ -33,6 +33,8 @@ pub(crate) struct RestateSessionControl {
     pub(crate) processes: Arc<dyn lash_core::ProcessRegistry>,
     pub(crate) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
+    pub(crate) lost_processes: tokio::sync::Mutex<Option<lash_core::ProcessRegistryCursor>>,
+    pub(crate) lost_roots: tokio::sync::Mutex<Option<RootRef>>,
 }
 
 #[derive(Default)]
@@ -43,7 +45,13 @@ pub(crate) struct LostRootPass {
     pub(crate) failed: Vec<(String, String)>,
 }
 
-/// Visit the store's open roots in stable pages and end each one whose
+pub(crate) struct RecoveryScan<'a, C> {
+    pub(crate) limit: std::num::NonZeroUsize,
+    pub(crate) after: &'a mut Option<C>,
+    pub(crate) deadline: tokio::time::Instant,
+}
+
+/// Visit one stable page of the store's open roots and end each one whose
 /// execution Restate lost, on the evidence its runs give
 /// ([`RootRunLoss`]). The store supplies the keys, so the engine's retained
 /// history never decides which roots are read, and every generation lane of
@@ -64,77 +72,129 @@ pub(crate) struct LostRootPass {
 ///   input and drives it, so the store leaves it ([`RootRunLoss::NoRun`]).
 ///
 /// An admin read that fails proves nothing about any run: the pass stops
-/// before it ends anything on that page, and the next pass reads it again.
+/// before it ends anything on that page. Every row spends the inspected-record
+/// budget. The cursor advances before engine requests, including failures and
+/// timeouts, and an exhausted catalog wraps and retries them. Store reads,
+/// queries, outcomes and terminal writes share the page deadline.
 pub(crate) async fn end_lost_root_runs(
     admin: &RestateAdminClient,
     ingress: &RestateIngressClient,
     namespace: &crate::RestateNamespace,
     sessions: &Arc<dyn lash_core::DeploymentStore>,
-    limit: std::num::NonZeroUsize,
+    scan: RecoveryScan<'_, RootRef>,
 ) -> Result<LostRootPass, lash_core::StoreError> {
+    let RecoveryScan {
+        limit,
+        after,
+        deadline,
+    } = scan;
     let mut pass = LostRootPass::default();
-    let mut after: Option<RootRef> = None;
-    loop {
-        let page = sessions
-            .non_terminal_roots_page(after.as_ref(), limit)
-            .await?;
-        if page.is_empty() {
+    let page = match recovery_request(
+        deadline,
+        sessions.non_terminal_roots_page(after.as_ref(), limit),
+    )
+    .await
+    {
+        Ok(page) => page,
+        Err(RecoveryRequestError::Failed(error)) => return Err(error),
+        Err(error) => {
+            pass.failed
+                .push(("lost-root-page".into(), error.to_string()));
             return Ok(pass);
         }
-        let keys: Vec<String> = page
+    };
+    *after = if page.len() == limit.get() {
+        page.last().cloned()
+    } else {
+        None
+    };
+    if page.is_empty() {
+        return Ok(pass);
+    }
+    let keys: Vec<String> = page
+        .iter()
+        .map(|target| turn_workflow_key(&target.session, &target.root))
+        .collect();
+    let runs = match recovery_request(deadline, admin.root_runs(namespace, &keys)).await {
+        Ok(runs) => runs,
+        Err(RecoveryRequestError::Failed(error)) => {
+            return Err(lash_core::StoreError::Backend(format!(
+                "read root runs from Restate: {error}"
+            )));
+        }
+        Err(error) => {
+            pass.failed
+                .push(("lost-root-page".into(), error.to_string()));
+            return Ok(pass);
+        }
+    };
+    for (target, key) in page.iter().zip(&keys) {
+        let key_runs: Vec<&crate::RestateInvocationStatus> = runs
             .iter()
-            .map(|target| turn_workflow_key(&target.session, &target.root))
+            .filter(|run| run.target_service_key.as_deref() == Some(key.as_str()))
             .collect();
-        let runs = admin.root_runs(namespace, &keys).await.map_err(|error| {
-            lash_core::StoreError::Backend(format!("read root runs from Restate: {error}"))
-        })?;
-        for (target, key) in page.iter().zip(&keys) {
-            let key_runs: Vec<&crate::RestateInvocationStatus> = runs
-                .iter()
-                .filter(|run| run.target_service_key.as_deref() == Some(key.as_str()))
-                .collect();
-            let loss = if key_runs.is_empty() {
-                RootRunLoss::NoRun
-            } else if key_runs.iter().all(|run| run.completed_with_failure()) {
-                match recorded_outcome(ingress, &key_runs, key).await {
-                    Ok(false) => RootRunLoss::FailedRun,
-                    Ok(true) => {
-                        pass.unchanged += 1;
-                        continue;
-                    }
-                    Err(error) => {
-                        pass.failed.push((key.clone(), error));
-                        continue;
-                    }
+        let loss = if key_runs.is_empty() {
+            RootRunLoss::NoRun
+        } else if key_runs.iter().all(|run| run.completed_with_failure()) {
+            match recorded_outcome(ingress, &key_runs, key, deadline).await {
+                Ok(false) => RootRunLoss::FailedRun,
+                Ok(true) => {
+                    pass.unchanged += 1;
+                    continue;
                 }
-            } else {
-                pass.unchanged += 1;
-                continue;
-            };
-            let at_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            match sessions.end_lost_root(target, loss, at_ms).await {
-                Ok(Some(_)) => {
-                    tracing::warn!(
-                        event = "root.run_lost",
-                        session_id = target.session.as_str(),
-                        root = target.root.as_str(),
-                        ?loss,
-                        "Restate lost a root's execution; the root ends substrate-lost"
-                    );
-                    pass.ended.push(target.clone());
+                Err(error) => {
+                    pass.failed.push((key.clone(), error));
+                    continue;
                 }
-                Ok(None) => pass.unchanged += 1,
-                Err(error) => pass.failed.push((key.clone(), error.to_string())),
             }
-        }
-        after = page.last().cloned();
-        if page.len() < limit.get() {
-            return Ok(pass);
+        } else {
+            pass.unchanged += 1;
+            continue;
+        };
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        match recovery_request(deadline, sessions.end_lost_root(target, loss, at_ms)).await {
+            Ok(Some(_)) => {
+                tracing::warn!(
+                    event = "root.run_lost",
+                    session_id = target.session.as_str(),
+                    root = target.root.as_str(),
+                    ?loss,
+                    "Restate lost a root's execution; the root ends substrate-lost"
+                );
+                pass.ended.push(target.clone());
+            }
+            Ok(None) => pass.unchanged += 1,
+            Err(error) => pass.failed.push((key.clone(), error.to_string())),
         }
     }
+    Ok(pass)
+}
+
+/// Every operation in a page spends the same deadline. Dropping a timed-out
+/// request does not undo its durable write; all recovery writes and sends
+/// are idempotent when a later scan reaches the item again.
+pub(crate) async fn recovery_request<T, E: std::fmt::Display>(
+    deadline: tokio::time::Instant,
+    request: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, RecoveryRequestError<E>> {
+    if tokio::time::Instant::now() >= deadline {
+        return Err(RecoveryRequestError::BudgetExhausted);
+    }
+    match tokio::time::timeout_at(deadline, request).await {
+        Ok(result) => result.map_err(RecoveryRequestError::Failed),
+        Err(_) => Err(RecoveryRequestError::BudgetExhausted),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RecoveryRequestError<E: std::fmt::Display> {
+    #[error("{0}")]
+    Failed(E),
+    #[error("recovery page time budget exhausted")]
+    BudgetExhausted,
 }
 
 /// Whether any of `key`'s failed runs recorded the root's outcome, read on
@@ -143,12 +203,15 @@ async fn recorded_outcome(
     ingress: &RestateIngressClient,
     failed: &[&crate::RestateInvocationStatus],
     key: &str,
+    deadline: tokio::time::Instant,
 ) -> Result<bool, String> {
     for run in failed {
-        let outcome: Option<lash_core::engine::RootOutcome> = ingress
-            .call_lash_workflow(&run.target_service_name, key, "outcome", &())
-            .await
-            .map_err(|error| format!("read root outcome of run `{}`: {error}", run.id))?;
+        let outcome: Option<lash_core::engine::RootOutcome> = recovery_request(
+            deadline,
+            ingress.call_lash_workflow(&run.target_service_name, key, "outcome", &()),
+        )
+        .await
+        .map_err(|error| format!("read root outcome of run `{}`: {error}", run.id))?;
         if outcome.is_some() {
             return Ok(true);
         }
@@ -182,6 +245,89 @@ impl StalledExecution for PausedInvocation<'_> {
 }
 
 impl RestateSessionControl {
+    async fn paused_page(
+        &self,
+        parks: &dyn ParkRecoveryWriter,
+        page: &EnginePage,
+        deadline: tokio::time::Instant,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        let invocations = recovery_request(
+            deadline,
+            self.admin.paused_work_page(
+                &self.namespace,
+                page.after.as_ref().map(|cursor| cursor.as_str()),
+                page.limit,
+            ),
+        )
+        .await
+        .map_err(refusal)?;
+        let mut report = ParkReconcileReport::default();
+        if invocations.len() == page.limit.get() {
+            report.next = invocations
+                .last()
+                .map(|invocation| EngineCursor::new(invocation.id.clone()));
+        }
+        for invocation in invocations {
+            let id = EngineCursor::new(invocation.id.clone());
+            if let Err(error) = recovery_request(
+                deadline,
+                self.reconcile_invocation(parks, invocation, &mut report),
+            )
+            .await
+            {
+                report.failed.push((id, error.to_string()));
+            }
+        }
+        Ok(report)
+    }
+
+    async fn lost_process_page(
+        &self,
+        page: &EnginePage,
+        deadline: tokio::time::Instant,
+    ) -> Result<crate::process::park_reconcile::LostRunPass, EngineRefusal> {
+        let mut cursor = tokio::time::timeout_at(deadline, self.lost_processes.lock())
+            .await
+            .map_err(refusal)?;
+        crate::process::park_reconcile::end_lost_process_runs(
+            &self.admin,
+            &self.ingress,
+            &self.namespace,
+            &self.processes,
+            &self.continuations,
+            RecoveryScan {
+                limit: page.limit,
+                after: &mut cursor,
+                deadline,
+            },
+        )
+        .await
+        .map_err(refusal)
+    }
+
+    async fn lost_root_page(
+        &self,
+        page: &EnginePage,
+        deadline: tokio::time::Instant,
+    ) -> Result<LostRootPass, EngineRefusal> {
+        let mut cursor = tokio::time::timeout_at(deadline, self.lost_roots.lock())
+            .await
+            .map_err(refusal)?;
+        end_lost_root_runs(
+            &self.admin,
+            &self.ingress,
+            &self.namespace,
+            &self.sessions,
+            RecoveryScan {
+                limit: page.limit,
+                after: &mut cursor,
+                deadline,
+            },
+        )
+        .await
+        .map_err(refusal)
+    }
+
     async fn invocation(
         &self,
         target: &RootRef,
@@ -494,48 +640,29 @@ impl SessionControlEngine for RestateSessionControl {
         parks: &dyn ParkRecoveryWriter,
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal> {
-        let invocations = self
-            .admin
-            .paused_work_page(
-                &self.namespace,
-                page.after.as_ref().map(|c| c.as_str()),
-                page.limit,
-            )
-            .await
-            .map_err(refusal)?;
-        let mut report = ParkReconcileReport::default();
-        if invocations.len() == page.limit.get() {
-            report.next = invocations.last().map(|v| EngineCursor::new(v.id.clone()));
-        }
-        for invocation in invocations {
-            let id = EngineCursor::new(invocation.id.clone());
-            if let Err(error) = self
-                .reconcile_invocation(parks, invocation, &mut report)
-                .await
-            {
-                tracing::warn!(
-                    invocation = id.as_str(),
-                    %error,
-                    "park reconcile could not settle a paused invocation; the next pass retries it"
-                );
-                report.failed.push((id, error.to_string()));
+        // Independent pages: a slow paused invocation, lost process or root
+        // never serializes either of the other catalogs. Cursor locks belong
+        // to this installed control, so concurrent callers cannot repeat a page.
+        let deadline = tokio::time::Instant::now() + page.budget;
+        let (paused, processes, roots) = tokio::join!(
+            self.paused_page(parks, &page, deadline),
+            self.lost_process_page(&page, deadline),
+            self.lost_root_page(&page, deadline),
+        );
+        let mut report = match paused {
+            Ok(report) => report,
+            Err(error) => {
+                let mut report = ParkReconcileReport {
+                    next: page.after.clone(),
+                    ..ParkReconcileReport::default()
+                };
+                report
+                    .failed
+                    .push((EngineCursor::new("paused-page"), error.to_string()));
+                report
             }
-        }
-        // A process segment's run the engine finished without the process's
-        // terminal (an operator's kill) strands the process: Restate never
-        // runs that key again. End each one `SubstrateLost` (ADR 0110). A
-        // segment whose run Restate no longer holds is resubmitted, and its
-        // admission ends a started process `SubstrateLost`.
-        match crate::process::park_reconcile::end_lost_process_runs(
-            &self.admin,
-            &self.ingress,
-            &self.namespace,
-            &self.processes,
-            &self.continuations,
-            page.limit,
-        )
-        .await
-        {
+        };
+        match processes {
             Ok(pass) => {
                 for process_id in &pass.resubmitted {
                     tracing::warn!(
@@ -552,25 +679,11 @@ impl SessionControlEngine for RestateSessionControl {
                         .map(|(id, error)| (EngineCursor::new(id), error)),
                 );
             }
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "lost-run reconcile could not read process runs; the next pass retries it"
-                );
-            }
+            Err(error) => report
+                .failed
+                .push((EngineCursor::new("lost-process-page"), error.to_string())),
         }
-        // An open root whose runs all failed without its outcome, or whose
-        // key Restate holds no run of on any lane, has no other recovery
-        // owner: a started one ends `SubstrateLost` here.
-        match end_lost_root_runs(
-            &self.admin,
-            &self.ingress,
-            &self.namespace,
-            &self.sessions,
-            page.limit,
-        )
-        .await
-        {
+        match roots {
             Ok(pass) => {
                 report.ended_roots.extend(pass.ended);
                 report.unchanged += pass.unchanged;
@@ -580,12 +693,9 @@ impl SessionControlEngine for RestateSessionControl {
                         .map(|(id, error)| (EngineCursor::new(id), error)),
                 );
             }
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "lost-root reconcile could not read root runs; the next pass retries it"
-                );
-            }
+            Err(error) => report
+                .failed
+                .push((EngineCursor::new("lost-root-page"), error.to_string())),
         }
         Ok(report)
     }

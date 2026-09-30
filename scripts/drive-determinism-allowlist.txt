@@ -56,3 +56,5 @@ crates/lash-core/src/runtime/drive/lanes.rs  |  pass: tokio::task::JoinHandle<Re
 crates/lash-core/src/runtime/drive/lanes.rs  |  fn end(&mut self, joined: Result<Result<RelayPass, StoreError>, tokio::task::JoinError>) {  |  1  # BENIGN recovery tick's lane records how its due pass ended; outside every drive and journaled step
 crates/lash-core/src/runtime/drive/lanes.rs  |  pass: crate::task::spawn(async move {  |  1  # BENIGN recovery tick spawns a kind's due pass on its lane; outside every drive and journaled step (ADR 0109 §1.8)
 crates/lash-core/src/runtime/drive/lanes.rs  |  tokio::select! {  |  1  # BENIGN recovery tick's bounded wait on its lanes; which side wins only moves when leader arms run, never a journaled outcome
+crates/lash-core/src/runtime/drive/reconcile.rs  |  let (parks, drain) = tokio::join!(parks, drain);  |  1  # BENIGN concurrent recovery arms run outside every drive and journaled step (ADR 0109 §1.8)
+crates/lash-core/src/runtime/drive/reconcile.rs  |  tokio::select! {  |  1  # BENIGN recovery arm deadline controls repair scheduling outside every drive and journaled step

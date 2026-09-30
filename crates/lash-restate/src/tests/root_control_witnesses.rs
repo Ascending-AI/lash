@@ -342,6 +342,7 @@ impl Fixture {
                 .reconcile_parks(
                     &writer,
                     EnginePage {
+                        budget: std::time::Duration::from_secs(1),
                         after: None,
                         limit: NonZeroUsize::MIN,
                     },
@@ -400,6 +401,7 @@ impl Fixture {
             .reconcile_parks(
                 &writer,
                 EnginePage {
+                    budget: std::time::Duration::from_secs(1),
                     after: None,
                     limit: NonZeroUsize::new(16).expect("page"),
                 },
@@ -520,6 +522,7 @@ async fn pause_resume(server: HarnessServer) {
         .reconcile_parks(
             &writer,
             EnginePage {
+                budget: std::time::Duration::from_secs(1),
                 after: None,
                 limit: NonZeroUsize::MIN,
             },
@@ -610,6 +613,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
         .reconcile_parks(
             &writer,
             EnginePage {
+                budget: std::time::Duration::from_secs(1),
                 after: None,
                 limit: NonZeroUsize::MIN,
             },
@@ -1200,6 +1204,7 @@ async fn one_failing_paused_execution_never_fails_the_park_page() {
         .reconcile_parks(
             &FailingParkWriter,
             EnginePage {
+                budget: std::time::Duration::from_secs(1),
                 after: None,
                 limit: NonZeroUsize::MIN,
             },
@@ -1875,7 +1880,11 @@ async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
             &crate::RestateIngressClient::new(harness.connection()),
             &crate::RestateNamespace::default(),
             &factory,
-            NonZeroUsize::new(16).expect("page"),
+            crate::session_control::RecoveryScan {
+                limit: NonZeroUsize::new(16).expect("page"),
+                after: &mut None,
+                deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(30),
+            },
         )
         .await;
         assert!(
@@ -1918,6 +1927,7 @@ async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
                 EnginePage {
                     after: None,
                     limit: NonZeroUsize::new(16).expect("page"),
+                    budget: std::time::Duration::from_secs(1),
                 },
             )
             .await;

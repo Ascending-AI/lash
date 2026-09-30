@@ -749,6 +749,8 @@ impl LiveConformanceHarness {
             lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
+                lost_processes: Default::default(),
+                lost_roots: Default::default(),
                 admin: self.admin_client(),
                 ingress: crate::RestateIngressClient::new(self.connection.clone()),
                 namespace: crate::RestateNamespace::default(),

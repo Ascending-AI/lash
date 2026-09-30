@@ -144,6 +144,8 @@ impl RestateEngine {
             build_generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
+                lost_processes: Default::default(),
+                lost_roots: Default::default(),
                 admin: admin.clone(),
                 ingress: RestateIngressClient::new(connection.clone()),
                 namespace: namespace.clone(),

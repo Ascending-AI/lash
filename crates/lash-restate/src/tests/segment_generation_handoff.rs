@@ -601,7 +601,11 @@ impl Roll {
             &crate::services::DEFAULT_NAMESPACE,
             &self.registry,
             &self.continuations,
-            std::num::NonZeroUsize::new(16).expect("non-zero"),
+            crate::session_control::RecoveryScan {
+                limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
+                after: &mut None,
+                deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+            },
         )
         .await
         .expect("the lost-run pass")
