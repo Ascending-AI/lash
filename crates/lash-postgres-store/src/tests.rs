@@ -1282,8 +1282,8 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
-        q if q.starts_with("UPDATE lash_attachment_referrer_edges") => {
-            "attachment-referrers-commit"
+        q if q.starts_with("SELECT EXISTS") && q.contains("FROM lash_referrer_fences") => {
+            "attachment-referrer-fence-check"
         }
         q if q.starts_with("SELECT admission_json FROM lash_session_roots") => {
             "root-admission-read"
@@ -1471,13 +1471,16 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     // admitted (ADR 0112) with one probe, where it used to insert the meta
     // row. The writer fence (ADR 0115 §2.2) is the transaction's first
     // statement.
+    // Attachment acquisition takes the Session referrer lock after the history
+    // lock and checks its fence even when this commit has no attachment ids.
+    // This replaces the old attachment-row update.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
             ("writer-fence", 1),
-            ("advisory-lock", 1),
+            ("advisory-lock", 2),
             ("deleted-session-check", 1),
             ("head-lock", 1),
             ("head-load", 1),
@@ -1490,7 +1493,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
             ("turn-commit-insert", 1),
             ("session-admitted-check", 1),
             ("head-upsert", 1),
-            ("attachment-manifest-commit", 1),
+            ("attachment-referrer-fence-check", 1),
             ("session-meta-touch", 1),
         ]);
     assert_eq!(

@@ -17,8 +17,8 @@ const SESSION_HISTORY_SOURCE: &str = include_str!("../../../lash-core-store/src/
 const DRIVE_EPOCH_SOURCE: &str = include_str!("../../../lash-core-store/src/store/drive_fence.rs");
 const ROOT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/root.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
-const ATTACHMENT_MANIFEST_SOURCE: &str =
-    include_str!("../../../lash-core-store/src/store/attachment_manifest.rs");
+const ATTACHMENT_REFERRERS_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/attachment_referrers.rs");
 /// The factory's control-intent ledger (FIG-3600 S7): every method is driven,
 /// none is excluded.
 const CONTROL_INTENT_SOURCE: &str =
@@ -71,7 +71,7 @@ fn harness_sources() -> Vec<String> {
 }
 
 /// Every fallible segment of `RuntimeStore`; fleet format is infallible and
-/// the attachment manifest has its own exclusions below.
+/// attachment referrers are checked separately below.
 const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
     (SESSION_CATALOG_SOURCE, "SessionCatalogStore"),
     (SESSION_STORE_SOURCE, "SessionCommitStore"),
@@ -173,7 +173,7 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
 /// Fallible attachment (blob artifact) store methods.
 ///
 /// The three session stores this harness compares hold no attachment bytes:
-/// their durable surface is the attachment *manifest* row, which the
+/// their durable surface is the attachment edge and pending-write rows, which the
 /// residue digest already covers. The blob store itself is compared by
 /// `attachment_blob_store_differential_agrees` in the same crate, which runs
 /// the same three-backend comparison over SQLite memory, file and S3 blob
@@ -206,33 +206,9 @@ const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Fallible [`AttachmentManifest`] methods the harness deliberately does not
-/// drive. `AttachmentManifest` is a supertrait of `SessionCommitStore`, so its
-/// surface is part of the runtime store contract this differential gates.
-const ATTACHMENT_MANIFEST_EXCLUSIONS: &[(&str, &str)] = &[
-    (
-        "list_uncommitted",
-        "factory-wide read: both durable backends hold one manifest for every session the factory \
-         owns, so this answers with the other cases' intents in the one shared PostgreSQL \
-         database and its answer is neither stable nor session-scoped. Owned by the attachment \
-         manifest conformance suite, which owns its database",
-    ),
-    (
-        "list_all_refs",
-        "factory-wide read over every session the factory owns; see list_uncommitted",
-    ),
-    (
-        "has_live_ref_for_id",
-        "factory-wide liveness predicate feeding the GC lever, answered over every session the \
-         factory owns; owned by the session_delete_blob_reclaim suite",
-    ),
-    (
-        "forget_aged_uncommitted_intents",
-        "factory-wide sweep: it forgets aged intents belonging to every session the factory owns, \
-         so a sweep launched mid-run would collect the other cases' intents and report their loss \
-         as this harness's own defect. Same argument as StoreMaintenance::gc_unreachable",
-    ),
-];
+/// Every `AttachmentReferrers` method is driven. The trait is part of the
+/// runtime store contract, with no excluded attachment-referrer methods.
+const ATTACHMENT_REFERRERS_EXCLUSIONS: &[(&str, &str)] = &[];
 
 /// Extract the fallible method names declared directly in `trait_name`.
 ///
@@ -345,8 +321,8 @@ fn store_trait_surface_is_fully_gated() {
         }
     }
 
-    for method in fallible_trait_methods(ATTACHMENT_MANIFEST_SOURCE, "AttachmentManifest") {
-        let exclusion = ATTACHMENT_MANIFEST_EXCLUSIONS
+    for method in fallible_trait_methods(ATTACHMENT_REFERRERS_SOURCE, "AttachmentReferrers") {
+        let exclusion = ATTACHMENT_REFERRERS_EXCLUSIONS
             .iter()
             .find(|(name, _)| *name == method);
         let driven = harness_drives(&sources, &method);
@@ -355,12 +331,12 @@ fn store_trait_surface_is_fully_gated() {
             (false, Some((_, reason))) => {
                 assert!(
                     !reason.trim().is_empty(),
-                    "exclusion for `AttachmentManifest::{method}` carries no reason"
+                    "exclusion for `AttachmentReferrers::{method}` carries no reason"
                 );
                 excluded += 1;
             }
-            (true, Some(_)) => stale_exclusions.push(format!("AttachmentManifest::{method}")),
-            (false, None) => missing.push(format!("AttachmentManifest::{method}")),
+            (true, Some(_)) => stale_exclusions.push(format!("AttachmentReferrers::{method}")),
+            (false, None) => missing.push(format!("AttachmentReferrers::{method}")),
         }
     }
 
@@ -428,7 +404,7 @@ fn store_trait_surface_is_fully_gated() {
         excluded,
         SESSION_STORE_EXCLUSIONS.len()
             + ATTACHMENT_STORE_EXCLUSIONS.len()
-            + ATTACHMENT_MANIFEST_EXCLUSIONS.len(),
+            + ATTACHMENT_REFERRERS_EXCLUSIONS.len(),
         "every exclusion must name a method the gated traits still declare"
     );
 }

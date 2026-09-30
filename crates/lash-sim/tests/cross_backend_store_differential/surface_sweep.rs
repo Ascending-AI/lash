@@ -195,8 +195,11 @@ pub(super) enum SurfaceMethod {
     },
     ListControlIntents,
     AbortUnknownAttachmentWrite,
-    CommitUnknownAttachmentRefs,
+    AcquireUnknownAttachmentRefs,
     ForgetUnknownAttachment,
+    ProbeAttachmentReferrers,
+    ProbeSessionReferrerState,
+    EndAttachmentReferrer,
     Vacuum,
 }
 
@@ -292,8 +295,11 @@ impl SurfaceMethod {
             } => "surface:open_root_intent_fork",
             Self::ListControlIntents => "surface:list_control_intents",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
-            Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
+            Self::AcquireUnknownAttachmentRefs => "surface:acquire_attachment_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
+            Self::ProbeAttachmentReferrers => "surface:attachment_referrers",
+            Self::ProbeSessionReferrerState => "surface:session_referrer_state",
+            Self::EndAttachmentReferrer => "surface:end_attachment_referrer",
             Self::Vacuum => "surface:vacuum",
         }
     }
@@ -307,13 +313,13 @@ fn unknown_attachment_id() -> AttachmentId {
     AttachmentId::parse(UNKNOWN_ATTACHMENT_ID).expect("the unknown-attachment id must parse")
 }
 
-fn unknown_attachment_intent(session_id: &SessionId) -> lash_core::AttachmentIntent {
-    lash_core::AttachmentIntent {
+fn unknown_attachment_write(session_id: &SessionId) -> lash_core::AttachmentWrite {
+    lash_core::AttachmentWrite {
         attachment_id: unknown_attachment_id(),
-        session_id: session_id.clone(),
-        canonical_uri: format!("lash-attachment://blake3/{UNKNOWN_ATTACHMENT_ID}"),
-        intent_at_epoch_ms: 1_000,
-        owner: None,
+        claim: lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::Session(
+            session_id.clone(),
+        ))
+        .expect("claim"),
     }
 }
 
@@ -347,7 +353,7 @@ fn surface_run_spec_hash() -> Option<lash_core::RunSpecHash> {
 const UNCOMMITTED_TURN_ID: &str = "fig-2841-uncommitted-turn";
 /// The turn id the surface sweep's seed commit stamps.
 const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
-/// An attachment id no case ever writes. The manifest drivers use
+/// An attachment id no case ever writes. The attachment-referrer drivers use
 /// it so the inventory covers those methods without mutating an attachment the
 /// surrounding case depends on: an unknown entity is itself a refusal driver,
 /// and whatever a backend answers, the no-residue law still applies.
@@ -539,8 +545,11 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
             surface(SurfaceMethod::AbortUnknownAttachmentWrite),
-            surface(SurfaceMethod::CommitUnknownAttachmentRefs),
+            surface(SurfaceMethod::AcquireUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
+            surface(SurfaceMethod::ProbeAttachmentReferrers),
+            surface(SurfaceMethod::ProbeSessionReferrerState),
+            surface(SurfaceMethod::EndAttachmentReferrer),
             // With no pending follow-on on the head the raise meets its
             // `FollowOnNotPending` refusal.
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
@@ -751,8 +760,11 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
-            surface(SurfaceMethod::CommitUnknownAttachmentRefs),
+            surface(SurfaceMethod::AcquireUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
+            surface(SurfaceMethod::ProbeAttachmentReferrers),
+            surface(SurfaceMethod::ProbeSessionReferrerState),
+            surface(SurfaceMethod::EndAttachmentReferrer),
             surface(SurfaceMethod::Vacuum),
         ],
     }
@@ -1652,8 +1664,8 @@ impl BackendRunner {
                     .len()
             ),
             SurfaceMethod::AbortUnknownAttachmentWrite => {
-                let intent = unknown_attachment_intent(&session_id);
-                let outcome = match store.begin_attachment_write(intent.clone()).await? {
+                let intent = unknown_attachment_write(&session_id);
+                let outcome = match store.begin_attachment_write(&intent).await? {
                     lash_core::AttachmentWriteFence::Granted(permit) => {
                         store.abort_attachment_write(&intent, permit).await?;
                         "aborted"
@@ -1662,15 +1674,38 @@ impl BackendRunner {
                 };
                 format!("outcome={outcome}")
             }
-            SurfaceMethod::CommitUnknownAttachmentRefs => {
+            SurfaceMethod::AcquireUnknownAttachmentRefs => {
                 store
-                    .commit_refs(&session_id, &[unknown_attachment_id()])
+                    .acquire_attachment_refs(
+                        &unknown_attachment_write(&session_id).claim,
+                        &[unknown_attachment_id()],
+                    )
                     .await?;
-                "committed".to_string()
+                "acquired".to_string()
             }
             SurfaceMethod::ForgetUnknownAttachment => {
-                store.forget(&session_id, &unknown_attachment_id()).await?;
+                store
+                    .forget_attachment_ref(
+                        &lash_core::ArtifactReferrer::Session(session_id.clone()),
+                        &unknown_attachment_id(),
+                    )
+                    .await?;
                 "forgotten".to_string()
+            }
+            SurfaceMethod::ProbeAttachmentReferrers => format!(
+                "refs={:?}",
+                store.attachment_referrers(&unknown_attachment_id()).await?
+            ),
+            SurfaceMethod::ProbeSessionReferrerState => format!(
+                "state={:?}",
+                store.session_referrer_state(&session_id).await?
+            ),
+            SurfaceMethod::EndAttachmentReferrer => {
+                let referrer = lash_core::ArtifactReferrer::ProcessRecord(
+                    lash_core::ProcessId::fixture(&format!("surface-ended:{session_id}")),
+                );
+                store.end_attachment_referrer(&referrer).await?;
+                "ended".to_string()
             }
             SurfaceMethod::Vacuum => {
                 let report = store

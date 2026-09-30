@@ -23,15 +23,14 @@ use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::{
-    AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, DeploymentStore,
-    EffectAddress, ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint,
-    LeaseOwnerIdentity, PendingTurnInputDraft, PluginNamespaceState, PluginState,
-    ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
-    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
-    SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
-    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress,
-    TurnInputStateKind,
+    AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
+    ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
+    PluginNamespaceState, PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent,
+    QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore,
+    RuntimeTurnCommitStamp, SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord,
+    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication,
+    TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -230,7 +229,7 @@ enum StoreOperation {
         turn_id: &'static str,
         owed_turn_id: Option<&'static str>,
     },
-    RecordAttachmentIntent,
+    RecordAttachmentWrite,
     ReclaimRetainedEvidence,
     PinLeaf,
     ForkAtLeaf,
@@ -318,7 +317,7 @@ impl StoreOperation {
     fn label(&self) -> &'static str {
         match self {
             Self::Commit { label, .. } | Self::CommitFollowOn { label, .. } => label,
-            Self::RecordAttachmentIntent => "record_attachment_intent",
+            Self::RecordAttachmentWrite => "record_attachment_write",
             Self::ReclaimRetainedEvidence => "reclaim_terminal_evidence_with_retained_fork",
             Self::PinLeaf => "pin_leaf",
             Self::ForkAtLeaf => "fork_at_leaf",
@@ -934,8 +933,7 @@ fn differential_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
 
-/// The process that owns the differential's process-scoped attachment. No
-/// registry row backs it: the manifest records its owner by id alone.
+/// The process identity used by the session-ownership fixtures.
 fn differential_process_owner_id() -> lash_sansio::ProcessId {
     lash_sansio::ProcessId::fixture("differential-process-owner")
 }
@@ -950,15 +948,7 @@ fn differential_process_attachment_id() -> AttachmentId {
 
 // Row shapes for the SQL observation queries. Named because the tuples are wide
 // enough that clippy flags them inline, and a name reads better at the use site.
-type AttachmentRow = (
-    String,
-    String,
-    i64,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-    Option<String>,
-);
+type AttachmentRow = (String, String, String, bool, bool, i64);
 type QueuedWorkBatchRow = (
     i64,
     String,
@@ -985,14 +975,6 @@ enum RawDurableReader {
         session_id: SessionId,
         store: Option<Arc<dyn RuntimeStore>>,
     },
-}
-
-fn decode_attachment_owner_kind(value: Option<&str>) -> Option<AttachmentOwnerKind> {
-    value.map(|value| match value {
-        "turn" => AttachmentOwnerKind::Turn,
-        "process" => AttachmentOwnerKind::Process,
-        other => panic!("unknown attachment owner kind `{other}`"),
-    })
 }
 
 fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
@@ -1419,7 +1401,7 @@ impl BackendRunner {
                     });
                 self.commit_and_track(commit, CheckpointSpec::Empty).await
             }
-            StoreOperation::RecordAttachmentIntent => {
+            StoreOperation::RecordAttachmentWrite => {
                 attachment_seeding::seed_differential_attachment_rows(
                     self.store().as_ref(),
                     &self.session_id,

@@ -152,17 +152,13 @@ pub(super) struct RuntimeTurnCommitObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct AttachmentManifestObservation {
+pub(super) struct AttachmentReferrerObservation {
     pub(super) attachment_id: AttachmentId,
-    pub(super) canonical_uri: String,
-    pub(super) intent_at_epoch_ms: u64,
-    // Commit and upload times are store-authoritative (database time in
-    // PostgreSQL, injected host time locally). The logical lifecycle facts are
-    // compared explicitly.
+    pub(super) referrer_kind: String,
+    pub(super) referrer_id: String,
+    pub(super) edge: bool,
     pub(super) written: bool,
-    pub(super) committed: bool,
-    pub(super) owner_kind: Option<AttachmentOwnerKind>,
-    pub(super) owner_id: Option<String>,
+    pub(super) pending_writes: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,7 +202,7 @@ pub(super) struct RawDurableState {
     pub(super) checkpoint: Option<CheckpointObservation>,
     pub(super) durable_nodes: Vec<DurableNode>,
     pub(super) runtime_turn_commits: Vec<RuntimeTurnCommitObservation>,
-    pub(super) attachment_manifest: Vec<AttachmentManifestObservation>,
+    pub(super) attachment_referrers: Vec<AttachmentReferrerObservation>,
     pub(super) node_anchors: Vec<NodeAnchorObservation>,
     pub(super) usage_deltas: Vec<UsageDeltaObservation>,
     pub(super) session_meta: Option<SessionMetaObservation>,

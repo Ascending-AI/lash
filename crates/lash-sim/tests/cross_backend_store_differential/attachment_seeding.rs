@@ -1,59 +1,36 @@
-//! Manifest rows the differential compares across backends.
-//!
-//! Adoption is gated on recorded upload evidence, so seeding a comparable row
-//! is no longer a single write: the attempt is minted under the backend's
-//! write fence and stamped only when the put succeeded. Both the stamped and
-//! the unstamped shape must read back identically on every backend.
-
-use lash_core::store::StoreError;
-use lash_core::{AttachmentIntent, AttachmentOwner, AttachmentWriteFence, SessionId};
-
+#![expect(
+    clippy::expect_used,
+    reason = "fixture claims use known supported referrer kinds"
+)]
+//! Evidence-backed session edge and independent process pending write.
 use super::RuntimeStore;
-
-/// Seed the two manifest rows the differential observes.
-///
-/// The turn-owned row carries positive upload evidence; the process-owned row
-/// is deliberately left unstamped, because an attempt that never completed
-/// must also read back identically on every backend. The process owner
-/// identity is `(process_id, incarnation)`, so this row is what proves both
-/// backends persist and return the incarnation rather than the turn shape that
-/// leaves the column NULL. The fixture wires no process registry, so the row
-/// stays an immortal root everywhere.
+use lash_core::store::StoreError;
+use lash_core::{
+    ArtifactReferrer, AttachmentWrite, AttachmentWriteFence, ProcessId, ReferrerClaim, SessionId,
+};
 pub(crate) async fn seed_differential_attachment_rows(
     store: &dyn RuntimeStore,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    let operation =
-        lash_core::store::OperationId::turn(session_id, "attachment-adoption", "differential")
-            .storage_key()?;
-    let turn_owned = AttachmentIntent {
+    let completed = AttachmentWrite {
         attachment_id: super::differential_attachment_id(),
-        session_id: session_id.clone(),
-        canonical_uri: "lash-attachment://blake3/differential-attachment".to_string(),
-        intent_at_epoch_ms: 1_000,
-        owner: Some(AttachmentOwner::Turn { id: operation }),
+        claim: ReferrerClaim::unguarded(ArtifactReferrer::Session(session_id.clone()))
+            .expect("session claim"),
     };
-    let AttachmentWriteFence::Granted(turn_permit) =
-        store.begin_attachment_write(turn_owned.clone()).await?
+    let AttachmentWriteFence::Granted(permit) = store.begin_attachment_write(&completed).await?
     else {
-        panic!("the differential digest must grant its writer");
+        panic!("free digest must grant")
     };
-    store
-        .complete_attachment_write(&turn_owned, turn_permit)
-        .await?;
-
-    let process_owned = AttachmentIntent {
+    store.complete_attachment_write(&completed, permit).await?;
+    let pending = AttachmentWrite {
         attachment_id: super::differential_process_attachment_id(),
-        session_id: session_id.clone(),
-        canonical_uri: "lash-attachment://blake3/differential-process-attachment".to_string(),
-        intent_at_epoch_ms: 1_000,
-        owner: Some(AttachmentOwner::Process {
-            process_id: super::differential_process_owner_id(),
-        }),
+        claim: ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(ProcessId::fixture(
+            session_id.as_str(),
+        )))
+        .expect("process claim"),
     };
-    let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(process_owned).await?
-    else {
-        panic!("the process-owned digest must grant its writer");
+    let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(&pending).await? else {
+        panic!("free digest must grant")
     };
     Ok(())
 }

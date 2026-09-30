@@ -6,7 +6,7 @@ pub(super) fn attachment_adoption_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::AttachmentAdoption,
         operations: vec![
-            StoreOperation::RecordAttachmentIntent,
+            StoreOperation::RecordAttachmentWrite,
             StoreOperation::Commit {
                 label: "adopt_attachment_in_runtime_commit",
                 expected_head_revision: 0,

@@ -141,7 +141,7 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
 #[tokio::test]
 async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("unknown-attachment-owner.db");
+    let path = dir.path().join("unknown-attachment-referrer.db");
     let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open store");
@@ -149,20 +149,20 @@ async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("allow unknown durable enum injection");
     raw.execute(
-        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-owner', 'unknown', 'opaque')",
+        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-referrer', 'unknown', 'opaque')",
         [],
     )
-    .expect("insert unknown owner kind");
+    .expect("insert unknown referrer kind");
 
     let error = lash_core_execution::AttachmentReferrers::attachment_referrers(
         &store,
-        &lash_core_execution::AttachmentId::parse("unknown-owner").unwrap(),
+        &lash_core_execution::AttachmentId::parse("unknown-referrer").unwrap(),
     )
     .await
-    .expect_err("unknown SQLite attachment owner kind must refuse");
+    .expect_err("unknown SQLite attachment referrer kind must refuse");
     assert!(
         matches!(error, StoreError::Incompatible { .. }),
-        "SQLite must return the typed attachment-owner incompatibility, got {error:?}"
+        "SQLite must return the typed attachment-referrer incompatibility, got {error:?}"
     );
 }
 

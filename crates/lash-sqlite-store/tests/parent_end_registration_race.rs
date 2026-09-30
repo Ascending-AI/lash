@@ -86,7 +86,6 @@ async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core_executio
 async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
     let dir = tempfile::tempdir().expect("tempdir");
     let process_path = dir.path().join("processes.db");
-    let sessions = dir.path().join("sessions");
     let registry = Arc::new(
         SqliteProcessRegistry::open(&process_path)
             .await

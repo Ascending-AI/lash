@@ -105,7 +105,7 @@ pub enum AttachmentCondemnation {
 /// error and, past the retry bound, its typed stall.
 ///
 /// The restoring write's attempt identity remains private to the store
-/// implementation. A host needs the owning session to establish quiescence
+/// implementation. A host needs the restoring referrer to establish quiescence
 /// before recovery, but must never be able to present or settle the write's
 /// fence identity itself.
 #[derive(Clone, Debug, PartialEq, Eq)]

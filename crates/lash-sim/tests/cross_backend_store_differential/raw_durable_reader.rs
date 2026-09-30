@@ -232,37 +232,30 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
-                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
-                    "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
-                            committed_at_ms, owner_kind, owner_id
-                     FROM lash_attachment_manifest
-                     WHERE session_id = $1
-                     ORDER BY attachment_id ASC",
-                )
+                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as("SELECT r.attachment_id, r.referrer_kind, r.referrer_id,
+ EXISTS(SELECT 1 FROM lash_attachment_referrer_edges e WHERE e.attachment_id = r.attachment_id AND e.referrer_kind = r.referrer_kind AND e.referrer_id = r.referrer_id),
+ EXISTS(SELECT 1 FROM lash_attachment_uploads u WHERE u.attachment_id = r.attachment_id),
+ (SELECT COUNT(*) FROM lash_attachment_pending_writes p WHERE p.attachment_id = r.attachment_id AND p.referrer_kind = r.referrer_kind AND p.referrer_id = r.referrer_id)
+ FROM (SELECT attachment_id, referrer_kind, referrer_id FROM lash_attachment_referrer_edges
+ UNION SELECT attachment_id, referrer_kind, referrer_id FROM lash_attachment_pending_writes) r
+ WHERE (r.referrer_kind = 'session' AND r.referrer_id = $1)
+ OR (r.referrer_kind = 'process_record' AND r.referrer_id = $2)
+ ORDER BY r.attachment_id, r.referrer_kind, r.referrer_id")
                 .bind(session_id.as_str())
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres attachment manifest");
-                let attachment_manifest = attachment_rows
+                .bind(lash_sansio::ProcessId::fixture(session_id.as_str()).as_str())
+                .fetch_all(pool).await.expect("read attachment roots");
+                let attachment_referrers = attachment_rows
                     .into_iter()
                     .map(
-                        |(
-                            attachment_id,
-                            canonical_uri,
-                            intent_at_epoch_ms,
-                            written_at_epoch_ms,
-                            committed_at_epoch_ms,
-                            owner_kind,
-                            owner_id,
-                        )| AttachmentManifestObservation {
-                            attachment_id: AttachmentId::parse(attachment_id)
-                                .expect("valid attachment id"),
-                            canonical_uri,
-                            intent_at_epoch_ms: intent_at_epoch_ms as u64,
-                            written: written_at_epoch_ms.is_some(),
-                            committed: committed_at_epoch_ms.is_some(),
-                            owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
-                            owner_id,
+                        |(id, referrer_kind, referrer_id, edge, written, pending_writes)| {
+                            AttachmentReferrerObservation {
+                                attachment_id: AttachmentId::parse(id).expect("digest"),
+                                referrer_kind,
+                                referrer_id,
+                                edge,
+                                written,
+                                pending_writes,
+                            }
                         },
                     )
                     .collect();
@@ -388,7 +381,7 @@ impl RawDurableReader {
                     checkpoint,
                     durable_nodes,
                     runtime_turn_commits,
-                    attachment_manifest,
+                    attachment_referrers,
                     node_anchors,
                     usage_deltas,
                     session_meta,
@@ -510,49 +503,47 @@ pub(super) async fn read_sqlite_durable_state(
             )
             .collect()
     };
-    let attachment_manifest = {
-        let mut statement = connection
-            .prepare(
-                "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
-                        committed_at_ms, owner_kind, owner_id
-                 FROM attachment_manifest
-                 WHERE session_id = ?1
-                 ORDER BY attachment_id ASC",
-            )
-            .expect("prepare SQLite attachment-manifest read");
+    let attachment_referrers = {
+        let mut statement = connection.prepare("SELECT r.attachment_id, r.referrer_kind, r.referrer_id,
+ EXISTS(SELECT 1 FROM attachment_referrer_edges e WHERE e.attachment_id = r.attachment_id AND e.referrer_kind = r.referrer_kind AND e.referrer_id = r.referrer_id),
+ EXISTS(SELECT 1 FROM attachment_uploads u WHERE u.attachment_id = r.attachment_id),
+ (SELECT COUNT(*) FROM attachment_pending_writes p WHERE p.attachment_id = r.attachment_id AND p.referrer_kind = r.referrer_kind AND p.referrer_id = r.referrer_id)
+ FROM (SELECT attachment_id, referrer_kind, referrer_id FROM attachment_referrer_edges
+ UNION SELECT attachment_id, referrer_kind, referrer_id FROM attachment_pending_writes) r
+ WHERE (r.referrer_kind = 'session' AND r.referrer_id = ?1)
+ OR (r.referrer_kind = 'process_record' AND r.referrer_id = ?2)
+ ORDER BY r.attachment_id, r.referrer_kind, r.referrer_id").expect("prepare attachment roots");
         statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                ))
-            })
-            .expect("read SQLite attachment manifest")
+            .query_map(
+                rusqlite::params![
+                    session_id.as_str(),
+                    lash_sansio::ProcessId::fixture(session_id.as_str()).as_str()
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, bool>(3)?,
+                        row.get::<_, bool>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .expect("read attachment roots")
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite attachment manifest")
+            .expect("decode roots")
             .into_iter()
             .map(
-                |(
-                    attachment_id,
-                    canonical_uri,
-                    intent_at_epoch_ms,
-                    written_at_epoch_ms,
-                    committed_at_epoch_ms,
-                    owner_kind,
-                    owner_id,
-                )| AttachmentManifestObservation {
-                    attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
-                    canonical_uri,
-                    intent_at_epoch_ms: intent_at_epoch_ms as u64,
-                    written: written_at_epoch_ms.is_some(),
-                    committed: committed_at_epoch_ms.is_some(),
-                    owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
-                    owner_id,
+                |(id, referrer_kind, referrer_id, edge, written, pending_writes)| {
+                    AttachmentReferrerObservation {
+                        attachment_id: AttachmentId::parse(id).expect("digest"),
+                        referrer_kind,
+                        referrer_id,
+                        edge,
+                        written,
+                        pending_writes,
+                    }
                 },
             )
             .collect()
@@ -730,7 +721,7 @@ pub(super) async fn read_sqlite_durable_state(
         checkpoint,
         durable_nodes,
         runtime_turn_commits,
-        attachment_manifest,
+        attachment_referrers,
         node_anchors,
         usage_deltas,
         session_meta,

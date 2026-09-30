@@ -18,7 +18,7 @@
 //! | [`completion_ownership`] | completion keys the sim's deferring tools registered and the host resolved ([`Fact::CompletionRegistered`], [`Fact::CompletionResolved`]); the committed transcript's tool results |
 //! | [`effect_window`] | runs of the sim's tool bodies with the engine's failed-attempt count at each run ([`Fact::ToolExecuted`]); counted executions of the effects the harness runs ([`Fact::EffectRan`]) |
 //! | [`obligations_settled`] | every ADR 0109 obligation column family in every store database |
-//! | [`artifact_reachability`] | `artifact_refs`, `artifact_referrer_edges`, `artifact_referrer_fences` and `artifact_cleanup_obligations` |
+//! | [`artifact_reachability`] | `artifact_refs`, `artifact_referrer_edges`, `referrer_fences` and `artifact_cleanup_obligations` |
 //! | [`tool_call_identity`] | tool-body runs ([`Fact::ToolExecuted`]) and the committed transcript's tool calls |
 //! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_roots` and `session_root_inputs` |
 //! | [`start_originator`] | the host's process starts, each with the originator it requested and the one the answered process carries ([`Fact::ProcessStartAnswered`]) |

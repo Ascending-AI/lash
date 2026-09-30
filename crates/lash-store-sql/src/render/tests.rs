@@ -17,8 +17,7 @@ const TABLES: &[&str] = &[
 /// the layout of a deployment that holds one file.
 const MAIN: TableLayout = TableLayout::new(&[SchemaTables::new("main", TABLES)]);
 
-/// The catalog beside a bound process registry: the two-database layout the
-/// attachment GC's owner-death proof needs.
+/// A catalog beside a process registry, exercising cross-database rendering.
 const MAIN_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
     SchemaTables::new(
         "main",

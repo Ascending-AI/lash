@@ -359,7 +359,7 @@ impl StoreSnapshot {
         for row in read(
             stores,
             core,
-            "SELECT referrer_kind, referrer_id FROM artifact_referrer_fences",
+            "SELECT referrer_kind, referrer_id FROM referrer_fences",
         )? {
             snapshot.fences.insert((
                 required(&row, "referrer_kind"),

@@ -52,18 +52,6 @@ impl ResidueDigest {
 /// SQLite table name is what the read covers, so the catalog walk skips it.
 /// `?1`/`$1` is the session id.
 const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
-    // Condemnation rows are keyed by attachment, not by session, so they are
-    // scoped through this session's manifest rows.
-    (
-        "attachment_condemnations",
-        "attachment_condemnations",
-        "SELECT * FROM attachment_condemnations
-         WHERE attachment_id IN
-             (SELECT attachment_id FROM attachment_manifest WHERE session_id = ?1)",
-        "SELECT to_jsonb(t)::text FROM lash_attachment_condemnations t
-         WHERE attachment_id IN
-             (SELECT attachment_id FROM lash_attachment_manifest WHERE session_id = $1)",
-    ),
     (
         "queued_work_items",
         "queued_work_items",
