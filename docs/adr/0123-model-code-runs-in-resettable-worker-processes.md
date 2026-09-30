@@ -424,6 +424,13 @@ or frame depth, measured by the VM against the run's own bounds — is recorded:
 the process terminal `process_execution_bound_exhausted`, or the cell's
 program failure (FIG-4451).
 
+A retryable worker infrastructure failure follows the same rule during cell
+setup as during execution. A crashed or unresponsive worker, a broken protocol
+or a refused payload fails the attempt retryably, including during source
+analysis and compilation. `PoolError::is_host_verdict` uses the infrastructure
+outcome's retryability classification. The cell records no Host failure for
+it, and its retry runs the same cell on a replacement worker (FIG-4459).
+
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains
 in force across every effect response and if the parent dies. Only reset for a

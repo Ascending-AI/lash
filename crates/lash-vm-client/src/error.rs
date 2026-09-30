@@ -27,23 +27,22 @@ pub enum PoolError {
 
 impl PoolError {
     /// Whether this is a verdict of the host and the attempt that met it:
-    /// its worker budget (a deadline, cumulative CPU or replacement
-    /// attempts), its pool's capacity, or its recovery store. It is read
+    /// its worker failure, worker budget (a deadline, cumulative CPU or
+    /// replacement attempts), pool capacity, or recovery store. It is read
     /// live, outside any recorded step, and a replay or another host with
     /// capacity answers it differently, so it fails the attempt and is never
-    /// an execution's recorded outcome (FIG-4451).
+    /// an execution's recorded outcome (FIG-4451, FIG-4459). Infrastructure
+    /// faults use the same retryability classification during setup and
+    /// execution; only a limit of the run itself remains a recorded outcome.
     pub fn is_host_verdict(&self) -> bool {
         match self {
-            Self::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
-                limit.is_host_verdict()
-            }
+            Self::Infrastructure(outcome) => outcome.is_retryable(),
             Self::Recovery { .. }
             | Self::QueueFull { .. }
             | Self::CheckoutTimedOut
             | Self::RestartStorm
             | Self::RetryLimitExceeded => true,
             Self::ProtocolVersion(_)
-            | Self::Infrastructure(_)
             | Self::InvalidConfiguration
             | Self::UnsupportedPlatform
             | Self::Io { .. } => false,
@@ -79,5 +78,40 @@ impl PoolError {
 impl From<CodecRefusal> for PoolError {
     fn from(error: CodecRefusal) -> Self {
         InfrastructureOutcome::from(error).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_vm_protocol::WorkerLimit;
+
+    #[test]
+    fn retryable_worker_faults_are_host_verdicts() {
+        for outcome in [
+            InfrastructureOutcome::WorkerCrashed {
+                evidence: SupervisorEvidence::EndOfStream,
+            },
+            InfrastructureOutcome::WorkerUnresponsive { silent_ms: 10 },
+            InfrastructureOutcome::ProtocolViolation {
+                reason: "lost worker response".into(),
+            },
+            InfrastructureOutcome::PayloadTooLarge { limit: 1, size: 2 },
+            InfrastructureOutcome::WorkerLimitExceeded {
+                limit: WorkerLimit::Deadline,
+            },
+        ] {
+            assert!(
+                PoolError::Infrastructure(outcome.clone()).is_host_verdict(),
+                "{outcome:?}: a retryable worker fault must fail the attempt"
+            );
+        }
+        for limit in [WorkerLimit::Fuel, WorkerLimit::Heap, WorkerLimit::Depth] {
+            assert!(
+                !PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit })
+                    .is_host_verdict(),
+                "{limit:?}: the run's own limit remains a recorded outcome"
+            );
+        }
     }
 }

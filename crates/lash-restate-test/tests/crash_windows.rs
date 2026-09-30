@@ -1698,3 +1698,6 @@ mod journal_settlement_cleanup;
 
 #[path = "crash_windows/worker_verdicts.rs"]
 mod worker_verdicts;
+
+#[path = "crash_windows/worker_crashes.rs"]
+mod worker_crashes;

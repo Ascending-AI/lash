@@ -1294,12 +1294,12 @@ fn exec_setup_failure_or_stop(
     exec_setup_failure(lash_core::CellFailure::new(kind, error))
 }
 
-/// A worker service fault in a cell. A host verdict — its worker budget,
-/// its pool's capacity or its recovery store
+/// A worker service fault in a cell. A host verdict — its retryable worker
+/// failure, worker budget, pool capacity or recovery store
 /// ([`lash_vm_client::PoolError::is_host_verdict`]) — is read live, outside
 /// any recorded step, and a replay or another host with capacity answers it
 /// differently: it fails the attempt retryably, so the cell seals nothing
-/// and the model never sees it (FIG-4451). Any other fault is the cell's
+/// and the model never sees it (FIG-4451, FIG-4459). Any other fault is the cell's
 /// host failure.
 fn worker_setup_failure(
     state: &mut RlmExecutionState,
