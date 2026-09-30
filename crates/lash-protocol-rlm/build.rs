@@ -1,7 +1,7 @@
 //! Emits the declaration order of the snapshot types declared in this crate's
 //! own `src/executor/state.rs`.
 //!
-//! It reads nothing but that file, and it must stay that way. Bazel compiles a
+//! It reads nothing but that file, and it must stay that way. Buck2 compiles a
 //! build script's dependency closure in the exec configuration as well as the
 //! target one, so a first-party dependency here duplicates the whole runtime
 //! tree beneath it at `opt-level=3` for artifacts no product consumes. The

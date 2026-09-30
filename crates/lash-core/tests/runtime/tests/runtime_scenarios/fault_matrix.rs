@@ -571,7 +571,7 @@ fn run_fast_gate_with_fake_cargo_inheriting(
 }
 
 /// The repository root, both under Cargo (an absolute path two levels above
-/// the crate) and under Bazel, where `CARGO_MANIFEST_DIR` is the
+/// the crate) and under Buck2, where `CARGO_MANIFEST_DIR` is the
 /// runfiles-relative package directory and the root is the working directory.
 fn repository_root() -> &'static std::path::Path {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -26,9 +26,9 @@ use lash_restate::SweptObject;
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
 /// The N+1 (`synthetic-next`) build's `lash-upgrade-node`.
 pub const NODE_NEXT_ENV: &str = "LASH_UPGRADE_NODE_NEXT";
-/// The Bazel-built N operator binary.
+/// The Buck2-built N operator binary.
 pub const LASHCTL_N_ENV: &str = "LASH_UPGRADE_LASHCTL_N";
-/// The Bazel-built synthetic-next operator binary.
+/// The Buck2-built synthetic-next operator binary.
 pub const LASHCTL_NEXT_ENV: &str = "LASH_UPGRADE_LASHCTL_NEXT";
 /// The PostgreSQL database every PostgreSQL case migrates and serves.
 pub const POSTGRES_URL_ENV: &str = "LASH_POSTGRES_DATABASE_URL";

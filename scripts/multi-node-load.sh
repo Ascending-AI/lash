@@ -132,34 +132,27 @@ labels=("//crates/lashctl:lashctl")
 for binary in "${binaries[@]}"; do labels+=("//runbooks/restate-postgres-workers:${binary}__bin"); done
 # The rolling deploy's replacement generation (FIG-4169): the same worker and
 # its operator binary built as the synthetic N+1, resolved from the generated
-# feature variants so a feature-set change moves no recipe.
-synthetic_next() {
-  awk -v target="$2" '
-    /^lash_rust_feature_binary\(/ { block = 1; name = ""; next_build = 0 }
-    block && name == "" && /^    name = "/ { split($0, part, "\""); name = part[2] }
-    block && /^    crate_features = \[$/ { getline; if ($0 ~ /^        "synthetic-next",$/) next_build = 1 }
-    block && /^\)/ { if (index(name, target "__fv_") == 1 && next_build) print name; block = 0 }
-  ' "$1/BUILD.bazel"
+# feature inventory so a feature-set change moves no recipe.
+next_worker="$(python3 scripts/resolve_buck2_target.py \
+  //runbooks/restate-postgres-workers lash-e2e-worker__bin --feature synthetic-next)"
+next_lashctl="$(python3 scripts/resolve_buck2_target.py \
+  //crates/lashctl lashctl --feature synthetic-next)"
+labels+=("$next_worker" "$next_lashctl")
+build_report="target/loadtest-image/build-report.json"
+kiln build --materializations final --build-report "$build_report" "${labels[@]}"
+output() {
+  python3 tools/buck2/outputs.py --report "$build_report" --label "$1" --single
 }
-next_worker="$(synthetic_next runbooks/restate-postgres-workers lash-e2e-worker__bin)"
-next_lashctl="$(synthetic_next crates/lashctl lashctl)"
-for resolved in "$next_worker" "$next_lashctl"; do
-  if [[ -z "$resolved" ]] || [[ "$(printf '%s\n' "$resolved" | wc -l)" -ne 1 ]]; then
-    echo "cannot resolve the synthetic N+1 variants: '$next_worker' '$next_lashctl'" >&2
-    exit 1
-  fi
-done
-labels+=("//runbooks/restate-postgres-workers:$next_worker" "//crates/lashctl:$next_lashctl")
-kiln build --remote_download_outputs=toplevel "${labels[@]}"
-install -m 755 bazel-bin/crates/lashctl/lashctl target/loadtest-image/bin/lashctl
+install -m 755 "$(output //crates/lashctl:lashctl)" target/loadtest-image/bin/lashctl
 rm -rf target/loadtest-image/bin-next
 mkdir -p target/loadtest-image/bin-next
 for binary in "${binaries[@]}"; do
-  install -m 755 "bazel-bin/runbooks/restate-postgres-workers/${binary}__bin" "target/loadtest-image/bin/$binary"
-  install -m 755 "bazel-bin/runbooks/restate-postgres-workers/${binary}__bin" "target/loadtest-image/bin-next/$binary"
+  label="//runbooks/restate-postgres-workers:${binary}__bin"
+  install -m 755 "$(output "$label")" "target/loadtest-image/bin/$binary"
+  install -m 755 "$(output "$label")" "target/loadtest-image/bin-next/$binary"
 done
-install -m 755 "bazel-bin/runbooks/restate-postgres-workers/$next_worker" target/loadtest-image/bin-next/lash-e2e-worker
-install -m 755 "bazel-bin/crates/lashctl/$next_lashctl" target/loadtest-image/bin-next/lashctl
+install -m 755 "$(output "$next_worker")" target/loadtest-image/bin-next/lash-e2e-worker
+install -m 755 "$(output "$next_lashctl")" target/loadtest-image/bin-next/lashctl
 # The chart's schema Job creates the witness role/database using secret values.
 sed '/^CREATE ROLE lash_witness /d; /^CREATE DATABASE lash_witness /d' runbooks/restate-postgres-workers/witness.sql > target/loadtest-image/witness.sql
 image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repository"])' "$run/build-settings.json"):$name"

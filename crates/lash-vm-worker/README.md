@@ -67,10 +67,10 @@ journal replay and live Restate kill points belong to the broker/adapter lanes.
 
 The helper's compiled identity fingerprints its transitive local source, the
 locked dependency graph and compiler pin, plus target, debug assertions and its
-testing feature. Cargo and Bazel run the same `build.rs`; the fingerprint is a
+testing feature. Cargo and Buck2 run the same `build.rs`; the fingerprint is a
 compiler environment input and is never generated into the source tree. Cargo
 watches the closure files and source directories, including source additions
-and removals. Bazel declares the closure as build-script inputs. The inventory
+and removals. Buck2 declares the closure as build-script inputs. The inventory
 generator declares inputs without hashing their contents. Re-exec hosts supply
 their own immutable compiled identity.
 

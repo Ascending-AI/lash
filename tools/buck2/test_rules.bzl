@@ -1,0 +1,178 @@
+"""Cacheable Lash test wrappers with reports and exact run budgets."""
+
+load(":platforms.bzl", "pool_properties")
+
+def _bundle_impl(ctx):
+    directory = ctx.actions.copied_dir("helpers", {
+        "junit_xml.py": ctx.attrs.junit,
+        "postgres_slot_runner.sh": ctx.attrs.postgres,
+        "test_batch_runner.sh": ctx.attrs.batch,
+        "test_batch_launcher.sh": ctx.attrs.batch_launcher,
+        "test_launcher.sh": ctx.attrs.launcher,
+        "test_shard.py": ctx.attrs.shard,
+        "test_timeout.py": ctx.attrs.timeout,
+        "test_xml_runner.sh": ctx.attrs.xml,
+    })
+    return [
+        DefaultInfo(default_output = directory),
+        RunInfo(args = cmd_args(
+            "/usr/bin/bash",
+            directory.project("test_launcher.sh"),
+            hidden = directory,
+        )),
+    ]
+
+test_helper_bundle = rule(
+    impl = _bundle_impl,
+    attrs = {
+        "batch": attrs.source(),
+        "batch_launcher": attrs.source(),
+        "junit": attrs.source(),
+        "launcher": attrs.source(),
+        "postgres": attrs.source(),
+        "shard": attrs.source(),
+        "timeout": attrs.source(),
+        "xml": attrs.source(),
+    },
+)
+
+def _external_test_impl(ctx):
+    test_info = ctx.attrs.test[DefaultInfo]
+    local = read_root_config("kiln", "execution_mode", "remote") == "local"
+    default_executor = CommandExecutorConfig(
+        local_enabled = local,
+        remote_enabled = not local,
+        remote_cache_enabled = not local,
+        remote_execution_properties = ctx.attrs.properties,
+        remote_execution_use_case = "lash",
+    )
+    return [
+        # The public test label is also the workspace all-targets build and
+        # lint label. Forward the native rust_test binary and its diagnostic
+        # subtargets so building or selecting [clippy.txt] cannot skip test
+        # compilation behind the external-runner wrapper.
+        DefaultInfo(
+            default_outputs = test_info.default_outputs,
+            other_outputs = test_info.other_outputs,
+            sub_targets = {
+                name: [providers[DefaultInfo]]
+                for name, providers in test_info.sub_targets.items()
+            },
+        ),
+        ExternalRunnerTestInfo(
+            type = "custom",
+            command = [ctx.attrs.runner[RunInfo]] + ctx.attrs.prefix + [ctx.attrs.test[RunInfo]] + ctx.attrs.args,
+            env = ctx.attrs.env,
+            labels = ctx.attrs.labels,
+            run_from_project_root = True,
+            use_project_relative_paths = True,
+            supports_test_execution_caching = True,
+            default_executor = default_executor,
+            executor_overrides = {
+                "local": CommandExecutorConfig(
+                    local_enabled = True,
+                    remote_enabled = False,
+                    remote_cache_enabled = False,
+                ),
+            },
+        ),
+    ]
+
+_external_test = rule(
+    impl = _external_test_impl,
+    attrs = {
+        "args": attrs.list(attrs.arg()),
+        "env": attrs.dict(attrs.string(), attrs.arg()),
+        "labels": attrs.list(attrs.string()),
+        "prefix": attrs.list(attrs.arg()),
+        "properties": attrs.dict(attrs.string(), attrs.string()),
+        "runner": attrs.dep(providers = [RunInfo]),
+        "test": attrs.dep(providers = [DefaultInfo, RunInfo]),
+    },
+)
+
+def _sharded_test_suite_impl(ctx):
+    compile_info = ctx.attrs.compile[DefaultInfo]
+    return [DefaultInfo(
+        default_outputs = compile_info.default_outputs,
+        other_outputs = compile_info.other_outputs,
+        sub_targets = {
+            name: [providers[DefaultInfo]]
+            for name, providers in compile_info.sub_targets.items()
+        },
+    )]
+
+_sharded_test_suite = rule(
+    impl = _sharded_test_suite_impl,
+    attrs = {
+        "compile": attrs.dep(providers = [DefaultInfo]),
+        "labels": attrs.list(attrs.string()),
+    },
+)
+
+def lash_test_wrapper(
+        name,
+        test,
+        args,
+        env,
+        cpu,
+        memory_kb,
+        timeout_seconds,
+        shard_count = 0,
+        tags = []):
+    labels = list(tags) + [
+        "lash.timeout_seconds={}".format(timeout_seconds),
+        "lash.resource_cpu={}".format(cpu),
+        "lash.resource_memory_kb={}".format(memory_kb),
+    ]
+    run_env = dict(env)
+    run_env.update({
+        "BUILD_WORKSPACE_DIRECTORY": ".",
+        "INSTA_WORKSPACE_ROOT": ".",
+        "KILN_ACTION_CPU_COUNT": str(cpu),
+        "KILN_ACTION_MEMORY_KB": str(memory_kb),
+        "PATH": "/usr/bin:/bin",
+        "TEST_BINARY": "//{}:{}".format(native.package_name(), name),
+        "TEST_TARGET": "//{}:{}".format(native.package_name(), name),
+    })
+    wrappers = []
+    count = shard_count if shard_count > 0 else 1
+    for index in range(count):
+        wrapper_name = name if count == 1 else name + "__shard_{}".format(index + 1)
+        prefix = []
+        wrapper_labels = list(labels)
+        if count > 1:
+            prefix = [
+                "/usr/bin/python3",
+                "$(location //tools/buck2:test_helpers)/test_shard.py",
+                str(count),
+                str(index),
+            ]
+            wrapper_labels.append("lash.shard={}/{}".format(index + 1, count))
+            shard_env = dict(run_env)
+            shard_env["TEST_SHARD_INDEX"] = str(index)
+            shard_env["TEST_TOTAL_SHARDS"] = str(count)
+        else:
+            shard_env = dict(run_env)
+            shard_env["TEST_SHARD_INDEX"] = "0"
+            shard_env["TEST_TOTAL_SHARDS"] = "0"
+        _external_test(
+            name = wrapper_name,
+            runner = "//tools/buck2:test_helpers",
+            test = test,
+            args = args,
+            env = shard_env,
+            labels = wrapper_labels,
+            properties = pool_properties(str(cpu), str(memory_kb)),
+            prefix = prefix,
+            visibility = ["PUBLIC"],
+        )
+        wrappers.append(":" + wrapper_name)
+    if count > 1:
+        _sharded_test_suite(
+            name = name,
+            compile = test,
+            labels = labels,
+            tests = wrappers,
+            visibility = ["PUBLIC"],
+        )

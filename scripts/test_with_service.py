@@ -6,8 +6,8 @@ Two kinds of check live here.
 The contract half holds the wrapper to the CI jobs it runs inside: every suite
 the workflow dispatches goes through the wrapper, the PostgreSQL matrix majors
 are all declared services, the images the wrapper names are the images CI used
-to start by hand, and `store-tests.sh` still keeps its shared-cache environment
-required inside CI while supplying the `kiln build` configuration outside it.
+to start by hand, and `store-tests.sh` keeps service execution local and fresh
+while compilation uses the shared Buck2 pool.
 
 The behaviour half runs the wrapper against a fake `docker` on PATH, so the
 lifecycle it promises -- the chosen port reaching the command, teardown on a
@@ -117,36 +117,27 @@ class WithServiceContract(unittest.TestCase):
     def test_wrapper_supplies_the_names_store_tests_forwards(self) -> None:
         """Every variable the wrapper exports must reach the test spawn."""
         script = STORE_TESTS.read_text(encoding="utf-8")
-        forwarded = set(re.findall(r"--test_env=([A-Z_]+)", script))
         exported = set(re.findall(r"\"(LASH_[A-Z_]+)=", wrapper_text()))
         self.assertTrue(exported)
-        self.assertLessEqual(exported, forwarded)
+        self.assertIn('test_env+=(--test_env "$name")', script)
+        for name in exported:
+            with self.subTest(name=name):
+                self.assertIn(name, script)
 
-    def test_store_tests_keeps_ci_strict_and_supplies_the_kiln_configuration(
-        self,
-    ) -> None:
-        """The generalisation must not weaken CI.
-
-        Inside GitHub Actions both shared-cache variables stay required: an
-        unset value there means the credentials step did not run, and a build
-        that quietly missed the shared cache is the failure this refuses. The
-        default outside CI is the same `--config=shared` `kiln build` uses.
-        """
+    def test_store_tests_keeps_compilation_remote_and_service_execution_local(self) -> None:
         script = STORE_TESTS.read_text(encoding="utf-8")
-        self.assertIn('if [ -n "${GITHUB_ACTIONS:-}" ]; then', script)
-        self.assertIn('"${BAZEL_SHARED_CACHE_FLAGS:?', script)
-        self.assertIn('"${BAZEL_OUTPUT_USER_ROOT:?', script)
-        self.assertIn(
-            ': "${BAZEL_SHARED_CACHE_FLAGS=--config=shared'
-            ' --strategy=TestRunner=local}"',
-            script,
-        )
+        self.assertIn("scripts/hermetic-build.sh test", script)
+        self.assertIn("--local-test-execution", script)
+        self.assertIn("--no-test-cache", script)
+        self.assertIn('--jobs "${LASH_POSTGRES_SLOT_COUNT:-32}"', script)
+        self.assertIn("--test_env=LASH_POSTGRES_SLOT_DIR", script)
+        self.assertNotIn("--no-remote-cache", script)
         # The trust decision itself is never defaulted by store-tests.sh: a run
         # that cannot say which path it is on must fail, not guess. The wrapper
         # takes the trusted, pool-built path for a local run, and never
         # overrides the decision CI already made.
-        self.assertIn('trusted="${BAZEL_TRUSTED:?BAZEL_TRUSTED must be', script)
-        self.assertIn('export BAZEL_TRUSTED="${BAZEL_TRUSTED:-true}"', wrapper_text())
+        self.assertIn('trusted="${BUCK2_TRUSTED:?BUCK2_TRUSTED must be', script)
+        self.assertIn('export BUCK2_TRUSTED="${BUCK2_TRUSTED:-true}"', wrapper_text())
 
     def test_not_covered_names_runnable_recipes(self) -> None:
         """The closing report must not send a reader to a recipe that is gone."""
@@ -237,8 +228,8 @@ class FakeDocker:
     def env(self) -> dict[str, str]:
         merged = os.environ.copy()
         merged["PATH"] = f"{self.directory}:{merged['PATH']}"
-        # The wrapper must not reach the shared cache or a real bazel here.
-        merged["BAZEL_TRUSTED"] = "false"
+        # The wrapper must not reach the shared cache or a real Buck2 client here.
+        merged["BUCK2_TRUSTED"] = "false"
         merged.pop("GITHUB_ACTIONS", None)
         return merged
 

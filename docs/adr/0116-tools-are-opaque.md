@@ -890,7 +890,7 @@ per §7.
 remove. Delete `tests/ui/orchestrating_tool_def_requires_unsafe.{rs,stderr}`,
 `tests/ui/orchestrating_tool_def_unsafe_is_auditable.{rs,stderr}` and
 `tests/ui/tool_call_context_is_journal_incapable.{rs,stderr}`, their lines in
-`tests/ui.rs:78-85` and `BUILD.bazel`'s `ui_fixtures` list.
+`tests/ui.rs:78-85` and `BUCK`'s `ui_fixtures` list.
 
 **`crates/lash-sim`**: `src/request_snapshot.rs:111-131` (the 25 wording),
 `tests/possession_conservation.rs:22`: update.
@@ -1301,7 +1301,7 @@ arc writes only the regions in §10.4.
 | `crates/lash/src/lib.rs` | ADR 0112 runtime (ADR 0113 R and ADR 0114 H hold export regions) | S: `DeclaredStart` exports; D: the `lash::tools` removals |
 | `crates/lash/src/tests/agent_scenarios/harness.rs`, `src/tests/turn_streaming.rs` | ADR 0112 runtime | B: the non-standard batch installer; D: orchestrating cases |
 | `crates/lash/tests/integration/integrator_facade.rs`, `tests/triggers_evidence.rs` | ADR 0112 readers | D |
-| `crates/lash/BUILD.bazel` | ADR 0112 runtime (ADR 0113 K and ADR 0114 H hold targets) | S and D: `ui_fixtures` entries |
+| `crates/lash/BUCK` | ADR 0112 runtime (ADR 0113 K and ADR 0114 H hold targets) | S and D: `ui_fixtures` entries |
 | `.github/workflows/ci.yml`, `.pre-commit-config.yaml`, `scripts/push-gate.sh`, `scripts/test_confidence_gate_ci_contract.py` | none | D: the lint wiring |
 | `runbooks/process-operations/runbook.md`, `examples/agent-workbench/README.md` | ADR 0112 readers | S: the spawn row; D: the `ToolContext` passage |
 

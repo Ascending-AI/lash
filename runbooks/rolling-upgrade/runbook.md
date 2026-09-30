@@ -21,7 +21,7 @@ no provider network call and produces no judged dialect row.
 
 ## The two builds
 
-Bazel builds the two `lash-upgrade-node` variants and `lashctl` for the
+Buck2 builds the two `lash-upgrade-node` variants and `lashctl` for the
 run. The node binaries are:
 
 - **N** is the default build.
@@ -38,7 +38,7 @@ run. The node binaries are:
 `cli_build_generation`, the store's `fleet_generations`, and declared ranges.
 The nodes write their build labels and generations to ready files.
 The operator and scripted node builds enable different Lash features, so the
-ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Bazel targets. `lashctl version`
+ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Buck2 targets. `lashctl version`
 reports the CLI build; the fleet generation comes from each node's ready file.
 
 ## What the run does
@@ -165,7 +165,7 @@ its configured capacity.
 ## Operator commands
 
 The harness runs these exact command forms with `LASH_POSTGRES_DATABASE_URL`
-set to the PostgreSQL test database. Every command uses the Bazel-built
+set to the PostgreSQL test database. Every command uses the Buck2-built
 `lashctl` binary, prints its JSON envelope in the E2E log, and must exit zero.
 `G_N` and `G_N+1` below are the generations in the nodes' ready files.
 

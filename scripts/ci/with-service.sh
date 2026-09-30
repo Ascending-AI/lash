@@ -56,7 +56,7 @@ readonly SERVICES=(pg14 pg16 pg18 s3 restate)
 readonly ALL_SERVICES=(pg14 pg16 pg18 s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
-# `lash_slot_<index>`; `tools/bazel/postgres_slot_runner.sh` hands one to each
+# `lash_slot_<index>`; `tools/buck2/postgres_slot_runner.sh` hands one to each
 # test action so the sharded suites never share tables (FIG-3572).
 readonly POSTGRES_SLOT_COUNT=4
 
@@ -204,19 +204,19 @@ not_covered() {
 NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
   * Test heavy suites
       why: the fault-matrix chunks fork real cargo test invocations of their own,
-           so neither Bazel nor a container owns them
+           so neither Buck2 nor a container owns them
       run: cargo nextest run --profile ci-heavy --workspace --locked --no-fail-fast
   * Build worker E2E binaries
       why: staged between jobs rather than run against a service; trusted
            events take them from the shared build cache
       run: python3 scripts/ci/restate_suite.py stage-binaries //runbooks/restate-postgres-workers <dir>
   * Restate + Postgres + S3 Workers
-      why: shell E2E drivers over release binaries rather than any Cargo or Bazel
+      why: shell E2E drivers over release binaries rather than any Cargo or Buck2
            test label
       run: just restate-postgres-workers-e2e
   * slack-clone e2e feature
       why: the e2e feature is outside the resolved default workspace graph, so it
-           has no Bazel label
+           has no Buck2 label
       run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
   * Functional E2E process operations
       why: a compose runbook that stands up its own S3 service beside Restate and PostgreSQL
@@ -433,7 +433,7 @@ main() {
   # store-tests.sh refuses to guess which build path it is on. CI always sets
   # this from the plan job; a local run takes the trusted, shared-cache path,
   # the same one `kiln build` uses.
-  export BAZEL_TRUSTED="${BAZEL_TRUSTED:-true}"
+  export BUCK2_TRUSTED="${BUCK2_TRUSTED:-true}"
 
   trap remove_containers EXIT
   trap on_interrupt INT TERM

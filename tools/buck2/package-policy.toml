@@ -1,0 +1,486 @@
+# Per-package Buck2 policy: the facts `tools/buck2/generate_model.py`
+# cannot read from `cargo metadata`, stated once as data instead of as
+# `package == ...` branches in the generator.
+#
+# A `[[rule]]` selects labels by Cargo package name, target kind and target
+# name, and contributes to every label it selects:
+#
+#   packages      Cargo package names (required).
+#   kinds         Target kinds: lib, unit-test, bin, bin-unit-test, test,
+#                 example, bench. Omitted means every kind. A `bin-unit-test`
+#                 also inherits the compile data of its `bin` target.
+#   targets       Glob patterns over the Cargo target name. A unit test is
+#                 named after its library. Omitted means every target.
+#
+#   tags, reason  Test-policy tags (`manual`, `dev-deferred`, `pr-deferred`,
+#                 `cargo-*`) and the reason recorded in target-inventory.json.
+#   compile_data  Labels the compile needs beyond the package's own sources.
+#   data          Labels the test needs at run time.
+#   env           Test environment.
+#   serial        Run libtest one case at a time (`RUST_TEST_THREADS=1`). Cargo
+#                 nextest isolates every case in its own process, so the
+#                 constraint has no nextest encoding; Buck2 runs a binary's
+#                 cases in one process and needs it said.
+#   args          libtest arguments.
+#   bin_env       Env var -> a Cargo binary of the same package, passed as its
+#                 runfiles path and added to the test's data.
+#   shards        Buck2 test shards (ordinary label only).
+#   timeout       Buck2 test timeout (ordinary label only).
+#
+# Rules apply in file order; list values accumulate in that order.
+
+# --- Test partition policy ---------------------------------------------------
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-s3-store"]
+kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
+tags = ["manual", "cargo-service-gate"]
+reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
+
+# The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
+# ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
+# Each shard runs through `//tools/buck2:postgres_slot_runner`, which gives it
+# a database of its own, so shards run in parallel without sharing the tables
+# `reset()` truncates.
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["test"]
+targets = ["conformance"]
+shards = 6
+
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["test"]
+targets = ["integration"]
+shards = 2
+
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["test"]
+targets = ["ui"]
+tags = ["manual", "cargo-trybuild"]
+reason = "uses trybuild and its Cargo-managed compiler fixture cache"
+
+[[rule]]
+packages = ["workflow-graph-roundtrip"]
+kinds = ["test"]
+tags = ["manual", "cargo-frontend-assets"]
+reason = "uses the Cargo-owned generated frontend asset workflow"
+
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["cross_backend*"]
+tags = ["cargo-service-gate"]
+reason = "local differential and trait-surface checks run in the ordinary suite; ignored cross-backend cases run in the service job with PostgreSQL"
+
+# This binary carries the generated-simulation and minimizer fixture replays
+# (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the
+# pool, which straddles Buck2's default `medium` 300 s bound; `long` is 900 s.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["unit-test"]
+tags = ["dev-deferred"]
+reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s, and the serial-lane determinism sweep is bounded to 4 of its 20 seeds per run (LASH_SIM_SERIAL_LANE_SEEDS) after measuring ~74--118 s at all twenty; too slow for the developer loop, still in the PR Buck2 partition"
+shards = 8
+timeout = "long"
+
+# The crash-point matrix (FIG-3849): every cell kills and restarts a
+# deployment on the Restate server double for each of its seeds and ticks the
+# recovery interval on virtual time until the end-state invariants hold. The
+# whole binary runs minutes, not seconds, so it stays out of the developer
+# loop; the Buck2 tail runs it on every full-profile dispatch of main.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["crash_point_matrix"]
+tags = ["dev-deferred"]
+reason = "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Buck2 tail runs it on main's full-profile dispatch"
+
+# The chaos soak (FIG-3873): its smoke mode runs two seeded epochs of
+# randomized workload under kills, lease loss and rolling deploys on the
+# Restate server double, about two minutes; its release mode is ignored and
+# runs from `just chaos-soak`. Tagged as the crash-point matrix is.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["chaos_soak"]
+tags = ["dev-deferred"]
+reason = "the chaos-soak smoke runs two seeded epochs of randomized workload under kills, lease loss and rolling deploys on the server double; minutes per run, too slow for the developer loop; the Buck2 tail runs it on main's full-profile dispatch"
+timeout = "long"
+
+# The no-abort guarantee forks a dozen children that each parse deliberately
+# deep sources right up to the stack bound. At the 4 GiB test floor
+# `the_abort_corpus_survives_without_the_preflight` and
+# `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the label
+# used to be pinned to the runner with `no-remote-exec`, where it ran on every
+# CI leg (about 70 s of the tail's local time). The run is sized from its
+# measured runs now and executes on the pool like any other.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["test"]
+targets = ["carrier_laws", "corpus_laws", "integration", "race_any_runtime"]
+tags = ["dev-deferred"]
+reason = "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Buck2 tail"
+
+# The whole Test262 selection (FIG-3646): about 19,000 programs, measured at
+# 165 s of one core. The developer loop runs the stratified sample
+# (`test262`); the PR partition's tail runs this, and so does the nightly
+# Test262 workflow, uncached.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["test"]
+targets = ["test262_full"]
+tags = ["dev-deferred"]
+reason = "the full Test262 selection runs about 19,000 programs; the developer loop runs its stratified sample, and the PR tail and the nightly Test262 workflow run it whole"
+
+[[rule]]
+packages = ["lash-regress"]
+kinds = ["test"]
+targets = ["unicodesets"]
+tags = ["pr-deferred"]
+reason = "RGI Unicode suites are too slow for the PR Buck2 partition; they run on lash-regress diffs and on trunk"
+
+# --- Library and unit-test compile inputs -----------------------------------
+
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["lib", "unit-test"]
+compile_data = ["//examples:shared_rust_sources"]
+
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["lib"]
+compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
+
+[[rule]]
+packages = ["lash-internal-sansio"]
+kinds = ["unit-test"]
+compile_data = ["//:workspace_rust_sources"]
+
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["unit-test"]
+compile_data = ["//:workspace_test_scripts"]
+
+# This instrumentation binary shares process-global counters.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["unit-test"]
+compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
+serial = true
+
+[[rule]]
+packages = ["lash-runtime", "lash-internal-sqlite-store"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lashlang:old_module_fixture"]
+
+# The process-observation wire contracts validate real items against the
+# published observation-item schema compiled into the test.
+[[rule]]
+packages = ["lash-internal-remote-protocol"]
+kinds = ["unit-test"]
+compile_data = ["//:host_schemas"]
+
+# The Node session oracle (FIG-3599) runs the dialect's session corpora through
+# the RLM executor; the corpora, their Node answers and the census the
+# session generator (FIG-3608) draws rejected cells from live with the dialect.
+[[rule]]
+packages = ["lash-internal-protocol-rlm"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-typescript:session_oracle_corpus", "//:Cargo.toml"]
+
+# --- Binary and integration-test support -------------------------------------
+
+# The checked-in workspace fact that replaces a nested `cargo metadata` call
+# in the dependency-direction test.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration_boundary"]
+data = ["//tools/buck2:target_inventory"]
+
+# These carry the relocated suites that assert over captured `tracing` events.
+# Capture installs a scoped default subscriber, so other cases in the same
+# libtest process must not emit concurrently.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_turns", "runtime_observability"]
+serial = true
+
+# The warning-capture contract installs a scoped tracing subscriber.
+[[rule]]
+packages = ["lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+serial = true
+
+# These cost laws read a process-global counting allocator.
+[[rule]]
+packages = ["lash-internal-lashlang"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["append_cost", "dialect_cost"]
+serial = true
+
+[[rule]]
+packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench"]
+kinds = ["bin", "test", "example", "bench"]
+compile_data = ["//examples:shared_rust_sources"]
+
+# The TypeScript host-flow module links the checked-in `examples/typescript-host-flows/*.ts`
+# cells with `include_str!`, the schema agreement test compiles the published
+# graph schema in and validates real serialized graph documents, and the
+# deviation-register census reads ADR 0062's register the same way.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+compile_data = [
+    "//examples:typescript_host_flow_cells",
+    "//:workflow_graph_schema",
+    "//:dialect_deviation_register",
+]
+
+# The corpus laws (FIG-3599) run over every corpus, the TypeScript host-flow cells
+# among them.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["corpus_laws"]
+compile_data = ["//examples:typescript_host_flow_cells"]
+
+# The schema agreement tests compile the published trace record and graph
+# snapshot schemas in and validate real serialized records against them.
+[[rule]]
+packages = ["lash-internal-trace"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["schema"]
+compile_data = ["//:host_schemas"]
+
+# It holds the dialect to the corpus's own checked-in budget by reading the
+# budget file with `include_str!`, the way lash-perf does.
+[[rule]]
+packages = ["lash-internal-lashlang"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["dialect_cost"]
+compile_data = ["//:perf_guard_budgets"]
+
+# The tool-batch scaling guard holds each double to its checked-in budget by
+# reading the budget file with `include_str!`, the way lash-perf does
+# (FIG-4068).
+[[rule]]
+packages = ["lash-internal-protocol-rlm", "lash-internal-protocol-standard"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["tool_batch_parallelism"]
+compile_data = ["//:perf_guard_budgets"]
+
+[[rule]]
+packages = ["lash-internal-restate"]
+kinds = ["unit-test"]
+compile_data = ["//:perf_guard_budgets"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["conformance"]
+compile_data = ["//crates/lash-core:queued_admission_atomicity"]
+
+# The SQLite conformance suite runs a second time over memory backends
+# (ADR 0102), from its own test root.
+[[rule]]
+packages = ["lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["conformance_memory"]
+compile_data = ["//crates/lash-core:queued_admission_atomicity"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["durable_read_fixture"]
+compile_data = ["//crates/lash-core:durable_read_fixture_source"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["preflight_durable_walk"]
+compile_data = ["//crates/lashlang:old_module_fixture"]
+
+# Architecture lints that read sibling crates' sources at run time. A library's
+# runfiles carry only its declared non-Rust inputs, so a test that scans
+# another crate's sources names that crate's `rust_sources` filegroup.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_effect", "runtime_scenarios"]
+data = ["//crates/lash-core-execution:rust_sources"]
+
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+data = [
+  "//crates/lash-remote-protocol:rust_sources",
+  "//crates/lash-sansio:rust_sources",
+  "//crates/lash-tool-support:rust_sources",
+  "//crates/lash-trace:rust_sources",
+]
+
+# The fault-matrix routing probes execute the real scripts/confidence-gate.sh
+# against a recording `cargo`. The five `..._real_cargo_filters_chunk_*` cases
+# each fork a real `cargo test ... -- --list` against the workspace to prove
+# the gate's name filters still select tests. That is a claim about Cargo's own
+# selection, so it cannot be proved inside a hermetic action; the trunk-only
+# `Test heavy suites` job (nextest `profile.ci-heavy`) owns them. Excluded by
+# name here so the label is honest about what it executed.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_scenarios"]
+data = ["//:confidence_gate_scripts"]
+args = ["--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_"]
+
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+compile_data = [
+  "//crates/lash-postgres-store:package_files",
+  "//crates/lash-sqlite-store:package_files",
+]
+
+# Its completeness gates read the real store trait definitions with
+# `include_str!`.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["cross_backend_store_differential"]
+compile_data = ["//crates/lash-core-store:package_files"]
+
+# The gate scans every first-party Rust source, runbooks and examples included.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["signal_replay_key_constructor"]
+compile_data = ["//:workspace_rust_sources"]
+
+# The workbench unit test shells out to Node for its browser-projection case.
+# Its interpreter is a pinned Buck2 input, including on feature-lane variants.
+[[rule]]
+packages = ["agent-workbench"]
+kinds = ["bin-unit-test"]
+data = ["native//:node"]
+env = { LASH_WORKBENCH_TEST_NODE = "$(location native//:node)" }
+
+# The agent-service unit gate exercises its embedded browser controller in Node.
+[[rule]]
+packages = ["agent-service"]
+kinds = ["bin-unit-test"]
+data = ["native//:node"]
+env = { LASH_AGENT_SERVICE_TEST_NODE = "$(location native//:node)" }
+
+# Slack's asynchronous view fixture executes the production browser script.
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["unit-test"]
+data = ["native//:node", "//examples/slack-clone:package_files"]
+env = { LASH_SLACK_TEST_NODE = "$(location native//:node)" }
+
+# --- Test-run requests --------------------------------------------------------
+
+# A test run's request comes from its measured row in test-run-sizes.json.
+# These are the per-package exceptions, keyed `package/crate` like the rows of
+# action-sizes.json, plus per-label pins in `[test_runs.pinned]` below.
+[test_runs]
+# Timing-sensitive suites keep four cores whatever they measure. Below that the
+# harness's and the runtime's own threads contend and time-sensitive cases fail
+# instead of running slowly: CI run 34950810111 lost
+# `//crates/lash-perf:lash-perf__unit_test` on a phase assertion and timed out
+# `//crates/lash-sim:stack_policy__test` at one core. A measured p95 of 1.3
+# cores for lash-perf is exactly what such a suite shows while it is healthy.
+contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
+
+# Unmeasured runs of these crates keep the larger request they have always had.
+# The same crates are the suites that never join a `:test_batch`.
+[test_runs.large_suites]
+"agent-workbench/agent_workbench" = { cpu_count = 8, memory_kb = 4194304 }
+"lash-internal-core/lash_core" = { cpu_count = 8, memory_kb = 6815744 }
+"lash-internal-restate/lash_restate" = { cpu_count = 8, memory_kb = 4194304 }
+# The no-abort stress binary forks a dozen children that each parse
+# deliberately deep sources up to the stack bound. Measured 2026-09-23 as one
+# cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
+"lash-internal-typescript/integration" = { cpu_count = 4, memory_kb = 12058624 }
+# The full Test262 selection spreads its programs over every core it gets;
+# measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest
+# test, with a 0.7 GiB peak -- 1.5 GiB keeps the margin the sizing rule asks.
+"lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 1572864 }
+"lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
+
+# Requests pinned per Buck2 label, for runs and batches whose size is policy
+# rather than a measured row: too few samples for the table to price them, or
+# a batch the member sum would oversize. A `__fv_` feature-variant label
+# inherits its base label's pin, as it does a measured row.
+[test_runs.pinned]
+# The pool has never priced this batch (unmeasured); the member sum of two
+# unmeasured runs would still oversize it.
+"//crates/lash-restate-test:test_batch" = { cpu_count = 2, memory_kb = 1048576 }
+"//crates/lash-typescript:test_batch" = { cpu_count = 4, memory_kb = 1048576 }
+# --- Service jobs --------------------------------------------------------------
+
+# The service jobs build these packages' test labels from the shared cache and
+# execute them uncached against the service they stand up
+# (`tools/buck2/<service>_test_labels.txt`).
+[service_packages]
+postgres = ["lash-internal-postgres-store"]
+s3 = ["lash-internal-s3-store"]
+
+# --- Feature-lane variants ---------------------------------------------------
+
+# Compile inputs a variant needs only when one of its features is on.
+[feature_compile_data.agent-workbench]
+provider-wire-fixtures = ["//crates/lash-sim:package_files"]
+
+# --- Shared filegroups ---------------------------------------------------------
+
+# Package files other packages' targets name as compile or runtime inputs.
+[filegroups.lash-internal-core]
+cold_process_drivers = { srcs = ["tests/support/cold_process_effect_driver.rs"] }
+durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
+queued_admission_atomicity = { srcs = ["tests/support/queued_admission_atomicity.rs"] }
+
+[filegroups.lash-internal-lashlang]
+old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
+
+[filegroups.lash-internal-typescript]
+# FIG-3727: the corpora are shard trees — one file per session, generated
+# session or census row — so parallel corpus changes never meet in a file.
+session_oracle_corpus = { glob = [
+    "README.md",
+    "tests/differential/sessions/expectations/**",
+    "tests/differential/sessions/generated/**",
+    "tests/test262/census/**",
+] }
+
+# --- trybuild fixtures ---------------------------------------------------------
+
+# FIG-3364: the trusted seal lane compiles every tests/ui/*.stderr fixture with
+# the toolchain rustc directly (`ui_fixtures`), reading the harness's own
+# CrateInfo so fixtures see the identical `--extern` set and feature
+# resolution. The fixture set mirrors the registration gates in tests/ui.rs:
+# `rlm_gated` fixtures exist only when `rlm` resolves, and the `store_seam`
+# pins are written for the rlm-without-testing graph, so they stay excluded
+# under the canonical resolution.
+[ui_fixtures.lash-runtime]
+harness = "ui"
+rlm_gated = [
+  "rlm_config_builder_requires_channel",
+  "rlm_config_builder_requires_every_bound",
+  "rlm_memory_limit_cannot_take_an_instruction_budget",
+  "rlm_turn_options_cannot_name_a_dialect",
+]
+store_seam = [
+  "attachment_store_head_has_no_default",
+]
+
+[[rule]]
+packages = ["transcript-contract"]
+compile_data = ["//crates/lash-core-execution:rust_sources"]

@@ -1,8 +1,8 @@
 # One Git pathspec glob per line exempts matching added files from checks A and B.
 # Remove entries when they stop matching tracked files; an immediately preceding
 # "# keep: reason" comment preserves an entry intentionally reserved for future use.
-# Bazel's generated module lock records the complete pinned dependency graph.
-MODULE.bazel.lock
+# Reindeer's generated lock records the complete pinned dependency graph.
+third-party/Cargo.lock
 
 # The generated Test262 outcome record: `outcomes/**/*.tsv` shards, one per
 # test directory cut as deep as the tree is hot (FIG-3646, FIG-3727),

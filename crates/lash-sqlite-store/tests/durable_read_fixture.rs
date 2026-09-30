@@ -283,7 +283,7 @@ fn source_manifest_dir() -> PathBuf {
         && std::env::var(REGENERATE_ENV).as_deref() == Ok("1")
         && Path::new(env!("CARGO_MANIFEST_DIR")).is_relative()
     {
-        panic!("Bazel fixture regeneration requires BUILD_WORKSPACE_DIRECTORY");
+        panic!("Buck2 fixture regeneration requires BUILD_WORKSPACE_DIRECTORY");
     }
     source_manifest_dir_for(workspace)
 }
@@ -296,7 +296,7 @@ fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
 }
 
 #[test]
-fn fixture_source_dir_resolves_bazel_workspace() {
+fn fixture_source_dir_resolves_build_workspace() {
     assert_eq!(
         source_manifest_dir_for(Some("/tmp/lash-fork".into())),
         PathBuf::from("/tmp/lash-fork/crates/lash-sqlite-store")

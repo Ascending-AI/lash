@@ -7,40 +7,78 @@ test accidentally moved behind a feature could not take the default build's
 coverage with it silently. The suite itself is now a pool test target; this
 restores the count.
 
-The labels come from `tools/bazel/feature_lanes.bzl`, which the generator
-writes -- the variant's name is a hash of its resolved closure, so nothing else
-can name it.
+The labels and floors come from `tools/buck2/target-inventory.json`, which the
+generator writes. A variant's name is a hash of its resolved closure, so no
+caller reconstructs it.
 """
 
 from __future__ import annotations
 
-import ast
+import json
 import os
 import pathlib
 import re
-import shlex
 import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-LANES = ROOT / "tools" / "bazel" / "feature_lanes.bzl"
+INVENTORY = ROOT / "tools" / "buck2" / "target-inventory.json"
 CASE = re.compile(r": test$", re.MULTILINE)
 
 
 def floors() -> dict[str, int]:
-    source = LANES.read_text(encoding="utf-8")
-    marker = "FEATURE_LANE_TEST_FLOORS = "
-    start = source.index(marker) + len(marker)
-    end = source.index("\n\n", start)
-    return ast.literal_eval(source[start:end])
+    inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
+    values = inventory["feature_lane_test_floors"]
+    if not isinstance(values, dict) or not all(
+        isinstance(label, str) and isinstance(floor, int)
+        for label, floor in values.items()
+    ):
+        raise ValueError("feature_lane_test_floors must map labels to integers")
+    return values
 
 
 def main() -> int:
-    flags = shlex.split(os.environ.get("BAZEL_SHARED_CACHE_FLAGS", ""))
+    expected = floors()
+    if not expected:
+        raise SystemExit("feature_lane_test_floors is empty")
+    report_dir = pathlib.Path(os.environ.get("RUNNER_TEMP", ROOT / ".buck2" / "ci-reports"))
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report = report_dir / "feature-lane-floor-build-report.json"
+    subprocess.run(
+        [
+            "scripts/hermetic-build.sh",
+            "build",
+            "--jobs",
+            "32" if os.environ.get("CI") else "16",
+            "--materializations",
+            "final",
+            "--build-report",
+            str(report),
+            *sorted(expected),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
     failures = []
-    for label, floor in sorted(floors().items()):
+    for label, floor in sorted(expected.items()):
+        resolved = subprocess.run(
+            [
+                sys.executable,
+                "tools/buck2/outputs.py",
+                "--report",
+                str(report),
+                "--label",
+                label,
+                "--single",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        executable = resolved.stdout.strip()
         listing = subprocess.run(
-            ["bazel", "run", *flags, label, "--", "--list"],
+            [executable, "--list"],
             cwd=ROOT,
             check=True,
             capture_output=True,

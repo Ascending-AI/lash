@@ -34,7 +34,7 @@ fields.
 
 ## Safety and stop conditions
 
-1. Work in the owned Kiln fork. Use the exact Bazel label for each deterministic
+1. Work in the owned Kiln fork. Use the exact Buck2 label for each deterministic
    test. `kiln test` executes these on the shared pool; the PostgreSQL gate below
    keeps its service-owned Cargo recipe.
 1b. **Every named test filter in this runbook must be scored on its executed count, never on

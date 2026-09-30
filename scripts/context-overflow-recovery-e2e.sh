@@ -35,8 +35,8 @@ cleanup() {
 trap cleanup EXIT
 
 # The mapping this scenario judges, proved in the kernel before a row is spent.
-if [[ -f .kiln.bazelrc ]]; then
-  kiln test --test_output=all \
+if [[ -f .buckconfig.local ]]; then
+  kiln test \
     --test_arg=context_overflow_response_stops_as_its_own_outcome \
     //crates/lash-sansio:lash-sansio__unit_test \
     2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
@@ -66,7 +66,7 @@ fi
 
 staging="$artifact_root/context-overflow-recovery/.observed"
 mkdir -p "$staging"
-if [[ -f .kiln.bazelrc ]]; then
+if [[ -f .buckconfig.local ]]; then
   "$repo/scripts/ci/with-service.sh" restate -- \
     kiln run //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
     2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"

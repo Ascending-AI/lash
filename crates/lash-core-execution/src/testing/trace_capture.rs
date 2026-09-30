@@ -139,7 +139,7 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
 /// `cargo test` (the mutation baseline runner), a sibling case emitting a
 /// never-before-seen callsite can trigger exactly that rebuild while a
 /// capture is installed, silently dropping this test's own events even on the
-/// thread that owns the scoped default; the Bazel targets hide it by running
+/// thread that owns the scoped default; the Buck2 targets hide it by running
 /// `RUST_TEST_THREADS=1`. Holding one extra dispatcher for the process
 /// lifetime keeps the registered count above one during every capture window,
 /// so rebuilds iterate the live dispatchers rather than a defaultless

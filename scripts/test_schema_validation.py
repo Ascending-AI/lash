@@ -95,7 +95,7 @@ class SchemaValidationTests(unittest.TestCase):
                 env={
                     **os.environ,
                     "PATH": f"{root}:{os.environ['PATH']}",
-                    "BAZEL_TRUSTED": "false",
+                    "BUCK2_TRUSTED": "false",
                     "COMMAND_LOG": str(log),
                 },
                 capture_output=True,
@@ -119,7 +119,7 @@ class SchemaValidationTests(unittest.TestCase):
             )
             self.assertIn("exit 7", result.stdout)
 
-    def test_trusted_lint_uses_completed_bazel_contracts(self) -> None:
+    def test_trusted_lint_uses_completed_buck2_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / "commands"
@@ -138,7 +138,7 @@ class SchemaValidationTests(unittest.TestCase):
                 env={
                     **os.environ,
                     "PATH": f"{root}:{os.environ['PATH']}",
-                    "BAZEL_TRUSTED": "true",
+                    "BUCK2_TRUSTED": "true",
                     "COMMAND_LOG": str(log),
                 },
                 capture_output=True,
@@ -206,7 +206,7 @@ class SchemaValidationTests(unittest.TestCase):
                         "PATH": f"{bin_dir}:/usr/bin:/bin",
                         "GITHUB_ACTIONS": "true",
                         "GITHUB_EVENT_NAME": "workflow_dispatch",
-                        "BAZEL_TRUSTED": "true",
+                        "BUCK2_TRUSTED": "true",
                         "COMMAND_LOG": str(log),
                         "SCHEMA_GENERATOR": str(generator),
                     },
@@ -297,7 +297,7 @@ class SchemaValidationTests(unittest.TestCase):
         for decision in ("true", "", "unknown"):
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/ci/check-schema-contracts.sh")],
-                env={**os.environ, "BAZEL_TRUSTED": decision},
+                env={**os.environ, "BUCK2_TRUSTED": decision},
                 capture_output=True,
                 text=True,
             )

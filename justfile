@@ -173,9 +173,9 @@ agent-workbench-restate-e2e:
 workbench-continue-as-budget-gate:
   #!/usr/bin/env bash
   set -euo pipefail
-  kiln test //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test --test_arg=budget_warning --test_sharding_strategy=disabled --test_output=errors
-  kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_sharding_strategy=disabled --test_output=errors
-  kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_sharding_strategy=disabled --test_output=errors
+  kiln test //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test --test_arg=budget_warning --test_output=errors
+  kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_output=errors
+  kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_output=errors
 
 # The regression gate for the Restate effect-group choreography. Its suites are
 # `#[ignore]`d because they need a Restate server, so this recipe is the only
@@ -348,11 +348,11 @@ latency-gate:
     exit "$status"
   fi
 
-# Builds Phase A's two builds of head (ADR 0115 §6, FIG-3805) with Bazel: N
+# Builds Phase A's two builds of head (ADR 0115 §6, FIG-3805) with Buck2: N
 # (the default build) and N+1 (the `synthetic-next` feature), each as a
 # `lash-upgrade-node` and a `lashctl`, copied into `<artifacts>/bin/n` and
 # `<artifacts>/bin/n+1`. Each feature variant's label is read from its
-# generated BUILD file, so a change to either build's feature set moves no
+# generated target inventory, so a change to either build's feature set moves no
 # recipe.
 _upgrade-harness-builds artifacts:
   #!/usr/bin/env bash
@@ -360,45 +360,24 @@ _upgrade-harness-builds artifacts:
   cd "{{repo}}"
   artifacts="{{artifacts}}"
   mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
-  # variant <package> <target> <none|synthetic-next>: the target's feature
-  # binary built with no features, or with `synthetic-next` alone.
-  variant() {
-    awk -v target="$2" -v want="$3" '
-      /^lash_rust_feature_binary\(/ { block = 1; name = ""; features = "" }
-      block && name == "" && /^    name = "/ { split($0, part, "\""); name = part[2] }
-      block && /^    crate_features = \[\],/ { features = "none" }
-      block && /^    crate_features = \[$/ { getline; if ($0 ~ /^        "synthetic-next",$/) features = "synthetic-next" }
-      block && /^\)/ { if (index(name, target "__fv_") == 1 && features == want) print name; block = 0 }
-    ' "$1/BUILD.bazel"
+  node_n="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin)"
+  node_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin --feature synthetic-next)"
+  lashctl_next="$(python3 scripts/resolve_buck2_target.py //crates/lashctl lashctl --feature synthetic-next)"
+  report="$artifacts/build-report.json"
+  scripts/hermetic-build.sh build --materializations final --build-report "$report" \
+    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next"
+  output() {
+    python3 tools/buck2/outputs.py --report "$report" --label "$1" --single
   }
-  node_n="$(variant crates/lash-upgrade-harness lash-upgrade-node__bin none)"
-  node_next="$(variant crates/lash-upgrade-harness lash-upgrade-node__bin synthetic-next)"
-  lashctl_next="$(variant crates/lashctl lashctl synthetic-next)"
-  for resolved in "$node_n" "$node_next" "$lashctl_next"; do
-    if [ -z "$resolved" ] || [ "$(printf '%s\n' "$resolved" | wc -l)" -ne 1 ]; then
-      echo "cannot resolve the Phase A feature variants: '$node_n' '$node_next' '$lashctl_next'" >&2
-      exit 1
-    fi
-  done
-  bazel_startup=()
-  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
-    bazel_startup=(--output_user_root="$BAZEL_OUTPUT_USER_ROOT")
-  fi
-  read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
-  bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
-    "//crates/lash-upgrade-harness:$node_next" \
-    "//crates/lash-upgrade-harness:$node_n" \
-    //crates/lashctl:lashctl \
-    "//crates/lashctl:$lashctl_next"
-  cp "bazel-bin/crates/lash-upgrade-harness/$node_next" "$artifacts/bin/n+1/lash-upgrade-node"
-  cp "bazel-bin/crates/lash-upgrade-harness/$node_n" "$artifacts/bin/n/lash-upgrade-node"
-  cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
-  cp "bazel-bin/crates/lashctl/$lashctl_next" "$artifacts/bin/n+1/lashctl"
+  cp "$(output "$node_next")" "$artifacts/bin/n+1/lash-upgrade-node"
+  cp "$(output "$node_n")" "$artifacts/bin/n/lash-upgrade-node"
+  cp "$(output //crates/lashctl:lashctl)" "$artifacts/bin/n/lashctl"
+  cp "$(output "$lashctl_next")" "$artifacts/bin/n+1/lashctl"
 
 # Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
 # `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
-# and one live `restate-server`. Bazel builds both nodes and lashctl. The
+# and one live `restate-server`. Buck2 builds both nodes and lashctl. The
 # operator binary runs the PostgreSQL version, migrate, preflight, drain,
 # finalize and contract steps, over a database the run creates for itself;
 # SQLite migrates on open. The `phase_a` legs run under `just phase-a`.
@@ -565,7 +544,7 @@ seal:
 # An opt-in broad tooling checkpoint over the Kiln fork: the dev and feature-lane test and
 # clippy partitions on the shared pool plus the quick script gates. Frontend
 # dependencies are installed first so npm does not replace node_modules while
-# Bazel scans the example package; the remaining gates run concurrently and
+# Buck2 scans the example package; the remaining gates run concurrently and
 # are reported as one table. The repository-gates leg skips
 # `scripts/test-agent-workbench-dev-reset.sh` locally (170 s, it alone
 # bounded the floor) and says so in its table row; CI's `Test repository
@@ -578,7 +557,9 @@ floor:
   cd "{{repo}}"
   npm --prefix examples/workflow-graph-roundtrip/frontend ci
   printf '%s\n' \
-    'kiln test //:dev_tests //:feature_lane_tests //:workspace_clippy //:feature_lane_clippy //:schema_checks' \
+    'kiln test //:dev_tests //:feature_lane_tests' \
+    'kiln clippy //:workspace_clippy //:feature_lane_clippy' \
+    'kiln build //:schema_checks' \
     'kiln fmt -- --check' \
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \

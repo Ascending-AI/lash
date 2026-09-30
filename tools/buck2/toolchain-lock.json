@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "host": "x86_64-unknown-linux-gnu",
+  "rust_version": "1.98.1",
+  "components": [
+    {
+      "archive_prefix": "rustc-1.98.1-x86_64-unknown-linux-gnu/rustc",
+      "name": "rustc",
+      "sha256": "3f4fde8ab25a2d7fe4209e0ad4bd1572d3f2a2d5fdc4f02e327751baa008cc67",
+      "url": "https://github.com/hermeticbuild/rust-redist/releases/download/1.98.1/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.zst"
+    },
+    {
+      "archive_prefix": "clippy-1.98.1-x86_64-unknown-linux-gnu/clippy-preview",
+      "name": "clippy",
+      "sha256": "200223e0aaef0fef6b0d682bbcfe834e57aa1d89033d9742830503cada90b620",
+      "url": "https://github.com/hermeticbuild/rust-redist/releases/download/1.98.1/clippy-1.98.1-x86_64-unknown-linux-gnu.tar.zst"
+    },
+    {
+      "archive_prefix": "rust-std-1.98.1-x86_64-unknown-linux-gnu/rust-std-x86_64-unknown-linux-gnu",
+      "name": "rust-std",
+      "sha256": "49b8f19ee265fb83aa2d0cbee69dad34fce1e1df6f035c9c68c548c8b271cc91",
+      "url": "https://github.com/hermeticbuild/rust-redist/releases/download/1.98.1/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.zst"
+    }
+  ]
+}

@@ -7,7 +7,7 @@ inputs:
   toolchain:
     description: Rust toolchain specification.
     required: false
-    # Keep CI aligned with rust-toolchain.toml and the hermetic Bazel toolchain.
+    # Keep CI aligned with rust-toolchain.toml and the hermetic Buck2 toolchain.
     # The workspace rust-version remains the declared compatibility floor for
     # published crates.
     default: 1.98.1
@@ -64,6 +64,7 @@ runs:
         RUSTUP_PERMIT_COPY_RENAME=1 rustup "${rustup_args[@]}"
         rustup default "${TOOLCHAIN}"
         rustc "+${TOOLCHAIN}" --version --verbose
+        echo "KILN_REAL_CARGO=$(command -v cargo)" >> "${GITHUB_ENV}"
 
         if [ -z "${CARGO_INCREMENTAL+x}" ]; then
           echo "CARGO_INCREMENTAL=0" >> "${GITHUB_ENV}"

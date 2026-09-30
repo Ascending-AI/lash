@@ -209,7 +209,8 @@ run_workspace_check() {
 
 # The trybuild compile-fail fixtures under crates/lash/tests/ui are data to
 # every compile-shaped gate: `cargo check --all-targets` never builds them and
-# no `:all` Bazel wildcard reaches the `manual`-tagged `ui_fixtures` target
+# no ordinary Buck2 package build label reaches the `manual`-tagged
+# `ui_fixtures` target
 # (FIG-2801). CI's seal lane runs them whenever the facade crate or a root
 # manifest moves (scripts/ci_plan.py `_is_facade_path`); the same trigger set
 # runs `just seal` here so a re-export break reds before the push, not on CI.

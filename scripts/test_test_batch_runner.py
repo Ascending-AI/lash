@@ -10,7 +10,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 
-RUNNER = Path(__file__).resolve().parents[1] / "tools/bazel/test_batch_runner.sh"
+RUNNER = Path(__file__).resolve().parents[1] / "tools/buck2/test_batch_runner.sh"
 
 
 class BatchRunnerTests(unittest.TestCase):

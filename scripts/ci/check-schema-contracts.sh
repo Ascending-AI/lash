@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Portable CI jobs build generators once and use the same comparison code
-# as Bazel. Functional E2E owns only the example contracts.
+# as Buck2. Functional E2E owns only the example contracts.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
 context="${1:-untrusted}"
 case "$context" in
   untrusted)
-    [[ "${BAZEL_TRUSTED:-}" == false ]] || {
+    [[ "${BUCK2_TRUSTED:-}" == false ]] || {
       echo 'check-schema-contracts: portable Cargo path is only for untrusted CI' >&2
       exit 2
     }

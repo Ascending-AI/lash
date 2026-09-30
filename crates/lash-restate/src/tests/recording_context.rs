@@ -1758,7 +1758,7 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
         fixture.expected_signal_events = signal_events;
         let mut bytes = serde_json::to_vec_pretty(&fixture).expect("serialize corpus fixture");
         bytes.push(b'\n');
-        // Under `kiln run` the source tree is the Bazel workspace, not the
+        // Under `kiln run` the source tree is the Buck2 workspace, not the
         // compile-time manifest directory.
         let manifest_dir = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
             || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),

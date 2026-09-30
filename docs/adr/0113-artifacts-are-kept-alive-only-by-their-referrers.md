@@ -1506,7 +1506,7 @@ deletes if it is present.
 | `crates/lash/src/lib.rs` | runtime | R: export swap |
 | `crates/lash/src/core.rs` | runtime | R: delete `bind_artifact_stores` call; add `host_artifacts()` |
 | `crates/lash/src/admin.rs` | runtime | R: delete direct retirement |
-| `crates/lash/BUILD.bazel` | runtime | K: the new test target |
+| `crates/lash/BUCK` | runtime | K: the new test target |
 | `crates/lash-sqlite-store/src/schema.rs` | SQLite | S: artifact tables and both cleanup tables |
 | `crates/lash-sqlite-store/src/persistence/session_commit.rs` | SQLite | S: the frame-transition block in the commit transaction |
 | `crates/lash-sqlite-store/src/session_deletion.rs` | SQLite | S: frame fence and cleanup in the delete transaction |

@@ -11,7 +11,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 
-TOOLS = Path(__file__).resolve().parents[1] / "tools/bazel"
+TOOLS = Path(__file__).resolve().parents[1] / "tools/buck2"
 WRITER = TOOLS / "junit_xml.py"
 RUNNER = TOOLS / "test_xml_runner.sh"
 

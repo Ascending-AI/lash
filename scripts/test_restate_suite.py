@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import socket
@@ -70,13 +71,19 @@ class FakeBinary:
 
 class RegistryTests(unittest.TestCase):
     def test_every_registered_suite_names_a_label_and_a_directory_that_exist(self) -> None:
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+        )
+        labels = {
+            target["label"]
+            for package in inventory["packages"]
+            for target in package["targets"]
+            if isinstance(target.get("label"), str)
+        }
         for name in MODULE.load_registry():
             with self.subTest(suite=name):
                 suite = MODULE.load_suite(name)
-                package, _, target = suite.label.removeprefix("//").partition(":")
-                build_file = ROOT / package / "BUILD.bazel"
-                self.assertTrue(build_file.is_file(), build_file)
-                self.assertIn(f'name = "{target}"', build_file.read_text(encoding="utf-8"))
+                self.assertIn(suite.label, labels)
                 self.assertTrue((ROOT / suite.cwd).is_dir())
                 self.assertTrue(suite.filters)
                 self.assertGreaterEqual(suite.shards, 1)

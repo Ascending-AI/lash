@@ -44,7 +44,7 @@ thread_local! {
     ///
     /// This counter was one process-global atomic until FIG-3221, which made
     /// every figure below the sum of the run being measured and whatever a
-    /// sibling libtest case allocated inside the same window. Bazel hid that
+    /// sibling libtest case allocated inside the same window. Buck2 hid that
     /// by running this target with `RUST_TEST_THREADS=1`; `cargo test` — what
     /// cargo-mutants runs for its baseline — runs the cases in this file
     /// concurrently in one process, and the AST corpus scenario measured
@@ -110,7 +110,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 /// This is the law FIG-3221 broke. With one process-global counter the two
 /// cost cases in this file measured each other whenever libtest ran them
 /// concurrently, and the only thing holding the figures up was the
-/// `RUST_TEST_THREADS=1` this target happens to carry under Bazel — which
+/// `RUST_TEST_THREADS=1` this target happens to carry under Buck2 — which
 /// `cargo test` never reads. A revert to global accounting fails here, on the
 /// law itself, instead of surfacing as a budget overshoot under one runner and
 /// not the other.

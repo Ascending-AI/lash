@@ -64,12 +64,12 @@ def input_id(base: str) -> str:
     add(git("diff", "--binary", "--no-ext-diff", "HEAD"))
     add(json.dumps({
         name: value for name, value in os.environ.items()
-        if name.startswith(("LASH_", "KILN_", "BAZEL_", "RUST", "CARGO_"))
+        if name.startswith(("LASH_", "KILN_", "BUCK2_", "RUST", "CARGO_"))
         or name == "PATH"
     }, sort_keys=True).encode())
     # These ignored files select the actual executor/tooling of a fork.
     paths = set(git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0"))
-    paths.update((b".kiln.bazelrc", b"env.sh"))
+    paths.update((b".buckconfig.local", b"env.sh"))
     for raw in sorted(paths - {b""}):
         path = ROOT / os.fsdecode(raw)
         add(raw)
@@ -146,6 +146,11 @@ def quick_test_args(paths: list[str]) -> list[str]:
     return args
 
 
+def root_cell_label(label: str) -> str:
+    """Return Buck2's root-cell label in the inventory's `//package:target` form."""
+    return label.removeprefix("root") if label.startswith("root//") else label
+
+
 def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
     # `scripts/ci_plan.py` is the repository's one change classifier; this is
     # its dev-test projection plus the commands each part of it runs.
@@ -162,28 +167,40 @@ def plan(base: str, dependents: bool) -> dict:
     allowed, batches = ci_plan.dev_test_inventory(ROOT)
     members = {label for label in allowed if label.split(":")[0] in packages}
     if dependents and packages and not broad:
-        # Restrict the query universe to first-party packages. `//...` also
-        # traverses Bazel's generated bazel-src symlink in a fork and can fail
-        # while loading its external repository aliases, forcing a broad suite.
-        expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":all" for p in packages) + ')))'
+        # Restrict the query universe to first-party packages so generated and
+        # third-party cells cannot widen the selection.
+        expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":" for p in packages) + ')))'
+        bootstrap = subprocess.run(
+            [sys.executable, "tools/buck2/bootstrap.py"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        client = bootstrap.stdout.strip()
         result = subprocess.run(
-            ["bazel", "query", expression], cwd=ROOT, capture_output=True, text=True
+            [client, "uquery", expression] if bootstrap.returncode == 0 and client else ["false"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
         )
         if result.returncode:
             print(result.stderr, file=sys.stderr)
             broad = True
         else:
-            members = set(result.stdout.split()) & allowed
+            members = {root_cell_label(label) for label in result.stdout.split()} & allowed
     # A change under a package's directory also runs that package's
     # `dev-deferred` labels: the tail leg is merge-group-only in CI, so a
     # change to a deferred test's inputs (#2109's corpus expectations file)
     # otherwise lands untested. This holds on a broad plan too -- a package
     # manifest widens the selection but is still a deferred test's input.
-    # The label assembly is ci_plan.affected_bazel_labels: the same selection
-    # the pull-request leg of `bazel-tests` runs in CI.
+    # The label assembly is ci_plan.affected_buck2_labels: the same selection
+    # the pull-request leg of `buck2-tests` runs in CI.
     tail = ci_plan.pr_tail_labels(paths, ROOT)
     scope = ci_plan.DevTestScope(tuple(sorted(packages)), broad, facade, False, ())
-    labels, builds = ci_plan.affected_bazel_labels(scope, members, tail, batches)
+    package_builds = ci_plan.package_build_labels(set(packages), ROOT)
+    labels, builds = ci_plan.affected_buck2_labels(
+        scope, members, tail, batches, package_builds
+    )
     if builds:
         commands.append(["kiln", "build", *builds])
     if labels:
@@ -192,7 +209,7 @@ def plan(base: str, dependents: bool) -> dict:
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),
         "inputs": identity,
-        "identity_scope": "checkout/config snapshot; Bazel validates full action inputs",
+        "identity_scope": "checkout/config snapshot; Buck2 validates full action inputs",
         "changed_files": paths,
         "selection": "suite" if broad else "dependents" if dependents else "packages",
         "commands": commands,
@@ -210,30 +227,25 @@ def save(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-# Bazel's summary block: `//pkg:tgt  FAILED in 1.2s` followed by indented
-# artifact paths, and `FAIL: //pkg:tgt (see /path/test.log)` lines.
-_TARGET_STATUS = re.compile(
-    r"^(\s*)(//\S+)\s+.*\b(FAILED|TIMEOUT|FLAKY|NO STATUS)\b", re.MULTILINE)
-_SEE = re.compile(r"^FAIL:\s+(//\S+)\s+\((?:see|cached)\s+(\S+)\)", re.MULTILINE)
-
-
-def failed_targets(text: str) -> list[tuple[str, list[str]]]:
-    """Each failed Bazel label with the artifact paths printed beneath it."""
-    lines = text.splitlines()
-    targets: list[tuple[str, list[str]]] = []
-    for index, line in enumerate(lines):
-        label, artifacts = None, []
-        if match := _TARGET_STATUS.match(line):
-            label = match.group(2)
-        elif match := _SEE.match(line):
-            label, artifacts = match.group(1), [match.group(2)]
-        if label is None:
+def failed_targets(report_path: Path) -> list[tuple[str, list[str]]]:
+    """Each failed Buck2 label and its materialized result paths."""
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    targets = []
+    for label, result in sorted(report.get("results", {}).items()):
+        if result.get("status") in {"PASS", "SUCCESS"}:
             continue
-        follow = index + 1
-        while follow < len(lines) and (line := lines[follow]).startswith((" ", "\t")) and line.strip():
-            artifacts += [t for t in line.split() if "testlogs/" in t or t.endswith(("test.log", "test.xml"))]
-            follow += 1
-        targets.append((label, artifacts))
+        outputs = result.get("outputs") or {}
+        artifacts = [str(path) for path in (
+            outputs.get("junit_xml"), outputs.get("log"), outputs.get("undeclared")
+        ) if path]
+        if result.get("stdout"):
+            artifacts.append(str(result["stdout"]))
+        if result.get("stderr"):
+            artifacts.append(str(result["stderr"]))
+        targets.append((label.removeprefix("root"), artifacts))
     return targets
 
 
@@ -290,7 +302,7 @@ def target_failure(artifacts: list[str]) -> tuple[list[str], str | None, str | N
     return names, detail, log
 
 
-def failure_summary(command: list[str], code: int, log_path: Path) -> str:
+def failure_summary(command: list[str], code: int, log_path: Path, report_path: Path) -> str:
     """The ~40-line digest printed when a validation command fails."""
     try:
         text = log_path.read_text(errors="replace")
@@ -300,7 +312,7 @@ def failure_summary(command: list[str], code: int, log_path: Path) -> str:
         f"dev-test: `{shlex.join(command)}` failed with exit {code}",
         f"dev-test: full output: {log_path}",
     ]
-    targets = failed_targets(text)
+    targets = failed_targets(report_path)
     if targets:
         lines.append("dev-test: failing targets:")
         for label, artifacts in targets[:12]:
@@ -336,7 +348,7 @@ def run(planned: dict, verbose: bool) -> int:
             print("dev-test: checkout/config snapshot changed while planning/waiting; rerun", file=sys.stderr)
             return 2
         receipt_path = directory / "latest.json"
-        # Only Bazel knows the full declared action inputs, including ignored
+        # Only Buck2 knows the full declared action inputs, including ignored
         # package data and external toolchains. A prior receipt cannot replace
         # its cache validation, even for an overlapping identical request.
         started = time.time_ns()
@@ -348,19 +360,27 @@ def run(planned: dict, verbose: bool) -> int:
             for index, command in enumerate(planned["commands"]):
                 print("+ " + shlex.join(command), flush=True)
                 log_path = directory / f"command-{index}.log"
+                report_path = directory / f"test-report-{index}.json"
+                output_dir = directory / f"test-results-{index}"
+                executed = list(command)
+                if executed[:2] == ["kiln", "test"]:
+                    executed[2:2] = [
+                        "--test-report", str(report_path),
+                        "--test-output-dir", str(output_dir),
+                    ]
                 if verbose:
-                    process = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
+                    process = subprocess.Popen(executed, cwd=ROOT, start_new_session=True)
                 else:
                     # Command output goes to a per-command log; a failure
                     # prints the digest of it, not the whole log.
                     with log_path.open("wb") as sink:
                         process = subprocess.Popen(
-                            command, cwd=ROOT, start_new_session=True,
+                            executed, cwd=ROOT, start_new_session=True,
                             stdout=sink, stderr=subprocess.STDOUT)
                 code = process.wait()
                 if code:
                     if not verbose:
-                        print(failure_summary(command, code, log_path))
+                        print(failure_summary(command, code, log_path, report_path))
                     break
                 if not verbose:
                     print(f"dev-test: exit 0, output {log_path}", flush=True)
@@ -397,13 +417,13 @@ def main() -> int:
     signal.signal(signal.SIGTERM, interrupt)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", help="Comparison revision; defaults to merge-base with origin/main")
-    parser.add_argument("--dependents", action="store_true", help="Include Bazel reverse dependencies")
+    parser.add_argument("--dependents", action="store_true", help="Include Buck2 reverse dependencies")
     parser.add_argument("--dry-run", action="store_true", help="Print the exact plan as JSON without executing")
     parser.add_argument("--verbose", action="store_true", help="Stream each command's output instead of logging it and summarizing failures")
     args = parser.parse_args()
     if any(os.environ.get(name) for name in LIVE_STORES):
         parser.error("live store URLs are not accepted; CI owns Postgres/S3/E2E")
-    if not (ROOT / ".kiln.bazelrc").is_file():
+    if not (ROOT / ".buckconfig.local").is_file():
         parser.error("run inside a Kiln fork")
     if args.base:
         base = git("rev-parse", "--verify", args.base + "^{commit}").decode().strip()

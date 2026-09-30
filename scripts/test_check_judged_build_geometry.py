@@ -19,8 +19,27 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         self._original_root = GATE.ROOT
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name)
-        for name in ("Cargo.toml", "justfile", ".bazelrc"):
+        for name in ("Cargo.toml", "justfile"):
             shutil.copy2(ROOT / name, self.root / name)
+        (self.root / "tools/buck2").mkdir(parents=True)
+        for name in (
+            "BUCK",
+            "clippy_policy.bzl",
+            "host_transition.bzl",
+            "lash_rust.bzl",
+            "prelude_overlay.py",
+            "profile.bzl",
+            "third_party.bzl",
+            "driver.py",
+            "invocation.py",
+            "service_policy.py",
+        ):
+            shutil.copy2(ROOT / "tools/buck2" / name, self.root / "tools/buck2" / name)
+        (self.root / "tools/buck2/toolchains").mkdir()
+        shutil.copy2(
+            ROOT / "tools/buck2/toolchains/rust.bzl",
+            self.root / "tools/buck2/toolchains/rust.bzl",
+        )
         for relative in ("examples", "scripts", "runbooks"):
             shutil.copytree(
                 ROOT / relative,
@@ -40,8 +59,10 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         GATE.check_boot_sites(failures)
         GATE.check_artifact_dirs(failures)
         GATE.check_profile_overrides_exported(failures)
-        GATE.check_bazel_judged_config(failures)
-        GATE.check_bazel_boot_sites(failures)
+        GATE.check_buck2_judged_config(failures)
+        GATE.check_buck2_optimized_config(failures)
+        GATE.check_monty_optimized_config(failures)
+        GATE.check_buck2_boot_sites(failures)
         GATE.check_build_precedes_launcher_locks(failures)
         return failures
 
@@ -95,11 +116,14 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         self.assertTrue(any("without `--profile judged`" in f for f in failures), failures)
 
     def test_boot_without_the_judged_profile_fails(self) -> None:
-        script = self.root / "scripts" / "agent-workbench-dev.sh"
+        script = self.root / "scripts" / "slack-clone-dev.sh"
+        invocation = 'cargo build -p slack-clone --locked --profile "$cargo_profile"'
+        self.assertIn(invocation, script.read_text(encoding="utf-8"))
         script.write_text(
             script.read_text(encoding="utf-8").replace(
-                "cargo build -p agent-workbench --profile judged",
-                "cargo build -p agent-workbench",
+                invocation,
+                "cargo build -p slack-clone --locked",
+                1,
             ),
             encoding="utf-8",
         )
@@ -123,11 +147,15 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         )
 
     def test_literal_dev_artifact_directory_fails(self) -> None:
-        script = self.root / "scripts" / "agent-workbench-dev.sh"
+        script = self.root / "scripts" / "slack-clone-dev.sh"
+        source = '"${CARGO_TARGET_DIR:-$repo_root/target}" "$(profile_artifact_dir)" "$1"'
+        replacement = '"${CARGO_TARGET_DIR:-$repo_root/target}/dev/%s" "$1"'
+        self.assertIn(source, script.read_text(encoding="utf-8"))
         script.write_text(
             script.read_text(encoding="utf-8").replace(
-                '$repo_root/target}/judged/agent-workbench',
-                '$repo_root/target}/dev/agent-workbench',
+                source,
+                replacement,
+                1,
             ),
             encoding="utf-8",
         )
@@ -137,11 +165,15 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         )
 
     def test_undeclared_artifact_directory_fails(self) -> None:
-        script = self.root / "scripts" / "agent-workbench-dev.sh"
+        script = self.root / "scripts" / "slack-clone-dev.sh"
+        source = '"${CARGO_TARGET_DIR:-$repo_root/target}" "$(profile_artifact_dir)" "$1"'
+        replacement = '"${CARGO_TARGET_DIR:-$repo_root/target}/shipping/%s" "$1"'
+        self.assertIn(source, script.read_text(encoding="utf-8"))
         script.write_text(
             script.read_text(encoding="utf-8").replace(
-                '$repo_root/target}/judged/agent-workbench',
-                '$repo_root/target}/shipping/agent-workbench',
+                source,
+                replacement,
+                1,
             ),
             encoding="utf-8",
         )
@@ -169,23 +201,181 @@ class JudgedBuildGeometryTests(unittest.TestCase):
             any("without `export`" in f for f in failures), failures
         )
 
-    def test_bazel_judged_config_without_debug_assertions_fails(self) -> None:
+    def test_buck2_judged_config_without_debug_assertions_fails(self) -> None:
         # The defect this exists for: rustc turns debug assertions ON at
-        # `-C opt-level=0`, so a Bazel config that simply omits the flag ships
+        # `-C opt-level=0`, so a Buck2 config that simply omits the flag ships
         # the geometry `[profile.judged]` was created to remove — and the host
         # still boots, so nothing else notices.
-        bazelrc = self.root / ".bazelrc"
-        text = bazelrc.read_text(encoding="utf-8")
-        flag_line = (
-            "build:judged --@rules_rust//rust/settings:"
-            "extra_rustc_flag=-Cdebug-assertions=off\n"
-        )
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        flag_line = '"-Cdebug-assertions=no",'
         self.assertIn(flag_line, text)
-        bazelrc.write_text(text.replace(flag_line, "", 1), encoding="utf-8")
+        rules.write_text(text.replace(flag_line, "", 1), encoding="utf-8")
         failures = self.run_gate()
-        self.assertTrue(any("-Cdebug-assertions=off" in f for f in failures), failures)
+        self.assertTrue(any("first-party target rustc_flags" in f for f in failures), failures)
 
-    def test_bazel_build_without_the_judged_config_fails(self) -> None:
+    def test_unused_judged_flag_strings_do_not_satisfy_the_gate(self) -> None:
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        rules.write_text(
+            'unused = ["-Cdebug-assertions=no", "-Coverflow-checks=no"]\n',
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("first-party target rustc_flags" in f for f in failures), failures)
+
+    def test_judged_select_cannot_change_optimization_geometry(self) -> None:
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        flag = '"-Cdebug-assertions=no",'
+        self.assertIn(flag, text)
+        rules.write_text(
+            text.replace(flag, flag + '\n            "-Copt-level=3",', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("first-party target rustc_flags" in f for f in failures), failures)
+
+    def test_judged_select_not_returned_to_rustc_flags_fails(self) -> None:
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        self.assertIn(" + judged", text)
+        rules.write_text(text.replace(" + judged", "", 1), encoding="utf-8")
+        failures = self.run_gate()
+        self.assertTrue(any("first-party target rustc_flags" in f for f in failures), failures)
+
+    def test_third_party_judged_select_not_appended_fails(self) -> None:
+        rules = self.root / "tools/buck2/third_party.bzl"
+        text = rules.read_text(encoding="utf-8")
+        constraint = '"//tools/buck2:profile_judged"'
+        self.assertIn(constraint, text)
+        rules.write_text(
+            text.replace(constraint, '"//tools/buck2:profile_unused"', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("third-party target rustc_flags" in f for f in failures), failures)
+
+    def test_driver_judged_config_must_select_the_judged_platform(self) -> None:
+        driver = self.root / "tools/buck2/driver.py"
+        text = driver.read_text(encoding="utf-8")
+        expression = "'//tools/buck2:' + options.config"
+        self.assertIn(expression, text)
+        driver.write_text(
+            text.replace(expression, "'//tools/buck2:ordinary'", 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("--config=judged does not select" in f for f in failures), failures)
+
+    def test_monty_uses_the_optimized_configuration(self) -> None:
+        script = self.root / "scripts/profile_monty_comparison.sh"
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("--config=optimized", text)
+        script.write_text(
+            text.replace("--config=optimized", "--config=judged", 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("Bazel-opt-equivalent" in f for f in failures), failures)
+
+    def test_optimized_profile_flags_match_bazel_opt(self) -> None:
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        self.assertIn('"-Copt-level=3",', text)
+        rules.write_text(
+            text.replace('"-Copt-level=3",', '"-Copt-level=2",', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("optimized Rust flags" in f for f in failures), failures)
+
+    def test_toolchain_cannot_override_package_opt_level_after_rules(self) -> None:
+        rules = self.root / "tools/buck2/toolchains/rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        assignment = "extra_rustc_flags = []"
+        self.assertIn(assignment, text)
+        rules.write_text(
+            text.replace(assignment, 'extra_rustc_flags = ["-Copt-level=3"]', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("after package overrides" in f for f in failures), failures)
+
+    def test_lash_regress_target_override_remains_effective(self) -> None:
+        profile = self.root / "tools/buck2/profile.bzl"
+        text = profile.read_text(encoding="utf-8")
+        self.assertIn('"lash-regress": 2', text)
+        profile.write_text(
+            text.replace('"lash-regress": 2', '"lash-regress": 3', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("lash-regress target opt2" in f for f in failures), failures)
+
+    def test_host_profile_suppresses_target_package_override(self) -> None:
+        rules = self.root / "tools/buck2/lash_rust.bzl"
+        text = rules.read_text(encoding="utf-8")
+        host = '"//tools/buck2:profile_host": [],'
+        self.assertIn(host, text)
+        rules.write_text(
+            text.replace(host, '"//tools/buck2:profile_host": ["-Copt-level=2"],', 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("target/host opt3" in f for f in failures), failures)
+
+    def test_host_transition_applies_the_optimized_host_profile(self) -> None:
+        transition = self.root / "tools/buck2/host_transition.bzl"
+        text = transition.read_text(encoding="utf-8")
+        assignment = "constraints[host.setting.label] = host"
+        self.assertIn(assignment, text)
+        transition.write_text(
+            text.replace(assignment, "constraints.pop(host.setting.label, None)", 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("profile_host geometry" in f for f in failures), failures)
+
+    def test_third_party_optimized_profile_reaches_rustc_flags(self) -> None:
+        rules = self.root / "tools/buck2/third_party.bzl"
+        text = rules.read_text(encoding="utf-8")
+        constraint = '"//tools/buck2:profile_optimized": _OPTIMIZED_FLAGS,'
+        self.assertIn(constraint, text)
+        rules.write_text(
+            text.replace(
+                constraint,
+                '"//tools/buck2:profile_optimized": [],',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("target/host opt3" in f for f in failures), failures)
+
+    def test_optimized_flags_reach_build_script_commands_and_environment(self) -> None:
+        overlay = self.root / "tools/buck2/prelude_overlay.py"
+        text = overlay.read_text(encoding="utf-8")
+        combined = "rust_toolchain_info.rustc_flags + ctx.attrs.cargo_rustc_flags"
+        self.assertIn(combined, text)
+        overlay.write_text(
+            text.replace(combined, "rust_toolchain_info.rustc_flags", 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("effective order" in f for f in failures), failures)
+
+    def test_optimized_driver_preserves_profile_across_exec_transitions(self) -> None:
+        driver = self.root / "tools/buck2/driver.py"
+        text = driver.read_text(encoding="utf-8")
+        self.assertIn("kiln.rust_profile=optimized", text)
+        driver.write_text(
+            text.replace("kiln.rust_profile=optimized", "kiln.rust_profile=ordinary", 1),
+            encoding="utf-8",
+        )
+        failures = self.run_gate()
+        self.assertTrue(any("across Rust exec transitions" in f for f in failures), failures)
+
+    def test_buck2_build_without_the_judged_config_fails(self) -> None:
         script = self.root / "scripts" / "agent-workbench-dev.sh"
         text = script.read_text(encoding="utf-8")
         invocation = '"${build_command[@]}" --config=judged '

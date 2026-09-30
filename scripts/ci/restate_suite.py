@@ -28,7 +28,7 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   fails in minutes with its own output and the server's log, and one law's
   process state cannot leak into the next law.
 
-The suites themselves -- the Bazel label of the test binary, the filters and
+The suites themselves -- the Buck2 label of the test binary, the filters and
 the endpoints each shard binds -- live in
 `scripts/restate-suites.toml`; the replay leg's known divergences live one
 ticket per file under `scripts/restate-divergences/`.
@@ -42,9 +42,9 @@ Usage:
       A gate that owns a port block passes its base: the server then binds
       ingress, admin and node on P, P+1 and P+2 instead of free ports.
   restate_suite.py build <label>...
-      Build Bazel labels from the shared cache and print each output path.
+      Build Buck2 labels from the shared cache and print each output path.
   restate_suite.py stage-binaries <package> <dir>
-      Build every Rust binary of a Bazel package from the shared cache and
+      Build every Rust binary of a Buck2 package from the shared cache and
       copy each into <dir> under its Cargo name, stripped.
   restate_suite.py server-path
       Print the pinned server binary, fetching and verifying it on first use.
@@ -357,28 +357,43 @@ class RestateServer:
 def build(labels: Sequence[str]) -> list[Path]:
     """Build labels on the shared pool and return their output files.
 
-    CI names its cache and output base through the bazel-shared-cache action;
-    a Kiln fork builds through `kiln`; anything else uses the checkout's
-    `--config=shared`. Only the top-level outputs are downloaded.
+    The hermetic driver uses the shared pool in a Kiln fork or configured CI
+    checkout. Outputs are resolved from the build report, never from a
+    configuration-hashed buck-out path.
     """
-    flags = ["--remote_download_outputs=toplevel"]
-    if os.environ.get("GITHUB_ACTIONS"):
-        shared = os.environ.get("BAZEL_SHARED_CACHE_FLAGS")
-        root = os.environ.get("BAZEL_OUTPUT_USER_ROOT")
-        if not shared or not root:
-            raise SystemExit("CI must configure the shared build cache before a Restate suite builds")
-        argv = ["bazel", f"--output_user_root={root}", "build", *shared.split(), *flags, *labels]
-    elif os.environ.get("KILN_REPO") and shutil.which("kiln"):
-        argv = ["kiln", "build", *flags, *labels]
-    else:
-        argv = ["bazel", "build", "--config=shared", *flags, *labels]
+    report_root = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
+    report = report_root / f"restate-build-{os.getpid()}.json"
+    argv = [
+        str(ROOT / "scripts/hermetic-build.sh"),
+        "build",
+        "--jobs",
+        "32" if os.environ.get("GITHUB_ACTIONS") else "16",
+        "--materializations",
+        "final",
+        "--build-report",
+        str(report),
+        *labels,
+    ]
     log(f"building {' '.join(labels)}")
     subprocess.run(argv, cwd=ROOT, check=True, stdout=sys.stderr)
-    bazel_bin = (ROOT / "bazel-bin").resolve()
     outputs = []
     for label in labels:
-        package, _, name = label.removeprefix("//").partition(":")
-        path = bazel_bin / package / name
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/buck2/outputs.py",
+                "--report",
+                str(report),
+                "--label",
+                label,
+                "--single",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        path = Path(result.stdout.strip())
         if not path.is_file():
             raise SystemExit(f"{label} built, but {path} is missing")
         outputs.append(path)
@@ -386,12 +401,20 @@ def build(labels: Sequence[str]) -> list[Path]:
 
 
 def package_binaries(package: str) -> list[str]:
-    """The labels of a package's Rust binaries, from its generated BUILD file."""
-    build_file = ROOT / package.removeprefix("//") / "BUILD.bazel"
-    names = re.findall(r'^lash_rust_binary\(\n    name = "([^"]+)",$', build_file.read_text(), flags=re.MULTILINE)
-    if not names:
-        raise SystemExit(f"{build_file.relative_to(ROOT)} declares no lash_rust_binary")
-    return [f"{package}:{name}" for name in names]
+    """The labels of a package's Rust binaries, from generated inventory."""
+    inventory_path = ROOT / "tools/buck2/target-inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    manifest = package.removeprefix("//") + "/Cargo.toml"
+    labels = [
+        target["label"]
+        for entry in inventory["packages"]
+        if entry["manifest"] == manifest
+        for target in entry["targets"]
+        if target.get("kind") == "bin"
+    ]
+    if not labels:
+        raise SystemExit(f"{inventory_path.relative_to(ROOT)} declares no binaries for {package}")
+    return labels
 
 
 def stage_binaries(package: str, destination: Path) -> list[Path]:
@@ -796,7 +819,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("labels", nargs="+")
 
     stage = sub.add_parser("stage-binaries", help="build a package's binaries and stage them under Cargo names")
-    stage.add_argument("package", help="a Bazel package, e.g. //runbooks/restate-postgres-workers")
+    stage.add_argument("package", help="a Buck2 package, e.g. //runbooks/restate-postgres-workers")
     stage.add_argument("destination")
 
     serve = sub.add_parser("serve", help="run a command beside one server")

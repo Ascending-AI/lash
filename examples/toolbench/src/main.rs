@@ -190,15 +190,15 @@ struct TaskResult {
               construction, so as_object_mut/as_object are Some"
 )]
 async fn main() -> Result<()> {
-    let bazel_working_dir =
+    let invocation_working_dir =
         std::env::var_os("BUILD_WORKING_DIRECTORY").map(std::path::PathBuf::from);
-    if let Some(dir) = &bazel_working_dir {
+    if let Some(dir) = &invocation_working_dir {
         let _ = dotenvy::from_path(dir.join(".env"));
     } else {
         let _ = dotenvy::dotenv();
     }
     let mut args = Args::parse();
-    let working_dir = bazel_working_dir.unwrap_or(std::env::current_dir()?);
+    let working_dir = invocation_working_dir.unwrap_or(std::env::current_dir()?);
     resolve_user_paths(&mut args, &working_dir);
     if args.repetitions == 0 || args.concurrency == 0 {
         bail!("--repetitions/--runs and --concurrency must be at least 1");
@@ -500,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn bazel_run_paths_resolve_against_invocation_directory() {
+    fn build_run_paths_resolve_against_invocation_directory() {
         let mut args = Args::parse_from([
             "toolbench",
             "--results-file",

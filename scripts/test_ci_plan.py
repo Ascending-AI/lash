@@ -226,10 +226,10 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("workbench dependency closure is underivable", plan["reason"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_workbench_only_skips_breadth_but_keeps_the_bazel_partition(self) -> None:
+    def test_workbench_only_skips_breadth_but_keeps_the_buck2_partition(self) -> None:
         """The pool owns the workbench unit suite, so `rust` cannot be false.
 
-        `rust` gates `Test Bazel partition`, which runs every agent-workbench
+        `rust` gates `Test Buck2 partition`, which runs every agent-workbench
         unit case with a pinned Node interpreter for the browser-projection
         test. The store, functional-E2E and
         worker-E2E breadth families stay off: the workbench is an example
@@ -282,10 +282,17 @@ class ClassifyTests(unittest.TestCase):
             ("crates/lash-perf/src/lib.rs", "false"),
             ("examples/agent-workbench/src/main.rs", "false"),
             ("schemas/host/workflow/v1.schema.json", "false"),
-            ("tools/bazel/clippy.bzl", "false"),
+            ("tools/buck2/rust_rules.bzl", "false"),
             # The job runs every test through these.
-            ("tools/bazel/postgres_slot_runner.sh", "true"),
-            ("tools/bazel/test_xml_runner.sh", "true"),
+            ("tools/buck2/driver.py", "true"),
+            ("tools/buck2/junit_xml.py", "true"),
+            ("tools/buck2/postgres_slot_runner.sh", "true"),
+            ("tools/buck2/service_policy.py", "true"),
+            ("tools/buck2/test_launcher.sh", "true"),
+            ("tools/buck2/test_runner.py", "true"),
+            ("tools/buck2/test_shard.py", "true"),
+            ("tools/buck2/test_timeout.py", "true"),
+            ("tools/buck2/test_xml_runner.sh", "true"),
         ):
             with self.subTest(path=path):
                 self.assertEqual(
@@ -302,8 +309,8 @@ class ClassifyTests(unittest.TestCase):
         # script self-test (`CiMachineryTests` pins the rest of its map).
         self.assertEqual("true", ci_plan.classify([("M", "scripts/ci_plan.py")])["tooling"])
         for path, expected in (
-            ("tools/bazel/clippy.bzl", "true"),
-            ("BUILD.bazel", "true"),
+            ("tools/buck2/rust_rules.bzl", "true"),
+            ("BUCK", "true"),
             ("tools/kiln/main.py", "true"),
             ("crates/lash-core/src/lib.rs", "false"),
         ):
@@ -398,7 +405,7 @@ class PathClassifierTests(unittest.TestCase):
                 self.assertEqual(ci_plan.PathKind.DOCS, self.kind(path))
                 self.assertEqual("true", ci_plan.classify([("M", path)])["docs_only"])
 
-    def test_markdown_inside_a_bazel_package_is_package_input(self) -> None:
+    def test_markdown_inside_a_buck2_package_is_package_input(self) -> None:
         # `include_str!` and test runfiles read package READMEs.
         for path in ("crates/lash/README.md", "runbooks/rlm-smoke/README.md"):
             with self.subTest(path=path):
@@ -413,9 +420,9 @@ class PathClassifierTests(unittest.TestCase):
                 self.assertEqual("false", plan["docs_only"])
                 self.assertEqual("true", plan["rust"])
 
-    def test_bazel_configuration_is_tooling(self) -> None:
-        for path in (".bazelrc", ".bazelversion", "MODULE.bazel", "MODULE.bazel.lock",
-                     "BUILD.bazel", "tools/bazel/clippy.bzl", ".gitattributes"):
+    def test_buck2_configuration_is_tooling(self) -> None:
+        for path in (".buckconfig", "BUCK", "tools/buck2/pins.json",
+                     "tools/buck2/rust_rules.bzl", ".gitattributes"):
             with self.subTest(path=path):
                 self.assertEqual(ci_plan.PathKind.TOOLING, self.kind(path))
                 plan = ci_plan.classify([("M", path)])
@@ -423,6 +430,21 @@ class PathClassifierTests(unittest.TestCase):
                 self.assertEqual("true", plan["rust"])
                 self.assertEqual("true", plan["tooling"])
                 self.assertEqual("false", plan["stores"])
+
+    def test_generated_third_party_graph_is_a_shared_build_input(self) -> None:
+        for path in (
+            "third-party/Cargo.lock",
+            "third-party/Cargo.toml",
+            "third-party/rust/BUCK",
+            "third-party/src/lib.rs",
+            "third-party/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.SHARED, self.kind(path))
+                plan = ci_plan.classify([("M", path)])
+                self.assertEqual("false", plan["docs_only"])
+                self.assertEqual("true", plan["rust"])
+                self.assertEqual("true", plan["stores"])
 
     def test_every_tracked_path_has_a_known_class(self) -> None:
         listed = subprocess.run(
@@ -529,7 +551,7 @@ class CiMachineryTests(unittest.TestCase):
             "scripts/dev.sh": "true\n",
             "scripts/nightly.sh": "true\n",
             "scripts/budgets.json": "{}\n",
-            "BUILD.bazel": 'filegroup(name = "b", srcs = ["scripts/budgets.json"])\n',
+            "BUCK": 'filegroup(name = "b", srcs = ["scripts/budgets.json"])\n',
             **(extra or {}),
         }
         for path, text in files.items():
@@ -571,7 +593,7 @@ class CiMachineryTests(unittest.TestCase):
             # Another workflow has its own triggers and its own scope.
             (".github/workflows/nightly.yml", tooling),
             ("scripts/nightly.sh", tooling),
-            # A build input selects the Bazel partition.
+            # A build input selects the Buck2 partition.
             ("scripts/budgets.json", {"rust", "tooling"}),
         ):
             with self.subTest(path=path):
@@ -702,7 +724,7 @@ class CiMachineryTreeTests(unittest.TestCase):
         stores = plan("scripts/ci/store-tests.sh")
         self.assertEqual("true", stores["stores"])
         self.assertEqual("false", stores["rust"])
-        self.assertEqual("true", plan("scripts/ci/bazel_profile_digest.py")["rust"])
+        self.assertEqual("true", plan("scripts/ci/buck2_event_digest.py")["rust"])
         # A crate change beside a script keeps the build input's families.
         mixed = plan("scripts/ci_plan.py", "crates/lash-core/src/lib.rs")
         self.assertEqual("production-relevant diff", mixed["reason"])
@@ -832,7 +854,7 @@ class GateScopeTests(unittest.TestCase):
                 self.assertEqual(ci_plan.ALL_GATE_FAMILIES, scope.families)
 
     def test_tooling_runs_compile_and_scripts(self) -> None:
-        scope = self.scope("tools/bazel/generate_build_files.py")
+        scope = self.scope("tools/buck2/sync.py")
         self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
 
     def test_ci_machinery_runs_rust_only_when_a_rust_job_runs_it(self) -> None:
@@ -841,7 +863,7 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual("ci-machinery", scope.classification)
         self.assertEqual(guards, scope.families)
         self.assertEqual(
-            guards | {self.RUST}, self.scope("scripts/ci/bazel_profile_digest.py").families
+            guards | {self.RUST}, self.scope("scripts/ci/buck2_event_digest.py").families
         )
 
     def test_text_output_lists_every_family_in_ascii(self) -> None:
@@ -981,24 +1003,30 @@ class DevTestScopeTests(unittest.TestCase):
         self.assertFalse(scope.repository)
 
     def test_shared_inputs_and_tooling_widen_with_repository_gates(self) -> None:
-        for path in ("scripts/unknown.py", ".bazelrc", ".github/workflows/ci.yml"):
+        for path in ("scripts/unknown.py", ".buckconfig", ".github/workflows/ci.yml"):
             with self.subTest(path=path):
                 scope = self.scope(path)
                 self.assertTrue(scope.broad and scope.repository)
 
     def test_the_test_xml_runner_runs_its_self_test(self) -> None:
         tests = frozenset({"scripts/test_test_xml.py"})
-        for path in ("tools/bazel/junit_xml.py", "tools/bazel/test_xml_runner.sh"):
+        for path in ("tools/buck2/junit_xml.py", "tools/buck2/test_xml_runner.sh"):
             with self.subTest(path=path):
                 scope = self.scope(path, scripts=tests)
                 self.assertEqual(("scripts/test_test_xml.py",), scope.script_tests)
                 self.assertFalse(scope.broad or scope.repository)
 
+    def test_the_buck2_sharder_runs_its_behavioral_contract(self) -> None:
+        tests = frozenset({"scripts/test_buck2_test_contract.py"})
+        scope = self.scope("tools/buck2/test_shard.py", scripts=tests)
+        self.assertEqual(("scripts/test_buck2_test_contract.py",), scope.script_tests)
+        self.assertFalse(scope.broad or scope.repository)
+
     def test_a_script_runs_the_suite_only_when_a_rust_job_runs_it(self) -> None:
         checker = self.scope("scripts/check_format_registry.py")
         self.assertTrue(checker.repository)
         self.assertFalse(checker.broad)
-        digest = self.scope("scripts/ci/bazel_profile_digest.py")
+        digest = self.scope("scripts/ci/buck2_event_digest.py")
         self.assertTrue(digest.repository and digest.broad)
 
     def test_a_script_test_edit_runs_only_its_proof(self) -> None:
@@ -1011,7 +1039,7 @@ class DevTestScopeTests(unittest.TestCase):
 class PrTailLabelTests(unittest.TestCase):
     """The PR leg re-adds the dev-deferred labels of each package a diff touches.
 
-    `bazel-tests-tail` runs only on merge groups and dispatches, and lash PRs
+    `buck2-tests-tail` runs only on merge groups and dispatches, and lash PRs
     are often admin-merged past the queue: #2109 appended to
     `corpus_laws__test`'s expectations file (now sharded) and main went red
     because nothing ran the deferred test on the PR.
@@ -1067,7 +1095,7 @@ class PrTailLabelTests(unittest.TestCase):
     def test_examples_manual_and_pr_deferred_labels_are_never_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            inventory = root / "tools/bazel/target-inventory.json"
+            inventory = root / "tools/buck2/target-inventory.json"
             inventory.parent.mkdir(parents=True)
             inventory.write_text(json.dumps({
                 "packages": [
@@ -1089,7 +1117,7 @@ class PrTailLabelTests(unittest.TestCase):
             }))
             for directory in ("crates/touched", "examples/leaf"):
                 (root / directory).mkdir(parents=True)
-                (root / directory / "BUILD.bazel").write_text("")
+                (root / directory / "BUCK").write_text("")
             self.assertEqual(
                 ["//crates/touched:slow__test"],
                 ci_plan.pr_tail_labels(
@@ -1120,15 +1148,15 @@ class PrTailLabelTests(unittest.TestCase):
             self.assertNotIn("manual", tags[label])
             self.assertNotIn("pr-deferred", tags[label])
 
-    def test_the_bazel_leg_readds_them_after_the_tail_subtraction(self) -> None:
+    def test_the_buck2_core_leg_readds_touched_tail_labels(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         run = next(
             step["run"]
-            for step in jobs["bazel-tests"]["steps"]
+            for step in jobs["buck2-tests"]["steps"]
             if step.get("name") == "Test the workspace core suite with shared cache"
         )
         self.assertLess(
-            run.index("-//:workspace_tail_tests"),
+            run.index("//:workspace_core_tests"),
             run.index("${{ needs.plan.outputs.pr_tail_labels }}"),
         )
         self.assertEqual(
@@ -1318,9 +1346,9 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                 )
                 needs["workspace-tests"]["result"] = "success" if not trusted else "skipped"
                 needs["check"]["result"] = "success" if not trusted else "skipped"
-                for job in ci_plan.BAZEL_TEST_JOBS:
+                for job in ci_plan.BUCK2_TEST_JOBS:
                     if event == "pull_request":
-                        needs["bazel-tests-tail"]["result"] = "skipped"
+                        needs["buck2-tests-tail"]["result"] = "skipped"
                     if not trusted:
                         needs[job]["result"] = "skipped"
                 if not trusted:
@@ -1331,7 +1359,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                         needs,
                         event,
                         workers_e2e_enabled=False,
-                        bazel_is_trusted=trusted,
+                        buck2_is_trusted=trusted,
                     ),
                 )
 
@@ -1359,10 +1387,10 @@ def successful_needs() -> dict[str, dict[str, object]]:
         job: {"result": "success", "outputs": {}}
         for job in ci_plan.UNGATED_JOBS
         | set(ci_plan.GATED_JOBS)
-        | ci_plan.BAZEL_TEST_JOBS
+        | ci_plan.BUCK2_TEST_JOBS
     }
     needs["plan"]["outputs"] = plan_outputs
-    # A trusted event runs the Bazel partition, whose invocation carries the
+    # A trusted event runs the Buck2 partition, whose invocation carries the
     # API seal; the Cargo workspace and seal jobs are the untrusted path.
     needs["workspace-tests"]["result"] = "skipped"
     needs["check"]["result"] = "skipped"
@@ -1376,7 +1404,7 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
     for job in ci_plan.DISPATCH_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     if event == "pull_request":
-        needs["bazel-tests-tail"]["result"] = "skipped"
+        needs["buck2-tests-tail"]["result"] = "skipped"
         for job in ci_plan.WORKERS_E2E_JOBS:
             needs[job]["result"] = "skipped"
         needs["postgres-store"]["result"] = (
@@ -1443,40 +1471,40 @@ class ConclusionTests(unittest.TestCase):
     def test_trusted_pr_requires_preflight_and_defers_full_tail_to_queue(self) -> None:
         needs = apply_event_deferrals(successful_needs(), "pull_request")
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
-        needs["bazel-tests-tail"]["result"] = "success"
+        needs["buck2-tests-tail"]["result"] = "success"
         self.assertTrue(any(
-            "bazel-tests-tail" in problem
+            "buck2-tests-tail" in problem
             for problem in ci_plan.evaluate_conclusion(needs, "pull_request")
         ))
-        needs["bazel-tests-tail"]["result"] = "skipped"
-        needs["bazel-tests"]["result"] = "skipped"
+        needs["buck2-tests-tail"]["result"] = "skipped"
+        needs["buck2-tests"]["result"] = "skipped"
         self.assertTrue(any(
-            "bazel-tests" in problem
+            "buck2-tests" in problem
             for problem in ci_plan.evaluate_conclusion(needs, "pull_request")
         ))
 
-    def test_bazel_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
+    def test_buck2_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
         trusted = successful_needs()
-        self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))
+        self.assertEqual([], ci_plan.evaluate_conclusion(trusted, buck2_is_trusted=True))
 
         untrusted = successful_needs()
-        for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
+        for job in ci_plan.BUCK2_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
             untrusted[job]["result"] = "skipped"
         untrusted["workspace-tests"]["result"] = "success"
         untrusted["check"]["result"] = "success"
         self.assertEqual(
-            [], ci_plan.evaluate_conclusion(untrusted, bazel_is_trusted=False)
+            [], ci_plan.evaluate_conclusion(untrusted, buck2_is_trusted=False)
         )
 
         for trusted_event, result in ((True, "skipped"), (False, "success")):
             with self.subTest(trusted=trusted_event, result=result):
                 needs = successful_needs()
-                needs[ci_plan.BAZEL_TEST_JOB]["result"] = result
+                needs[ci_plan.BUCK2_TEST_JOB]["result"] = result
                 problems = ci_plan.evaluate_conclusion(
-                    needs, bazel_is_trusted=trusted_event
+                    needs, buck2_is_trusted=trusted_event
                 )
                 self.assertTrue(
-                    any(ci_plan.BAZEL_TEST_JOB in problem for problem in problems)
+                    any(ci_plan.BUCK2_TEST_JOB in problem for problem in problems)
                 )
 
     def test_hygiene_jobs_are_required_for_every_event_and_docs_changes(self) -> None:
@@ -1492,8 +1520,8 @@ class ConclusionTests(unittest.TestCase):
                         needs["plan"]["outputs"].update({"docs_only": "true", **{f: "false" for f in ci_plan.FAMILIES}})
                         for gated in ci_plan.GATED_JOBS:
                             needs[gated]["result"] = "skipped"
-                        for bazel_job in ci_plan.BAZEL_TEST_JOBS:
-                            needs[bazel_job]["result"] = "skipped"
+                        for buck2_job in ci_plan.BUCK2_TEST_JOBS:
+                            needs[buck2_job]["result"] = "skipped"
                         needs[job]["result"] = result
                         problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                         self.assertTrue(any(job in problem for problem in problems))
@@ -1513,22 +1541,22 @@ class ConclusionTests(unittest.TestCase):
         needs["plan"]["outputs"].update({"docs_only": "true", **{family: "false" for family in ci_plan.FAMILIES}})
         for job in ci_plan.GATED_JOBS:
             needs[job]["result"] = "skipped"
-        for job in ci_plan.BAZEL_TEST_JOBS:
+        for job in ci_plan.BUCK2_TEST_JOBS:
             needs[job]["result"] = "skipped"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs))
 
     def test_wrongly_skipped_job_fails(self) -> None:
         needs = successful_needs()
         needs["workspace-tests"]["result"] = "skipped"
-        for job in ci_plan.BAZEL_TEST_JOBS:
+        for job in ci_plan.BUCK2_TEST_JOBS:
             needs[job]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, bazel_is_trusted=False)
+        problems = ci_plan.evaluate_conclusion(needs, buck2_is_trusted=False)
         self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
     def test_a_trusted_rust_event_expects_no_cargo_workspace_run(self) -> None:
-        """The Bazel partition owns every deterministic Rust binary.
+        """The Buck2 partition owns every deterministic Rust binary.
 
-        On a trusted event Bazel owns the browser-projection case too, so a
+        On a trusted event Buck2 owns the browser-projection case too, so a
         Cargo run is a policy violation.
         """
         needs = successful_needs()
@@ -1545,7 +1573,7 @@ class ConclusionTests(unittest.TestCase):
         needs = successful_needs()
         needs["plan"]["outputs"]["workbench"] = "false"
         needs["workspace-tests"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, bazel_is_trusted=False)
+        problems = ci_plan.evaluate_conclusion(needs, buck2_is_trusted=False)
         self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
     def test_inconsistent_classifier_output_fails(self) -> None:
@@ -1568,7 +1596,7 @@ class ConclusionTests(unittest.TestCase):
         needs["plan"]["outputs"].update(
             {family: "false" for family in ci_plan.FAMILIES} | {"tooling": "true"}
         )
-        for job in ("bazel-tests", "bazel-tests-tail", "workspace-tests", "check",
+        for job in ("buck2-tests", "buck2-tests-tail", "workspace-tests", "check",
                     "postgres-store", "unused-deps", "feature-lanes"):
             needs[job]["result"] = "skipped"
         apply_event_deferrals(needs, "pull_request")
@@ -1725,7 +1753,7 @@ class PostgresMatrixTests(unittest.TestCase):
     def test_one_job_runs_every_major_the_plan_selects(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         postgres = jobs["postgres-store"]
-        # One runner and one Bazel client for every major: no matrix.
+        # One runner and one Buck2 client for every major: no matrix.
         self.assertNotIn("strategy", postgres)
         self.assertEqual(
             "${{ needs.plan.outputs.postgres_primary }}", postgres["env"]["POSTGRES_PRIMARY"]
@@ -1823,11 +1851,11 @@ class PostgresMatrixTests(unittest.TestCase):
                     )
 
     def test_commands_pin_live_catalog_version_oracles(self) -> None:
-        """The named oracles must survive the Bazel/Cargo dispatch, on both paths.
+        """The named oracles must survive the Buck2/Cargo dispatch, on both paths.
 
         The steps delegate to scripts/ci/store-tests.sh, so the pin follows the
         test names into that script's branch for the suite each step selects,
-        and each name must appear on the Bazel side and the Cargo side.
+        and each name must appear on the Buck2 side and the Cargo side.
         """
         job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "postgres-store"
@@ -1842,11 +1870,11 @@ class PostgresMatrixTests(unittest.TestCase):
             if f"\n  {suite})\n" in script:
                 # A shaped suite writes both halves itself.
                 body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
-                bazel, cargo = body.split("\n    else\n", 1)
-                return bazel, cargo
+                buck2, cargo = body.split("\n    else\n", 1)
+                return buck2, cargo
             # A uniform suite states its selection once and renders it into
             # both dialects, so the row *is* both halves: a name present here
-            # reaches the Bazel and the Cargo command by construction.
+            # reaches the Buck2 and the Cargo command by construction.
             row = re.search(
                 rf'^\s*\[{re.escape(suite)}\]="([^"]*)"$', script, re.MULTILINE
             )
@@ -1864,8 +1892,8 @@ class PostgresMatrixTests(unittest.TestCase):
             ),
         ):
             with self.subTest(oracle=oracle):
-                bazel, cargo = suite_body(step_name)
-                self.assertIn(oracle, bazel)
+                buck2, cargo = suite_body(step_name)
+                self.assertIn(oracle, buck2)
                 self.assertIn(oracle, cargo)
 
     def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
@@ -2159,7 +2187,7 @@ class WorkbenchClosureContractTests(unittest.TestCase):
     def test_the_postgres_store_closure_matches_the_declared_cargo_graph(self) -> None:
         """Every first-party package a declared edge reaches, optional or not.
 
-        The trusted job builds the store tests under Bazel at the workspace's
+        The trusted job builds the store tests under Buck2 at the workspace's
         unified features, so the walk must not drop an optional edge that a
         feature somewhere else in the workspace turns on. That is the
         manifest's declared graph, not the per-package `resolve`.
@@ -2273,7 +2301,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())
         job = workflow["jobs"]["workspace-tests"]
         self.assertNotIn("github.event_name", job["if"])
-        self.assertIn("needs.plan.outputs.bazel_trusted != 'true'", job["if"])
+        self.assertIn("needs.plan.outputs.buck2_trusted != 'true'", job["if"])
         self.assertIn("needs.plan.outputs.rust == 'true'", job["if"])
         classify = next(
             step for step in workflow["jobs"]["plan"]["steps"]
@@ -2379,7 +2407,7 @@ class DispatchOnlyJobTests(unittest.TestCase):
                 needs[job]["result"] = "skipped"
             if event in ci_plan.DEFERRED_EVENTS:
                 needs["postgres-store"]["result"] = "skipped"
-            needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+            needs[ci_plan.BUCK2_TEST_JOB]["result"] = "skipped"
         apply_event_deferrals(needs, event)
         return needs
 
@@ -2458,7 +2486,7 @@ class FeatureLanesTests(unittest.TestCase):
         needs["plan"]["outputs"]["feature_lanes"] = str(gated).lower()
         apply_event_deferrals(needs, event, trusted=trusted)
         if not trusted:
-            for job in ci_plan.BAZEL_TEST_JOBS:
+            for job in ci_plan.BUCK2_TEST_JOBS:
                 needs[job]["result"] = "skipped"
             needs["workspace-tests"]["result"] = "success" if rust else "skipped"
             needs["check"]["result"] = "success"
@@ -2466,7 +2494,7 @@ class FeatureLanesTests(unittest.TestCase):
             for job, family in ci_plan.GATED_JOBS.items():
                 if family == "rust":
                     needs[job]["result"] = "skipped"
-            for job in ci_plan.BAZEL_TEST_JOBS:
+            for job in ci_plan.BUCK2_TEST_JOBS:
                 needs[job]["result"] = "skipped"
         needs[ci_plan.FEATURE_LANES_JOB]["result"] = (
             "success" if trusted and rust else "skipped"
@@ -2476,7 +2504,7 @@ class FeatureLanesTests(unittest.TestCase):
     def test_the_job_compiles_on_every_trusted_rust_event(self) -> None:
         job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["feature-lanes"]
         self.assertEqual(
-            "needs.plan.outputs.bazel_trusted == 'true'"
+            "needs.plan.outputs.buck2_trusted == 'true'"
             " && needs.plan.outputs.rust == 'true'",
             " ".join(job["if"].split()),
         )
@@ -2484,7 +2512,8 @@ class FeatureLanesTests(unittest.TestCase):
         steps = {step.get("name"): step for step in job["steps"]}
         compile_step = steps["Compile every feature lane"]
         self.assertNotIn("if", compile_step)
-        self.assertIn("//:feature_lanes //:feature_lane_clippy", compile_step["run"])
+        self.assertIn("//:feature_lane_compile", compile_step["run"])
+        self.assertIn("//:feature_lane_clippy", compile_step["run"])
 
     def test_the_lane_test_steps_keep_the_pull_request_path_gate(self) -> None:
         steps = {
@@ -2542,14 +2571,14 @@ class FeatureLanesTests(unittest.TestCase):
                 self.assertEqual(
                     [],
                     ci_plan.evaluate_conclusion(
-                        needs, "pull_request", bazel_is_trusted=trusted
+                        needs, "pull_request", buck2_is_trusted=trusted
                     ),
                 )
                 needs["feature-lanes"]["result"] = "success"
                 self.assertTrue(any(
                     "feature-lanes" in problem
                     for problem in ci_plan.evaluate_conclusion(
-                        needs, "pull_request", bazel_is_trusted=trusted
+                        needs, "pull_request", buck2_is_trusted=trusted
                     )
                 ))
 
@@ -2597,16 +2626,16 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
     def test_an_untrusted_facade_diff_requires_the_cargo_seal_lane(self) -> None:
         needs = self.board(facade="true")
         needs["check"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
+        problems = ci_plan.evaluate_conclusion(needs, "pull_request", buck2_is_trusted=False)
         self.assertTrue(any("check" in problem for problem in problems))
         needs["check"]["result"] = "success"
         self.assertFalse(any(
             "check" in problem
-            for problem in ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
+            for problem in ci_plan.evaluate_conclusion(needs, "pull_request", buck2_is_trusted=False)
         ))
 
-    def test_trusted_events_seal_inside_the_bazel_partition(self) -> None:
-        """`//crates/lash:ui_fixtures` rides `bazel-tests`; the job must skip."""
+    def test_trusted_events_seal_inside_the_buck2_partition(self) -> None:
+        """`//crates/lash:ui_fixtures` rides `buck2-tests`; the job must skip."""
         for event, families in (
             ("pull_request", {"facade": "true"}),
             ("merge_group", {"facade": "true"}),
@@ -2620,26 +2649,34 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
                 problems = ci_plan.evaluate_conclusion(needs, event)
                 self.assertTrue(any("check" in problem for problem in problems))
 
-    def test_the_bazel_partition_carries_the_seal(self) -> None:
+    def test_the_buck2_partition_carries_the_seal(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         core = next(
-            step for step in jobs["bazel-tests"]["steps"]
+            step for step in jobs["buck2-tests"]["steps"]
             if step.get("name") == "Test the workspace core suite with shared cache"
         )
-        self.assertIn(
-            "-- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures",
-            core["run"],
-        )
+        self.assertIn("//:workspace_core_tests", core["run"])
+        self.assertIn("//crates/lash:ui_fixtures", core["run"])
         self.assertEqual(
-            "needs.plan.outputs.bazel_trusted != 'true'"
+            "needs.plan.outputs.buck2_trusted != 'true'"
             " && needs.plan.outputs.facade == 'true'",
             jobs["check"]["if"].strip(),
         )
         self.assertNotIn("environment", jobs["check"])
-        rule = (ROOT / "tools/bazel/ui_fixtures.bzl").read_text(encoding="utf-8")
+        rule = (ROOT / "tools/buck2/ui_fixtures.bzl").read_text(encoding="utf-8")
+        provider = rule.split("UIHarnessInfo = provider(", 1)[1].split("\n)\n", 1)[0]
+        fixture_harness = rule.split("def _fixture_harness_impl(ctx):", 1)[1]
+        fixture_harness = fixture_harness.split("\nui_fixture_harness = rule(", 1)[0]
+        fixtures = rule.split("def _ui_fixtures_impl(ctx):", 1)[1]
+        fixtures = fixtures.split("\n_ui_fixtures = rule(", 1)[0]
+        self.assertIn('"harness_outputs": list', provider)
         self.assertIn(
-            "OutputGroupInfo(_validation = ctx.attr.harness[DefaultInfo].files)", rule
+            "harness_outputs = ctx.attrs.harness[DefaultInfo].default_outputs",
+            fixture_harness,
         )
+        self.assertIn("harness_outputs = harness_outputs", fixture_harness)
+        self.assertIn("harness = ctx.attrs.harness[UIHarnessInfo]", fixtures)
+        self.assertIn("hidden = [helpers, harness.harness_outputs]", fixtures)
 
     def test_tooling_diff_requires_repo_gates(self) -> None:
         needs = self.board(tooling="true")
@@ -2650,7 +2687,7 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
 
     def test_stores_diff_defers_postgres_store_to_the_queue(self) -> None:
-        # The fast board covers a store diff through its affected Bazel
+        # The fast board covers a store diff through its affected Buck2
         # labels: postgres-store is merge-group and dispatch work, and a run
         # on a pull request is a contract violation, not spare coverage.
         needs = self.board(stores="true")

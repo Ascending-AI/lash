@@ -1,0 +1,124 @@
+name: Buck2 shared cache
+description: >-
+  Restores the pinned Buck2 tools, validates the shared pool configuration,
+  writes authenticated client configuration, and installs the verified client.
+  Pass CACHE_ENDPOINT, CACHE_INSTANCE, KILN_EXECUTOR_RUNTIME, CACHE_CA,
+  CACHE_CERT and CACHE_KEY in the calling step's env. Pair it with an
+  if-always cleanup step for $RUNNER_TEMP/build-cache. This action restores
+  the tool cache but never saves it; cache-warm.yml is the only writer.
+
+outputs:
+  tool-cache-key:
+    description: The pinned Buck2 tool cache key.
+    value: ${{ steps.keys.outputs.tool_cache }}
+  tool-cache-hit:
+    description: '"true" when that exact key was restored.'
+    value: ${{ steps.tool-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify shared pool configuration
+      id: pool
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=()
+        for name in CACHE_ENDPOINT CACHE_INSTANCE KILN_EXECUTOR_RUNTIME \
+          CACHE_CA CACHE_CERT CACHE_KEY; do
+          if [ -z "${!name:-}" ]; then
+            missing+=("${name}")
+          fi
+        done
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::the build-cache environment supplied no ${missing[*]}; the build-infra repository owns these secrets" >&2
+          exit 1
+        fi
+        endpoint="$(printf '%s' "${CACHE_ENDPOINT}" | tr -d '[:space:]')"
+        instance="$(printf '%s' "${CACHE_INSTANCE}" | tr -d '[:space:]')"
+        runtime="$(printf '%s' "${KILN_EXECUTOR_RUNTIME}" | tr -d '[:space:]')"
+        echo "::add-mask::${endpoint}"
+        echo "::add-mask::${instance}"
+        echo "::add-mask::${runtime}"
+        mask_multiline() {
+          local name="$1" line
+          while IFS= read -r line; do
+            [ -z "$line" ] || echo "::add-mask::${line}"
+          done <<< "${!name}"
+        }
+        mask_multiline CACHE_CA
+        mask_multiline CACHE_CERT
+        mask_multiline CACHE_KEY
+        if ! [[ "${endpoint}" =~ ^grpcs://[A-Za-z0-9.-]+:[0-9]+$ ]]; then
+          echo "::error::CACHE_ENDPOINT is not grpcs://host:port" >&2
+          exit 1
+        fi
+        if [ -z "${instance}" ] || [ -z "${runtime}" ]; then
+          echo "::error::CACHE_INSTANCE and KILN_EXECUTOR_RUNTIME must contain non-whitespace text" >&2
+          exit 1
+        fi
+        {
+          echo "address=${endpoint#*://}"
+          echo "instance=${instance}"
+          echo "runtime=${runtime}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Resolve Buck2 tool cache key
+      id: keys
+      shell: bash
+      run: |
+        python_abi="$(python3 -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')"
+        tool_digest="${{ hashFiles('tools/buck2/*pins.json', 'tools/buck2/*lock.json', 'tools/buck2/*bootstrap*.py', 'tools/buck2/prelude_overlay.py', 'tools/buck2/reindeer.toml', 'tools/buck2/fixups/**', 'third-party/Cargo.toml', 'third-party/Cargo.lock') }}"
+        echo "tool_cache=buck2-tools-v2-${RUNNER_OS}-${RUNNER_ARCH}-${python_abi}-${tool_digest}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pinned Buck2 tools
+      id: tool-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      continue-on-error: true
+      with:
+        path: |
+          .buck2/bin
+          .buck2/native
+          .buck2/prelude
+          .buck2/test-runner
+          tools/buck2/bin
+          tools/buck2/toolchains/rust-files
+          vendor
+        key: ${{ steps.keys.outputs.tool_cache }}
+
+    - name: Configure authenticated Buck2 client
+      shell: bash
+      env:
+        POOL_ADDRESS: ${{ steps.pool.outputs.address }}
+        POOL_INSTANCE: ${{ steps.pool.outputs.instance }}
+        POOL_RUNTIME: ${{ steps.pool.outputs.runtime }}
+      run: |
+        set -euo pipefail
+        umask 077
+        mkdir -p "$RUNNER_TEMP/build-cache"
+        printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
+        {
+          printf '%s\n' "$CACHE_CERT"
+          printf '%s\n' "$CACHE_KEY"
+        } > "$RUNNER_TEMP/build-cache/client.pem"
+        cat > .buckconfig.local <<EOF
+        [buck2_re_client]
+        engine_address = ${POOL_ADDRESS}
+        action_cache_address = ${POOL_ADDRESS}
+        cas_address = ${POOL_ADDRESS}
+        tls_ca_certs = $RUNNER_TEMP/build-cache/ca.crt
+        tls_client_cert = $RUNNER_TEMP/build-cache/client.pem
+        instance_name = ${POOL_INSTANCE}
+        execution_concurrency_limit = 32
+        [kiln]
+        executor_runtime = ${POOL_RUNTIME}
+        EOF
+
+    - name: Install pinned Buck2 client and tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        client="$(python3 tools/buck2/bootstrap.py)"
+        test -x "$client"
+        echo "$(dirname "$client")" >> "$GITHUB_PATH"
+        echo "KILN_REAL_CARGO=$(command -v cargo)" >> "$GITHUB_ENV"

@@ -15,28 +15,26 @@ mkdir -p "$artifact_root"
 artifact_root="$(cd "$artifact_root" && pwd -P)"
 build_log="$artifact_root/build.log"
 
-# Built through Bazel so this gate shares the box's action cache with every
+# Built through Buck2 so this gate shares the box's action cache with every
 # other checkout instead of compiling the workspace again into its own Cargo
 # target directory (FIG-3153). The geometry is unchanged: `cargo build` without
-# a profile and Bazel's default `fastbuild` are both `-C opt-level=0` with
+# a profile and Buck2's default profile are both `-C opt-level=0` with
 # debug assertions on, which is what this host has always run under.
 # `LASH_RLM_SMOKE_HOST_BIN` launches a prebuilt binary and skips the build.
 smoke_host_label='//runbooks/rlm-smoke:rlm-smoke'
 smoke_host_bin="${LASH_RLM_SMOKE_HOST_BIN:-}"
 if [[ -z "$smoke_host_bin" ]]; then
-  symlink_prefix="$artifact_root/bazel-"
+  build_report="$artifact_root/build-report.json"
   if command -v kiln >/dev/null 2>&1; then
     build_command=(kiln build)
   else
     build_command=("$repo/scripts/hermetic-build.sh" build)
   fi
-  # `build:shared` downloads no action outputs (`remote_download_outputs=
-  # minimal`), so the host binary this script launches must be pulled
-  # explicitly, as `hermetic-build.sh run` already does.
-  "${build_command[@]}" "--symlink_prefix=$symlink_prefix" \
-    --remote_download_outputs=toplevel "$smoke_host_label" \
+  "${build_command[@]}" --materializations final \
+    --build-report "$build_report" "$smoke_host_label" \
     2>&1 | tee "$build_log"
-  smoke_host_bin="${symlink_prefix}bin/runbooks/rlm-smoke/rlm-smoke"
+  smoke_host_bin="$(python3 tools/buck2/outputs.py \
+    --report "$build_report" --label "$smoke_host_label" --single)"
 fi
 [[ -x "$smoke_host_bin" ]] || {
   echo "rlm-smoke-host binary is missing at $smoke_host_bin" >&2

@@ -88,7 +88,7 @@ load1="$(cut -d' ' -f1 /proc/loadavg)"
 if awk -v a="$load1" -v b="$max_load" 'BEGIN{exit !(a > b)}'; then
   quiet_violations+=("one-minute load ${load1} exceeds the ${max_load} limit")
 fi
-for comm in rustc cargo bazel lash-perf; do
+for comm in rustc cargo buck2 lash-perf; do
   count=0
   for entry in /proc/[0-9]*/comm; do
     [[ "$(cat "$entry" 2>/dev/null)" == "$comm" ]] && ((count++)) || true

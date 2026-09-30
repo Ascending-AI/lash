@@ -1,4 +1,4 @@
-//! Derives the worker identity during both Cargo and Bazel builds.
+//! Derives the worker identity during both Cargo and Buck2 builds.
 #![allow(
     clippy::disallowed_methods,
     reason = "build scripts read declared build inputs"

@@ -1391,10 +1391,10 @@ exports.
 | `crates/lash-sansio/src/lib.rs`, `src/llm/types.rs`, `src/session_model/mod.rs` | runtime | R (C0): `mod` line, the tool-input variants, the observation variant | — |
 | `crates/lash/src/lib.rs` | runtime | H: the stopped-partial exports | R: the export swap |
 | `crates/lash/src/{turn.rs,send/follow.rs,durable_session.rs,session.rs}` | runtime | H: the report field, both projections, the durable report and the read | — |
-| `crates/lash/BUILD.bazel` | runtime | H: the new test target | K: its new test target |
+| `crates/lash/BUCK` | runtime | H: the new test target | K: its new test target |
 | `crates/lash-remote-protocol/src/turn_result.rs`, `core_conversions/turn_result.rs` | runtime | H: the field, conversion and validation | — |
 | `crates/lash-restate/src/session_control.rs` | runtime | R: the lost-root publication | — |
-| `crates/lash-restate-test/BUILD.bazel`, `crates/lash-core/tests/runtime_turns.rs` | runtime | R: the test target and `mod` line | — |
+| `crates/lash-restate-test/BUCK`, `crates/lash-core/tests/runtime_turns.rs` | runtime | R: the test target and `mod` line | — |
 | `crates/lash-sqlite-store/src/schema.rs` | SQLite | S: the four capture tables | S: artifact tables and both cleanup tables |
 | `crates/lash-sqlite-store/src/persistence/session_commit.rs` | SQLite | S: the partial-commit block, after the frame-transition block | S: the frame-transition block |
 | `crates/lash-sqlite-store/src/session_deletion.rs` | SQLite | S: staging deletion in the delete transaction | S: frame fence and cleanup in the delete transaction |

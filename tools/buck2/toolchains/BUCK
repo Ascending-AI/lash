@@ -1,0 +1,31 @@
+load("@prelude//toolchains:cxx.bzl", "cxx_tools_info_toolchain")
+load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
+load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_toolchain")
+load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
+load(":rust.bzl", "rust_toolchain")
+load(":hermetic_cxx.bzl", "hermetic_cxx_tools")
+
+hermetic_cxx_tools(
+    name = "cxx_tools",
+    llvm_tree = "native//:llvm_tree",
+)
+
+cxx_tools_info_toolchain(
+    name = "cxx",
+    cxx_tools_info = ":cxx_tools",
+    c_flags = [
+        "-resource-dir", "$(location native//:llvm_tree)/lib/clang/22",
+        "-isystem", "$(location native//:glibc_headers)/include",
+        "-isystem", "$(location native//:kernel_headers)/include",
+    ],
+    cxx_flags = [
+        "-resource-dir", "$(location native//:llvm_tree)/lib/clang/22",
+        "-isystem", "$(location native//:glibc_headers)/include",
+        "-isystem", "$(location native//:kernel_headers)/include",
+    ],
+    visibility = ["PUBLIC"],
+)
+system_python_bootstrap_toolchain(name = "python_bootstrap", interpreter = "/usr/bin/python3", visibility = ["PUBLIC"])
+remote_test_execution_toolchain(name = "remote_test_execution", visibility = ["PUBLIC"])
+noop_test_toolchain(name = "test", visibility = ["PUBLIC"])
+rust_toolchain(name = "rust", srcs = {p.removeprefix("rust-files/"): p for p in glob(["rust-files/**"])}, visibility = ["PUBLIC"])

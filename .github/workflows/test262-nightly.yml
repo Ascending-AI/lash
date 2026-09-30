@@ -52,8 +52,8 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Configure Bazel shared cache
-        uses: ./.github/actions/bazel-shared-cache
+      - name: Configure Buck2 shared cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -66,19 +66,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            --remote_download_regex='.*/testlogs/.*/test[.]log$' \
-            --nocache_test_results --test_output=errors --test_arg=--nocapture \
+          scripts/ci/buck2-test.sh test262-full \
+            --no-test-cache --test_arg=--nocapture \
             //crates/lash-typescript:test262_full__test
 
       - name: Report the figures
         if: always()
         shell: bash
         run: |
-          log=bazel-testlogs/crates/lash-typescript/test262_full__test/test.log
+          log="$RUNNER_TEMP/test262-full-test-results/root/crates/lash-typescript/test262_full__test/test.log"
           if [ -f "$log" ]; then
             grep -h '^Test262:' "$log" >> "$GITHUB_STEP_SUMMARY" || true
           fi

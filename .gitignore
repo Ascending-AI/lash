@@ -1,6 +1,14 @@
 /target/
 /.bazel/
 /bazel-*
+# Pinned tools, fork-local build outputs and private executor identity.
+/.buck2/
+/buck-out/
+/.buckconfig.local
+/.kiln/
+/tools/buck2/toolchains/rust-files/
+/tools/buck2/bin/
+/vendor/
 /.tgt/
 *.perf
 *.old

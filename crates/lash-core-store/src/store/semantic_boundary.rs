@@ -242,7 +242,7 @@ mod semantic_boundary_request_identity_tests {
             assert!(
                 workspace.is_some()
                     || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
-                "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+                "Buck2 regeneration requires BUILD_WORKSPACE_DIRECTORY"
             );
             let manifest_dir = workspace.map_or_else(
                 || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),

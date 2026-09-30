@@ -263,7 +263,7 @@ every accepted input driven exactly once, every obligation settled or stalled
 typed, no orphaned child, no wedged session, every terminal root's scope
 closed, within the ADR 0109 §1.8 detection bound. The harness lives in
 `src/crash_matrix/`; its module docs say how an S8 slice activates the cells
-it owns. The binary is `dev-deferred`: the Bazel tail runs it on main's
+it owns. The binary is `dev-deferred`: the Buck2 tail runs it on main's
 full-profile dispatch.
 
 ```sh

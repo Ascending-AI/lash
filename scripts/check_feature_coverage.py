@@ -892,17 +892,12 @@ def workflow_job_block(workflow: str, job: str) -> str:
     return workflow[start : start + len(marker) + next_job.start()]
 
 
-def bazel_feature_lanes(root: Path) -> dict[str, list[str]]:
-    """The generated lane -> Bazel label table, read out of Starlark.
-
-    `tools/bazel/feature_lanes.bzl` is generated, and its `FEATURE_LANES`
-    literal is a dict of string lists -- valid Python as well as valid
-    Starlark -- so it is read rather than re-derived.
-    """
-    source = (root / "tools" / "bazel" / "feature_lanes.bzl").read_text(encoding="utf-8")
-    marker = "FEATURE_LANES = "
-    start = source.index(marker) + len(marker)
-    return ast.literal_eval(source[start:].strip())
+def buck2_feature_lanes(root: Path) -> dict[str, list[str]]:
+    """The generated lane to Buck2 label table from target inventory."""
+    inventory = json.loads(
+        (root / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+    )
+    return inventory["feature_lanes"]
 
 
 def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
@@ -1168,27 +1163,27 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
 
     workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     feature_job = workflow_job_block(workflow, "feature-lanes")
-    # The lanes compile on the pool now, one Bazel target per resolved unit.
+    # The lanes compile on the pool now, one Buck2 target per resolved unit.
     # `ci.yml` no longer carries a leg per lane, so the coverage contract's
     # question changes from "does the matrix name this lane" to "does the lane
-    # graph compile it": a lane with no Bazel label would be a lane that CI
+    # graph compile it": a lane with no Buck2 label would be a lane that CI
     # silently stopped proving.
-    bazel_lanes = bazel_feature_lanes(root)
+    buck2_lanes = buck2_feature_lanes(root)
     for name in lane_names:
-        if not bazel_lanes.get(name):
-            failures.append(f"coverage lane has no Bazel targets: {name}")
+        if not buck2_lanes.get(name):
+            failures.append(f"coverage lane has no Buck2 targets: {name}")
     for aggregate in (
-        "//:feature_lanes",
+        "//:feature_lane_compile",
         "//:feature_lane_tests",
         "//:feature_lane_clippy",
     ):
         if aggregate not in feature_job:
-            failures.append(f"feature-lanes does not build {aggregate}")
+            failures.append(f"feature-lanes does not execute {aggregate}")
     # The lane compile and clippy run on every trusted event whose diff can
     # move a Rust build; only the lane tests keep a path gate on pull
     # requests. Either way the job needs the pool's credentials.
     if (
-        "needs.plan.outputs.bazel_trusted == 'true'" not in feature_job
+        "needs.plan.outputs.buck2_trusted == 'true'" not in feature_job
         and "github.event_name == 'workflow_dispatch'" not in feature_job
     ):
         failures.append("feature-lanes does not require a trusted shared cache")
@@ -1213,7 +1208,7 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
         "python3 scripts/check_feature_coverage.py check",
         # The independent half of the reconciliation: Cargo's own resolver,
         # through `cargo tree`, against the generator's reimplementation.
-        "python3 tools/bazel/generate_build_files.py --verify-resolution",
+        "python3 tools/buck2/sync.py --verify-resolution",
     ):
         if invocation not in repo_gates:
             failures.append(f"repo-gates does not execute {invocation}")

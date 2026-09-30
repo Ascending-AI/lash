@@ -11,6 +11,7 @@ import re
 import runpy
 import shlex
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -32,15 +33,12 @@ GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 FEATURE_COVERAGE = ROOT / "scripts" / "feature-coverage.toml"
-GENERATOR = ROOT / "tools" / "bazel" / "generate_build_files.py"
-LANE_TABLE = ROOT / "tools" / "bazel" / "feature_lanes.bzl"
+LANE_TABLE = ROOT / "tools" / "buck2" / "target-inventory.json"
 
 
 def feature_lane_table() -> dict[str, list[str]]:
-    """The generated lane -> Bazel label table; a Starlark dict is a Python one."""
-    source = LANE_TABLE.read_text(encoding="utf-8")
-    marker = "FEATURE_LANES = "
-    return ast.literal_eval(source[source.index(marker) + len(marker) :].strip())
+    """The generated lane -> Buck2 label table."""
+    return json.loads(LANE_TABLE.read_text(encoding="utf-8"))["feature_lanes"]
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
 PERF_PHASE_PROBE_RS = (
@@ -66,20 +64,30 @@ FAST_SHARDS = [
 
 @functools.lru_cache(maxsize=None)
 def _store_tests_stub_bin() -> str:
-    """A PATH entry whose `bazel`, `cargo` and `python3` echo their argv instead of running."""
+    """A PATH entry that records build commands while running inventory reads."""
     directory = pathlib.Path(tempfile.mkdtemp(prefix="store-tests-stub-"))
-    for tool in ("bazel", "cargo", "python3"):
+    for tool in ("buck2", "cargo"):
         stub = directory / tool
         stub.write_text(
             f'#!/usr/bin/env bash\nprintf "%s\\n" "{tool} $*"\n', encoding="utf-8"
         )
         stub.chmod(0o755)
+    python = directory / "python3"
+    python.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "${1:-}" == "-" ]]; then\n'
+        f'  exec "{sys.executable}" "$@"\n'
+        "fi\n"
+        'printf "%s\\n" "python3 $*"\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
     return str(directory)
 
 
 @functools.lru_cache(maxsize=None)
 def store_suite_branches(suite: str) -> tuple[str, str]:
-    """Returns the (Bazel, Cargo) commands one `store-tests.sh` suite renders.
+    """Returns the (Buck2, Cargo) commands one `store-tests.sh` suite renders.
 
     The service jobs dispatch to that script rather than inlining a command, so
     a pin on a command or a test name has to follow the name into the branch
@@ -87,7 +95,7 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
     untrusted event (fork or Dependabot PR) gets no cache credentials and takes
     the Cargo half.
 
-    This runs the script with `bazel` and `cargo` stubbed to echo their argv,
+    This runs the script with `buck2` and `cargo` stubbed to echo their argv,
     rather than splitting the arm's text on `else`. Uniform suites are
     rendered from one table instead of written twice, so there is no `else` to
     split on -- and reading what the script actually invokes is the stronger
@@ -104,7 +112,7 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
         environment["PATH"] = (
             f"{_store_tests_stub_bin()}{os.pathsep}{environment['PATH']}"
         )
-        environment["BAZEL_TRUSTED"] = trusted
+        environment["BUCK2_TRUSTED"] = trusted
         # `scripts/ci/with-service.sh` exports the slot count to every suite
         # it wraps; the sharded PostgreSQL suite refuses to run without it.
         environment["LASH_POSTGRES_SLOT_COUNT"] = "4"
@@ -126,6 +134,66 @@ def store_suite_for_step(step: str) -> str:
     if match is None:
         raise AssertionError(f"step does not dispatch to store-tests.sh:\n{step}")
     return match.group(1)
+
+
+def isolated_store_fixture(directory: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """Copy the store dispatcher beside a recording hermetic-build executable."""
+    root = directory / "repo"
+    script = root / "scripts/ci/store-tests.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(STORE_TESTS.read_bytes())
+    script.chmod(0o755)
+    calls = directory / "calls.jsonl"
+    driver = root / "scripts/hermetic-build.sh"
+    driver.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+entry = {
+    "argv": sys.argv[1:],
+    "environment": {
+        name: os.environ.get(name)
+        for name in (
+            "LASH_POSTGRES_DATABASE_URL",
+            "LASH_REQUIRE_POSTGRES",
+            "LASH_CROSS_BACKEND_CASES",
+        )
+    },
+}
+with open(os.environ["STORE_TEST_CALLS"], "a", encoding="utf-8") as output:
+    output.write(json.dumps(entry) + "\\n")
+""",
+        encoding="utf-8",
+    )
+    driver.chmod(0o755)
+    return root, calls
+
+
+def run_isolated_store_suite(
+    root: pathlib.Path,
+    calls: pathlib.Path,
+    suite: str,
+    runner_temp: pathlib.Path,
+    extra_environment: dict[str, str],
+) -> list[dict]:
+    before = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    environment = os.environ | {
+        "BUCK2_TRUSTED": "true",
+        "RUNNER_TEMP": str(runner_temp),
+        "STORE_TEST_CALLS": str(calls),
+    } | extra_environment
+    subprocess.run(
+        ["bash", str(root / "scripts/ci/store-tests.sh"), suite],
+        cwd=root,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    after = calls.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in after[len(before):]]
 
 
 def shell_int_constant(script: str, name: str) -> int:
@@ -618,7 +686,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             job: {"result": "success", "outputs": {}}
             for job in plan["UNGATED_JOBS"]
             | set(plan["GATED_JOBS"])
-            | plan["BAZEL_TEST_JOBS"]
+            | plan["BUCK2_TEST_JOBS"]
         }
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
@@ -631,7 +699,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # store suite is merge-group and dispatch work.
         needs["plan"]["outputs"]["restate_suites"] = "false"
         needs["workspace-tests"]["result"] = "skipped"
-        # Trusted events seal the API inside `bazel-tests`.
+        # Trusted events seal the API inside `buck2-tests`.
         needs["check"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -645,9 +713,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["functional-e2e"] = {"result": "skipped", "outputs": {}}
         needs["pr-host-workers"] = {"result": "skipped", "outputs": {}}
         needs["postgres-store"] = {"result": "skipped", "outputs": {}}
-        needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
+        needs["buck2-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
-        needs["bazel-tests-tail"] = {"result": "success", "outputs": {}}
+        needs["buck2-tests-tail"] = {"result": "success", "outputs": {}}
         needs["postgres-store"] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group", False), [])
         # A pull request keeps the live Restate legs skipped even when the
@@ -661,7 +729,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         restate_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
         restate_needs["plan"]["outputs"]["restate_suites"] = "true"
         self.assertEqual(evaluate(restate_needs, "merge_group", False), [])
-        restate_needs["bazel-tests-tail"]["result"] = "skipped"
+        restate_needs["buck2-tests-tail"]["result"] = "skipped"
         restate_needs["postgres-store"]["result"] = "skipped"
         self.assertEqual(evaluate(restate_needs, "pull_request"), [])
         restate_needs["functional-e2e"]["result"] = "success"
@@ -682,7 +750,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
         for job in workers:
             needs[job] = {"result": "skipped", "outputs": {}}
-        needs["bazel-tests-tail"]["result"] = "skipped"
+        needs["buck2-tests-tail"]["result"] = "skipped"
         needs["postgres-store"]["result"] = "skipped"
         self.assertEqual([], evaluate(needs, "pull_request"))
         needs["restate-postgres-workers"]["result"] = "success"
@@ -766,7 +834,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in plan["GATED_JOBS"]:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
-        for job in plan["BAZEL_TEST_JOBS"]:
+        for job in plan["BUCK2_TEST_JOBS"]:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual([], evaluate(pr_needs, "pull_request"))
 
@@ -1724,7 +1792,7 @@ write_confidence_summary failed
     def test_mutation_package_loops_skip_the_real_cargo_fault_matrix_probes(self) -> None:
         """The fault-matrix chunk tests fork a real `cargo test` each and alone
         exceed the baseline's per-test timeout; every package-scoped
-        cargo-mutants run must forward the same skip the Bazel targets use."""
+        cargo-mutants run must forward the same skip the Buck2 targets use."""
         gate = GATE.read_text(encoding="utf-8")
         self.assertIn(
             "MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'",
@@ -2428,8 +2496,8 @@ derive_mutation_jobs() {{
         # job runs inside it — `scripts/test_with_service.py` refuses a store
         # suite that is not wrapped, which is the same "no step can lose it"
         # property enforced at its source rather than by inheritance. Either
-        # way a Bazel test spawn inherits nothing from the client environment,
-        # so the shared `bazel_test` helper still forwards both by name — and
+        # way a Buck2 test spawn inherits nothing from the client environment,
+        # so the shared `buck2_test` helper still forwards both by name — and
         # that forwarding is what keeps the PG major an execution-only input,
         # outside every compile action key.
         postgres_job_env = yaml.safe_load(workflow)["jobs"]["postgres-store"]["env"]
@@ -2458,11 +2526,6 @@ derive_mutation_jobs() {{
                     step,
                 )
 
-        store_tests = STORE_TESTS.read_text(encoding="utf-8")
-        bazel_helper = store_tests.split("bazel_test() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("--test_env=LASH_POSTGRES_DATABASE_URL", bazel_helper)
-        self.assertIn("--test_env=LASH_REQUIRE_POSTGRES", bazel_helper)
-
         for step_name in (
             "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
@@ -2471,8 +2534,8 @@ derive_mutation_jobs() {{
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(postgres_store_job, step_name)
-                bazel, cargo = store_suite_branches(store_suite_for_step(step))
-                self.assertTrue(bazel.strip())
+                buck2, cargo = store_suite_branches(store_suite_for_step(step))
+                self.assertTrue(buck2.strip())
                 self.assertIn("cargo ", cargo)
 
         store_suites = workflow_step_block(
@@ -2484,7 +2547,7 @@ derive_mutation_jobs() {{
         self.assertIn("store-tests.sh pg-store", store_suites)
         self.assertIn(
             "//crates/lash-postgres-store:integration__test",
-            (ROOT / "tools/bazel/postgres_test_labels.txt").read_text(encoding="utf-8"),
+            json.loads(LANE_TABLE.read_text(encoding="utf-8"))["service_test_targets"]["postgres"],
         )
         self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
         self.assertIn("needs.plan.outputs.pr_pg_store == 'true'", postgres_store_job)
@@ -2492,7 +2555,7 @@ derive_mutation_jobs() {{
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured
         # output is what makes a real run distinguishable from a skipped one.
-        differential_bazel, differential_cargo = store_suite_branches(
+        differential_buck2, differential_cargo = store_suite_branches(
             store_suite_for_step(
                 workflow_step_block(
                     postgres_store_job, "Test cross-backend store differential"
@@ -2500,10 +2563,10 @@ derive_mutation_jobs() {{
             )
         )
         self.assertIn("--no-capture", differential_cargo)
-        # libtest's spelling of the same flag, plus the Bazel-side switch that
+        # libtest's spelling of the same flag, plus the Buck2-side switch that
         # actually lets the uncaptured stderr reach the log.
-        self.assertIn("--test_arg=--nocapture", differential_bazel)
-        self.assertIn("--test_output=all", differential_bazel)
+        self.assertIn("--test_arg=--nocapture", differential_buck2)
+        self.assertIn("--test_output=all", differential_buck2)
         self.assertIn(
             'LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}"',
             push_gate,
@@ -2524,6 +2587,100 @@ derive_mutation_jobs() {{
                 for command in conformance_calls
             ),
         )
+
+    def test_buck2_store_runtime_flags_and_reports_are_forwarded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = pathlib.Path(directory)
+            root, calls = isolated_store_fixture(temporary)
+            runner_temp = temporary / "runner-temp"
+            environment = {
+                "LASH_POSTGRES_DATABASE_URL": "postgres://fixture/db",
+                "LASH_REQUIRE_POSTGRES": "1",
+                "LASH_CROSS_BACKEND_CASES": "4",
+            }
+            first, = run_isolated_store_suite(
+                root, calls, "pg-cross-backend", runner_temp, environment
+            )
+            second, = run_isolated_store_suite(
+                root, calls, "pg-cross-backend", runner_temp, environment
+            )
+            s3_environment = {
+                "LASH_REQUIRE_S3": "1",
+                "LASH_S3_ENDPOINT": "http://127.0.0.1:9000",
+                "LASH_S3_REGION": "fixture-region",
+                "LASH_S3_BUCKET": "fixture-bucket",
+                "LASH_S3_ACCESS_KEY": "fixture-access",
+                "LASH_S3_SECRET_KEY": "fixture-secret",
+            }
+            s3, = run_isolated_store_suite(
+                root, calls, "s3-attachment-differential", runner_temp,
+                s3_environment,
+            )
+
+        argv = first["argv"]
+        forwarded = {
+            argv[index + 1]
+            for index, argument in enumerate(argv[:-1])
+            if argument == "--test_env"
+        }
+        self.assertGreaterEqual(
+            forwarded,
+            {
+                "LASH_POSTGRES_DATABASE_URL",
+                "LASH_REQUIRE_POSTGRES",
+                "LASH_CROSS_BACKEND_CASES",
+            },
+        )
+        self.assertEqual(first["environment"], environment)
+        self.assertIn("--test_output=all", argv)
+        s3_argv = s3["argv"]
+        s3_forwarded = {
+            s3_argv[index + 1]
+            for index, argument in enumerate(s3_argv[:-1])
+            if argument == "--test_env"
+        }
+        self.assertGreaterEqual(s3_forwarded, set(s3_environment))
+
+        def report_directories(call: dict) -> set[pathlib.Path]:
+            arguments = call["argv"]
+            return {
+                pathlib.Path(arguments[arguments.index(option) + 1]).parent
+                for option in (
+                    "--build-report",
+                    "--test-report",
+                    "--test-output-dir",
+                    "--event-log",
+                )
+            }
+
+        first_directories = report_directories(first)
+        second_directories = report_directories(second)
+        self.assertEqual(len(first_directories), 1)
+        self.assertEqual(len(second_directories), 1)
+        first_directory, = first_directories
+        second_directory, = second_directories
+        self.assertNotEqual(first_directory, second_directory)
+        self.assertEqual(
+            first_directory.parent,
+            runner_temp / "store-test-results",
+        )
+        self.assertEqual(
+            second_directory.parent,
+            runner_temp / "store-test-results",
+        )
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        for job_name in ("postgres-store", "s3-store"):
+            uploads = [
+                step
+                for step in workflow["jobs"][job_name]["steps"]
+                if "upload-artifact@" in step.get("uses", "")
+                and step["with"]["name"].startswith("buck2-reports-")
+            ]
+            self.assertEqual(len(uploads), 1, job_name)
+            self.assertEqual(
+                uploads[0]["with"]["path"],
+                "${{ runner.temp }}/store-test-results/",
+            )
 
     def test_store_suites_state_one_selection_in_both_dialects(self) -> None:
         """Each suite's test selection is written once, rendered twice.
@@ -2570,18 +2727,24 @@ derive_mutation_jobs() {{
         # command. The stubs make this the command the script would have run.
         for suite in sorted(suites):
             with self.subTest(suite=suite):
-                bazel, cargo = store_suite_branches(suite)
-                self.assertTrue(bazel.startswith("bazel test "), bazel)
+                buck2, cargo = store_suite_branches(suite)
+                commands = buck2.splitlines()
+                self.assertTrue(commands, buck2)
+                for command in commands:
+                    self.assertRegex(
+                        command,
+                        r"^python3 .*/tools/buck2/driver\.py test ",
+                    )
                 self.assertIn("cargo ", cargo)
 
         for suite, row in sorted(uniform.items()):
             with self.subTest(suite=suite):
                 label, test_filter, package, target, runner, flags = row.split("|")
-                bazel, cargo = store_suite_branches(suite)
+                buck2, cargo = store_suite_branches(suite)
                 invocation_count = len(test_filter.split(","))
-                self.assertEqual(invocation_count, len(bazel.splitlines()))
+                self.assertEqual(invocation_count, len(buck2.splitlines()))
                 self.assertEqual(invocation_count, len(cargo.splitlines()))
-                self.assertIn(label, bazel)
+                self.assertIn(label, buck2)
                 self.assertIn(f"-p {package}", cargo)
                 if target:
                     self.assertIn(target, cargo)
@@ -2597,7 +2760,7 @@ derive_mutation_jobs() {{
                     # The one selection reaches both dialects. A libtest filter
                     # that matches nothing exits 0, so a name present on one
                     # side only is a silently retired leg.
-                    self.assertIn(f"--test_arg={selected_filter}", bazel)
+                    self.assertIn(f"--test_arg={selected_filter}", buck2)
                     self.assertIn(
                         selected_filter if runner == "cargo-test" else f"test({selected_filter})",
                         cargo,
@@ -2608,21 +2771,21 @@ derive_mutation_jobs() {{
                         self.assertTrue(skipped_filter)
                         self.assertIn(
                             f"--test_arg=--skip --test_arg={skipped_filter}",
-                            bazel,
+                            buck2,
                         )
                         self.assertEqual("cargo-test", runner)
                         self.assertIn(f"--skip {skipped_filter}", cargo)
                         continue
-                    bazel_spelling, cargo_spellings = flag_dialects[flag]
-                    self.assertIn(bazel_spelling, bazel, flag)
+                    buck2_spelling, cargo_spellings = flag_dialects[flag]
+                    self.assertIn(buck2_spelling, buck2, flag)
                     self.assertTrue(
                         any(spelling in cargo for spelling in cargo_spellings),
                         (flag, cargo),
                     )
                 # And a flag the row does not ask for is in neither half.
-                for flag, (bazel_spelling, _) in flag_dialects.items():
+                for flag, (buck2_spelling, _) in flag_dialects.items():
                     if flag not in flags.split(","):
-                        self.assertNotIn(bazel_spelling, bazel, (suite, flag))
+                        self.assertNotIn(buck2_spelling, buck2, (suite, flag))
 
         # The rendered arms are gone from the `case`, so there is no second
         # place a selection could be written.
@@ -2639,8 +2802,8 @@ derive_mutation_jobs() {{
 
         # The require flag is supplied once at job level, so an unavailable
         # service fails instead of skipping for every suite in the job and no
-        # step can lose it on its own. A Bazel test spawn inherits nothing from
-        # the client environment, so `bazel_test` forwards it by name.
+        # step can lose it on its own. A Buck2 test spawn inherits nothing from
+        # the client environment, so `buck2_test` forwards it by name.
         s3_job_env = yaml.safe_load(workflow)["jobs"]["s3-store"]["env"]
         self.assertEqual("1", str(s3_job_env["LASH_REQUIRE_S3"]))
         self.assertNotIn("LASH_S3_ENDPOINT", s3_job_env)
@@ -2662,44 +2825,42 @@ derive_mutation_jobs() {{
                     "bash scripts/ci/with-service.sh s3 --",
                     workflow_step_block(s3_store_job, step_name),
                 )
-        bazel_helper = STORE_TESTS.read_text(encoding="utf-8").split(
-            "bazel_test() {", 1
-        )[1].split("\n}", 1)[0]
-        self.assertIn("--test_env=LASH_REQUIRE_S3", bazel_helper)
-
-        conformance_bazel, conformance_cargo = store_suite_branches(
+        conformance_buck2, conformance_cargo = store_suite_branches(
             store_suite_for_step(
                 workflow_step_block(s3_store_job, "Test S3 store conformance")
             )
         )
         self.assertIn("cargo test -p lash-internal-s3-store --locked", conformance_cargo)
-        # The Bazel half runs the generated label set, so a new S3-gated
+        # The Buck2 half runs the generated label set, so a new S3-gated
         # binary joins this job without a hand edit. The generated file is what
         # has to name the crate, and the rendered command is what has to carry
         # every label in it.
-        s3_labels = (ROOT / "tools" / "bazel" / "s3_test_labels.txt").read_text(
-            encoding="utf-8"
+        s3_labels = json.loads(LANE_TABLE.read_text(encoding="utf-8"))[
+            "service_test_targets"
+        ]["s3"]
+        self.assertTrue(
+            any(label.startswith("//crates/lash-s3-store:") for label in s3_labels),
+            s3_labels,
         )
-        self.assertIn("//crates/lash-s3-store:", s3_labels)
-        for label in s3_labels.split():
-            self.assertIn(label, conformance_bazel, label)
+        for label in s3_labels:
+            self.assertIn(label, conformance_buck2, label)
 
-        differential_bazel, differential_cargo = store_suite_branches(
+        differential_buck2, differential_cargo = store_suite_branches(
             store_suite_for_step(
                 workflow_step_block(
                     s3_store_job, "Test attachment blob-store differential"
                 )
             )
         )
-        for branch in (differential_bazel, differential_cargo):
+        for branch in (differential_buck2, differential_cargo):
             self.assertIn("attachment_blob_store_differential_agrees", branch)
 
     def test_every_declared_lane_reaches_the_pool_graph(self) -> None:
-        """Each coverage lane is compiled by the one Bazel feature job.
+        """Each coverage lane is compiled by the one Buck2 feature job.
 
         The fourteen `Package feature check` legs and the four
         `Runtime feature boundary` legs were a matrix of Cargo commands; they
-        are now one job building `//:feature_lanes`. The lane names are still
+        are now one job building `//:feature_lane_compile`. The lane names are still
         the contract, so they are spelled out here rather than read out of the
         table under test.
         """
@@ -2731,19 +2892,15 @@ derive_mutation_jobs() {{
                 self.assertTrue(labels, f"lane {lane} compiles nothing")
 
         worker_labels = set(lanes["loadtest-worker-synthetic-next"])
-        worker_build = ROOT / "runbooks/restate-postgres-workers/BUILD.bazel"
-        worker_features = set()
-        for statement in ast.parse(worker_build.read_text(encoding="utf-8")).body:
-            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
-                continue
-            call = statement.value
-            if not isinstance(call.func, ast.Name) or call.func.id != "lash_rust_feature_binary":
-                continue
-            fields = {keyword.arg: keyword.value for keyword in call.keywords}
-            name = ast.literal_eval(fields["name"])
-            label = f"//runbooks/restate-postgres-workers:{name}"
-            if label in worker_labels and ast.literal_eval(fields["crate_root"]) == "src/bin/worker.rs":
-                worker_features.add(frozenset(ast.literal_eval(fields["crate_features"])))
+        inventory = json.loads(LANE_TABLE.read_text(encoding="utf-8"))
+        worker_features = {
+            frozenset(unit["features"])
+            for unit in inventory["feature_lane_units"]
+            if unit["label"] in worker_labels
+            and unit["package"] == "lash-restate-postgres-workers-e2e"
+            and unit["kind"] == "bin"
+            and ":lash-e2e-worker__bin" in unit["label"]
+        }
         self.assertEqual(
             {frozenset(), frozenset({"synthetic-next"})},
             worker_features,
@@ -2751,7 +2908,7 @@ derive_mutation_jobs() {{
         )
 
         job = workflow_job_block(WORKFLOW.read_text(encoding="utf-8"), "feature-lanes")
-        self.assertIn("//:feature_lanes", job)
+        self.assertIn("//:feature_lane_compile", job)
         self.assertIn("//:feature_lane_tests", job)
         self.assertIn(
             "python3 scripts/ci/check_feature_lane_test_floors.py", job
@@ -2792,13 +2949,9 @@ derive_mutation_jobs() {{
             runtime["commands"],
         )
 
-        generator = GENERATOR.read_text(encoding="utf-8")
-        self.assertIn('("lash-runtime", (), "unit-test"): 130,', generator)
-        lanes = LANE_TABLE.read_text(encoding="utf-8")
-        marker = "FEATURE_LANE_TEST_FLOORS = "
-        floors = json.loads(
-            lanes[lanes.index(marker) + len(marker) : lanes.index("\n\nFEATURE_LANES")]
-        )
+        floors = json.loads(LANE_TABLE.read_text(encoding="utf-8"))[
+            "feature_lane_test_floors"
+        ]
         self.assertEqual([130], sorted(floors.values()))
         self.assertTrue(
             all("crates/lash:" in label for label in floors),
@@ -2858,7 +3011,7 @@ derive_mutation_jobs() {{
         self.assertIn("Install Node for browser projection gates", workspace_tests)
         self.assertIn("node-version: 24", workspace_tests)
         # Untrusted pull requests keep the full workspace build. Trusted
-        # events run Bazel instead.
+        # events run Buck2 instead.
         self.assertIn(
             'cargo build --locked ${LASH_CI_FEATURES} "${build_args[@]}"',
             workspace_tests,
@@ -2868,7 +3021,7 @@ derive_mutation_jobs() {{
             ")",
             workspace_tests,
         )
-        self.assertIn("trusted event must use the Bazel partition", workspace_tests)
+        self.assertIn("trusted event must use the Buck2 partition", workspace_tests)
         self.assertNotIn("scope=(--package agent-workbench)", workspace_tests)
         self.assertIn(
             "cargo nextest run --profile ci --locked ${LASH_CI_FEATURES}",
@@ -2885,22 +3038,22 @@ derive_mutation_jobs() {{
         check_job = workflow_job_block(workflow, "check")
         self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)
-        # The trusted path is pure Bazel (FIG-3364) and rides the core test
+        # The trusted path is pure Buck2 (FIG-3364) and rides the core test
         # invocation: `ui_fixtures` runs every tests/ui/*.stderr fixture
         # through the toolchain rustc directly and, as its validation output,
         # builds `ui__test` (which proves the compile-pass modules still
         # compile), so the seal no longer pays trybuild's nested `cargo check`
-        # of the dependency graph or a Bazel client of its own. The Cargo
+        # of the dependency graph or a Buck2 client of its own. The Cargo
         # command stays as the untrusted/fork leg, so both spellings are
         # pinned here.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
             check_job,
         )
-        self.assertNotIn("bazel ", check_job)
-        self.assertNotIn("bazel-shared-cache", check_job)
+        self.assertNotIn("buck2 ", check_job)
+        self.assertNotIn("buck2-shared-cache", check_job)
         self.assertIn(
-            "//crates/lash:ui_fixtures", workflow_job_block(workflow, "bazel-tests")
+            "//crates/lash:ui_fixtures", workflow_job_block(workflow, "buck2-tests")
         )
         self.assertNotIn("run-seal-harness", check_job)
         self.assertNotIn("cargo fetch", check_job)
@@ -2919,7 +3072,7 @@ derive_mutation_jobs() {{
                 "bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py",
             ),
             "feature-lanes": (
-                "//:feature_lanes",
+                "//:feature_lane_compile",
                 "//:feature_lane_tests",
                 "python3 scripts/ci/check_feature_lane_test_floors.py",
             ),

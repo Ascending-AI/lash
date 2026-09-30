@@ -1,4 +1,4 @@
-//! Build-only source closure shared by Cargo, Bazel and the identity laws.
+//! Build-only source closure shared by Cargo, Buck2 and the identity laws.
 #![allow(
     clippy::disallowed_methods,
     reason = "build-time source inputs, never runtime ambient reads"

@@ -559,7 +559,7 @@ The two mechanisms above check one script, run once. Four FIG-3571 defects
 passed them for that reason — block and generated bindings leaking into the
 next cell, printer faults, a lifted literal declared twice, a draft carrying
 an artifact's identity — so three more mechanisms join them. All three run in
-the cacheable Bazel test partition, with no network.
+the cacheable Buck2 test partition, with no network.
 
 **The Node session oracle** (`crates/lash-typescript/tests/differential/sessions/`)
 holds sessions: ordered cells. Its reference answer is the pinned Node v25.2.1

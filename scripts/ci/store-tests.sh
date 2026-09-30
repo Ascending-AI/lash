@@ -1,61 +1,33 @@
 #!/usr/bin/env bash
-# Run one service-backed store suite, either from the shared Bazel cache or
+# Run one service-backed store suite, either from the shared Buck2 cache or
 # from a Cargo compile.
 #
-# Trusted events (`BAZEL_TRUSTED=true`) build the test binaries from the shared
+# Trusted events (`BUCK2_TRUSTED=true`) build the test binaries from the shared
 # remote cache and execute them on this runner against the service the job
 # stood up. Untrusted events -- fork and Dependabot pull requests -- never
 # receive cache credentials, so they run exactly the Cargo commands that
 # predate this cutover.
 #
-# Two properties hold for every Bazel invocation here and must keep holding:
+# Two properties hold for every Buck2 invocation here and must keep holding:
 #
 #   * PostgreSQL version and connection settings reach the test only through
 #     `--test_env`, which is part of the test spawn and of nothing else. Every
 #     compile action key is therefore identical across the PG 14/16/18 matrix
 #     legs, and the three jobs share one set of compiled outputs.
-#   * The PostgreSQL conformance suite runs for several minutes against a real
-#     database, and Cargo imposes no per-binary bound. Bazel's default is 300
-#     seconds, so `--test_timeout` restores the Cargo shape; the job's
-#     `timeout-minutes` remains the real bound.
-#   * `--nocache_test_results` plus `no-cache`/`no-remote-cache` on the
-#     `TestRunner` mnemonic means a service-backed test RESULT is never read
-#     from, and never written to, the shared cache. A cached green for a test
-#     whose verdict depends on a live database is a false green. The
-#     `--modify_execution_info` filter is scoped to `TestRunner` precisely so
-#     the compile actions above it stay cacheable.
-#   * `no-remote-exec` on the same mnemonic keeps the test spawn on this
-#     runner. The service this job stood up listens on the runner's loopback
-#     and exists nowhere else, so a test action dispatched to the execution
-#     pool would have no database or bucket to talk to. Only the compile
-#     actions below it are submitted to the pool.
+#   * `--no-test-cache` prevents service-dependent verdicts from entering the
+#     shared cache while leaving compilation cacheable.
+#   * `--local-test-execution` keeps test processes on the runner whose
+#     loopback hosts the database or bucket. Compilation still uses the pool.
 #
 # Usage: scripts/ci/store-tests.sh <suite>
 set -euo pipefail
 
 suite="${1:?usage: store-tests.sh <suite>}"
-trusted="${BAZEL_TRUSTED:?BAZEL_TRUSTED must be 'true' or 'false'}"
-# CI exports both of these from .github/actions/bazel-shared-cache, and there
-# they must stay required: an unset value would mean the credentials step did
-# not run and the build would silently miss the shared cache. Outside CI --
-# `scripts/ci/with-service.sh`, the same wrapper CI's store jobs use to start a
-# container and then run these same suites -- the shared cache is configured by
-# the checkout's .bazelrc and .kiln.bazelrc instead, so the defaults below name
-# exactly what `kiln build` uses and the output base the .bazelrc `startup` line
-# already pins.
-if [ -n "${GITHUB_ACTIONS:-}" ]; then
-  : "${BAZEL_SHARED_CACHE_FLAGS:?BAZEL_SHARED_CACHE_FLAGS must be set in CI}"
-  : "${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set in CI}"
-fi
-# `--config=shared` is the same pool configuration `kiln build` uses, so the
-# compiles below are shared-cache hits and pool actions. The test spawn itself
-# must stay on this machine: the service container publishes its port on this
-# host's loopback, and a TestRunner action on a pool worker would reach nothing.
-: "${BAZEL_SHARED_CACHE_FLAGS=--config=shared --strategy=TestRunner=local}"
+trusted="${BUCK2_TRUSTED:?BUCK2_TRUSTED must be 'true' or 'false'}"
 case "${trusted}" in
   true | false) ;;
   *)
-    echo "invalid Bazel trust decision: ${trusted}" >&2
+    echo "invalid Buck2 trust decision: ${trusted}" >&2
     exit 1
     ;;
 esac
@@ -63,42 +35,57 @@ esac
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
-bazel_test() {
-  local startup=()
-  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
-    startup=(--output_user_root="${BAZEL_OUTPUT_USER_ROOT}")
+buck2_test_count=0
+buck2_report_root=""
+buck2_test() {
+  buck2_test_count=$((buck2_test_count + 1))
+  if [[ -z "$buck2_report_root" ]]; then
+    local report_base="${RUNNER_TEMP:-.buck2}/store-test-results"
+    local report_name="${suite//[^A-Za-z0-9_.-]/_}"
+    mkdir -p "$report_base"
+    buck2_report_root="$(mktemp -d "$report_base/${report_name}.XXXXXX")"
   fi
-  # shellcheck disable=SC2086
-  bazel "${startup[@]}" test \
-    ${BAZEL_SHARED_CACHE_FLAGS} \
-    --nocache_test_results \
-    --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache,TestRunner=+no-remote-exec \
-    --local_test_jobs=1 \
-    --test_timeout=1200 \
-    --test_output=errors \
-    --test_env=LASH_POSTGRES_DATABASE_URL \
-    --test_env=LASH_REQUIRE_POSTGRES \
-    --test_env=LASH_REQUIRE_S3 \
-    --test_env=LASH_S3_ENDPOINT \
-    --test_env=LASH_S3_REGION \
-    --test_env=LASH_S3_BUCKET \
-    --test_env=LASH_S3_ACCESS_KEY \
-    --test_env=LASH_S3_SECRET_KEY \
-    --test_env=LASH_CROSS_BACKEND_CASES \
+  local test_env=()
+  local name
+  for name in \
+    LASH_POSTGRES_DATABASE_URL LASH_REQUIRE_POSTGRES \
+    LASH_REQUIRE_S3 LASH_S3_ENDPOINT LASH_S3_REGION LASH_S3_BUCKET \
+    LASH_S3_ACCESS_KEY LASH_S3_SECRET_KEY LASH_CROSS_BACKEND_CASES; do
+    if [[ -v "$name" ]]; then
+      test_env+=(--test_env "$name")
+    fi
+  done
+  scripts/hermetic-build.sh test \
+    --jobs "${LASH_POSTGRES_SLOT_COUNT:-32}" \
+    --local-test-execution \
+    --no-test-cache \
+    --test_timeout 1200 \
+    --test_output=all \
+    --build-report "$buck2_report_root/build-${buck2_test_count}.json" \
+    --test-report "$buck2_report_root/test-${buck2_test_count}.json" \
+    --test-output-dir "$buck2_report_root/results-${buck2_test_count}" \
+    --event-log "$buck2_report_root/events-${buck2_test_count}.json-lines" \
+    "${test_env[@]}" \
     "$@"
 }
 
 labels() {
-  # Generated by tools/bazel/generate_build_files.py: a new service-gated
-  # binary joins its service job without a hand edit here.
-  tr '\n' ' ' <"tools/bazel/$1_test_labels.txt"
+  # Generated inventory: a new service-gated binary joins its service job
+  # without a hand edit here.
+  python3 - "$1" <<'PY'
+import json
+import sys
+with open("tools/buck2/target-inventory.json", encoding="utf-8") as source:
+    inventory = json.load(source)
+print(*inventory["service_test_targets"][sys.argv[1]])
+PY
 }
 
 
 # One test selection per uniform suite, rendered into both dialects below.
 # Fields are
 #
-#   bazel label|comma-separated test filters|cargo package|cargo target|cargo runner|flags
+#   Buck2 label|comma-separated test filters|cargo package|cargo target|cargo runner|flags
 #
 # `skip=<filter>` excludes an explicitly unresolved ignored law from a
 # cargo-test suite that otherwise includes its service-only ignored tests.
@@ -132,16 +119,16 @@ suite_has_flag() {
   esac
 }
 
-# The Bazel half: a libtest name filter and the libtest switches, each passed
+# The Buck2 half: a libtest name filter and the libtest switches, each passed
 # through `--test_arg`, plus the output switch `--nocapture` needs to be
 # visible in the log.
-render_bazel_suite() {
+render_buck2_suite() {
   local label="$1" filter="$2" flags="$3"
   local args=()
   [ -n "$filter" ] && args+=("--test_arg=${filter}")
   suite_has_flag "$flags" include-ignored && args+=(--test_arg=--include-ignored)
   suite_has_flag "$flags" single-threaded && args+=(--test_arg=--test-threads=1)
-  suite_has_flag "$flags" nocapture && args+=(--test_arg=--nocapture --test_output=all)
+  suite_has_flag "$flags" nocapture && args+=(--test_arg=--nocapture)
   local flag
   local -a selections
   IFS=, read -r -a selections <<< "$flags"
@@ -150,7 +137,7 @@ render_bazel_suite() {
       args+=(--test_arg=--skip "--test_arg=${flag#skip=}")
     fi
   done
-  bazel_test "${args[@]}" "$label"
+  buck2_test "${args[@]}" "$label"
 }
 
 # The Cargo half: the same selection in nextest's or libtest's spelling.
@@ -207,7 +194,7 @@ run_uniform_store_suite() {
   fi
   for filter in "${filters[@]}"; do
     if [ "${trusted}" = true ]; then
-      render_bazel_suite "$label" "$filter" "$flags"
+      render_buck2_suite "$label" "$filter" "$flags"
     else
       render_cargo_suite "$filter" "$package" "$target" "$runner" "$flags"
     fi
@@ -225,9 +212,9 @@ case "${suite}" in
   # distinct version-stamp gate.
   pg-catalog-compatibility)
     if [ "${trusted}" = true ]; then
-      bazel_test --test_arg=committed_shape_artifact_matches_the_ddl_artifact \
+      buck2_test --test_arg=committed_shape_artifact_matches_the_ddl_artifact \
         //crates/lash-postgres-store:lash-postgres-store__unit_test
-      bazel_test \
+      buck2_test \
         --test_arg=a_mismatched_version_stamp_is_reported_without_a_column_diff \
         //crates/lash-postgres-store:schema_drift__test
     else
@@ -244,31 +231,27 @@ case "${suite}" in
   # synthetic tier's PostgreSQL suites run against the same service.
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
-  # a time against the one database. Bazel runs the sharded binaries' shards
-  # and the other binaries in parallel (FIG-3572), each under
-  # `//tools/bazel:postgres_slot_runner`, which gives every test action a
+  # a time against the one database. Buck2 runs the sharded binaries' shards
+  # and the other binaries in parallel (FIG-3572), each under the generated
+  # slot wrapper, which gives every test action a
   # database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
-  # `with-service.sh` created; `--local_test_jobs` never runs more tests than
-  # there are slots.
+  # `with-service.sh` created; `--jobs` never runs more tests than there are
+  # slots.
   pg-store)
     if [ "${trusted}" = true ]; then
-      slots="${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
+      : "${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
       LASH_POSTGRES_SLOT_DIR="$(mktemp -d)"
       export LASH_POSTGRES_SLOT_DIR
       # shellcheck disable=SC2046
-      bazel_test \
-        --run_under=//tools/bazel:postgres_slot_runner \
-        --local_test_jobs="${slots}" \
+      buck2_test \
         --test_env=LASH_POSTGRES_SLOT_DIR \
         --test_env=LASH_POSTGRES_SLOT_COUNT \
         $(labels postgres)
-      bazel_test \
-        --run_under=//tools/bazel:postgres_slot_runner \
+      buck2_test \
         --test_env=LASH_POSTGRES_SLOT_DIR \
         --test_env=LASH_POSTGRES_SLOT_COUNT \
         --test_arg=postgres_ingress \
         --test_arg=--ignored \
-        --test_sharding_strategy=disabled \
         //crates/lash-restate:lash-restate__unit_test
     else
       cargo test -p lash-internal-postgres-store --locked
@@ -283,7 +266,7 @@ case "${suite}" in
   s3-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
-      bazel_test $(labels s3)
+      buck2_test $(labels s3)
     else
       cargo test -p lash-internal-s3-store --locked
     fi
