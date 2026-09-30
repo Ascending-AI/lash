@@ -407,6 +407,7 @@ pub(crate) use admission::{
 };
 pub(crate) mod drive_epoch;
 mod history;
+pub(crate) use history::read_tx;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;

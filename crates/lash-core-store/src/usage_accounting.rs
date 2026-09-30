@@ -288,13 +288,13 @@ pub struct UsageFactRecord {
     pub source: String,
     pub model: String,
     pub usage: TokenUsage,
-    pub disposition: UsageDisposition, // Reported | Unreported | Reconciled
-    pub run: Option<UsageRunId>,       // None for a correction
+    pub disposition: UsageReporting, // Reported | Unreported | Reconciled
+    pub run: Option<UsageRunId>,     // None for a correction
     pub generation_id: Option<String>,
     pub recorded_at_ms: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UsageDisposition {
+pub enum UsageReporting {
     Reported,
     Unreported,
     Reconciled,
@@ -631,12 +631,12 @@ impl UsageAttemptFact {
                 generation_id,
             } => (
                 usage.clone(),
-                UsageDisposition::Reported,
+                UsageReporting::Reported,
                 generation_id.clone(),
             ),
             AttemptFactOutcome::Unreported { generation_id } => (
                 TokenUsage::default(),
-                UsageDisposition::Unreported,
+                UsageReporting::Unreported,
                 generation_id.clone(),
             ),
         };
@@ -702,7 +702,7 @@ impl UsageFactKind {
         }
     }
 }
-impl UsageDisposition {
+impl UsageReporting {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Reported => "reported",

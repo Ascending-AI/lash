@@ -503,7 +503,7 @@ pub async fn delivered_usage(
             .await
             .map_err(|err| format!("page `{session}` usage facts: {err}"))?;
         for fact in page.facts {
-            if fact.disposition == lash_core::UsageDisposition::Reported {
+            if fact.disposition == lash_core::UsageReporting::Reported {
                 let buckets = UsageBuckets::from_accounting_usage(&fact.usage)?;
                 if !buckets.is_zero() {
                     facts.push(buckets);

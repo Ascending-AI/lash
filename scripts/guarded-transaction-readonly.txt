@@ -30,7 +30,7 @@ postgres crates/lash-postgres-store/src/postgres/migrate.rs::lock_connection  # 
 postgres crates/lash-postgres-store/src/postgres/migrate.rs::read_state_under_lock  # reads the migration stamp, ledger and release stamp in one REPEATABLE READ snapshot
 postgres crates/lash-postgres-store/src/postgres/migrate.rs::verify_changed_catalog  # the synthetic-next shape verification after a run: it reads the catalog and rolls back; each step begins at `begin_migration`
 postgres crates/lash-postgres-store/src/preflight/walk.rs::read_only_snapshot  # opens a REPEATABLE READ READ ONLY snapshot for the durable walk
-postgres crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs::read_tx  # opens a REPEATABLE READ READ ONLY snapshot for history reads
+postgres crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs::read_tx  # opens a REPEATABLE READ READ ONLY snapshot for history and owner-usage reads
 postgres crates/lash-postgres-store/src/postgres/process_registry/park_feed.rs::process_park_feed  # reads a page of the process park feed under a share-locked horizon
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::get_process_by_start_key  # reads the process a start key names
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::processes_changed_since  # reads a page of process changes under the compaction horizon

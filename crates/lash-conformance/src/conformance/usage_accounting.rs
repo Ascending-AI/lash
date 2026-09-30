@@ -628,7 +628,7 @@ pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs
     );
     let reported = facts
         .iter()
-        .filter(|fact| fact.disposition == crate::UsageDisposition::Reported)
+        .filter(|fact| fact.disposition == crate::UsageReporting::Reported)
         .count();
     assert_eq!(
         reported,

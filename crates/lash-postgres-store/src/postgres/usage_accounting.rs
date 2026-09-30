@@ -7,9 +7,9 @@ use lash_core_execution::UsageAccountingStore;
 use lash_core_execution::{LlmCallId, StoreError, TokenUsage};
 use lash_core_execution::{
     OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, UsageAdmissionError, UsageAppendError,
-    UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageDisposition, UsageEffectKey,
-    UsageFactConflict, UsageFactCursor, UsageFactIdentity, UsageFactKind, UsageFactPage,
-    UsageFactRecord, UsageOwnerRetired, UsageRunAdmission, UsageRunAdmitted, UsageRunCursor,
+    UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageEffectKey, UsageFactConflict,
+    UsageFactCursor, UsageFactIdentity, UsageFactKind, UsageFactPage, UsageFactRecord,
+    UsageOwnerRetired, UsageReporting, UsageRunAdmission, UsageRunAdmitted, UsageRunCursor,
     UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord, UsageRunResolution, UsageRunState,
     UsageSettleReceipt, UsageSettlement, UsageUnknownReason, usage_correction_payload_hash,
     usage_fact_payload_hash, usage_owner_columns,
@@ -110,9 +110,9 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
             },
         },
         disposition: match disposition.as_str() {
-            "reported" => UsageDisposition::Reported,
-            "unreported" => UsageDisposition::Unreported,
-            "reconciled" => UsageDisposition::Reconciled,
+            "reported" => UsageReporting::Reported,
+            "unreported" => UsageReporting::Unreported,
+            "reconciled" => UsageReporting::Reconciled,
             _ => return Err(corrupt("invalid disposition")),
         },
         run: run.map(UsageRunId::try_from).transpose()?,
@@ -438,7 +438,7 @@ impl UsageAccountingStore for PostgresStore {
                 return Err(UsageAppendError::CorrectionTargetMissing { identity });
             };
             let mut record = decode_fact(&target)?;
-            if record.disposition != UsageDisposition::Unreported {
+            if record.disposition != UsageReporting::Unreported {
                 return Err(UsageAppendError::CorrectionTargetReported { identity });
             }
             let hash = usage_correction_payload_hash(
@@ -448,7 +448,7 @@ impl UsageAccountingStore for PostgresStore {
                 &record.model,
             );
             record.identity.kind = UsageFactKind::Correction;
-            record.disposition = UsageDisposition::Reconciled;
+            record.disposition = UsageReporting::Reconciled;
             record.run = None;
             record.usage = correction.usage.clone();
             record.generation_id = Some(correction.generation_id.clone());
@@ -521,11 +521,9 @@ impl UsageAccountingStore for PostgresStore {
         })
     }
     async fn load_owner_usage(&self, owner: &RuntimeOwner) -> Result<OwnerUsage, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        // One snapshot for the totals, the outstanding attempts and the
+        // completeness counts, so they describe the same ledger.
+        let mut tx = crate::runtime_persistence::read_tx(self).await?;
         let (kind, id) = usage_owner_columns(owner);
         let rows = sqlx::query(SQL.facts.aggregate.sql())
             .bind(kind)
