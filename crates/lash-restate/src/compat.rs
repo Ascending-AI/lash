@@ -89,6 +89,13 @@ tokio::task_local! {
     static DEPLOYMENT_WIRE: DeploymentWire;
 }
 
+/// The fleet epoch of the deployment this process serves, for lash code that
+/// runs under no lash handler: a host's own handler (a host workflow that
+/// sends turns, starts processes or opens effect scopes through its own
+/// controller). Set by [`crate::RestateEngine::endpoint_builder`].
+static HOST_FLEET: std::sync::RwLock<Option<crate::object_state::FleetView>> =
+    std::sync::RwLock::new(None);
+
 impl DeploymentWire {
     /// A deployment reading `reads` under `fleet`.
     pub(crate) fn speaking(reads: VersionRange, fleet: lash_core::FleetFormat) -> Self {
@@ -98,13 +105,54 @@ impl DeploymentWire {
         Self { reads, writes }
     }
 
-    /// The wire of the deployment whose handler runs this task. A host's
-    /// own handler that runs lash code runs under no deployment of lash's,
-    /// and speaks this build's wire under its own `F`.
+    /// The wire of the deployment whose handler runs this task, or, for lash
+    /// code a host's own handler runs, [`Self::host`].
     pub(crate) fn current() -> Self {
         DEPLOYMENT_WIRE
             .try_with(|wire| *wire)
-            .unwrap_or_else(|_| Self::speaking(RESTATE_WIRE, lash_core::FleetFormat::current()))
+            .unwrap_or_else(|_| Self::host())
+    }
+
+    /// The wire of lash code a host's own handler runs, under no lash
+    /// handler's scope: this build's range under the fleet epoch of the
+    /// deployment this process serves ([`Self::serve_host_fleet`]). The
+    /// host's calls are journaled in the host's invocation and may reach a
+    /// handler of another build, so they state what the store's recorded `F`
+    /// selects, like a lash handler's: N+1 states N's version until finalize
+    /// (FIG-3805).
+    ///
+    /// A process that serves no deployment (a library host that only
+    /// submits work) has no store epoch to read, and explicitly speaks this
+    /// build's own epoch `F_self`, logging that once. In a mixed fleet such a
+    /// host must run the build whose `F_self` is the recorded `F`.
+    pub(crate) fn host() -> Self {
+        let registered = HOST_FLEET
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(crate::object_state::FleetView::fleet_format);
+        let fleet = registered.unwrap_or_else(|| {
+            static UNBOUND: std::sync::Once = std::sync::Once::new();
+            UNBOUND.call_once(|| {
+                tracing::warn!(
+                    target: "lash::restate",
+                    event = "restate.host_wire_unbound",
+                    fleet_format = lash_core::FleetFormat::current().version(),
+                    "lash code runs under no lash handler in a process that serves no deployment: \
+                     its journaled calls state this build's own fleet epoch"
+                );
+            });
+            lash_core::FleetFormat::current()
+        });
+        Self::speaking(RESTATE_WIRE, fleet)
+    }
+
+    /// Serve `fleet`'s epoch to the lash code this process's host handlers
+    /// run ([`Self::host`]).
+    pub(crate) fn serve_host_fleet(fleet: crate::object_state::FleetView) {
+        *HOST_FLEET
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(fleet);
     }
 
     /// Run `handler` under this wire.
@@ -218,6 +266,34 @@ mod tests {
             super::DeploymentWire::speaking(RESTATE_WIRE, n_epoch).journaled(),
             VersionRange::exactly(1),
             "this build states N's wire while F is N's epoch"
+        );
+    }
+
+    /// FIG-3805: lash code a host's own handler runs journals the wire the
+    /// served deployment's recorded `F` selects, not this build's own epoch.
+    /// On the synthetic N+1 at `F = 1` it states N's version, so a call that
+    /// a rollback routes to N's handler is answered, not refused
+    /// `lash.wire_unsupported`.
+    #[test]
+    fn a_host_handler_call_states_the_served_fleet_epoch() {
+        struct Recorded(lash_core::FleetFormat);
+        impl lash_core::FleetFormatStore for Recorded {
+            fn fleet_format(&self) -> lash_core::FleetFormat {
+                self.0
+            }
+        }
+        let n_epoch = lash_core::FleetFormat::from_version(1);
+        super::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(
+            std::sync::Arc::new(Recorded(n_epoch)),
+        ));
+        assert_eq!(
+            super::DeploymentWire::current().journaled(),
+            VersionRange::exactly(1),
+            "outside any lash handler, this build states the served store's epoch"
+        );
+        assert_eq!(
+            super::DeploymentWire::current(),
+            super::DeploymentWire::speaking(RESTATE_WIRE, n_epoch)
         );
     }
 

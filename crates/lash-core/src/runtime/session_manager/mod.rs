@@ -121,15 +121,25 @@ pub(in crate::runtime) struct CurrentOwnerCapability {
 }
 
 impl CurrentOwnerCapability {
-    /// The fleet-format generation this capability's durable writers emit —
-    /// the `F` the bound session's store recorded (FIG-3796). A capability
-    /// holding no store writes nothing durable, so the build's own generation
-    /// is the only honest answer it can give.
+    /// The fleet-format generation this capability's durable writers emit:
+    /// the `F` the bound session's store recorded (FIG-3796), or, for a
+    /// process owner, the `F` its process registry recorded, since a process
+    /// writes its effect occurrences and terminal through that registry
+    /// (FIG-3805). A capability holding neither writes nothing durable, so the
+    /// build's own generation is the only honest answer it can give.
     pub(in crate::runtime) fn fleet_format(&self) -> crate::FleetFormat {
-        self.session()
-            .and_then(|session| session.store.as_ref())
-            .map(|store| store.fleet_format())
-            .unwrap_or_else(crate::FleetFormat::current)
+        match &self.owner {
+            CurrentOwner::Session(session) => session
+                .store
+                .as_ref()
+                .map(|store| store.fleet_format())
+                .unwrap_or_else(crate::FleetFormat::current),
+            CurrentOwner::Process { .. } => self
+                .host
+                .process_registry()
+                .map(|registry| registry.fleet_format())
+                .unwrap_or_else(crate::FleetFormat::current),
+        }
     }
 
     pub(in crate::runtime) fn runtime_owner(&self) -> crate::RuntimeOwner {

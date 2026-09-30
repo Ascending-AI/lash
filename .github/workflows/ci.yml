@@ -466,7 +466,7 @@ jobs:
           python3 scripts/test_bazel_test_contract.py
           python3 scripts/test_vm_worker_identity_generation.py
           python3 scripts/test_loadtest_measurements.py
-          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_manifest.py
+          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py
           python3 scripts/test_bazel_profile_digest.py
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py

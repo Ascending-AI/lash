@@ -386,6 +386,28 @@ pub enum ProcessEffectReportError {
     EmptyOmissions,
 }
 
+/// The `vocabulary_version` an appended payload may carry: the version each
+/// fleet epoch this build writes under assigns the vocabulary (ADR 0115
+/// §2.1). A build writing under one epoch writes one version; a compatibility
+/// release writes `F_prev`'s version until finalize and `F_self`'s after, so
+/// its validator admits both.
+fn vocabulary_version_schema() -> serde_json::Value {
+    let writable = crate::FleetFormat::writable();
+    let mut versions = (writable.min()..=writable.max())
+        .map(|fleet| {
+            crate::FleetFormat::from_version(fleet).writer_version(
+                lash_core_store::surface_format!(PROCESS_EVENT_VOCABULARY_VERSION),
+            )
+        })
+        .collect::<Vec<_>>();
+    versions.sort_unstable();
+    versions.dedup();
+    match versions.as_slice() {
+        [version] => serde_json::json!({ "const": version }),
+        _ => serde_json::json!({ "enum": versions }),
+    }
+}
+
 pub(super) fn effect_outcome_payload_schema() -> crate::LashSchema {
     crate::LashSchema::new(serde_json::json!({
         "type": "object",
@@ -395,7 +417,7 @@ pub(super) fn effect_outcome_payload_schema() -> crate::LashSchema {
             "outcome_class", "replay_key"
         ],
         "properties": {
-            "vocabulary_version": { "const": PROCESS_EVENT_VOCABULARY_VERSION },
+            "vocabulary_version": vocabulary_version_schema(),
             "node_id": { "type": "string", "minLength": 1 },
             "occurrence": {
                 "type": "integer",
@@ -420,7 +442,7 @@ pub(super) fn effect_omissions_payload_schema() -> crate::LashSchema {
         "additionalProperties": false,
         "required": ["vocabulary_version", "occurrence_cap", "nodes"],
         "properties": {
-            "vocabulary_version": { "const": PROCESS_EVENT_VOCABULARY_VERSION },
+            "vocabulary_version": vocabulary_version_schema(),
             "occurrence_cap": { "const": PROCESS_EFFECT_OCCURRENCE_CAP },
             "nodes": {
                 "type": "object",

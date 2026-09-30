@@ -143,6 +143,13 @@ the finalizing build's own epoch, including a release without format changes
 Without a matching pin it uses the build's newest version. A finalize moves
 the epoch rather than individually selecting every format (`:196`).
 
+A writer's epoch is its store's recorded one: a session's store, or for a
+process run its process registry. Only a writer holding no store uses the
+build's own epoch (`crates/lash-core/src/runtime/session_manager/mod.rs:130`,
+`crates/lash-core/src/runtime/session_manager/process_runners/runner.rs:176`).
+A payload validator admits the version each epoch in the writable range
+assigns (`crates/lash-core-execution/src/runtime/process/effect_summary.rs:394`).
+
 #### 2.2 The guarded transaction entry
 
 Ordinary PostgreSQL mutations begin through `begin_guarded`. Its first
@@ -240,7 +247,12 @@ version (`crates/lash-restate/src/compat.rs:41`, `:127`,
 Ingress may state the full readable range. A journaled call states exactly
 the wire version its deployment's fleet epoch selects, so replay-equivalent
 builds record the same call under that epoch
-(`crates/lash-restate/src/compat.rs:49`, `:82`).
+(`crates/lash-restate/src/compat.rs:49`, `:82`). A host handler's journaled
+call reads the same epoch: the engine registers its store's fleet view when it
+builds its endpoint. A process serving no deployment states its build's own
+epoch and warns `restate.host_wire_unbound` once
+(`crates/lash-restate/src/compat.rs:110`, `:128`, `:152`,
+`crates/lash-restate/src/engine.rs:210`).
 Session and turn requests rely on this wire contract rather than a request
 `drive_version` gate (`crates/lash-restate/src/session_driver.rs:787`, `:795`).
 Journal generation remains a separate routing concern.
@@ -396,6 +408,18 @@ the two node builds against live services plus SQLite reopen cases; the
 operator JSON proof needs one binary. `just phase-a` and `just e2e-rolling`
 run the service proofs (`justfile:434`, `runbooks/rolling-upgrade/runbook.md:43`).
 Each law's registration supplies its supported store and host combination.
+
+`just e2e-rolling-cluster` runs the choreography under load on the Helm load
+topology: three Restate nodes with replication two, PostgreSQL and kind, with
+N's and N+1's workers side by side while the load driver's sessions keep
+sending. It half-rolls, rolls back before finalize, rolls, finalizes with the
+object sweep, and fences: the live N worker's write, a fresh N process and
+N's operator are refused. The load verifier's witness classes judge no lost or
+duplicated effects, stale writers fenced after finalize, the rollback
+restoring N, and every session settling turns through each step
+(`scripts/loadtest_upgrade.py:1`,
+`runbooks/restate-postgres-workers/src/load/upgrade_verify.rs:1`). It runs on
+demand and sets no performance baseline.
 
 ### 7. Release-cut guardrails
 

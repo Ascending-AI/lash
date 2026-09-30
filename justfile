@@ -733,8 +733,19 @@ check-file-size:
 multi-node-load target="local":
   bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}"
 
+# Phase B of the rolling upgrade (FIG-3805, `runbooks/rolling-upgrade/`): N
+# and the synthetic N+1 side by side on the FIG-4167 topology (three Restate
+# nodes, PostgreSQL, kind) under the load driver's sessions, through the
+# half roll, the rollback before finalize, the roll, finalize with the
+# object sweep, and the stale-writer fence (`scripts/loadtest_upgrade.py`).
+# Short, with no measurement archive: the witness verdict is the proof. Run
+# through kiln gate, like `multi-node-load`.
+e2e-rolling-cluster target="local":
+  bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}" rolling-upgrade
+
 loadtest-chart-check:
   bash "{{repo}}/scripts/check-loadtest-chart.sh"
   python3 "{{repo}}/scripts/test_loadtest_topology.py"
   python3 "{{repo}}/scripts/test_loadtest_faults.py"
+  python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
   python3 "{{repo}}/scripts/test_loadtest_manifest.py"

@@ -259,7 +259,9 @@ object-sweep crash resume, retention delivery and skipped-release refusal.
 The rolling harness exercises PostgreSQL overlap and SQLite stop-then-start
 against live Restate, including rollback, drain, deployment removal, hold,
 finalize and contract. It tests the synthetic release window, not arbitrary
-pre-1.0 binary compatibility.
+pre-1.0 binary compatibility. The multi-node leg (`just e2e-rolling-cluster`)
+runs the same choreography under load on the Helm load topology, on demand
+rather than per PR (ADR 0115 §6).
 
 Storage laws run against SQLite file, SQLite memory and PostgreSQL. Execution
 hosts are the in-process Restate server double, live Restate and lash-sim's

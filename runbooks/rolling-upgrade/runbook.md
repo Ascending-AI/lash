@@ -1,23 +1,40 @@
-# Runbook: Rolling Upgrade Across Two Builds (Phase A)
+# Runbook: Rolling Upgrade Across Two Builds
 
-> **Read [../RULES.md](../RULES.md) first.** This is a deterministic companion,
-> not an agent-judged browser leg. `just e2e-rolling` runs every command; the
-> judge reads its artifact bundle and never drives a process, Docker, or Restate
+> **Read [../RULES.md](../RULES.md) first.** This runbook is agent-judged over
+> the artifact bundles of two deterministic companions: `just e2e-rolling`
+> (Phase A, local processes) and `just e2e-rolling-cluster` (Phase B, the
+> multi-node cluster under load). The companions run every command; the judge
+> reads their bundles and never drives a process, Docker, kind or Restate
 > itself.
 
 **Purpose.** Prove, before the 1.0 cut, that a 1.0 node can serve as an N-1:
 it runs beside a newer build during a PostgreSQL roll, upgrades SQLite
-stop-then-start, and can be rolled back to
+stop-then-start after a complete backup, and can be rolled back to
 ([ADR 0115](../../docs/adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
-§6, FIG-3805 phase A). The rollout follows the choreography of
+§6, FIG-3805). The rollout follows the choreography of
 [ADR 0106](../../docs/adr/0106-durable-formats-upgrade-by-migration-or-drain.md)
 §6: migrate, half roll, rollback, roll, drain, retire, finalize, and then
 the backfill and contract that finalize releases (FIG-3800 B, FIG-3817).
 
+The version freeze holds until the cut, so both phases roll head (N) to the
+repository's synthetic successor (N+1, the `synthetic-next` feature), not to
+a real 1.1. The first real successor reuses this machinery unchanged.
+
+- **Phase A** (`just e2e-rolling`, `just phase-a`) runs the two builds as
+  local processes over PostgreSQL, a SQLite store directory and one
+  `restate-server`, one session at a time, and pins each typed refusal.
+- **Phase B** (`just e2e-rolling-cluster`) runs the same choreography on
+  the FIG-4167 load topology: three Restate nodes with replication two,
+  PostgreSQL and two workers per generation on kind, while the FIG-4168
+  load driver's sessions keep sending. It is where the four laws are judged
+  under load. It is short: it proves each step, and it sets no performance
+  baseline.
+
 **Execution class.** Deterministic-only. It is listed under `deterministic_only`
-in `judged-matrix.toml`. Every model reply comes from the node's scripted
-provider, which answers `served by <build> at generation <G>`. The run makes
-no provider network call and produces no judged dialect row.
+in `judged-matrix.toml`. Every Phase A model reply comes from the node's
+scripted provider, which answers `served by <build> at generation <G>`;
+Phase B's come from the load topology's synthetic provider. Neither makes a
+provider network call or produces a judged dialect row.
 
 ## The two builds
 
@@ -160,6 +177,60 @@ budget preflight hook against the live server before every Helm upgrade.
 Keep both checks: a rendered chart cannot prove the server has restarted with
 its configured capacity.
 
+## Phase B: the cluster roll under load
+
+`just e2e-rolling-cluster` (run it through `kiln gate lash <fork> --`, like
+`just multi-node-load`) is `scripts/multi-node-load.sh local rolling-upgrade`.
+It builds the load topology's worker, provider and driver, the synthetic
+N+1 worker, and both builds' `lashctl`, into two images: N's and N+1's, each
+carrying its own `lash-e2e-worker` and `lashctl`. It boots a three-node kind
+cluster, installs the `deploy/helm/lash-loadtest` chart, provisions Restate
+(three metadata members, 24 partitions, replication two), registers the
+bootstrap workers and answers one public smoke turn. It skips the FIG-4167
+quorum-loss hold, which proves the topology, not the upgrade. Then it starts
+the `smoke-v1` load, four sessions running open-loop until the campaign ends,
+and `scripts/loadtest_upgrade.py` runs the campaign.
+
+Worker generations are Kubernetes names, and each one serves at its own
+immutable URI `http://lash-loadtest-workers-<generation>:18100`:
+
+| Generation | Build | Serves from | Retired at |
+|---|---|---|---|
+| `initial` | N | install | the roll, after N's drain |
+| `next` | N+1 | the half roll | the rollback, after N+1's drain |
+| `rollback` | N | the rollback | Restate: finalize; pods: the fence |
+| `final` | N+1 | the roll | never |
+
+The campaign's five steps, in order. Each waits for load work on the
+generation it moves away from, and recovers only when every operation in
+flight at it has answered, a turn, a queued input and a cron emission sent
+after it have answered, and every session has settled a turn it sent after
+it (answered, or cancelled as its plan asked):
+
+| Step | What the operator does | What must hold |
+|---|---|---|
+| `half-roll` | Helm starts `next` beside `initial`; its pre-upgrade hook runs N+1's `lashctl migrate`; N+1's `lashctl preflight` and `version`; `next` registers; N+1's `lashctl drain <G_N>` | the two builds report different `G`; turns after it are answered by `next` workers |
+| `rollback` | N+1's `lashctl end-drain <G_N>`; Helm starts `rollback` without a migrate hook; N's `lashctl preflight` admits the expanded store; `rollback` registers; N's `lashctl drain <G_N+1>` | `rollback` reports N's `G`; turns after it are answered by `rollback` workers; `lashctl drain-status <G_N+1>` drained with nothing stalled and no unfinished invocation pinned to `next`'s deployment; `next` retires from Helm and Restate; N's `lashctl end-drain <G_N+1>` |
+| `roll` | Helm starts `final` (its hook runs N+1's migrate again, a no-op); N+1's `lashctl preflight`; `final` registers; N+1's `lashctl drain <G_N>` | turns after it are answered by `final` workers; `<G_N>` drained, nothing pinned to either N deployment; `initial` retires from Helm |
+| `finalize` | N+1's `lashctl finalize <G_N> --restate-admin-url ...`, once `lashctl drain-status <G_N>` reads drained; an exit 5 `generation_not_drained` (a stopped pod's session close still in the store) waits for the drain again | refused `deployments_retained` while N's deployments are registered; after both are removed, `F` moves from 1 to 2 with every backfill `applied`; `lashctl end-drain <G_N>`; `lashctl migrate --phase contract` executes steps; `lashctl objects-preflight`, `lashctl objects-sweep` and `lashctl objects-preflight` again leave no object at N's format |
+| `fence` | the still-running `rollback` N worker marks a drain; a fresh `lash-e2e-worker` starts inside its pod; N's `lashctl preflight` | the live write answers HTTP 500 `writer fenced: ...` and `drain-status` shows no mark written; the fresh process exits non-zero with the reader-floor or fleet-epoch refusal; N's preflight exits 3 or 4; then `rollback` retires |
+
+The driver then reconciles the witness ledgers. Beside the 19 load classes
+(FIG-4168) it judges the campaign's own classes
+(`runbooks/restate-postgres-workers/src/load/upgrade_verify.rs`):
+`upgrade-campaign`, one class per step, and `sessions-through-roll`. The
+four laws read from them:
+
+| Law | Where the verdict proves it |
+|---|---|
+| No lost or duplicated effects across the roll | every step's in-flight operations answered; `turns`, `tools` and `child-processes` span the roll: every answered turn's effects committed exactly once with the regenerated result, and no effect committed that no turn planned |
+| Stale writers are fenced after finalize | `finalize` (refused while N was registered, then `F` 1 to 2) and `fence` (the live N write fenced and unwritten, a fresh N process and N's operator refused) |
+| The rollback leg restores N cleanly before finalize | `rollback`: N's own `G` serves and takes admission, N+1 drained with nothing stalled or pinned and retired, and `roll` and `finalize` only after it recovered |
+| Every session keeps working through the roll | `sessions-through-roll`: every session settled a turn sent after every step |
+
+Phase B is PostgreSQL only: mixed-version overlap is PostgreSQL's (FIG-4254),
+and SQLite's stop-then-start leg with its migration backup is Phase A's.
+
 ## Operator commands
 
 The harness runs these exact command forms with `LASH_POSTGRES_DATABASE_URL`
@@ -209,6 +280,21 @@ The artifact directory (default
 - `restate-server.log`: the server's log;
 - the E2E log: every `lashctl` JSON envelope and turn report.
 
+Phase B's run directory is `target/fig-3790/<gate>-<timestamp>/`. It holds:
+
+- `result.txt`: the topology gate line and `rolling upgrade passed: ...`;
+- `upgrade.log`: every step's intent, injected and recovered row, and every
+  `lashctl` envelope, in order; `faults.jsonl` holds the same ledger rows;
+- `lashctl.jsonl`: one row per `lashctl` call, with the generation and
+  build that ran it, its arguments, its exit code and its envelope;
+- `load-witness.txt` and `load.log`: the driver's per-class lines and its
+  verdict;
+- `*-values.yaml`: the Helm overlay of each step (`half-roll`, `rollback`,
+  `rollback-retired`, `roll`, `roll-retired`, `fence-retired`);
+- `faults-kubectl.log`: every `kubectl` and `helm` call the campaign made;
+- each pod's log (`<pod>.log`), `events.txt` and `resources.txt`, captured
+  before the cluster is deleted.
+
 ## Scorecard
 
 The judge answers each item from the bundle and cites the file:
@@ -233,5 +319,39 @@ The judge answers each item from the bundle and cites the file:
    and `lashctl migrate --phase contract` executing its step. SQLite records
    its finalize flip, has no separate contract step, and N refuses its
    finalized fleet epoch.
+7. **SQLite backup before migrate.** The E2E log prints the SQLite roll's
+   migration backup after N+1's first turn and again after finalize: one
+   `manifest.json` in state `migrated`, naming all three databases, each
+   moving from a lower to a higher version. No backup existed before N+1
+   opened the store.
+
+Phase B, from its run directory:
+
+8. **The cluster.** `result.txt` shows the topology gate line (three Restate
+   nodes, three metadata members, replication two) and `rolling upgrade
+   passed`. `lashctl.jsonl` shows both builds' `lashctl` (`build` `n` and
+   `n+1`), and the half roll's injected row reports two different `G`.
+9. **Every step, in order.** `upgrade.log` shows `half-roll`, `rollback`,
+   `roll`, `finalize` and `fence`, each `intent`, `injected`, `recovered`,
+   each injected after the previous step recovered, and the campaign
+   `complete`. Each injected row names in-flight work and each recovered row
+   gives `in_flight_at_injection` of at least one.
+10. **No lost or duplicated effects.** `load-witness.txt` reports
+    `violations=0` for `turns`, `tools`, `child-processes` and every step
+    class, and the verdict line reads `verdict=passed`.
+11. **The rollback restores N before finalize.** The `rollback` injected row's
+    `restored_generation` equals the half roll's `old_generation`, its
+    recovered row shows `drained: true` with zero pinned and stalled, and
+    `retired: next`; the `lashctl.jsonl` row for N's `preflight` in the
+    rollback exited 0; `finalize` comes after it.
+12. **Stale writers are fenced.** `lashctl.jsonl` shows `finalize` refused
+    `deployments_retained`, then answering `{"outcome":"finalized","from":1,
+    "to":2}` with every backfill `applied`, then `migrate --phase contract`
+    executing steps and the object sweep leaving nothing at N's format. The
+    `fence` rows show the live write answering HTTP 500 `writer fenced`, no
+    drain mark written, the fresh N process's refusal text and exit code,
+    and N's `preflight` exiting 3 or 4.
+13. **Every session keeps working.** `load-witness.txt` shows
+    `sessions-through-roll` with five or more witnessed and zero violations.
 
 Any failed item is an Abort/RCA under [../RULES.md](../RULES.md).

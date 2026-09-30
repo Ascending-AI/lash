@@ -510,6 +510,9 @@ impl<'run> RuntimeExecutionContext<'run> {
             chronological_projection,
             turn_context,
             live_tool_catalog: None,
+            // This build's own epoch until the caller binds its store's
+            // recorded `F` with `with_fleet_format`, as every context over a
+            // durable store must (the session's and the process runner's).
             fleet_format: crate::FleetFormat::current(),
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
