@@ -173,7 +173,7 @@ fn a_const_bound_literal_lifts_the_same_way() {
     // handler = async (tick) => { ... }
     // handle = await triggers.register({
     //   source: timer.Schedule({ expr: "0 8 * * *" }),
-    //   target: handler,
+    //   target: { definition: handler },
     //   inputs: { tick: trigger.event }
     // })?
     // The binding is the slot: the literal lifts at the binding and reads of

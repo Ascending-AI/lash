@@ -380,11 +380,11 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
     "tools": 2
   },
   "trigger_registry_host_environment": {
-    "button_handle": "trigger:ui.button.pressed:on_button",
+    "button_handle": "trigger:ui.button.pressed:button watcher",
     "daily_handle": "trigger:cron.Schedule:daily_digest",
     "disabled": false,
+    "listed_name": "daily_digest",
     "listed_source": "cron.Schedule",
-    "listed_target": "daily_digest",
     "registration_count": 1
   },
   "type_system_stress": {

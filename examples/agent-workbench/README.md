@@ -476,7 +476,7 @@ const onMail = async (event: mail.Received) => {
 
 const handle = await triggers.register({
   source: mail.received({}),
-  target: onMail,
+  target: { definition: onMail },
   inputs: (event) => ({ event }),
   name: "inbox concierge"
 });
@@ -503,7 +503,7 @@ const onButton = async (event: ui.button.Pressed) => {
 
 const handle = await triggers.register({
   source: ui.button.pressed({}),
-  target: onButton,
+  target: { definition: onButton },
   inputs: (event) => ({ event }),
   name: "button watcher"
 });
@@ -531,11 +531,11 @@ const dailyDigest = async (tick: cron.Tick) => {
 const source = cron.Schedule({ expr: "0 8 * * *", tz: "UTC" });
 const handle = await triggers.register({
   source,
-  target: dailyDigest,
+  target: { definition: dailyDigest },
   inputs: (tick) => ({ tick }),
   name: "daily_digest"
 });
-const registrations = await triggers.list({ target: dailyDigest });
+const registrations = await triggers.list({ target: { definition: dailyDigest } });
 finish(
   `Registered daily digest \`${handle.subscription_key}\`. ` +
   `Active matching registrations: ${registrations.length}.`

@@ -348,7 +348,7 @@ if (existing.length > 0) {
 } else {
   handle = await triggers.register({
     source: mail.received({}),
-    target: forward_mail,
+    target: { definition: forward_mail },
     inputs: (event) => ({ event: event }),
     name: "runtime-perf-test-to-test23-forwarder"
   });
@@ -583,7 +583,7 @@ const existing = await triggers.list({{ name: {trigger_name}, enabled: true }});
 if (existing.length == 0) {{
   const handle = await triggers.register({{
     source: mail.received({{}}),
-    target: load_forward,
+    target: {{ definition: load_forward }},
     inputs: (event) => ({{ event: event }}),
     name: {trigger_name}
   }});

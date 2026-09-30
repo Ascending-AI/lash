@@ -661,7 +661,7 @@ const on_button = async (event: ui.button.Pressed) => {
 
 const handle = await triggers.register({
   source: ui.button.pressed({}),
-  target: on_button,
+  target: { definition: on_button },
   inputs: (event) => ({ event: event }),
   name: "button watcher"
 });

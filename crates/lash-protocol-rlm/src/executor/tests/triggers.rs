@@ -319,7 +319,7 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
         let code = r#"
             const wrong = async (value: number) => true;
             await triggers.register({
-              source: calendar.Changed({}), target: wrong,
+              source: calendar.Changed({}), target: { definition: wrong },
               inputs: (event) => ({ value: event })
             });
             finish(true);

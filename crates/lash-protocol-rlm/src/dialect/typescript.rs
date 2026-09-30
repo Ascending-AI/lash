@@ -984,7 +984,7 @@ mod tests {
             ),
             (
                 "a trigger registration whose `inputs` is not the erased arrow",
-                "const p = async (a: unknown) => { return a; }; finish(await triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: p, inputs: { a: 1 } }));",
+                "const p = async (a: unknown) => { return a; }; finish(await triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: { definition: p }, inputs: { a: 1 } }));",
             ),
             (
                 "an unknown binding",

@@ -151,6 +151,28 @@ fn inline_definition_targets_lift_for_each_registration_operation() {
     }
 }
 
+/// A bound process is not a target either: the refusal names both accepted
+/// shapes, so the repair is one edit (FIG-4362).
+#[test]
+fn a_bare_bound_process_target_is_refused_with_the_explicit_forms_named() {
+    let error = reject(
+        r#"
+        const remember = async (tick: unknown) => { return true; };
+        await triggers.register({
+          source: timer.Schedule({ expr: "0 8 * * *" }),
+          target: remember,
+          subscription_key: "bare-target"
+        });
+        "#,
+    );
+    assert_eq!(error.code, DiagnosticCode::LinkError, "{error}");
+    assert!(
+        error.message.contains("`{ definition: <process> }`")
+            && error.message.contains("`{ definition_id: <id> }`"),
+        "{error}"
+    );
+}
+
 #[test]
 fn trigger_targets_refuse_bare_processes_and_closures() {
     for target in [
