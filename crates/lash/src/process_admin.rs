@@ -598,18 +598,13 @@ impl Processes {
         process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
-        let process_id = self
-            .core
-            .process_registry()
-            .require_process_id(process_id)
-            .await?;
         #[expect(
             clippy::expect_used,
             reason = "an execution scope is a struct of opaque string identities, whose \
                       serialization has no failing case"
         )]
         let command = lash_core::ProcessCommand::Cancel {
-            process_id,
+            process_id: process_id.clone(),
             origin: lash_core::CancelOrigin::OperatorRequested,
             requester: serde_json::to_string(scoped_effect_controller.execution_scope()).expect(
                 "an execution scope is a struct of opaque string identities, whose \
@@ -637,13 +632,8 @@ impl Processes {
         request: lash_core::ProcessEventAppendRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let process_id = self
-            .core
-            .process_registry()
-            .require_process_id(process_id)
-            .await?;
         let command = lash_core::ProcessCommand::Signal {
-            process_id,
+            process_id: process_id.clone(),
             signal_name: signal_name.into(),
             signal_id: signal_id.into(),
             request,

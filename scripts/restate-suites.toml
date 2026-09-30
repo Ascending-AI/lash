@@ -124,3 +124,11 @@ filters = ["live_restate_"]
 endpoints = ["HSW"]
 shards = 1
 timeout_seconds = 420
+
+[suites.public-process-command]
+label = "//crates/lash:integration__test"
+cwd = "crates/lash"
+filters = ["public_process_command_replay::live_"]
+endpoints = ["PC"]
+shards = 1
+timeout_seconds = 180

@@ -43,3 +43,7 @@ async fn created_session(
     }
     core.session(session_id)
 }
+
+#[cfg(feature = "restate")]
+#[path = "integration/public_process_command_replay.rs"]
+mod public_process_command_replay;
