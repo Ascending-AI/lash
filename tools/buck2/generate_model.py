@@ -536,7 +536,7 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     for cargo_name, label in labels.items():
         key = f"CARGO_BIN_EXE_{cargo_name}"
         if key in text:
-            env[key] = f"$(rootpath :{label})"
+            env[key] = f"$(location :{label})"
             deps.append(f":{label}")
     return env, deps
 
@@ -599,7 +599,7 @@ def target_policy(
                 continue
             helper = next(candidate for candidate in targets if candidate["name"] == binary)
             label = f":{label_name(helper, False)}"
-            policy.env[variable] = f"$(rootpath {label})"
+            policy.env[variable] = f"$(location {label})"
             policy.data.append(label)
         policy.shards = rule.get("shards", policy.shards)
         policy.timeout = rule.get("timeout", policy.timeout)

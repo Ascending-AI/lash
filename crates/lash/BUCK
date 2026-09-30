@@ -796,12 +796,12 @@ lash_rust_integration_test(
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    test_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(location :lash-seam-proof-worker__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash",
     library_crate_name = "lash",
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
-    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(rootpath :lash-seam-proof-worker__bin)"},
+    rustc_env = {"CARGO_BIN_EXE_lash-seam-proof-worker": "$(location :lash-seam-proof-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
