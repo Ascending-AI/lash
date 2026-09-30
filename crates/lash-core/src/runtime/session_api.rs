@@ -627,7 +627,11 @@ impl LashRuntime {
             .map(|services| services.lifecycle_service())
     }
 
-    /// Returns a lane-less host service for calls between turn drivers, never concurrently with a running turn.
+    /// Returns a lane-less session graph service. Host head writes are
+    /// boundary session commands, applied by the drive at a turn boundary.
+    /// A direct append while the bound turn owns the head returns the
+    /// recoverable [`PluginError::SessionHeadOwned`] busy refusal, naming
+    /// the session and its head owner, without writing anything.
     pub fn session_graph_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionGraphService>, PluginOperationInvokeError> {

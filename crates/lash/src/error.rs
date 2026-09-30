@@ -424,6 +424,42 @@ mod tests {
     }
 
     #[test]
+    fn head_ownership_stays_typed_and_recoverable_across_embed_boundary() {
+        let session_id = SessionId::from("busy-session");
+        for owner in [
+            lash_core::store::SessionHeadOwner::Root {
+                root: lash_core::TurnId::from("bound-root"),
+            },
+            lash_core::store::SessionHeadOwner::FollowOn {
+                follow_on: lash_core::TurnId::from("owed-follow-on"),
+            },
+            lash_core::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
+        ] {
+            let plugin = PluginError::from(StoreError::SessionHeadOwned {
+                session_id: session_id.clone(),
+                owner: owner.clone(),
+            });
+            for error in [
+                EmbedError::from(plugin.clone()),
+                EmbedError::from(SessionError::Plugin(plugin)),
+            ] {
+                assert!(error.is_retryable(), "{error}");
+                assert!(!error.is_terminal(), "{error}");
+                assert!(matches!(
+                    error,
+                    EmbedError::Plugin(PluginError::SessionHeadOwned {
+                        session_id: found_session,
+                        owner: found_owner,
+                    }) | EmbedError::Session(SessionError::Plugin(PluginError::SessionHeadOwned {
+                        session_id: found_session,
+                        owner: found_owner,
+                    })) if found_session == session_id && found_owner == owner
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn controller_owned_lane_contention_stays_retryable_across_embed_boundary() {
         let error = EmbedError::Plugin(PluginError::RuntimeEffectController(
             RuntimeEffectControllerError::new(

@@ -301,10 +301,26 @@ fn leaked_signature_types_are_homed(
     );
 }
 
+fn head_ownership_refusal_is_public(
+    session_id: SessionId,
+    owner: lash::SessionHeadOwner,
+) -> Option<(SessionId, lash::SessionHeadOwner)> {
+    let plugin = lash::plugins::PluginError::SessionHeadOwned { session_id, owner };
+    let host = lash::EmbedError::from(plugin);
+    match host {
+        lash::EmbedError::Plugin(lash::plugins::PluginError::SessionHeadOwned {
+            session_id,
+            owner,
+        }) => Some((session_id, owner)),
+        _ => None,
+    }
+}
+
 fn assert_store_object(_: &dyn RuntimeStore) {}
 
 fn main() {
     let _ = assert_store_object;
+    let _ = head_ownership_refusal_is_public;
     let _ = SessionHeadMeta::assemble(
         &SessionId::from("facade"),
         SessionHeadPayload {

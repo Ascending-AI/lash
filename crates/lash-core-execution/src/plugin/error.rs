@@ -117,6 +117,16 @@ pub enum PluginError {
     /// not a create.
     #[error("session `{session_id}` already exists")]
     SessionAlreadyExists { session_id: crate::SessionId },
+    /// A lane-less head write found an owner in the store transaction.
+    /// Submit host head writes as boundary session commands, or retry once
+    /// the owner releases the head. The refused write changes nothing.
+    #[error(
+        "session `{session_id}`'s head is owned by {owner}; a head write outside the drive is refused"
+    )]
+    SessionHeadOwned {
+        session_id: SessionId,
+        owner: crate::store::SessionHeadOwner,
+    },
     #[error("plugin registration error: {0}")]
     Registration(String),
     #[error("plugin invoke error: {0}")]
@@ -322,9 +332,14 @@ impl<R> From<crate::MaintenanceFailure<R>> for PluginError {
 
 impl From<crate::StoreError> for PluginError {
     fn from(error: crate::StoreError) -> Self {
-        match crate::store::StoreRefusal::of_store_error(&error) {
-            Some(refusal) => Self::StoreRefusal(refusal),
-            None => Self::Session(error.to_string()),
+        match error {
+            crate::StoreError::SessionHeadOwned { session_id, owner } => {
+                Self::SessionHeadOwned { session_id, owner }
+            }
+            error => match crate::store::StoreRefusal::of_store_error(&error) {
+                Some(refusal) => Self::StoreRefusal(refusal),
+                None => Self::Session(error.to_string()),
+            },
         }
     }
 }
@@ -369,6 +384,10 @@ impl PluginError {
             {
                 error.into_runtime_error()
             }
+            error @ Self::SessionHeadOwned { .. } => crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionHeadOwned,
+                error.to_string(),
+            ),
             error @ Self::SessionExecutionLeaseLost { .. } => crate::RuntimeError::new(
                 crate::RuntimeErrorCode::SessionExecutionLeaseLost,
                 error.to_string(),
@@ -443,6 +462,7 @@ impl PluginError {
     /// Whether retrying the identical plugin operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
         match self {
+            Self::SessionHeadOwned { .. } => true,
             Self::Runtime(error) => error.is_retryable(),
             Self::RuntimeEffectController(error) => {
                 error.cause.is_none() && error.code.is_retryable()
@@ -496,6 +516,41 @@ impl PluginError {
 #[cfg(test)]
 mod classification_tests {
     use super::*;
+
+    #[test]
+    fn head_ownership_survives_plugin_journaling_and_error_conversions() {
+        let session_id = SessionId::from("busy-session");
+        for owner in [
+            crate::store::SessionHeadOwner::Root {
+                root: crate::TurnId::from("bound-root"),
+            },
+            crate::store::SessionHeadOwner::FollowOn {
+                follow_on: crate::TurnId::from("owed-follow-on"),
+            },
+            crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
+        ] {
+            let plugin = PluginError::from(crate::StoreError::SessionHeadOwned {
+                session_id: session_id.clone(),
+                owner: owner.clone(),
+            });
+            let encoded = serde_json::to_vec(&plugin).expect("encode plugin journal");
+            let plugin: PluginError =
+                serde_json::from_slice(&encoded).expect("replay plugin journal");
+            assert!(matches!(
+                &plugin,
+                PluginError::SessionHeadOwned { session_id: found_session, owner: found_owner }
+                    if *found_session == session_id && *found_owner == owner
+            ));
+            assert!(plugin.is_retryable());
+            assert!(!plugin.is_terminal());
+            let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+            assert_eq!(controller.code, crate::RuntimeErrorCode::SessionHeadOwned);
+            let runtime = plugin.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+            assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionHeadOwned);
+            assert!(runtime.is_retryable());
+            assert!(!runtime.is_terminal());
+        }
+    }
 
     #[test]
     fn store_refusals_survive_plugin_journaling_and_turn_failure_mapping() {

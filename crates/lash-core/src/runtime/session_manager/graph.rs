@@ -119,6 +119,9 @@ impl CurrentOwnerCapability {
             Err(crate::StoreError::SessionExecutionLeaseExpired { session_id }) => {
                 return Err(crate::PluginError::SessionExecutionLeaseLost { session_id });
             }
+            Err(error @ crate::StoreError::SessionHeadOwned { .. }) => {
+                return Err(error.into());
+            }
             Err(err) => return Err(crate::PluginError::Session(err.to_string())),
         };
         let receipt_replayed = result.receipt_replayed;

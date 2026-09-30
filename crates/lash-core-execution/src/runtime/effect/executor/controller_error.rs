@@ -15,6 +15,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
             PluginError::StoreRefusal(err) => err.into_store_error().into(),
             PluginError::Runtime(err) => err.into(),
             PluginError::RuntimeEffectController(err) => err,
+            err @ PluginError::SessionHeadOwned { .. } => {
+                Self::new(RuntimeErrorCode::SessionHeadOwned, err.to_string())
+            }
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
             }

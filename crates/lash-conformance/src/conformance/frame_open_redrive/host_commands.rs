@@ -395,15 +395,59 @@ async fn a_lane_less_write_is_refused(law: &LawSession) {
         )
         .await
         .expect_err("the bound turn owns the head");
+    let bound = law
+        .store
+        .unfinished_root(&law.session_id)
+        .await
+        .expect("read the bound root")
+        .expect("a root is bound")
+        .root;
     assert!(
-        refused.to_string().contains("is owned by unfinished root"),
-        "the refusal names the head's owner: {refused}"
+        matches!(
+            &refused,
+            crate::PluginError::SessionHeadOwned { session_id, owner }
+                if *session_id == law.session_id
+                    && *owner == crate::store::SessionHeadOwner::Root { root: bound }
+        ),
+        "the typed refusal names the session and the bound root: {refused:?}"
     );
     assert_eq!(
         law.head().await.head_revision,
         before,
         "the refused write wrote nothing"
     );
+}
+
+/// A lane-less append during a bound turn returns the typed ownership
+/// refusal with the exact session and root, without changing the head.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the bound turn is released once the refusal is checked"
+)]
+pub async fn a_lane_less_append_names_the_bound_head_owner(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let (law, _, hold) = bound_turn_session(
+        prefix,
+        "lane-less-append-owner",
+        effect_host,
+        stores,
+        runner,
+        &HostPluginProbe::default(),
+    )
+    .await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(
+            law.run_root("root-2"),
+            hold.while_held(a_lane_less_write_is_refused(&law)),
+        ),
+    )
+    .await
+    .expect("the bound turn ends after the typed refusal");
 }
 
 /// The position of the one committed message on `path` whose text is
