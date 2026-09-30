@@ -11,8 +11,8 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEnd, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
-    RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
+    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
     decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
     scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
@@ -181,19 +181,19 @@ pub(crate) fn write_root_terminal_conn(
 }
 
 /// Release every row of either admission table `root` still holds, in the
-/// caller's transaction: active-turn input is re-deferred to the next turn
-/// (FIG-1573), and each row owes its session a drive again.
+/// caller's transaction: accepted input is open again in the state its
+/// submitted delivery names, and each row owes its session a drive again.
 ///
-/// Open input addressed to a turn the root ends ([`RootEndedTurns`]: its own
+/// Open input addressed to a turn the root ends ([`RootTurns`]: its own
 /// physical turns and the turns its admission's members were accepted
-/// under) names a turn that will never run, so the root's disposition
+/// under) names a turn that will never run again, so the root's disposition
 /// applies to it here (FIG-3946): the undelivered disposition of the root's
-/// cancellation request if it has one, else `Defer`. `Defer` re-opens the
-/// row as next-turn input at its own position; `Drop` withdraws it. Either
-/// is recorded on the request's outcome, and a withdrawal settles the row's
-/// ingress obligation at the terminal instant `at_ms` (FIG-4098). The
-/// terminal write is where a root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
-/// to, or addressed to a turn of, a root with terminal evidence.
+/// cancellation request if it has one, else `Defer`. `Defer` writes
+/// nothing: the row is next-turn input at its own position by rule, its
+/// submitted delivery unchanged (ADR 0101 §5.1). `Drop` withdraws it into
+/// its tombstone, settling its ingress obligation at the terminal instant
+/// `at_ms` (FIG-4098). Either is recorded once on the request's outcome. No
+/// open row is bound to a root with terminal evidence.
 ///
 /// An input the root's admission took as its own (`session_root_inputs`)
 /// that is still open is unbound from the root too, so a later root can
@@ -221,17 +221,10 @@ fn release_root_rows_conn(
             .map_err(sqlite_error)?;
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
-    let deferred_ingress = crate::encode_json(&deferred.ingress())?;
     crate::conn::cached_execute(
         tx,
         sql.pending_inputs.release_root.sql(),
-        params![
-            session_id.as_str(),
-            root.as_str(),
-            deferred.as_str(),
-            deferred_ingress.as_str(),
-        ],
+        params![session_id.as_str(), root.as_str()],
     )
     .map_err(sqlite_error)?;
     crate::conn::cached_execute(
@@ -240,7 +233,7 @@ fn release_root_rows_conn(
         params![session_id.as_str(), root.as_str()],
     )
     .map_err(sqlite_error)?;
-    let ended = RootEndedTurns::new(root, root_admission_conn(tx, session_id, root)?.as_ref());
+    let ended = RootTurns::new(root, root_admission_conn(tx, session_id, root)?.as_ref());
     let open_rows = {
         let mut stmt = tx
             .prepare_cached(sql.pending_inputs_sqlite.select_pending_active.sql())
@@ -273,33 +266,19 @@ fn release_root_rows_conn(
         |record| record.request.undelivered,
     );
     for (input_id, input_json) in addressed {
-        match disposition {
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
-                crate::conn::cached_execute(
-                    tx,
-                    sql.pending_inputs.defer_to_next_turn.sql(),
-                    params![
-                        session_id.as_str(),
-                        input_id.as_str(),
-                        deferred.as_str(),
-                        deferred_ingress.as_str(),
-                    ],
-                )
-            }
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
-                crate::conn::cached_execute(
-                    tx,
-                    sql.pending_inputs.cancel.sql(),
-                    params![
-                        session_id.as_str(),
-                        input_id.as_str(),
-                        lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
-                        crate::clamp_epoch_ms(at_ms),
-                    ],
-                )
-            }
+        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
+            crate::conn::cached_execute(
+                tx,
+                sql.pending_inputs.cancel.sql(),
+                params![
+                    session_id.as_str(),
+                    input_id.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    crate::clamp_epoch_ms(at_ms),
+                ],
+            )
+            .map_err(sqlite_error)?;
         }
-        .map_err(sqlite_error)?;
         if request.is_some() {
             crate::persistence::turn_cancel::append_turn_cancel_outcome_conn(
                 tx,
@@ -479,7 +458,7 @@ fn write_unanswered_root_end_conn(
     )
     .map_err(sqlite_error)?;
 
-    // The root's own input is dropped and its batches removed first; the
+    // The root's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the root still held.
     let sql = &session_roots_sql().verbs;
     let mut inputs = {
@@ -499,16 +478,18 @@ fn write_unanswered_root_end_conn(
     for input in inputs {
         crate::conn::cached_execute(
             tx,
-            sql.input.sql(),
-            params![session.as_str(), input, "cancelled"],
+            sql.cancel_input.sql(),
+            params![
+                session.as_str(),
+                input,
+                crate::clamp_epoch_ms(at_ms),
+                lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+            ],
         )
         .map_err(sqlite_error)?;
     }
     for batch in batches {
-        crate::conn::cached_execute(tx, sql.delete_batch_items.sql(), params![batch])
-            .map_err(sqlite_error)?;
-        crate::conn::cached_execute(tx, sql.delete_batch.sql(), params![session.as_str(), batch])
-            .map_err(sqlite_error)?;
+        cancel_root_batch_conn(tx, session, &batch, at_ms)?;
     }
     // The terminal write applies the root's cancel request's `undelivered`
     // disposition to open input addressed to a turn the root ends
@@ -599,6 +580,44 @@ fn root_admission_conn(
 
 /// The queued-work batches `root`'s recorded admission took, read on `conn`:
 /// none for a root with no admission or an input-headed one.
+/// Cancel batch `batch_id` of session `session_id`, held by a root a verb
+/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8). A wake's
+/// cancellation is its terminal transition, so its receiver floor rises in
+/// the same write (ADR 0101 §9).
+pub(crate) fn cancel_root_batch_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    batch_id: &str,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    if let Some(batch) = crate::queued_work::load_queued_batch_by_id_conn(tx, batch_id)?
+        && batch.terminal.is_none()
+        && let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch)
+    {
+        crate::queued_work::raise_wake_redelivery_fence_conn(tx, session_id, &wake)?;
+    }
+    crate::conn::cached_execute(
+        tx,
+        session_roots_sql().verbs.cancel_batch.sql(),
+        params![session_id.as_str(), batch_id, crate::clamp_epoch_ms(at_ms)],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
+/// The turns session `session_id`'s unfinished root runs, if a root is
+/// unfinished, read on `conn`.
+pub(crate) fn unfinished_root_turns_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<RootTurns>, StoreError> {
+    let Some(unfinished) = unfinished_root_conn(conn, session_id)? else {
+        return Ok(None);
+    };
+    let admission = root_admission_conn(conn, session_id, &unfinished.root)?;
+    Ok(Some(RootTurns::new(&unfinished.root, admission.as_ref())))
+}
+
 pub(crate) fn admitted_batches_conn(
     conn: &Connection,
     session_id: &SessionId,

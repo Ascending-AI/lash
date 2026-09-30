@@ -809,32 +809,36 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // and the lifted-process name domain.
         let expected_key =
             "derived/v3/9579ddf94026db8f3517f8e16148c3a089d710c7efbbeffb4f74744a5b90f1dd";
-        // The fixture's production effect address gives the cell's binding
-        // set (FIG-3587) and the deferred-resolution journal their link
-        // identity, so the journaled binding set is the first envelope, the
-        // resolution production always wrote the second. The register
-        // follows once the leaf tool's declared intent is realized (FIG-3116).
+        // The cell journals its projections before its tool bindings and
+        // deferred resolution. Registration follows once the leaf tool's
+        // declared intent is realized.
         let (effect_owner_scope, effect_subscription_key) = {
             let envelopes = capture.envelopes.lock_recover();
             let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
                 &envelopes[0].command
             else {
-                panic!("expected the cell's binding set first")
+                panic!("expected the cell's projected bindings first")
+            };
+            assert_eq!(operation, "rlm.projected-bindings");
+            let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
+                &envelopes[1].command
+            else {
+                panic!("expected the cell's tool binding set second")
             };
             assert_eq!(
                 operation,
                 "cell_tool_bindings:v1:[\"timer.Schedule\",\"triggers.register\"]"
             );
             let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
-                &envelopes[1].command
+                &envelopes[2].command
             else {
-                panic!("expected the deferred tool resolution effect second")
+                panic!("expected the deferred tool resolution effect third")
             };
             assert_eq!(
                 operation,
                 "deferred_tool_resolution:v2:[\"timer.Schedule\",\"triggers.register\"]"
             );
-            let command = envelopes[2..]
+            let command = envelopes[3..]
                 .iter()
                 .find_map(|envelope| match &envelope.command {
                     lash_core::RuntimeEffectCommand::Trigger { command } => Some(command),
@@ -1375,7 +1379,7 @@ async fn execute_trigger_process_with_originator(
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );

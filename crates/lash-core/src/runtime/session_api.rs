@@ -113,11 +113,17 @@ impl LashRuntime {
         self.install_resident_state(state);
     }
 
-    /// Publish the resident authority to the live plugin session.
-    fn publish_resident_authority(&self) {
+    /// Publish the resident authority to the live plugin session: its tool
+    /// authority, and the plugin configuration its hooks run under — the
+    /// installed view's, which inside a root is the root's recorded
+    /// admission (FIG-4379).
+    pub(super) fn publish_resident_authority(&self) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
+        session
+            .plugins()
+            .publish_plugin_config(self.state.admitted_plugin_config());
         if session.plugins().replace_authority(
             &self.state.authority.tool_access,
             self.state.authority.subagent.as_ref(),
@@ -163,72 +169,10 @@ impl LashRuntime {
         };
         Ok(session.plugins().tool_registry().export_state())
     }
-    /// The durable protocol turn options recorded on the session.
-    pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
+    /// The protocol turn options the session runs under: a view of the
+    /// protocol plugin's recorded configuration namespace (FIG-4379).
+    pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
         self.state.effective_protocol_turn_options()
-    }
-
-    /// This is the initialization half of the FIG-2479 contract: protocol
-    /// materialization hooks run before the session has a committed head, and
-    /// [`Self::configure_protocol_on_materialize`] marks the resulting config
-    /// dirty so `persist_materialized_protocol_config` publishes it durably
-    /// before any queued command work. Mid-run changes never come through
-    /// here — they use the commanded
-    /// [`Self::set_protocol_turn_options`] path instead.
-    #[expect(dead_code, reason = "retained during the runtime crate extraction")]
-    pub(crate) fn record_materialized_protocol_turn_options(
-        &mut self,
-        options: crate::ProtocolTurnOptions,
-    ) {
-        self.state.protocol_turn_options = options;
-    }
-
-    /// `plugin_options` are the plugin-keyed options that reached this materialization
-    /// (builder options for root opens, request options for child create); `is_root_session`
-    /// distinguishes root from child.
-    pub fn configure_protocol_on_materialize(
-        &mut self,
-        plugin_options: &crate::PluginOptions,
-        is_root_session: bool,
-    ) -> Result<(), crate::PluginError> {
-        match self.resident_session.validity() {
-            ResidentSessionState::Invalidated { decision_id } => {
-                self.trace_synchronous_resident_state_refusal(
-                    decision_id,
-                    "configure_protocol_on_materialize",
-                );
-                return Err(crate::PluginError::Session(
-                    "resident session state is invalidated; durable reload is required".to_string(),
-                ));
-            }
-            ResidentSessionState::Valid => {}
-        }
-        let recorded_options = self.state.protocol_turn_options.payload.clone();
-        let fleet_format = self.fleet_format();
-        let protocol_session = self
-            .session
-            .as_ref()
-            .map(|session| Arc::clone(session.plugins().protocol_session()));
-        if let Some(protocol_session) = protocol_session {
-            let materialization = crate::plugin::ProtocolSessionMaterialization {
-                plugin_options,
-                is_root_session,
-            };
-            protocol_session
-                .configure_runtime_on_materialize(
-                    crate::plugin::ProtocolRuntimeContext::new(
-                        &mut self.state.protocol_turn_options,
-                        fleet_format,
-                    ),
-                    materialization,
-                )
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        }
-        self.materialized_protocol_config_dirty |=
-            self.state.protocol_turn_options.payload != recorded_options;
-        self.state
-            .open_unpersisted_initial_frame_under_settled_protocol_options();
-        Ok(())
     }
 
     /// Export a snapshot of the current in-memory session state.
@@ -242,7 +186,7 @@ impl LashRuntime {
         crate::SessionReadView::from_runtime_state(
             &self.state,
             self.state.effective_policy().clone(),
-            self.state.effective_protocol_turn_options().clone(),
+            self.state.effective_protocol_turn_options(),
         )
     }
 
@@ -683,7 +627,11 @@ impl LashRuntime {
             .map(|services| services.lifecycle_service())
     }
 
-    /// Returns a lane-less host service for calls between turn drivers, never concurrently with a running turn.
+    /// Returns a lane-less session graph service. Host head writes are
+    /// boundary session commands, applied by the drive at a turn boundary.
+    /// A direct append while the bound turn owns the head returns the
+    /// recoverable [`PluginError::SessionHeadOwned`] busy refusal, naming
+    /// the session and its head owner, without writing anything.
     pub fn session_graph_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionGraphService>, PluginOperationInvokeError> {
@@ -736,32 +684,6 @@ impl LashRuntime {
         .await
     }
 
-    pub async fn cancel_queued_work_batch(
-        &self,
-        session_id: &SessionId,
-        batch_id: &str,
-    ) -> Result<Option<crate::QueuedWorkBatch>, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(queued_turn_input_store_required)?;
-        if store.session_id() != session_id {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                crate::StoreError::ForeignSessionRequest {
-                    view_session_id: store.session_id().clone(),
-                    request_session_id: session_id.clone(),
-                }
-                .to_string(),
-            ));
-        }
-        store
-            .cancel_queued_work_batch(batch_id)
-            .await
-            .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))
-    }
-
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         match self.resident_session.validity() {
@@ -805,6 +727,7 @@ impl LashRuntime {
         for contribution in plugin_session
             .collect_prompt_contributions(crate::PromptHookContext {
                 session_id,
+                plugin_config: plugin_session.admitted_plugin_config(),
                 sessions: services.state_service(),
                 state,
                 protocol_turn_options,
@@ -866,39 +789,35 @@ impl LashRuntime {
             )))
             .await
     }
+}
 
-    pub(super) async fn resolve_session_config_mutations(
-        &self,
-        previous: SessionPolicy,
-        candidate: SessionPolicy,
-    ) -> SessionPolicy {
-        let Some(session) = self.session.as_ref() else {
-            return candidate;
-        };
-        if candidate == previous {
-            return candidate;
-        }
-        let Ok(services) = self.runtime_session_services() else {
-            return candidate;
-        };
-        session
-            .plugins()
-            .mutate_session_config(
-                SessionConfigChangedContext {
-                    session_id: self.state.session_id.clone(),
-                    previous,
-                    current: candidate.clone(),
-                    sessions: services.state_service(),
-                },
-                candidate,
-            )
-            .await
+pub(super) enum AcceptedSessionCommand {
+    Inline(crate::SessionCommandReceipt),
+    Queued(crate::runtime::SessionCommandSettlementHandle),
+}
+
+/// Why a session command was not accepted.
+pub(super) enum SessionCommandEnqueueError {
+    /// The idempotency key already names a command with other submitted
+    /// content (ADR 0101 §8): the store refused the resubmission.
+    ChangedContent(RuntimeError),
+    /// The runtime or its store could not take the command.
+    Runtime(RuntimeError),
+}
+
+impl From<RuntimeError> for SessionCommandEnqueueError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Runtime(error)
     }
 }
 
-enum AcceptedSessionCommand {
-    Inline(crate::SessionCommandReceipt),
-    Queued(crate::runtime::SessionCommandSettlementHandle),
+impl From<SessionCommandEnqueueError> for RuntimeError {
+    fn from(error: SessionCommandEnqueueError) -> Self {
+        match error {
+            SessionCommandEnqueueError::ChangedContent(error)
+            | SessionCommandEnqueueError::Runtime(error) => error,
+        }
+    }
 }
 
 impl LashRuntime {
@@ -907,15 +826,28 @@ impl LashRuntime {
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
     ) -> Result<AcceptedSessionCommand, RuntimeError> {
+        Ok(self
+            .enqueue_session_command(command, idempotency_key)
+            .await?)
+    }
+
+    /// Accept `command` under `idempotency_key`. An identical resubmission
+    /// under the key answers the retained submission's row; one with other
+    /// content is refused [`SessionCommandEnqueueError::ChangedContent`].
+    pub(super) async fn enqueue_session_command(
+        &mut self,
+        command: crate::SessionCommand,
+        idempotency_key: impl Into<String>,
+    ) -> Result<AcceptedSessionCommand, SessionCommandEnqueueError> {
         self.reload_invalidated_resident_session_state().await?;
         let idempotency_key = idempotency_key.into();
         if idempotency_key.trim().is_empty() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::SessionCommandIdempotencyKey,
                 "session command idempotency key cannot be empty",
-            ));
+            )
+            .into());
         }
-        self.refuse_unservable_route(&command)?;
         let source_key = command.source_key(&idempotency_key);
         let session_id = self.state.session_id.clone();
         let Some(store) = self
@@ -932,19 +864,24 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
-        // The options this runtime's open materialized apply first, as a
-        // command of their own (FIG-4202).
-        Box::pin(self.submit_materialized_protocol_config(&store)).await?;
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
             command,
         )
         .with_source_key(source_key.clone());
-        let enqueued = store
-            .enqueue_queued_work(draft)
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
+        let enqueued = match store.enqueue_queued_work_with_outcome(draft).await {
+            Ok(
+                crate::QueuedWorkEnqueueOutcome::Inserted(batch)
+                | crate::QueuedWorkEnqueueOutcome::Existing(batch),
+            ) => batch,
+            Err(error @ crate::StoreError::QueuedWorkSourceKeyConflict { .. }) => {
+                return Err(SessionCommandEnqueueError::ChangedContent(
+                    super::runtime_error_from_store_commit(error),
+                ));
+            }
+            Err(error) => return Err(super::runtime_error_from_store_commit(error).into()),
+        };
         // The command's batch owes its session a drive, armed at admission;
         // deliver it now (ADR 0109 §3). The drive applies the command at its
         // next boundary, before any turn input (ADR 0101 §4).
@@ -960,48 +897,6 @@ impl LashRuntime {
                 },
             },
         ))
-    }
-
-    pub(super) async fn submit_apply_config_patch(
-        &mut self,
-        patch: super::ApplyConfigPatch,
-    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        Box::pin(self.submit_apply_config_patch_with_idempotency_key(
-            patch,
-            format!("config-patch:{}", uuid::Uuid::new_v4()),
-        ))
-        .await
-    }
-
-    pub async fn submit_apply_config_patch_with_idempotency_key(
-        &mut self,
-        patch: super::ApplyConfigPatch,
-        idempotency_key: impl Into<String>,
-    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        let accepted = match self
-            .accept_session_command(
-                crate::SessionCommand::ApplyConfigPatch {
-                    patch: Box::new(patch),
-                },
-                idempotency_key,
-            )
-            .await
-        {
-            Ok(accepted) => accepted,
-            Err(rejection) => {
-                return Ok(crate::runtime::SessionCommandSettlement::Rejected(
-                    rejection,
-                ));
-            }
-        };
-        match accepted {
-            AcceptedSessionCommand::Inline(receipt) => {
-                Ok(crate::runtime::SessionCommandSettlement::Durable(receipt))
-            }
-            AcceptedSessionCommand::Queued(handle) => {
-                self.await_session_command_settlement(handle, None).await
-            }
-        }
     }
 
     async fn await_session_command_settlement(
@@ -1247,26 +1142,28 @@ impl LashRuntime {
                 .map(|(_, command)| command.clone())
                 .collect::<Vec<_>>();
             // A replayed read may name a run this root already applied. An
-            // administrative compaction runs again: it replays the steps it
-            // journaled, then finds its command settled and adopts the head
-            // its commit published without committing again (FIG-4258). Any
-            // other command journals nothing, so a settled run is simply
-            // passed.
-            let compaction = matches!(
+            // administrative compaction or a config transaction runs again:
+            // it replays the steps it journaled, then finds its command
+            // settled and adopts the head its commit published without
+            // committing again (FIG-4258, FIG-4379). Any other command
+            // journals nothing, so a settled run is simply passed.
+            let journaled = matches!(
                 commands.as_slice(),
-                [crate::SessionCommand::CompactContext { .. }]
+                [crate::SessionCommand::CompactContext { .. }
+                    | crate::SessionCommand::ApplyConfigTransaction { .. }]
             );
-            // Only a compaction journals its apply. Any other run settles and
-            // commits off the journal, so a session that retired under it
-            // leaves the root's next recorded step the next read.
+            // Only a compaction and a config transaction journal their
+            // apply. Any other run settles and commits off the journal, so a
+            // session that retired under it leaves the root's next recorded
+            // step the next read.
             let off_journal = |error: RuntimeError| {
-                if !compaction && error.is_session_retirement() {
+                if !journaled && error.is_session_retirement() {
                     CommandDrainStop::Headless(error)
                 } else {
                     CommandDrainStop::Failed(error)
                 }
             };
-            if !compaction
+            if !journaled
                 && self
                     .session_command_run_settled(&store, &run.completion())
                     .await
@@ -1324,6 +1221,15 @@ impl LashRuntime {
             [crate::SessionCommand::CompactContext { instructions }] => {
                 return Box::pin(self.apply_compact_context_command(
                     instructions.clone(),
+                    completion,
+                    drive_fence,
+                    effect_controller,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::ApplyConfigTransaction { transaction }] => {
+                return Box::pin(self.apply_config_transaction_command(
+                    transaction.as_ref().clone(),
                     completion,
                     drive_fence,
                     effect_controller,
@@ -1445,63 +1351,35 @@ impl LashRuntime {
                     err.to_string(),
                 )
             })?;
-        let config_only = commands
-            .iter()
-            .all(|command| matches!(command, crate::SessionCommand::ApplyConfigPatch { .. }));
-        let mut next_config_state = config_only.then(|| self.state.clone());
-        if let Some(next_state) = next_config_state.as_mut() {
-            // Commands explicitly change the sticky config, unlike the
-            // recorded execution view of a root.
-            next_state.authority.committed_config = None;
-            next_state.authority.root_snapshot = None;
-            for command in &commands {
-                let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
-                    unreachable!("config-only command group was checked above")
-                };
-                patch.validate_for_fleet(self.fleet_format())?;
-                if self.refuses_route_at_apply(patch, next_state.effective_policy()) {
-                    continue;
+        debug_assert_eq!(commands.len(), 1, "session commands apply alone");
+        for command in commands {
+            match command {
+                crate::SessionCommand::RefreshToolCatalog { .. } => {
+                    self.refresh_session_tool_catalog().await.map_err(|err| {
+                        RuntimeError::new(
+                            crate::RuntimeErrorCode::SessionCommandRefreshTools,
+                            err.to_string(),
+                        )
+                    })?;
                 }
-                if patch.apply_to_state(next_state).is_err() {
-                    // A stale base is a silent no-op that still settles
-                    // completed: the old queued-work tables cannot carry a
-                    // typed stale outcome; the ingress drain's planner can
-                    // (ADR 0101 §12, Q8).
-                }
-            }
-        } else {
-            debug_assert_eq!(commands.len(), 1, "non-config commands remain exclusive");
-            for command in commands {
-                match command {
-                    crate::SessionCommand::RefreshToolCatalog { .. } => {
-                        self.refresh_session_tool_catalog().await.map_err(|err| {
-                            RuntimeError::new(
-                                crate::RuntimeErrorCode::SessionCommandRefreshTools,
-                                err.to_string(),
-                            )
-                        })?;
-                    }
-                    crate::SessionCommand::ApplyConfigPatch { .. } => {
-                        unreachable!("config commands use the cloned publication path")
-                    }
-                    // The drive's command lane applies a persisted command
-                    // that settles with an outcome before this point; only a
-                    // storeless runtime's inline command reaches here, and a
-                    // storeless runtime writes its head directly.
-                    command @ (crate::SessionCommand::CompactContext { .. }
-                    | crate::SessionCommand::AppendSessionNodes { .. }
-                    | crate::SessionCommand::RunPluginCommand { .. }
-                    | crate::SessionCommand::RunPluginTask { .. }
-                    | crate::SessionCommand::OpenAgentFrame { .. }) => {
-                        return Err(RuntimeError::new(
-                            RuntimeErrorCode::SessionCommandRequired,
-                            format!(
-                                "a storeless runtime applies `{}` directly, not through a \
-                                 session command",
-                                command.kind()
-                            ),
-                        ));
-                    }
+                // The drive's command lane applies a persisted command that
+                // settles with an outcome before this point; only a storeless
+                // runtime's inline command reaches here, and a storeless
+                // runtime writes its head directly.
+                command @ (crate::SessionCommand::CompactContext { .. }
+                | crate::SessionCommand::AppendSessionNodes { .. }
+                | crate::SessionCommand::RunPluginCommand { .. }
+                | crate::SessionCommand::RunPluginTask { .. }
+                | crate::SessionCommand::OpenAgentFrame { .. }
+                | crate::SessionCommand::ApplyConfigTransaction { .. }) => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::SessionCommandRequired,
+                        format!(
+                            "a storeless runtime applies `{}` directly, not through a session \
+                             command",
+                            command.kind()
+                        ),
+                    ));
                 }
             }
         }
@@ -1510,9 +1388,6 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            if let Some(next_state) = next_config_state {
-                self.install_resident_state(next_state);
-            }
             return Ok(true);
         };
         let Some((completion, drive_fence)) = applied else {
@@ -1525,8 +1400,7 @@ impl LashRuntime {
             .batch_ids
             .first()
             .map(|batch_id| {
-                let state = next_config_state.as_ref().unwrap_or(&self.state);
-                crate::OperationId::new(state.queue_drain_scope(batch_id), "session-command")
+                crate::OperationId::new(self.state.queue_drain_scope(batch_id), "session-command")
             })
             .ok_or_else(|| {
                 RuntimeError::new(
@@ -1535,7 +1409,7 @@ impl LashRuntime {
                 )
             })?;
         let fleet_format = self.fleet_format();
-        let commit_state = next_config_state.as_mut().unwrap_or(&mut self.state);
+        let commit_state = &mut self.state;
         if let Some(session) = self.session.as_ref() {
             commit_state.capture_plugin_states(session.plugins());
         }
@@ -1566,9 +1440,6 @@ impl LashRuntime {
         })?;
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
-        if let Some(next_state) = next_config_state {
-            self.install_resident_state(next_state);
-        }
         Ok(true)
     }
 }

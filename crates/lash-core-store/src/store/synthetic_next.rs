@@ -152,10 +152,6 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
-    decoder(
-        "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
-        crate::protocol_turn_options::PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION - 1,
-    ),
     tree(
         "PROCESS_EVENT_VOCABULARY_VERSION",
         1,
@@ -220,10 +216,6 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     pin(
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
-    ),
-    pin(
-        "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
-        crate::protocol_turn_options::PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION - 1,
     ),
     pin("PROCESS_EVENT_VOCABULARY_VERSION", 1),
     pin("SCOPE_STORAGE_PAYLOAD_VERSION", 2),

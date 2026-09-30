@@ -386,7 +386,7 @@ impl World {
 
 fn env_spec() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     )
 }

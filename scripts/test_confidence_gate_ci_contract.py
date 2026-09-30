@@ -2367,11 +2367,20 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         self.assertNotIn("build-release-assets", workflow)
         self.assertNotIn("install_lash.sh", workflow)
         self.assertIn("needs: [prepare-release, publish-crates, worker-artifacts]", publish)
-        self.assertIn("cargo build --locked --release -p lash-internal-vm-worker", worker_artifacts)
+        worker_artifacts = workflow_job_block(workflow, "worker-artifacts")
+        self.assertIn("ref: ${{ needs.prepare-release.outputs.release_sha }}", worker_artifacts)
+        self.assertIn('release_version.py stamp "${RELEASE_TAG#v}"', worker_artifacts)
+        self.assertIn(
+            "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker",
+            worker_artifacts,
+        )
         self.assertIn("python3 scripts/package_vm_worker.py", worker_artifacts)
         self.assertIn("pattern: sdk-worker-*", publish)
-        self.assertIn("worker-artifacts/*.tar.gz", publish)
-        self.assertIn("worker-artifacts/*.sha256", publish)
+        release_assets = yaml.safe_load(workflow)["jobs"]["publish"]["steps"][-1]["with"]
+        self.assertEqual(
+            ["worker-artifacts/*.tar.gz", "worker-artifacts/*.sha256"],
+            release_assets["files"].splitlines(),
+        )
         self.assertIn(
             "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
             publish_crates,

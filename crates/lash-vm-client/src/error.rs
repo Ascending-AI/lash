@@ -3,6 +3,8 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PoolError {
+    #[error(transparent)]
+    ProtocolVersion(#[from] lash_vm_protocol::ProtocolVersionRefusal),
     #[error("worker recovery store failed: {message}")]
     Recovery { message: String },
     #[error(transparent)]

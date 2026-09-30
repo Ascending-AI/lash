@@ -116,6 +116,11 @@ pub enum EmbedError {
     Session(#[source] SessionError),
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
+    /// A config transaction was not admitted (FIG-4379): it names an owner or
+    /// command no installed plugin registers, its arguments do not decode, or
+    /// its id was already submitted with other content. Nothing was enqueued.
+    #[error("config transaction not admitted: {0}")]
+    ConfigSubmit(lash_core::ConfigSubmitError),
     #[error("runtime plugin/control error: {0}")]
     Plugin(#[from] lash_core::PluginError),
     #[error("remote protocol error: {0}")]
@@ -289,6 +294,7 @@ impl EmbedError {
                 ..
             }) => true,
             Self::MissingProtocolPlugin
+            | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
@@ -354,7 +360,8 @@ impl EmbedError {
             | Self::StoreSessionMismatch { .. }
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
-            | Self::SessionAlreadyExists { .. } => true,
+            | Self::SessionAlreadyExists { .. }
+            | Self::ConfigSubmit(_) => true,
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
@@ -414,6 +421,42 @@ mod tests {
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
+    }
+
+    #[test]
+    fn head_ownership_stays_typed_and_recoverable_across_embed_boundary() {
+        let session_id = SessionId::from("busy-session");
+        for owner in [
+            lash_core::store::SessionHeadOwner::Root {
+                root: lash_core::TurnId::from("bound-root"),
+            },
+            lash_core::store::SessionHeadOwner::FollowOn {
+                follow_on: lash_core::TurnId::from("owed-follow-on"),
+            },
+            lash_core::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
+        ] {
+            let plugin = PluginError::from(StoreError::SessionHeadOwned {
+                session_id: session_id.clone(),
+                owner: owner.clone(),
+            });
+            for error in [
+                EmbedError::from(plugin.clone()),
+                EmbedError::from(SessionError::Plugin(plugin)),
+            ] {
+                assert!(error.is_retryable(), "{error}");
+                assert!(!error.is_terminal(), "{error}");
+                assert!(matches!(
+                    error,
+                    EmbedError::Plugin(PluginError::SessionHeadOwned {
+                        session_id: found_session,
+                        owner: found_owner,
+                    }) | EmbedError::Session(SessionError::Plugin(PluginError::SessionHeadOwned {
+                        session_id: found_session,
+                        owner: found_owner,
+                    })) if found_session == session_id && found_owner == owner
+                ));
+            }
+        }
     }
 
     #[test]

@@ -301,24 +301,6 @@ const PINS: &[Pin] = &[
         ),
     },
     Pin {
-        file: "crates/lash-core/src/runtime/session_manager/process_runners/control.rs",
-        text: ".is_observer(&session_scope.session_id, process_id)",
-        count: 1,
-        class: PinClass::Ticket("FIG-4351"),
-    },
-    Pin {
-        file: "crates/lash-core/src/runtime/session_manager/process_runners/control.rs",
-        text: "registry.is_observer(session_id, process_id).await",
-        count: 1,
-        class: PinClass::Ticket("FIG-4351"),
-    },
-    Pin {
-        file: "crates/lash-core/src/runtime/session_manager/process_runners/control.rs",
-        text: "registry.get_process(process_id).await.map(|record| {",
-        count: 1,
-        class: PinClass::Ticket("FIG-4351"),
-    },
-    Pin {
         file: "crates/lash-restate/src/process/workflow.rs",
         text: ".get_process(&process_id)",
         count: 1,

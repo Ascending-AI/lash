@@ -784,12 +784,13 @@ pub(super) struct SnapshotRecoveryToolOptions {
     snapshot_ref: String,
 }
 
-pub(super) fn snapshot_recovery_tool_options(snapshot_ref: &str) -> lash_core::PluginOptions {
-    lash_core::PluginOptions::typed(
+pub(super) fn snapshot_recovery_tool_config(snapshot_ref: &str) -> lash_core::AdmittedPluginConfig {
+    let mut config = lash_core::PluginConfig::default();
+    config.insert(
         "snapshot-recovery-tool",
         serde_json::json!({ "snapshot_ref": snapshot_ref }),
-    )
-    .expect("snapshot recovery plugin options")
+    );
+    lash_core::AdmittedPluginConfig::new(config, 0)
 }
 
 pub(super) fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
@@ -798,7 +799,7 @@ pub(super) fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_supp
         "snapshot-recovery-tool",
         Arc::new(|ctx| {
             let snapshot_available = ctx
-                .plugin_options
+                .plugin_config
                 .decode::<SnapshotRecoveryToolOptions>("snapshot-recovery-tool")
                 .map_err(|err| {
                     lash_core::PluginError::Registration(format!(
@@ -1164,7 +1165,7 @@ pub(super) fn recovery_session_policy() -> lash_core::SessionPolicy {
 
 pub(super) async fn persist_recovery_env_ref() -> lash_core::ProcessExecutionEnvRef {
     let mut spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
+        lash_core::AdmittedPluginConfig::default(),
         recovery_session_policy(),
     );
     spec.render = Some(recorded_standard_render());
@@ -1184,7 +1185,7 @@ pub(super) async fn persist_snapshot_recovery_env_ref(
     snapshot_ref: &str,
 ) -> lash_core::ProcessExecutionEnvRef {
     let mut spec = lash_core::ProcessExecutionEnvSpec::new(
-        snapshot_recovery_tool_options(snapshot_ref),
+        snapshot_recovery_tool_config(snapshot_ref),
         recovery_session_policy(),
     );
     spec.render = Some(recorded_standard_render());

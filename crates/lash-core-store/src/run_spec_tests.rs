@@ -11,9 +11,11 @@ fn snapshot() -> PersistedSessionConfig {
     config.prompt = Some(
         PromptLayer::new().with_contribution(PromptContribution::guidance("Session", "session")),
     );
-    config.protocol_turn_options = Some(ProtocolTurnOptions::from_payload(
+    config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    config.plugin_config.insert(
+        "protocol",
         serde_json::json!({ "keep": 1, "replace": "session" }),
-    ));
+    );
     config.config_revision = 7;
     config
 }
@@ -243,9 +245,8 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
     assert_eq!(
         resolved
             .config()
-            .protocol_turn_options
-            .clone()
-            .expect("options")
+            .plugin_config
+            .protocol_turn_options()
             .payload,
         serde_json::json!({ "keep": 1, "replace": "explicit", "added": true })
     );

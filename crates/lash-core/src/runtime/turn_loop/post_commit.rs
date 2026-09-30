@@ -44,6 +44,7 @@ impl LashRuntime {
                 crate::PluginLifecycleEvent::TurnPersisted(Box::new(
                     crate::SessionStateChangedContext {
                         session_id: self.state.session_id.clone(),
+                        plugin_config: session.plugins().admitted_plugin_config(),
                         state: crate::SessionReadView::from_snapshot(&returned_turn.state),
                         sessions: manager.state_service(),
                         session_graph: manager.graph_service(),

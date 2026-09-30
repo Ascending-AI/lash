@@ -1,8 +1,8 @@
 //! FIG-4099, FIG-4112: a session's config is baked in when it is created,
 //! and only `create(SessionCreation)` states it. An open runs with what the
 //! session recorded and writes nothing — it cannot state config at all (the
-//! `session_open_takes_no_config` UI fixture) — and every later change is
-//! `update(SessionConfigPatch)`.
+//! `session_open_takes_no_config` UI fixture) — and every later change is a
+//! config transaction (FIG-4379).
 
 use super::*;
 use lash_sansio::SessionId;
@@ -162,8 +162,8 @@ async fn a_reopen_runs_the_recorded_config_and_writes_nothing() -> Result<()> {
     Ok(())
 }
 
-/// Every config field changes durably through `update(SessionConfigPatch)`,
-/// and a cold reopen reads the patched values back.
+/// Every core config field changes durably through a config transaction, and
+/// a cold reopen reads the changed values back.
 #[tokio::test]
 async fn update_changes_each_config_field_durably() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -173,21 +173,23 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
     session
         .admin()
         .config()
-        .update(crate::SessionConfigPatch {
-            model: Some(model_with_attachments(
-                "patched-model",
-                "ignored-attachments",
-            )),
-            attachment_acceptance: Some(snapshot("patched-attachments")),
-            prompt: Some(guidance("PATCHED PROMPT")),
-            generation: Some(crate::GenerationOverlay::Merge(
-                lash_core::GenerationOptions {
+        .configure(
+            crate::config::ConfigTransaction::of(crate::config::SetModel {
+                model: model_with_attachments("patched-model", "ignored-attachments"),
+            })
+            .then(crate::config::SetAttachmentAcceptance {
+                acceptance: (*snapshot("patched-attachments")).clone(),
+            })
+            .then(crate::config::SetPrompt {
+                prompt: guidance("PATCHED PROMPT"),
+            })
+            .then(crate::config::SetGeneration {
+                generation: crate::GenerationOverlay::Merge(lash_core::GenerationOptions {
                     output_token_cap: std::num::NonZeroUsize::new(41),
                     ..Default::default()
-                },
-            )),
-            ..crate::SessionConfigPatch::default()
-        })
+                }),
+            }),
+        )
         .await?;
     Box::pin(session.close()).await?;
 
@@ -217,7 +219,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
 }
 
 /// ADR 0026: a model change retains the session's attachment snapshot; only
-/// the patch's own attachment field replaces it.
+/// `SetAttachmentAcceptance` replaces it.
 #[tokio::test]
 async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -226,13 +228,11 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
     let session = core.session("patch-keeps-attachments").open().await?;
     let config = session.admin().config();
     config
-        .update(crate::SessionConfigPatch {
-            model: Some(model_with_attachments(
-                "upgraded-model",
-                "catalogue-attachments",
-            )),
-            ..crate::SessionConfigPatch::default()
-        })
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetModel {
+                model: model_with_attachments("upgraded-model", "catalogue-attachments"),
+            },
+        ))
         .await?;
     let policy = session.policy_snapshot();
     assert_eq!(policy.model.id, "upgraded-model");
@@ -248,10 +248,11 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
     );
 
     config
-        .update(crate::SessionConfigPatch {
-            attachment_acceptance: Some(snapshot("adopted-attachments")),
-            ..crate::SessionConfigPatch::default()
-        })
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetAttachmentAcceptance {
+                acceptance: (*snapshot("adopted-attachments")).clone(),
+            },
+        ))
         .await?;
     let (_, recorded) = recorded_config(&backend, "patch-keeps-attachments").await;
     assert_eq!(recorded.model.id, "upgraded-model");
@@ -262,10 +263,11 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
     Ok(())
 }
 
-/// Plugin session config that no plugin of the session reads is refused
-/// typed, and the refused patch writes nothing — not even its other fields.
+/// A config command no installed plugin owns is refused typed at
+/// submission, and the refused transaction writes nothing — not even its
+/// other commands.
 #[tokio::test]
-async fn plugin_options_no_plugin_reads_are_refused_typed_and_write_nothing() -> Result<()> {
+async fn a_command_no_plugin_owns_is_refused_typed_and_writes_nothing() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, writes) = counting_core(captures).await?;
     create_with_creation_spec(&core, "patch-unread-plugin-options").await?;
@@ -274,28 +276,29 @@ async fn plugin_options_no_plugin_reads_are_refused_typed_and_write_nothing() ->
     let before = recorded_config(&backend, "patch-unread-plugin-options").await;
     writes.lock_recover().clear();
 
-    let error = session
-        .admin()
-        .config()
-        .update(crate::SessionConfigPatch {
-            prompt: Some(guidance("NEVER WRITTEN")),
-            plugin_options: Some(
-                lash_core::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
-                    .expect("options encode"),
-            ),
-            ..crate::SessionConfigPatch::default()
-        })
+    let config = session.admin().config();
+    let revision = config.revision().await?;
+    let error = config
+        .apply(
+            crate::config::ConfigWrite::new("unowned-plugin-command", revision),
+            crate::config::ConfigTransaction::of(crate::config::SetPrompt {
+                prompt: guidance("NEVER WRITTEN"),
+            })
+            .then_entry(crate::config::ConfigCommandEntry {
+                owner: "no-such-plugin".to_string(),
+                command: "set_k".to_string(),
+                args: serde_json::json!({ "k": 1 }),
+            }),
+        )
         .await
-        .expect_err("options no plugin reads are refused");
-    let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = &error
-    else {
-        panic!("expected a typed session config refusal, got: {error:?}");
-    };
-    assert_eq!(
-        refusal.downcast_ref::<lash_core::PluginOptionsUnaccepted>(),
-        Some(&lash_core::PluginOptionsUnaccepted {
-            plugin_ids: vec!["no-such-plugin".to_string()],
-        })
+        .expect_err("a command no installed plugin owns is refused");
+    assert!(
+        matches!(
+            &error,
+            crate::EmbedError::ConfigSubmit(crate::config::ConfigSubmitError::UnknownOwner { owner })
+                if owner == "no-such-plugin"
+        ),
+        "expected a typed config submission refusal, got: {error:?}"
     );
     assert_eq!(*writes.lock_recover(), Vec::<&str>::new());
     assert_eq!(

@@ -62,7 +62,6 @@ pub fn open_group_body(view: &RestateView, key: &str) -> Result<serde_json::Valu
             wake: lash_core::GroupWakePolicy::All,
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             replay_keys: vec![format!("{key}-child-0")],
-            wait_scope: lash_core::ExecutionScope::runtime_operation(key),
             opener: lash_core::AdmittedScope::turn(format!("{key}-session"), "turn"),
         },
         membership: lash_restate::EffectGroupMembership(vec!["{}".to_owned()]),

@@ -1,13 +1,12 @@
-use crate::admin::SessionConfigPatch;
 #[cfg(feature = "rlm")]
 use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, DeploymentStore, EmbedError, LashCore, PluginFactory, ProcessRegistry,
-    PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate, ProviderHandle, Result,
-    RunActivityCollector, RuntimeSessionState, SessionError, SessionObservationSubscription,
-    SessionResume, StaticPluginFactory, StdMutex, ToolProvider, TurnActivity, TurnActivityId,
-    TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait, message_text,
+    PromptLayerSink, ProviderHandle, Result, RunActivityCollector, RuntimeSessionState,
+    SessionError, SessionObservationSubscription, SessionResume, StaticPluginFactory, StdMutex,
+    ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput,
+    TurnOutcome, TurnReport, async_trait, message_text,
 };
 use lash_core::ProcessExecutionEnvStore;
 #[cfg(feature = "rlm")]
@@ -16,6 +15,7 @@ use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, SessionGraphFacadeOps, SessionNodeProjection, ToolStateFacadeOps,
 };
 use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
+use lash_core::{PromptContribution, PromptSlot, PromptTemplate};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
@@ -28,6 +28,29 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
 use lash_core::{LlmOutputPart, SessionProcessEventKind, StoreError, ToolDefinitionBindingExt};
+
+/// Test convenience over [`SessionConfigAdmin`](crate::admin::SessionConfigAdmin):
+/// apply a config transaction against the session's current config revision,
+/// under a fresh id, and require it to apply.
+pub(crate) trait ConfigureExt {
+    async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()>;
+}
+
+impl ConfigureExt for crate::admin::SessionConfigAdmin {
+    async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()> {
+        let revision = self.revision().await?;
+        let write = crate::config::ConfigWrite::new(
+            format!("test-config:{}", uuid::Uuid::new_v4()),
+            revision,
+        );
+        match self.apply(write, transaction).await? {
+            crate::config::ConfigTransactionOutcome::Applied { .. } => Ok(()),
+            outcome => Err(EmbedError::Session(SessionError::Protocol(format!(
+                "the config transaction did not apply: {outcome:?}"
+            )))),
+        }
+    }
+}
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 /// Create a session's durable metadata without building a runtime.

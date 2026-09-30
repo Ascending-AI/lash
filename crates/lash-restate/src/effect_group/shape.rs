@@ -12,9 +12,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use lash_core::{
-    ExecutionScope, GroupWakePolicy, LoserPolicy, RuntimeEffectControllerError, RuntimeEffectGroup,
-};
+use lash_core::{GroupWakePolicy, LoserPolicy, RuntimeEffectControllerError, RuntimeEffectGroup};
 use restate_sdk::errors::TerminalError;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,7 +20,6 @@ pub struct EffectGroupShape {
     pub wake: GroupWakePolicy,
     pub loser_disposition: LoserPolicy,
     pub replay_keys: Vec<String>,
-    pub wait_scope: ExecutionScope,
     /// The admitted scope of the controller that opened the group: the
     /// authority every child runs under (ADR 0099 §1). A child invocation
     /// mints its controller from its own context, and a timer or durable-wait
@@ -46,7 +43,6 @@ impl EffectGroupShape {
             .iter()
             .map(|child| child.invocation.effect_replay_key().to_owned())
             .collect();
-        let wait_scope = ExecutionScope::runtime_operation(group.group_key());
         let membership = group
             .children()
             .iter()
@@ -67,7 +63,6 @@ impl EffectGroupShape {
                 wake: group.wake(),
                 loser_disposition: group.loser_disposition(),
                 replay_keys,
-                wait_scope,
                 opener: opener.clone(),
             },
             EffectGroupMembership(membership),

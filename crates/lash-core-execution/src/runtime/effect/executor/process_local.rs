@@ -177,30 +177,114 @@ impl ProcessLocalExecution {
                     realization,
                 ))
             }
-            ProcessCommand::List {
-                session_scope,
-                mode,
-            } => {
-                let entries = match mode {
-                    crate::ProcessListMode::Live => {
+            ProcessCommand::List { selection } => {
+                let entries = match selection {
+                    crate::ProcessListSelection::Observed {
+                        session_scope,
+                        mode,
+                    } => match mode {
+                        crate::ProcessListMode::Live => {
+                            registry
+                                .list_live_observed_by(&session_scope.session_id)
+                                .await?
+                        }
+                        crate::ProcessListMode::All => {
+                            registry
+                                .list_observed_by(
+                                    &session_scope.session_id,
+                                    &crate::ProcessListFilter {
+                                        status: crate::ProcessStatusFilter::Any,
+                                        ..Default::default()
+                                    },
+                                )
+                                .await?
+                        }
+                    },
+                    crate::ProcessListSelection::HostRunning => {
                         registry
-                            .list_live_observed_by(&session_scope.session_id)
-                            .await?
-                    }
-                    crate::ProcessListMode::All => {
-                        registry
-                            .list_observed_by(
-                                &session_scope.session_id,
-                                &crate::ProcessListFilter {
-                                    status: crate::ProcessStatusFilter::Any,
-                                    ..Default::default()
-                                },
-                            )
+                            .list_processes(&crate::ProcessListFilter {
+                                status: crate::ProcessStatusFilter::any_of([
+                                    crate::ProcessStatus::Running,
+                                ]),
+                                ..Default::default()
+                            })
                             .await?
                     }
                 };
                 Ok((
                     ProcessEffectOutcome::List { entries },
+                    crate::StoreRealization::Realized,
+                ))
+            }
+            ProcessCommand::CompleteExternal {
+                session_scope,
+                process_id,
+                output,
+            } => {
+                if !registry
+                    .is_observer(&session_scope.session_id, &process_id)
+                    .await?
+                {
+                    return Err(crate::PluginError::ProcessNotVisible { process_id }.into());
+                }
+                if let Some(attachments) = attachments.as_ref() {
+                    crate::runtime::attachment_delivery::acquire_completion_output(
+                        attachments.as_ref(),
+                        &process_id,
+                        &output,
+                    )
+                    .await?;
+                }
+                let completion = registry
+                    .complete_process(
+                        &process_id,
+                        output,
+                        crate::ProcessCompletionAuthority::ExternalOwner,
+                    )
+                    .await?;
+                let realization = match &completion {
+                    crate::ProcessCompletionOutcome::Committed(_) => {
+                        crate::StoreRealization::Realized
+                    }
+                    crate::ProcessCompletionOutcome::AlreadyApplied { .. }
+                    | crate::ProcessCompletionOutcome::Superseded { .. } => {
+                        crate::StoreRealization::Coalesced
+                    }
+                };
+                Ok((
+                    ProcessEffectOutcome::CompleteExternal {
+                        completion: Box::new(completion),
+                    },
+                    realization,
+                ))
+            }
+            ProcessCommand::ValidateVisible { owner, process_ids } => {
+                let mut not_visible = None;
+                for process_id in process_ids {
+                    let visible = match &owner {
+                        crate::RuntimeOwner::Session(session_id) => {
+                            registry.is_observer(session_id, &process_id).await
+                        }
+                        crate::RuntimeOwner::Process(starter) => {
+                            let starter = crate::ScopeId::process(starter.clone());
+                            registry.get_process(&process_id).await.map(|record| {
+                                record.is_some_and(|record| {
+                                    record.ancestry.starter() == Some(&starter)
+                                })
+                            })
+                        }
+                    };
+                    match visible {
+                        Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
+                        Ok(false) => {
+                            not_visible = Some(process_id);
+                            break;
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Ok((
+                    ProcessEffectOutcome::ValidateVisible { not_visible },
                     crate::StoreRealization::Realized,
                 ))
             }

@@ -112,10 +112,9 @@ fn realistic_commit(
                     SessionNodePayload::FrameOpen {
                         frame_key: frame_key.clone(),
                         reason: lash_core_execution::AgentFrameReason::initial(),
-                        assignment: lash_core_execution::AgentFrameAssignment::from_policy(
+                        assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
                             SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
                         ),
-                        protocol_turn_options: Default::default(),
                     }
                 } else {
                     SessionNodePayload::Event {

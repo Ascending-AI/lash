@@ -62,18 +62,19 @@ pub fn run_observed(
     for source in &case.cells {
         loop {
             let start = start(case, source, state.clone(), pool, owner)?;
-            let bytes = FrameCodec::new(
-                pool.config().entry.build.clone(),
-                pool.config().protocol.decode,
-            )
-            .encode_parent(&ParentFrame {
-                // Reserve the largest lease encoding, as the broker does. A
-                // zero lease under-reserves after enough clean checkouts.
-                header: MessageFence::new(ExecutionLease(u64::MAX), OwnerEpoch(0), FrameEpoch(0))
+            let bytes = FrameCodec::new(pool.config().protocol.decode)
+                .encode_parent(&ParentFrame {
+                    // Reserve the largest lease encoding, as the broker does. A
+                    // zero lease under-reserves after enough clean checkouts.
+                    header: MessageFence::new(
+                        ExecutionLease(u64::MAX),
+                        OwnerEpoch(0),
+                        FrameEpoch(0),
+                    )
                     .next_header(),
-                message: ParentMessage::Start(Box::new(start.clone())),
-            })?
-            .len();
+                    message: ParentMessage::Start(Box::new(start.clone())),
+                })?
+                .len();
             let queued = Instant::now();
             let mut worker = pool.checkout(
                 bytes,

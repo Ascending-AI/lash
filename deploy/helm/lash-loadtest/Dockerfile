@@ -7,6 +7,8 @@ FROM ${RUNTIME_BASE}
 ARG BIN_DIR=target/loadtest-image/bin
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl iproute2 postgresql-client python3 && rm -rf /var/lib/apt/lists/*
 COPY ${BIN_DIR}/ /usr/local/bin/
+# The worker runs model code only in the VM helper beside it (FIG-4161).
+RUN test -x /usr/local/bin/lash-e2e-worker && test -x /usr/local/bin/lash-vm-worker
 COPY crates/lash-postgres-store/schema.sql /opt/lash/schema.sql
 COPY target/loadtest-image/witness.sql /opt/lash/witness.sql
 COPY scripts/loadtest_resources.py /opt/lash/loadtest_resources.py

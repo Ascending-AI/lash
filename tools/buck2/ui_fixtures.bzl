@@ -154,7 +154,7 @@ _ui_fixtures = rule(
     },
 )
 
-def ui_fixtures_test(name, harness, package, fixtures, expected, edition = "2024", tags = [], exec_properties = {}):
+def ui_fixtures_test(name, harness, package, fixtures, expected, edition = "2024", tags = [], exec_properties = {}, tests = []):
     # These defaults preserve the former gate's pool request. The measured
     # harness compiler retains its own independent resource row.
     _ui_fixtures(
@@ -167,5 +167,6 @@ def ui_fixtures_test(name, harness, package, fixtures, expected, edition = "2024
         tags = tags,
         cpu = exec_properties.get("cpu_count", "1"),
         memory_kb = exec_properties.get("memory_kb", "1572864"),
+        tests = tests,
         visibility = ["PUBLIC"],
     )

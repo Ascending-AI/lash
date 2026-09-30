@@ -63,6 +63,9 @@ impl std::fmt::Debug for PluginTraceEmitter {
 #[derive(Clone)]
 pub struct TurnTransformContext<'run> {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
     pub prompt_usage: Option<crate::TokenUsage>,
     pub max_context_tokens: Option<usize>,
@@ -78,6 +81,9 @@ pub struct TurnTransformContext<'run> {
 #[derive(Clone)]
 pub struct CompactionContext<'run> {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub instructions: Option<String>,
     pub state: SessionReadView,
     pub traces: PluginTraceEmitter,
@@ -101,6 +107,9 @@ pub struct CompactionContext<'run> {
 #[derive(Clone)]
 pub struct ContextPressureContext<'run> {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision.
+    pub plugin_config: super::AdmittedPluginConfig,
     /// The committed session, as it stood when the turn was admitted.
     pub state: SessionReadView,
     /// The previous turn's provider-reported prompt usage, if any.

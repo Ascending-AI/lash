@@ -497,9 +497,17 @@ impl Session<'_, '_> {
         frames: &mut watch::Receiver<FrameEpoch>,
     ) -> SessionEnd {
         match self.next_message(stop, frames).await {
-            Ok(WorkerMessage::Ready { build }) if &build == self.broker.codec.build() => {}
-            Ok(WorkerMessage::Ready { build }) => {
-                return self.violation(format!("the worker runs build `{build}`"));
+            Ok(WorkerMessage::Ready {
+                protocol_version,
+                crate_version,
+            }) => {
+                if let Err(refusal) = lash_vm_protocol::check_worker_protocol_version(
+                    protocol_version,
+                    env!("CARGO_PKG_VERSION"),
+                    &crate_version,
+                ) {
+                    return self.violation(refusal.to_string());
+                }
             }
             Ok(other) => return self.violation(format!("the worker opened with {}", name(&other))),
             Err(stop) => return self.stopped(stop, Settlement::default()),

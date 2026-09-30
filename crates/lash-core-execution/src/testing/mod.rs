@@ -70,7 +70,7 @@ pub fn process_work_wiring_for_registry(
 #[cfg(any(test, feature = "testing"))]
 fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     )
 }
@@ -1806,22 +1806,27 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    /// Production writes the terminal through the registry, not the controller
-    /// (`complete_external_process`), so this route journals nothing.
     async fn complete_external(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
         process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
-        _scope: crate::ProcessOpScope<'_>,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
-        self.registry
-            .complete_process(
-                process_id,
-                await_output,
-                crate::ProcessCompletionAuthority::ExternalOwner,
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::CompleteExternal {
+                    session_scope: crate::SessionScope::new(session_id),
+                    process_id: process_id.clone(),
+                    output: await_output,
+                },
             )
-            .await
+            .await?
+        {
+            crate::ProcessEffectOutcome::CompleteExternal { completion } => Ok(*completion),
+            _ => unreachable!("completion command returns completion outcome"),
+        }
     }
 
     async fn await_process(
@@ -1845,8 +1850,10 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let command = crate::ProcessCommand::List {
-            session_scope: crate::SessionScope::new(session_id),
-            mode,
+            selection: crate::ProcessListSelection::Observed {
+                session_scope: crate::SessionScope::new(session_id),
+                mode,
+            },
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::List { entries } => Ok(entries),
@@ -1854,24 +1861,31 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    /// Production authorizes visibility with a registry observer read
-    /// (`validate_process_handles_observed_inner`), so this route journals
-    /// nothing.
     async fn validate_visible(
         &self,
         owner: &crate::RuntimeOwner,
         process_ids: &[ProcessId],
-        _scope: crate::ProcessOpScope<'_>,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        let session_id = crate::plugin::require_session_owner(owner, "validate_visible")?;
-        for process_id in process_ids {
-            if !self.registry.is_observer(session_id, process_id).await? {
-                return Err(crate::PluginError::Session(format!(
-                    "process handle `{process_id}` is not visible in this session"
-                )));
-            }
+        if process_ids.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::ValidateVisible {
+                    owner: owner.clone(),
+                    process_ids: process_ids.to_vec(),
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::ValidateVisible { not_visible: None } => Ok(()),
+            crate::ProcessEffectOutcome::ValidateVisible {
+                not_visible: Some(process_id),
+            } => Err(crate::PluginError::ProcessNotVisible { process_id }),
+            _ => unreachable!("visibility command returns visibility outcome"),
+        }
     }
 
     async fn cancel(
@@ -2478,14 +2492,12 @@ impl crate::ProcessService for MockSessionManager {
         payload: serde_json::Value,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        let event_type = crate::process_signal_event_type(&signal_name)?;
+        let signal = crate::ProcessSignal::new(
+            crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
+            payload,
+        );
         self.registry()?
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-                    crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-                ),
-            )
+            .append_event(process_id, signal.append_request())
             .await
             .map(|result| result.event)
     }

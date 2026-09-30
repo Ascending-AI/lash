@@ -653,10 +653,9 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
         payload: SessionNodePayload::FrameOpen {
             frame_key,
             reason: crate::AgentFrameReason::initial(),
-            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+            assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             )),
-            protocol_turn_options: crate::ProtocolTurnOptions::default(),
         },
     };
     let mut stored: serde_json::Value = serde_json::from_str(
@@ -684,7 +683,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
 
 #[test]
 fn nearest_frame_is_derived_from_ancestry() {
-    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+    let assignment = crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
     ));
     let mut graph = SessionGraph::default();
@@ -696,7 +695,6 @@ fn nearest_frame_is_derived_from_ancestry() {
         first_key,
         crate::AgentFrameReason::initial(),
         assignment.clone(),
-        crate::ProtocolTurnOptions::default(),
         "2026-07-27T00:00:00Z".to_string(),
     ));
     let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
@@ -708,7 +706,6 @@ fn nearest_frame_is_derived_from_ancestry() {
         second_key,
         crate::AgentFrameReason::continue_as(),
         assignment,
-        crate::ProtocolTurnOptions::default(),
         "2026-07-27T00:00:01Z".to_string(),
     ));
     let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
@@ -1011,7 +1008,7 @@ fn open_test_frame(
     key: &str,
     reason: crate::AgentFrameReason,
 ) -> crate::FrameNodeId {
-    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+    let assignment = crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
     ));
     let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
@@ -1021,7 +1018,6 @@ fn open_test_frame(
         frame_key,
         reason,
         assignment,
-        crate::ProtocolTurnOptions::default(),
         "2026-09-29T00:00:00Z".to_string(),
     ));
     frame
@@ -1422,10 +1418,9 @@ mod window_anchor {
             payload: SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 )),
-                protocol_turn_options: crate::ProtocolTurnOptions::default(),
             },
         }
     }

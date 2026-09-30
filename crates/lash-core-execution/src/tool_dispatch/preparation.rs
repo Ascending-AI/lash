@@ -192,6 +192,7 @@ async fn prepare_authorized_tool_call_with_context(
         .plugins
         .before_tool_call(ToolCallHookContext::new(
             context.owner.runtime_owner(),
+            context.plugins.admitted_plugin_config(),
             tool_name.clone(),
             args.clone(),
             manifest.argument_projection.clone(),

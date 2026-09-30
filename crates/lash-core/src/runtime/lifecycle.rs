@@ -307,7 +307,6 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             resident_session: ResidentSessionContinuity::fresh(),
-            materialized_protocol_config_dirty: false,
             tool_restore_report,
         })
     }
@@ -490,31 +489,11 @@ impl LashRuntime {
         store: Option<crate::store::SessionStore>,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
-        Self::from_environment_with_plugin_options(
-            env,
-            policy,
-            state,
-            store,
-            crate::PluginOptions::default(),
-            runtime_lease_owner,
-        )
-        .await
-    }
-
-    pub async fn from_environment_with_plugin_options(
-        env: &RuntimeEnvironment,
-        policy: SessionPolicy,
-        state: RuntimeSessionState,
-        store: Option<crate::store::SessionStore>,
-        plugin_options: crate::PluginOptions,
-        runtime_lease_owner: crate::LeaseOwnerIdentity,
-    ) -> Result<Self, SessionError> {
         Self::from_environment_for_executor(
             env,
             policy,
             state,
             store,
-            plugin_options,
             runtime_lease_owner,
             uuid::Uuid::new_v4().to_string(),
         )
@@ -526,7 +505,6 @@ impl LashRuntime {
         policy: SessionPolicy,
         state: RuntimeSessionState,
         store: Option<crate::store::SessionStore>,
-        plugin_options: crate::PluginOptions,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
@@ -540,10 +518,12 @@ impl LashRuntime {
             .subagent
             .as_ref()
             .map(|subagent| subagent.parent_session_id.clone());
+        // The session's recorded plugin configuration, as recorded: every
+        // open delivers it unchanged (FIG-4379).
         let authority = crate::plugin::SessionAuthorityContext {
             tool_access: state.authority.tool_access.clone(),
             subagent: state.authority.subagent.clone(),
-            plugin_options,
+            plugin_config: state.admitted_plugin_config(),
         };
         let plugin_session = match state.plugin_state() {
             Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
@@ -551,21 +531,12 @@ impl LashRuntime {
                 ..PluginSessionRequest::rematerialization(
                     state.session_id.as_str(),
                     snapshot,
-                    crate::plugin::RecordedSessionConfig {
-                        authority,
-                        protocol_turn_options: state.protocol_turn_options.clone(),
-                    },
+                    authority,
                 )
             }),
             None => plugin_host.build_session(PluginSessionRequest {
                 parent_session_id,
-                ..PluginSessionRequest::creation(
-                    state.session_id.as_str(),
-                    crate::plugin::SessionCreationConfig {
-                        authority,
-                        protocol_turn_options: state.protocol_turn_options.clone(),
-                    },
-                )
+                ..PluginSessionRequest::creation(state.session_id.as_str(), authority)
             }),
         }
         .map_err(SessionError::Plugin)?;
@@ -581,67 +552,6 @@ impl LashRuntime {
             RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id),
         ))
         .await
-    }
-
-    /// Submit the protocol turn options this runtime's open materialized
-    /// (FIG-2479) to the session's command lane, ahead of the command about
-    /// to be submitted, when they differ from the durable ones.
-    ///
-    /// The bound turn owns the session head (FIG-4202), so the materialized
-    /// options are never written beside the drive: they are a config patch
-    /// the drive applies at a turn boundary, in order, before the command
-    /// that follows. The patch is keyed by the options it records, so a
-    /// resubmission names the same command.
-    pub(super) async fn submit_materialized_protocol_config(
-        &mut self,
-        store: &crate::store::SessionStore,
-    ) -> Result<(), RuntimeError> {
-        if !self.materialized_protocol_config_dirty {
-            return Ok(());
-        }
-        let fleet_format = self.fleet_format();
-        let options = self
-            .state
-            .protocol_turn_options
-            .restamped_for_fleet(fleet_format);
-        let options_json =
-            lash_core_ids::stable_hash::stable_json_string(&options).map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::SessionCommandRun,
-                    format!("failed to identify the materialized protocol options: {error}"),
-                )
-            })?;
-        let options_hash = lash_core_ids::stable_hash::blake3_hex(
-            "lash-protocol-materialization/v1",
-            options_json.as_bytes(),
-        );
-        let command = crate::SessionCommand::ApplyConfigPatch {
-            patch: Box::new(super::ApplyConfigPatch {
-                base_config_revision: self.state.config_revision,
-                protocol_turn_options: Some(options),
-                ..super::ApplyConfigPatch::for_fleet(fleet_format)
-            }),
-        };
-        let source_key = command.source_key(format!(
-            "protocol-materialization:{}:{options_hash}",
-            self.state.config_revision
-        ));
-        let enqueued = store
-            .enqueue_queued_work(
-                crate::QueuedWorkBatchDraft::new(
-                    self.state.session_id.clone(),
-                    crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                    command,
-                )
-                .with_source_key(source_key),
-            )
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        self.ingress_relay()
-            .deliver_admitted(enqueued.batch_id.as_str())
-            .await;
-        self.materialized_protocol_config_dirty = false;
-        Ok(())
     }
 
     /// Persist any dirty state and drop the runtime, returning a lightweight
@@ -799,7 +709,6 @@ impl LashRuntime {
             parked.policy,
             state,
             Some(parked.store),
-            crate::PluginOptions::default(),
             runtime_lease_owner,
             parked.runtime_lease_executor_id,
         )

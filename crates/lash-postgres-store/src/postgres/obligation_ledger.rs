@@ -195,7 +195,6 @@ pub(crate) async fn arm_cleanup_tx(
     let json = cleanup
         .to_json()
         .map_err(|error| StoreError::Backend(error.to_string()))?;
-    let awaited = cleanup.awaited_journal().map(|journal| journal.key());
     match decision {
         CleanupUpsert::Insert => {
             sqlx::query(CLEANUP.insert_if_absent.sql())
@@ -204,7 +203,6 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(json)
                 .bind(id.as_str())
                 .bind(sql_i64("cleanup due instant", now_ms)?)
-                .bind(awaited)
                 .execute(&mut *conn)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -215,7 +213,6 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(&referrer_id)
                 .bind(json)
                 .bind(sql_i64("cleanup due instant", now_ms)?)
-                .bind(awaited)
                 .execute(&mut *conn)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -631,24 +628,6 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
             .rows_affected();
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(changed == 1)
-    }
-
-    async fn nudge_awaiting_journal(
-        &self,
-        journal: &lash_sansio::EffectJournalIdentity,
-        now_ms: u64,
-    ) -> Result<u64, StoreError> {
-        let due_at = sql_i64("cleanup due instant", now_ms)?;
-        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let nudged = sqlx::query(CLEANUP.nudge_awaiting_journal.sql())
-            .bind(journal.key())
-            .bind(due_at)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected();
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(nudged)
     }
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {

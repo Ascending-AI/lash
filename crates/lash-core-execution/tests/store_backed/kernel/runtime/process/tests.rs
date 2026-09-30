@@ -443,7 +443,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     let backend = sqlite_memory_store_set().await;
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");

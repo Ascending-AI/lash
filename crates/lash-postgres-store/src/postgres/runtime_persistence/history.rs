@@ -20,7 +20,9 @@ fn corrupt(kind: &'static str, message: impl Into<String>) -> StoreError {
     }
 }
 
-async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreError> {
+/// A `REPEATABLE READ READ ONLY` snapshot on `store`'s pool: the one entry
+/// the store's multi-statement reads (history, owner usage) begin through.
+pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreError> {
     let mut tx = store.pool.begin().await.map_err(store_sqlx_error)?;
     sqlx::query(
         crate::connection_sql::connection_sql()

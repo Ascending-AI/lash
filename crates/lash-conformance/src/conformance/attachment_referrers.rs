@@ -602,6 +602,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: SessionPolicy::new(TurnBudget::Unbounded),
+            plugin_config: Default::default(),
         })
         .await
         .unwrap();

@@ -195,6 +195,15 @@ pub struct ToolChildLawFixture {
     pub turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 }
 
+/// A tier's operator over one group child's invocation (ADR 0099 §5, §8),
+/// called with the group key and the child's position: the invocation dies
+/// before its seat, as an operator's kill ends it; its retention expires; and
+/// the idempotency-keyed dispatch mints a successor for the position, which
+/// presents an invocation id the group never recorded. It returns once the
+/// successor is dispatched.
+pub type ChildInvocationExpiry =
+    Arc<dyn Fn(String, usize) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
 /// The lease window the lane law and the recovery law's live phases use:
 /// longer than the law, so a claim expiring mid-test can never be mistaken
 /// for the journal honoring it.

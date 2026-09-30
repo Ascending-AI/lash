@@ -31,10 +31,7 @@ impl WorkerSlots for PoolSlots {
         let frame = self.frame_epoch;
         // A resumed continuation may be larger than the initial input.
         // Reserve this checkout's complete Start, before queue admission.
-        let codec = FrameCodec::new(
-            self.pool.config().entry.build.clone(),
-            self.pool.config().protocol.decode,
-        );
+        let codec = FrameCodec::new(self.pool.config().protocol.decode);
         let mut fence = MessageFence::new(ExecutionLease(u64::MAX), epoch, frame);
         let reservation = codec
             .encode_parent(&ParentFrame {
@@ -82,10 +79,7 @@ impl WorkerSlots for PoolSlots {
         }
         let lease = worker.lease();
         let interruptor = worker.interruptor().map_err(|_| CheckoutRefusal::Closed)?;
-        let codec = FrameCodec::new(
-            self.pool.config().entry.build.clone(),
-            self.pool.config().protocol.decode,
-        );
+        let codec = FrameCodec::new(self.pool.config().protocol.decode);
         let (commands, mut inputs) = mpsc::channel::<Option<Vec<u8>>>(1);
         let (outputs, messages) = mpsc::channel(2);
         let recovery = self.recovery.clone();
@@ -111,7 +105,8 @@ impl WorkerSlots for PoolSlots {
             // Checkout has already received and verified the real handshake.
             send(
                 WorkerMessage::Ready {
-                    build: codec.build().clone(),
+                    protocol_version: WORKER_PROTOCOL_VERSION,
+                    crate_version: env!("CARGO_PKG_VERSION").into(),
                 },
                 &mut outgoing,
             );

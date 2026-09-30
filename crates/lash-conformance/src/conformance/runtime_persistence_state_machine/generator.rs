@@ -108,22 +108,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 0,
             coalesce: false,
         },
-        EnqueueWork {
-            slot: 1,
-            value: 1,
-            coalesce: false,
-        },
-        EnqueueWork {
-            slot: 2,
-            value: 2,
-            coalesce: true,
-        },
-        EnqueueWork {
-            slot: 3,
-            value: 3,
-            coalesce: true,
-        },
-        // A root takes the exclusive head alone and its commit settles it.
+        // A root takes the ready prefix and its commit settles it.
         AdmitWork,
         Commit {
             component_mode: 0,
@@ -132,7 +117,24 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
+        EnqueueWork {
+            slot: 1,
+            value: 1,
+            coalesce: false,
+        },
         AdmitWork,
+        // Work queued behind the running root stays open: a foreign row to
+        // the root, and the next root's joined admission.
+        EnqueueWork {
+            slot: 2,
+            value: 2,
+            coalesce: true,
+        },
+        EnqueueWork {
+            slot: 3,
+            value: 3,
+            coalesce: false,
+        },
         // The worker dies after its admission committed.
         Crash,
         SealFence { owner: 1 },
@@ -157,7 +159,8 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        // A joined admission; a second root is refused while it is unfinished.
+        // A joined admission, merge keys being per-item data; a second root
+        // is refused while it is unfinished.
         AdmitWork,
         EnqueueTurnInput { slot: 0, value: 0 },
         EnqueueTurnInput { slot: 1, value: 1 },

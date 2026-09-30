@@ -85,10 +85,10 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover,
-    SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
-    SessionScope, SessionStoreCreateRequest, StoreError, TokenUsage, TriggerCommand,
-    TriggerCommandOutcome, TriggerDeliveryReservation, TriggerInputBinding, TriggerMutationOutcome,
+    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
+    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, StoreError, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservation, TriggerInputBinding, TriggerMutationOutcome,
     TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
     WaitState,
@@ -1023,7 +1023,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         pending[0].input.source_key.as_deref(),
         Some(INPUT_SOURCE_KEY)
     );
-    assert!(pending[0].input.state.is_next_turn_pending());
+    assert!(pending[0].input.state.is_next_turn_input(None));
     assert_eq!(
         serde_json::to_value(&pending[0].input.input).expect("encode fixture pending input"),
         serde_json::to_value(TurnInput::text("durable read pending input"))
@@ -1173,20 +1173,18 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(1),
         "durable fixture semantic drift: sender wake allocation floor changed"
     );
+    // The settled wake's tombstone answers its redelivery, and nothing
+    // reopens (ADR 0101 §8).
     let redelivery = session
-        .enqueue_queued_work(process_wake_batch_draft(expected.wake_delivery.clone()))
+        .enqueue_queued_work_with_outcome(process_wake_batch_draft(expected.wake_delivery.clone()))
         .await
-        .expect_err("durable fixture drift: settled process wake was redelivered");
+        .expect("durable fixture drift: a settled process wake's redelivery is refused");
     assert!(
         matches!(
-            redelivery,
-            StoreError::ProcessWakeSequenceRewound {
-                sequence: 1,
-                allocation_floor: 1,
-                ..
-            }
+            &redelivery,
+            lash_core::runtime::QueuedWorkEnqueueOutcome::Existing(batch) if batch.terminal.is_some()
         ),
-        "durable fixture drift: receiver wake-redelivery fence returned {redelivery}"
+        "durable fixture drift: settled process wake was redelivered: {redelivery:?}"
     );
 
     match handles.processes.get_process(&tombstone_process_id()).await {
@@ -1278,7 +1276,6 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             frame_key,
             reason,
             assignment,
-            protocol_turn_options,
         } => {
             assert_eq!(
                 frame_key,
@@ -1296,15 +1293,9 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
                 lash_core::TurnBudget::Unbounded
             );
             assert_eq!(
-                serde_json::to_value(&assignment.plugin_options)
-                    .expect("encode frame plugin options"),
+                serde_json::to_value(&assignment.plugin_config)
+                    .expect("encode frame plugin config"),
                 serde_json::json!({})
-            );
-            // The options' content; their stamp is the version the writing
-            // store's `F` assigned, which the fixture does not pin.
-            assert_eq!(
-                protocol_turn_options.payload,
-                ProtocolTurnOptions::default().payload
             );
         }
         other => {

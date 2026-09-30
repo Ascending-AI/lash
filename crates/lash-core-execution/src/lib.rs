@@ -30,6 +30,10 @@ pub use lash_core_store::artifact_referrer::{
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::compat;
+pub use lash_core_store::config_transaction::{
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution, ConfigResolutionResult,
+    ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+};
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
 #[cfg(any(test, feature = "testing"))]
@@ -224,10 +228,8 @@ pub mod facade_support {
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
     pub use crate::plugin::PromptHookContext;
-    pub use crate::plugin::RecordedSessionConfig;
     pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
-    pub use crate::plugin::SessionCreationConfig;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionObserverIntent;
@@ -707,6 +709,13 @@ pub use lash_trace::{
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
+    AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
+    ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
+    ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
+    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
+    UnknownPluginConfigOwner,
+};
+pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
@@ -758,13 +767,13 @@ pub use runtime::{
     CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
     CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
-    DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupDrainBudget,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener,
-    EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
-    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
-    GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, Lifetime,
-    LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
+    DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,
+    EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
+    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId, InputItem,
+    InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, Lifetime, LifetimeDecision,
+    LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
     ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
@@ -785,16 +794,16 @@ pub use runtime::{
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity,
     ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
-    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessOutcomeObserver, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationProbe,
-    ProcessRegistrationReceipt, ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor,
-    ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
-    ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
-    ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessListMode, ProcessListSelection, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessOutcome, ProcessOutcomeObserver, ProcessProvenance, ProcessPruneReport, ProcessQuery,
+    ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome,
+    ProcessRegistrationProbe, ProcessRegistrationReceipt, ProcessRegistry, ProcessRegistryBinding,
+    ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome,
+    ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport,
+    ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
     ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
     ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
@@ -846,9 +855,8 @@ pub(crate) use runtime::{
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub(crate) use session::Session;
 pub use session::{
-    ExecRequest, PluginOptionsUnaccepted, RuntimeExecutionContext, SessionConfigRefusal,
-    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
-    resolve_trigger_owner_scope, tool_dispatch_surface,
+    ExecRequest, RuntimeExecutionContext, SessionConfigRefusal, SessionError, ToolDispatchSurface,
+    ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

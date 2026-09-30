@@ -34,7 +34,12 @@ pub(super) async fn count_events_through_counts_every_event_at_any_top_bound(
         let appended = registry
             .append_event(
                 &process_id,
-                ProcessEventAppendRequest::new(event_type, serde_json::json!({ "index": index })),
+                signal_request(
+                    &process_id,
+                    event_type.strip_prefix("signal.").expect("signal fixture"),
+                    &index.to_string(),
+                    serde_json::json!({ "index": index }),
+                ),
             )
             .await
             .expect("append count-bound event");

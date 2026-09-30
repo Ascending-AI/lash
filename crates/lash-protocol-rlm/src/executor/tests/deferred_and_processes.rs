@@ -347,12 +347,9 @@ async fn restricted_empty_deferred_context<'h>(
     let session = lash_core::facade_support::PluginHost::new(factories)
         .build_session(PluginSessionRequest::creation(
             session_id,
-            lash_core::plugin::SessionCreationConfig {
-                authority: lash_core::plugin::SessionAuthorityContext {
-                    tool_access: lash_core::SessionToolAccess::restricted([])
-                        .expect("restricted empty is valid"),
-                    ..Default::default()
-                },
+            lash_core::plugin::SessionAuthorityContext {
+                tool_access: lash_core::SessionToolAccess::restricted([])
+                    .expect("restricted empty is valid"),
                 ..Default::default()
             },
         ))
@@ -2199,7 +2196,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );
@@ -2333,7 +2330,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );
@@ -2450,7 +2447,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );

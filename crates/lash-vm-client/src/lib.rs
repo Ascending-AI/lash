@@ -16,18 +16,6 @@ pub use error::PoolError;
 pub use pool::{Checkout, ExecutionBudget, ParkOutcome, PoolStats, WorkerPool};
 pub use remote_state::{RemoteRestoreError, RemoteState, RemoteVm};
 
-/// Exact compiled worker-source identity; parent and helper must agree.
-pub fn build_identity() -> lash_vm_protocol::BuildIdentity {
-    lash_vm_protocol::BuildIdentity::new(format!(
-        "lash-worker/{}/{}/{}/debug-{}/testing-{}",
-        env!("LASH_VM_WORKER_BUILD_FINGERPRINT"),
-        std::env::consts::ARCH,
-        std::env::consts::OS,
-        cfg!(debug_assertions),
-        cfg!(feature = "testing")
-    ))
-}
-
 mod projections;
 pub use projections::Projections;
 

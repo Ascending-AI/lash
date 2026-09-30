@@ -8,9 +8,7 @@ use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceError;
-use rmcp::service::{RoleClient, RunningService, RxJsonRpcMessage, ServiceExt, TxJsonRpcMessage};
-use rmcp::transport::Transport;
-use rmcp::transport::async_rw::AsyncRwTransport;
+use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
@@ -19,29 +17,7 @@ use tokio::time::Instant;
 use crate::config::{McpServerConfig, McpStdioTransport, McpTransport};
 use crate::error::McpError;
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
-
-struct ManagedChildTransport {
-    io: AsyncRwTransport<RoleClient, tokio::fs::File, tokio::fs::File>,
-}
-
-impl Transport<RoleClient> for ManagedChildTransport {
-    type Error = std::io::Error;
-
-    fn send(
-        &mut self,
-        item: TxJsonRpcMessage<RoleClient>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
-        self.io.send(item)
-    }
-
-    fn receive(&mut self) -> impl Future<Output = Option<RxJsonRpcMessage<RoleClient>>> + Send {
-        self.io.receive()
-    }
-
-    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.io.close()
-    }
-}
+use crate::stdio_transport::ManagedChildTransport;
 
 type HandshakeFuture = Pin<
     Box<
@@ -78,12 +54,10 @@ pub(crate) fn connect_service(
                 stdio_child.child.stdout.take(),
                 stdio_child.child.stdin.take(),
             ) {
-                (Some(stdout), Some(stdin)) => Ok(ManagedChildTransport {
-                    io: AsyncRwTransport::new(
-                        tokio::fs::File::from_std(child_stdout_file(stdout)),
-                        tokio::fs::File::from_std(child_stdin_file(stdin)),
-                    ),
-                }),
+                (Some(stdout), Some(stdin)) => Ok(ManagedChildTransport::new(
+                    tokio::fs::File::from_std(child_stdout_file(stdout)),
+                    tokio::fs::File::from_std(child_stdin_file(stdin)),
+                )),
                 (None, _) => Err(McpError::Protocol(format!(
                     "failed to capture stdout for `{command}` MCP server `{server_name}`"
                 ))),

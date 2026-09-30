@@ -125,14 +125,40 @@ pub enum EffectGroupRecordSettlementResponse {
 
 /// One child's final record reaching the §4 point: the index-side decision
 /// the durable tiers' `commit_group_child` mirrors.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupCommitChildRequest {
     /// The child's declared replay key; the index resolves its position from
     /// the retained shape rather than trusting a caller-supplied position.
     pub replay_key: String,
+    /// The final this invocation offers the point. The index retains it with
+    /// a winning commit, and answers it to every later commit of the child.
+    pub committed: EffectGroupCommittedFinal,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What a child's final committed at the §4 point, as the index retains it
+/// for any later invocation of the child (ADR 0099 §5).
+///
+/// The committed final wins: an invocation whose commit finds the point taken
+/// seats the committed final, never its own. The invocation that committed it
+/// may have ended before its seat, so the index keeps what any successor needs
+/// to seat it — or, where no successor can, what it must report lost.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectGroupCommittedFinal {
+    /// A tool child's terminal: its sealed drain input — its record, its
+    /// declared intents and the attempt facts its settlement carries. A
+    /// successor drains it and seats that final; the attempt never runs again.
+    Tool { drain_input: String },
+    /// An atomic body's or a wait's outcome, or a tool child's failure before
+    /// its boundary: the committing invocation alone holds it, and publishes
+    /// it at its seat.
+    Held,
+    /// The typed refusal of an invocation that could not run the child: its
+    /// session's state generation was refused, or its attach expired.
+    Refusal { error: RuntimeEffectControllerError },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupCommitChildResponse {
     /// This child's final won the §4 point, and `rank` is the settlement
@@ -141,13 +167,12 @@ pub enum EffectGroupCommitChildResponse {
     Committed {
         rank: u64,
     },
-    /// The commit already landed, in this invocation or an earlier one: the
-    /// reserved rank, and every committed sibling below it that still owes
-    /// its seat — the §5 barrier a seat that cannot know what the winning
-    /// commit declared waits behind before it publishes.
+    /// The point already holds a final of this child, committed by an earlier
+    /// invocation: the rank it reserved and the final the index retained,
+    /// which wins over the one this commit offered.
     AlreadyCommitted {
         rank: u64,
-        blocking_positions: Vec<usize>,
+        committed: EffectGroupCommittedFinal,
     },
     /// The cancel disposition won first; the child's final journals nothing.
     CancelDecided {
@@ -156,31 +181,6 @@ pub enum EffectGroupCommitChildResponse {
     UnknownChild,
     UnknownGroup,
     Retired,
-}
-
-/// The §5 barrier read: which siblings committed at a rank below `rank` still
-/// owe their settlement seats.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupDrainBlockersRequest {
-    pub rank: u64,
-}
-
-/// The §5 barrier as the index sees it for one committed child.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupDrainBlockersResponse {
-    /// No sibling below the caller still owes its seat. An absent or retired
-    /// group holds no committed children, so it answers this too.
-    Admitted,
-    /// These lower-ranked committed siblings — every one of them — still owe
-    /// their seats. Each resolves its
-    /// drained wake under the group's retained `wait_scope` when it seats, so
-    /// the caller builds the wake keys from the scope the index resolves them
-    /// under rather than re-deriving it.
-    Blocked {
-        wait_scope: ExecutionScope,
-        positions: Vec<usize>,
-    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -326,24 +326,4 @@ pub struct EffectGroupServedRank {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupCloseRequest {
     pub disposition: LoserPolicy,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupWaitResolution {
-    Ready,
-    Rank,
-    Cancel,
-    Admit,
-    /// The child at this position seated its settlement: the wake a §5
-    /// barrier parks on while a lower-commit sibling finishes its drain.
-    Drained,
-    /// The child at this position seated its settlement, so no cancel can
-    /// reach it: its cancel wait ends without cancelling it, and the watch
-    /// its dispatch invocation held on the wait ends with it (FIG-3709).
-    Settled,
-    Refused {
-        reason: EffectGroupRefusal,
-    },
-    Retired,
 }

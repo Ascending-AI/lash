@@ -14,6 +14,9 @@ description = "Parent-worker VM protocol for lash: owned messages, opaque VM sta
 name = "lash_vm_protocol"
 doctest = false
 
+[features]
+synthetic-next = []
+
 [lints]
 workspace = true
 

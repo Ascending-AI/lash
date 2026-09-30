@@ -297,6 +297,35 @@ def check_dependency_and_profile_projection() -> None:
     )
     assert variant and '"cargo-trybuild"' in variant.group(0)
 
+    ui_targets = {}
+    for statement in ast.parse(lash_rules).body:
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and getattr(statement.value.func, "id", "") == "ui_fixtures_test"
+        ):
+            values = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in statement.value.keywords
+            }
+            ui_targets[values["name"]] = values
+    assert ui_targets["ui_fixtures"]["tests"] == [":ui_store_seam"]
+    seam = ui_targets["ui_store_seam"]
+    inventory = json.loads((HERE / "target-inventory.json").read_text())
+    seam_units = [
+        unit for unit in inventory["feature_lane_units"]
+        if unit["label"] == seam["harness"]
+    ]
+    assert seam_units and all(unit["features"] == ["rlm"] for unit in seam_units)
+    policy = tomllib.loads((HERE / "package-policy.toml").read_text())
+    expected_seams = set(policy["ui_fixtures"]["lash-runtime"]["store_seam"])
+    assert {pathlib.Path(path).stem for path in seam["fixtures"]} == expected_seams
+    assert seam["expected"] == [path.removesuffix(".rs") + ".stderr" for path in seam["fixtures"]]
+    assert not expected_seams.intersection(
+        pathlib.Path(path).stem for path in ui_targets["ui_fixtures"]["fixtures"]
+    )
+    assert "tests = tests" in ui_rule
+
     package = (HERE / "BUCK").read_text(encoding="utf-8")
     assert 'constraint_value(name = "profile_optimized"' in package
     assert 'name = "optimized"' in package
@@ -599,11 +628,12 @@ def check_direct_buck_generator() -> None:
     for generated in (protocol, client, worker):
         assert 'name = "Cargo.toml"' in generated
         assert 'visibility = ["PUBLIC"]' in generated
+    # The registry protocol replaces the source-fingerprint build scripts.
+    # Client and worker still export source groups for consumers, but neither
+    # may retain the retired workspace-root environment contract.
     for generated in (client, worker):
-        assert 'build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": ".lash-workspace"}' in generated
-        assert '"//crates/lash-vm-client:buildscript_sources"' in generated
-        assert '"//crates/lash-vm-worker:buildscript_sources"' in generated
-    assert 'extra_srcs = ["//crates/lash-vm-worker:rust_sources"]' in client
+        assert 'name = "build_script"' not in generated
+        assert "LASH_VM_WORKER_SOURCE_ROOT" not in generated
     assert '"//crates/lash-vm-worker:lash-vm-worker__bin"' in protocol
     assert 'test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"}' in protocol
     manifest_rule = (HERE / "buildscript_manifest.bzl").read_text(encoding="utf-8")
@@ -623,8 +653,6 @@ def check_direct_buck_generator() -> None:
     }
     assert build_scripts == {
         "//crates/lash-protocol-rlm:build_script__build",
-        "//crates/lash-vm-client:build_script__build",
-        "//crates/lash-vm-worker:build_script__build",
     }
     bins_units = [
         unit for unit in inventory["feature_lane_units"]

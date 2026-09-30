@@ -570,7 +570,7 @@ impl lash_core::Clock for CancelWatchTestClock {
 mod active_input_settlement;
 mod cancel_watch;
 mod checkpoint_progress;
-mod config_patches;
+mod config_transactions;
 mod drain_and_recovery;
 mod drop_cancel_owner_failure;
 mod effects_and_queue;

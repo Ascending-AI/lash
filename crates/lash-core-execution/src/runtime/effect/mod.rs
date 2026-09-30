@@ -49,10 +49,11 @@ mod validation;
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
     AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase,
-    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeInvocation, ServedExecutionEnvironmentSync, SleepSpec,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
+    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
+    RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
+    ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -68,11 +69,11 @@ pub use executor::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
 };
-pub use group::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
+pub use group::{CommittedGroupChildFinal, EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{
-    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
-    GroupReopen, GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy,
-    RankedGroupSettlement, RuntimeEffectGroup, refuse_unhonored_group_membership,
+    EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupReopen, GroupSettlement,
+    GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
+    refuse_unhonored_group_membership,
 };
 pub use group_executors::GroupExecutors;
 pub use identity_types::{
@@ -211,7 +212,8 @@ mod captured_environment_row_tests {
                 "instructions",
                 "x".repeat(128 * 1024),
             ));
-        let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+        let spec =
+            crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
         let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
             env: spec.stable_ref().expect("environment digest"),
         };

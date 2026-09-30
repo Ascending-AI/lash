@@ -18,7 +18,6 @@ pub struct EmbeddedRuntimeBuilder {
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     session_id: Option<SessionId>,
     policy: Option<SessionPolicy>,
-    plugin_options: crate::PluginOptions,
     initial_state: Option<RuntimeSessionState>,
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
@@ -37,7 +36,6 @@ impl EmbeddedRuntimeBuilder {
             runtime_lease_owner,
             session_id: None,
             policy: None,
-            plugin_options: crate::PluginOptions::default(),
             initial_state: None,
             plugin_source: PluginSource::Host(PluginHost::empty()),
             core,
@@ -56,11 +54,6 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_policy(mut self, policy: SessionPolicy) -> Self {
         self.policy = Some(policy);
-        self
-    }
-
-    pub fn with_plugin_options(mut self, plugin_options: crate::PluginOptions) -> Self {
-        self.plugin_options = plugin_options;
         self
     }
 
@@ -192,29 +185,34 @@ impl EmbeddedRuntimeBuilder {
         Ok(state)
     }
 
-    async fn resolve_state(&self) -> Result<RuntimeSessionState, SessionError> {
+    /// The state this builder runs, and whether it is a new session's: one
+    /// neither supplied nor loaded from the store.
+    async fn resolve_state(&self) -> Result<(RuntimeSessionState, bool), SessionError> {
         if let Some(state) = &self.initial_state {
-            return Ok({
-                let mut state = state.clone();
-                if let Some(session_id) = &self.session_id {
-                    state.session_id = session_id.clone();
-                }
-                if let Some(policy) = &self.policy {
-                    // The recorded provider id is a durable fact (ADR 0066):
-                    // a builder policy naming a different provider is refused
-                    // here, never discarded.
-                    state.policy.provider_id = crate::SessionPolicy::settle_provider_pin(
-                        &state.session_id,
-                        state.policy.recorded_provider_id(),
-                        policy.recorded_provider_id(),
-                    )?;
-                    state.policy.session_id = policy.session_id.clone();
-                    if state.policy.model.id.trim().is_empty() {
-                        state.policy.model = policy.model.clone();
+            return Ok((
+                {
+                    let mut state = state.clone();
+                    if let Some(session_id) = &self.session_id {
+                        state.session_id = session_id.clone();
                     }
-                }
-                state
-            });
+                    if let Some(policy) = &self.policy {
+                        // The recorded provider id is a durable fact (ADR 0066):
+                        // a builder policy naming a different provider is refused
+                        // here, never discarded.
+                        state.policy.provider_id = crate::SessionPolicy::settle_provider_pin(
+                            &state.session_id,
+                            state.policy.recorded_provider_id(),
+                            policy.recorded_provider_id(),
+                        )?;
+                        state.policy.session_id = policy.session_id.clone();
+                        if state.policy.model.id.trim().is_empty() {
+                            state.policy.model = policy.model.clone();
+                        }
+                    }
+                    state
+                },
+                false,
+            ));
         }
         if let Some(store) = &self.store {
             // The view names its session; a builder session id that
@@ -252,15 +250,15 @@ impl EmbeddedRuntimeBuilder {
                         state.policy.model = policy.model.clone();
                     }
                 }
-                return Ok(state);
+                return Ok((state, false));
             }
             let mut state = self.resolve_state_from_defaults()?;
             if let Some(policy) = &self.policy {
                 state.policy = policy.clone();
             }
-            return Ok(state);
+            return Ok((state, true));
         }
-        self.resolve_state_from_defaults()
+        Ok((self.resolve_state_from_defaults()?, true))
     }
 
     fn resolve_plugins(
@@ -280,13 +278,10 @@ impl EmbeddedRuntimeBuilder {
                         .map(|subagent| subagent.parent_session_id.clone()),
                     ..PluginSessionRequest::creation(
                         state.session_id.clone(),
-                        crate::plugin::SessionCreationConfig {
-                            authority: crate::plugin::SessionAuthorityContext {
-                                tool_access: state.authority.tool_access.clone(),
-                                subagent: state.authority.subagent.clone(),
-                                plugin_options: self.plugin_options.clone(),
-                            },
-                            protocol_turn_options: state.protocol_turn_options.clone(),
+                        crate::plugin::SessionAuthorityContext {
+                            tool_access: state.authority.tool_access.clone(),
+                            subagent: state.authority.subagent.clone(),
+                            plugin_config: state.admitted_plugin_config(),
                         },
                     )
                 })
@@ -295,8 +290,22 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub async fn build(self) -> Result<LashRuntime, SessionError> {
-        let state = self.resolve_state().await?;
+        let (mut state, created) = self.resolve_state().await?;
         let plugins = self.resolve_plugins(&state)?;
+        if created {
+            // A new session records what every installed owner resolves for
+            // it, under the protocol its plugins registered (FIG-4379).
+            state.authority.plugin_config = plugins
+                .host()
+                .resolve_creation_plugin_config(
+                    Some(plugins.protocol_plugin_id()),
+                    &crate::PluginOptions::default(),
+                    None,
+                    state.authority.subagent.is_none(),
+                )
+                .map_err(SessionError::SessionConfigRefused)?;
+            plugins.publish_plugin_config(state.admitted_plugin_config());
+        }
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);
         if let Some(manifest_store) = self.attachment_referrers_store {
             persistence = persistence.with_attachment_referrers_store(manifest_store);

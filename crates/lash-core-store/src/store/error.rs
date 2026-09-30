@@ -639,6 +639,18 @@ pub enum StoreError {
         source_key: String,
         existing_input_id: InputId,
     },
+    /// A queued-work submission reused session `session_id`'s source key
+    /// `source_key` with a digest other than the one batch
+    /// `existing_batch_id` recorded (ADR 0101 §8). Nothing was stored; the
+    /// existing batch, open or a tombstone, is unchanged.
+    #[error(
+        "queued work source_key `{source_key}` for session `{session_id}` is already bound to batch `{existing_batch_id}` with different submitted content"
+    )]
+    QueuedWorkSourceKeyConflict {
+        session_id: SessionId,
+        source_key: String,
+        existing_batch_id: BatchId,
+    },
     /// A draft named an `input_id` a stored pending-input row already carries,
     /// with different submitted content or from another session.
     ///
@@ -953,6 +965,7 @@ impl StoreError {
             | Self::IngressReservedSourceKey { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
+            | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
             | Self::PendingTurnInputBatchDuplicate { .. }
             | Self::PendingTurnInputBatchForeignSession { .. }
@@ -1069,6 +1082,7 @@ impl StoreError {
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
+            Self::QueuedWorkSourceKeyConflict { .. } => "QueuedWorkSourceKeyConflict",
             Self::PendingTurnInputIdConflict { .. } => "PendingTurnInputIdConflict",
             Self::PendingTurnInputBatchDuplicate { .. } => "PendingTurnInputBatchDuplicate",
             Self::PendingTurnInputBatchForeignSession { .. } => {

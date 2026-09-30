@@ -338,13 +338,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
-            DurableFormat::ProtocolTurnOptions,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: carried on each session head, refused at open rather than at \
-                 rest",
-            ),
-        ),
-        (
             DurableFormat::ScopeStoragePayload,
             SurfaceRelation::Unwalkable(
                 "no bounded surface: one payload per scope-close row, refused at decode \
@@ -479,7 +472,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         })
         .collect();
 
-    assert_eq!(relations.len() + engine_relations.len(), 42);
+    assert_eq!(relations.len() + engine_relations.len(), 41);
     for (format, expected) in relations.iter().copied().chain(engine_relations) {
         assert_eq!(
             format_surface(format),
@@ -494,7 +487,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::SessionHeadMeta,
         DurableFormat::SessionNodeBody,
         DurableFormat::SessionStateGeneration,
-        DurableFormat::ProtocolTurnOptions,
         DurableFormat::ScopeStoragePayload,
         DurableFormat::ProcessEffectReport,
         DurableFormat::AppendRequestIdentity,

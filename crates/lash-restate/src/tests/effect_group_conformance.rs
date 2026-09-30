@@ -24,12 +24,13 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
+use super::effect_group_rank_reservation::{DrainBarrierProbe as _, DrainBarrierProbeImpl};
 use super::live_turn_probe::ConformanceTurnProbe as _;
 use crate::RestateConnection;
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
-    EffectGroupChildRequest, admit_wait_request, arm_admission_witness, cancel_wait_request,
-    decode_wait_resolution, payload_key, rank_wait_request, ready_wait_request,
+    EffectGroupChildRequest, EffectGroupNotice, EffectGroupNotification,
+    EffectGroupSubscribeRequest, EffectGroupSubscribeResponse, arm_admission_witness, payload_key,
 };
 use crate::process::{LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::{
@@ -39,9 +40,8 @@ use crate::{
     EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRegisterDispatchRequest,
     EffectGroupRegisterDispatchResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
-    EffectGroupShape, EffectGroupWaitResolution, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration, RestateEffectHost,
-    RestateIngressClient,
+    EffectGroupShape, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
+    RestateDurableWaitRegistration, RestateEffectHost, RestateIngressClient,
 };
 use lash_http_transport::HttpRequest;
 
@@ -685,6 +685,7 @@ impl LiveConformanceHarness {
         )
         .bind(ScopeLivenessProbeImpl.serve())
         .bind(GroupOpenBudgetProbeImpl.serve())
+        .bind(DrainBarrierProbeImpl.serve())
         // A turn handler: a parked attempt fails retryably and the
         // invocation pauses after its last attempt (FIG-3697).
         .bind(crate::turn_service(
@@ -808,6 +809,64 @@ impl LiveConformanceHarness {
             }),
             turn_runner: self.turn_runner(),
         }
+    }
+
+    /// The retention sweep over one group child, on the server double (ADR
+    /// 0099 §8): the child's open invocation is killed, as an operator kills
+    /// it, before its seat; it is purged, as its retention's expiry purges it;
+    /// and its successor is dispatched with the child's own request under a
+    /// fresh invocation id, which is what the idempotency-keyed dispatch
+    /// mints once the retained invocation is gone.
+    pub(super) fn child_invocation_expiry(&self) -> lash_conformance::ChildInvocationExpiry {
+        let server = self
+            .server_double()
+            .expect("a child's retention expires on the server double");
+        let ingress = self.ingress();
+        Arc::new(move |group_key: String, position: usize| {
+            let server = server.clone();
+            let ingress = ingress.clone();
+            Box::pin(async move {
+                let (id, service, request) = server
+                    .invocations()
+                    .into_iter()
+                    .filter(|view| view.status != "completed")
+                    .find_map(|view| {
+                        let (service, rest) = view.target.split_once('/')?;
+                        let (key, handler) = rest.rsplit_once('/')?;
+                        if key != group_key || handler != "child" {
+                            return None;
+                        }
+                        let input = server.journal(&view.id)?.first()?.input()?;
+                        let request: serde_json::Value = serde_json::from_slice(&input).ok()?;
+                        (request["body"]["position"].as_u64() == Some(position as u64))
+                            .then(|| (view.id.clone(), service.to_owned(), request))
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("an open invocation of group {group_key}'s child {position}")
+                    });
+                assert_eq!(
+                    server.kill_and_await(&id).await,
+                    Some(true),
+                    "kill the open invocation of group {group_key}'s child {position}"
+                );
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    match server.purge(&id) {
+                        Some(true) => break,
+                        Some(false) if tokio::time::Instant::now() < deadline => {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        other => panic!("purge `{id}`: {other:?}"),
+                    }
+                }
+                ingress
+                    .send_workflow_json(&service, &group_key, "child", &request)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("dispatch the successor of group {group_key}'s child {position}: {error}")
+                    });
+            })
+        })
     }
 
     /// The endpoint's own host, for a law that builds a runtime on it: the
@@ -1361,6 +1420,7 @@ impl LiveConformanceHarness {
                     "commit_child",
                     &EffectGroupCommitChildRequest {
                         replay_key: replay_key.clone(),
+                        committed: crate::effect_group::EffectGroupCommittedFinal::Held,
                     },
                 )
                 .await;
@@ -1467,10 +1527,11 @@ impl LiveConformanceHarness {
     }
 
     /// FIG-3709: a settled child leaves nothing open for its group. Each
-    /// dispatched child watches its cancel wait through an ingress call of
-    /// its own; the index ends that wait as `Settled` when it seats the
-    /// child's settlement, so once every child settled the group's invocations drain
-    /// without the group closing or retiring.
+    /// dispatched child watches its cancel fact through an ingress attach of
+    /// its own to the index's `await_notice` (FIG-4344); the index answers it
+    /// `Settled` when it seats the child's settlement, so once every child
+    /// settled the group's invocations drain without the group closing or
+    /// retiring.
     pub(super) async fn run_settled_children_release_their_cancel_watches_witness(&self) {
         let ingress = RestateIngressClient::new(self.connection.clone());
         let witness_executors = Arc::new(WitnessExecutors::default());
@@ -1481,37 +1542,13 @@ impl LiveConformanceHarness {
         let shape = witness_shape(&group_key, &children);
         let executions = Arc::new(AtomicUsize::new(0));
         let mut releases = Vec::new();
-        let mut registrations = Vec::new();
-        let mut targets = vec![
+        let targets = [
             format!("EffectGroupIndex/{group_key}/"),
             format!("EffectGroupDispatch/{group_key}/"),
-            format!(
-                "LashDurableWaitIndex/{}/",
-                crate::durable_wait::durable_wait_index_key_for_scope(&shape.wait_scope)
-            ),
         ];
-        let mut waits = vec![ready_wait_request(&shape.wait_scope, &group_key).unwrap()];
-        for (position, child) in children.iter().enumerate() {
+        for child in &children {
             witness_executors.stage(child, Arc::clone(&executions), "settled-cancel-watch");
             releases.push(witness_executors.hold(child));
-            let cancel = cancel_wait_request(
-                &shape.wait_scope,
-                &group_key,
-                child.invocation.effect_replay_key(),
-            )
-            .unwrap();
-            registrations.push(arm_wait_registration_witness(&cancel.key));
-            waits.push(cancel);
-            waits.push(admit_wait_request(&shape.wait_scope, &group_key, position).unwrap());
-            waits.push(
-                rank_wait_request(&shape.wait_scope, &group_key, position as u64 + 1).unwrap(),
-            );
-        }
-        for wait in &waits {
-            targets.push(format!(
-                "LashDurableWaitWorkflow/{}/",
-                RestateDurableWaitAddress::for_key(&wait.key).workflow_key
-            ));
         }
 
         let opened: EffectGroupOpenResponse = ingress
@@ -1545,26 +1582,32 @@ impl LiveConformanceHarness {
             )
             .await
             .expect("the dispatcher submission is accepted");
-        for registration in registrations {
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(30), registration)
-                    .await
-                    .expect("the child's cancel watch registers before its body finishes")
-                    .expect("the registration witness remains live"),
-                RestateDurableWaitRegistration::Registered,
+        // Each held child's watch attaches to the index's `await_notice`
+        // before its body finishes.
+        let watch_target = format!("EffectGroupIndex/{group_key}/await_notice");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let watches = open_invocations(&self.admin)
+                .await
+                .into_values()
+                .filter(|target| target == &watch_target)
+                .count();
+            if watches == children.len() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "every held child watches its cancel fact; {watches} watches are open"
             );
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         for release in releases {
             release.notify_one();
         }
         for rank in 1..=2 {
             assert_eq!(
-                await_group_wait(
-                    &ingress,
-                    rank_wait_request(&shape.wait_scope, &group_key, rank).unwrap()
-                )
-                .await,
-                EffectGroupWaitResolution::Rank
+                await_group_wait(&ingress, &group_key, EffectGroupNotice::Rank { rank }).await,
+                EffectGroupNotification::Rank
             );
         }
         assert_eq!(executions.load(Ordering::SeqCst), 2, "each child runs once");
@@ -1616,17 +1659,16 @@ impl LiveConformanceHarness {
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        for child in &children {
-            let request = cancel_wait_request(
-                &shape.wait_scope,
-                &group_key,
-                child.invocation.effect_replay_key(),
-            )
-            .expect("the child's cancel wait key derives");
+        for position in 0..children.len() {
             assert_eq!(
-                await_group_wait(&ingress, request).await,
-                EffectGroupWaitResolution::Settled,
-                "a settled child's cancel wait ends as settled, not cancelled"
+                await_group_wait(
+                    &ingress,
+                    &group_key,
+                    EffectGroupNotice::ChildCancel { position }
+                )
+                .await,
+                EffectGroupNotification::Settled,
+                "a settled child's cancel fact is settled, not cancelled"
             );
         }
 
@@ -1931,20 +1973,12 @@ async fn run_design_witnesses(
     let second = second.expect("concurrent dispatcher submission attaches");
     assert_eq!(first, second, "one workflow key has one invocation id");
     assert_eq!(
-        await_group_wait(
-            &ingress,
-            ready_wait_request(&shape.wait_scope, &group_key).unwrap()
-        )
-        .await,
-        EffectGroupWaitResolution::Ready
+        await_group_wait(&ingress, &group_key, EffectGroupNotice::Ready).await,
+        EffectGroupNotification::Ready
     );
     assert_eq!(
-        await_group_wait(
-            &ingress,
-            rank_wait_request(&shape.wait_scope, &group_key, 1).unwrap()
-        )
-        .await,
-        EffectGroupWaitResolution::Rank
+        await_group_wait(&ingress, &group_key, EffectGroupNotice::Rank { rank: 1 }).await,
+        EffectGroupNotification::Rank
     );
     let rank: EffectGroupReadRankResponse = ingress
         .call_lash_object(
@@ -2039,13 +2073,32 @@ async fn run_design_witnesses(
     assert_eq!(late_record, EffectGroupRecordSettlementResponse::Retired);
     println!("EFFECT_GROUP_WITNESS i object-local-retired-fence PASS");
 
-    for request in [
-        ready_wait_request(&shape.wait_scope, &group_key).unwrap(),
-        rank_wait_request(&shape.wait_scope, &group_key, 1).unwrap(),
-    ] {
+    // A late subscriber is answered from the retired record: nothing is
+    // recorded, and its awakeable is never needed.
+    for (index, notice) in [
+        EffectGroupNotice::Ready,
+        EffectGroupNotice::Rank { rank: 1 },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let answer: EffectGroupSubscribeResponse = ingress
+            .call_lash_object(
+                "EffectGroupIndex",
+                &group_key,
+                "subscribe",
+                &EffectGroupSubscribeRequest {
+                    notice,
+                    awakeable_id: format!("late-subscriber-{index}"),
+                },
+            )
+            .await
+            .expect("a retired index answers a late subscriber");
         assert_eq!(
-            await_group_wait(&ingress, request).await,
-            EffectGroupWaitResolution::Retired,
+            answer,
+            EffectGroupSubscribeResponse::Notified {
+                notification: EffectGroupNotification::Retired,
+            },
             "late registration observes the retained retirement fence"
         );
     }
@@ -2128,21 +2181,18 @@ async fn run_design_witnesses(
         .expect("dispatcher redrive registers the mapping");
     assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
     assert_eq!(
-        await_group_wait(
-            &ingress,
-            admit_wait_request(&admission_shape.wait_scope, &admission_group, 0).unwrap()
-        )
-        .await,
-        EffectGroupWaitResolution::Admit,
-        "the registration retains the ADMIT notification"
+        await_group_wait(&ingress, &admission_group, EffectGroupNotice::Ready).await,
+        EffectGroupNotification::Ready,
+        "the registration answers the child's admission notice"
     );
     assert_eq!(
         await_group_wait(
             &ingress,
-            rank_wait_request(&admission_shape.wait_scope, &admission_group, 1).unwrap()
+            &admission_group,
+            EffectGroupNotice::Rank { rank: 1 }
         )
         .await,
-        EffectGroupWaitResolution::Rank,
+        EffectGroupNotification::Rank,
         "fresh admission executes and records a settlement"
     );
     assert_eq!(
@@ -2234,10 +2284,7 @@ async fn run_design_witnesses(
 /// another protocol version wrote refuses at handler entry with the typed
 /// terminal error.
 async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &HarnessAdmin) {
-    use crate::effect_group::{
-        EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
-        EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse, drained_wait_request,
-    };
+    use crate::effect_group::{EffectGroupCommitChildRequest, EffectGroupCommitChildResponse};
 
     let group_key = witness_key("drained-retire");
     let children = [witness_child(&group_key, 0), witness_child(&group_key, 1)];
@@ -2271,6 +2318,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
                 "commit_child",
                 &EffectGroupCommitChildRequest {
                     replay_key: child.invocation.effect_replay_key().to_owned(),
+                    committed: crate::effect_group::EffectGroupCommittedFinal::Held,
                 },
             )
             .await
@@ -2280,33 +2328,17 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         };
         ranks.push(rank);
     }
-    let blockers: EffectGroupDrainBlockersResponse = ingress
-        .call_lash_object(
-            "EffectGroupIndex",
-            &group_key,
-            "drain_blockers",
-            &EffectGroupDrainBlockersRequest { rank: ranks[1] },
-        )
-        .await
-        .expect("drained-wake witness reads the barrier");
-    assert_eq!(
-        blockers,
-        EffectGroupDrainBlockersResponse::Blocked {
-            wait_scope: shape.wait_scope.clone(),
-            positions: vec![0],
-        },
-        "child 1 is held behind child 0's owed seat, under the retained wait scope"
-    );
+    // Child 1's barrier is held behind child 0's owed seat.
     let waiter = tokio::spawn({
         let ingress = ingress.clone();
-        let request =
-            drained_wait_request(&shape.wait_scope, &group_key, 0).expect("drained wake request");
-        async move { await_group_wait(&ingress, request).await }
+        let group_key = group_key.clone();
+        let rank = ranks[1];
+        async move { await_group_wait(&ingress, &group_key, EffectGroupNotice::Drained { rank }).await }
     });
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(
         !waiter.is_finished(),
-        "child 0 never seated, so its drained wake is unresolved"
+        "child 0 never seated, so child 1's barrier has not lifted"
     );
     ingress
         .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
@@ -2316,7 +2348,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         .await
         .expect("retirement releases the drained wake")
         .expect("drained-wake waiter task");
-    assert_eq!(released, EffectGroupWaitResolution::Retired);
+    assert_eq!(released, EffectGroupNotification::Retired);
     println!("EFFECT_GROUP_WITNESS n drained-wake-retired PASS");
 
     let stale_group = witness_key("stale-format");
@@ -2349,11 +2381,11 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let refused = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let probed = ingress
-                .call_lash_object::<_, EffectGroupDrainBlockersResponse>(
+                .call_lash_object::<_, Option<EffectGroupNotification>>(
                     "EffectGroupIndex",
                     &stale_group,
-                    "drain_blockers",
-                    &EffectGroupDrainBlockersRequest { rank: 1 },
+                    "child_cancel",
+                    &crate::effect_group::EffectGroupChildCancelRequest { position: 0 },
                 )
                 .await;
             match probed {
@@ -2466,7 +2498,6 @@ pub(super) fn witness_shape(
             .iter()
             .map(|child| child.invocation.effect_replay_key().to_owned())
             .collect(),
-        wait_scope: ExecutionScope::runtime_operation(group_key),
         // The opener is the admission the wait and timer children's
         // envelopes are scope-checked against inside
         // `EffectGroupDispatch::child`: production's
@@ -2490,19 +2521,17 @@ pub(super) fn witness_membership(children: &[RuntimeEffectEnvelope]) -> EffectGr
 
 pub(super) async fn await_group_wait(
     ingress: &RestateIngressClient,
-    request: RestateDurableWaitAwaitRequest,
-) -> EffectGroupWaitResolution {
-    let address = RestateDurableWaitAddress::for_key(&request.key);
-    let resolution = ingress
-        .call_lash_workflow::<_, Resolution>(
-            "LashDurableWaitWorkflow",
-            &address.workflow_key,
-            "await_resolution",
-            &request,
-        )
-        .await
-        .expect("effect-group witness wait resolves");
-    decode_wait_resolution(resolution).expect("effect-group witness resolution is tagged")
+    group_key: &str,
+    notice: EffectGroupNotice,
+) -> EffectGroupNotification {
+    crate::effect_group::await_group_notice_via_ingress(
+        ingress,
+        "EffectGroupIndex",
+        group_key,
+        &notice,
+    )
+    .await
+    .expect("effect-group witness notice is answered")
 }
 
 fn assert_admission_enumerated(cleanup: &EffectGroupCleanupFacts, invocation_id: &str) {

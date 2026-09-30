@@ -19,9 +19,6 @@ pub(crate) enum WaitObserver {
     /// An attach to one turn's terminal publication: a follower's wait, held
     /// and dropped once per probe window.
     TurnTerminal,
-    /// A recorded step body's live watch of its effect-group child's cancel
-    /// fact, which the journal never sees.
-    GroupChildCancel,
 }
 
 impl WaitObserver {
@@ -33,7 +30,8 @@ impl WaitObserver {
             AwaitEventWaitIdentity::TurnTerminal => Some(Self::TurnTerminal),
             AwaitEventWaitIdentity::ToolCompletion { .. }
             | AwaitEventWaitIdentity::ProcessSignal { .. }
-            | AwaitEventWaitIdentity::Custom { .. } => None,
+            | AwaitEventWaitIdentity::Custom { .. }
+            | AwaitEventWaitIdentity::SessionCommandCancelGate => None,
         }
     }
 
@@ -42,7 +40,6 @@ impl WaitObserver {
         let family = match self {
             Self::TurnCancel => "lash-turn-cancel-watch",
             Self::TurnTerminal => "lash-turn-terminal-watch",
-            Self::GroupChildCancel => "lash-group-child-cancel-watch",
         };
         format!("{family}:{}", key.key_id)
     }

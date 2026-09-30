@@ -145,7 +145,14 @@ next_worker="$(python3 scripts/resolve_buck2_target.py \
   //runbooks/restate-postgres-workers lash-e2e-worker__bin --feature synthetic-next)"
 next_lashctl="$(python3 scripts/resolve_buck2_target.py \
   //crates/lashctl lashctl --feature synthetic-next)"
-labels+=("$next_worker" "$next_lashctl")
+# Model code runs only in the VM helper beside the worker. Ship each
+# generation with the helper selected from that worker's actual feature
+# closure, then materialize all binaries from one Buck2 build report.
+helper_pair="$(python3 scripts/check_loadtest_cluster.py helper . //runbooks/restate-postgres-workers:lash-e2e-worker__bin)"
+next_helper_pair="$(python3 scripts/check_loadtest_cluster.py helper . "$next_worker")"
+read -r helper helper_testing <<< "$helper_pair"
+read -r next_helper next_helper_testing <<< "$next_helper_pair"
+labels+=("$next_worker" "$next_lashctl" "$helper" "$next_helper")
 build_report="target/loadtest-image/build-report.json"
 kiln build --materializations final --build-report "$build_report" "${labels[@]}"
 output() {
@@ -161,6 +168,10 @@ for binary in "${binaries[@]}"; do
 done
 install -m 755 "$(output "$next_worker")" target/loadtest-image/bin-next/lash-e2e-worker
 install -m 755 "$(output "$next_lashctl")" target/loadtest-image/bin-next/lashctl
+install -m 755 "$(output "$helper")" target/loadtest-image/bin/lash-vm-worker
+install -m 755 "$(output "$next_helper")" target/loadtest-image/bin-next/lash-vm-worker
+python3 scripts/check_loadtest_cluster.py image target/loadtest-image/bin "$helper_testing" > "$run/vm-helper.txt"
+python3 scripts/check_loadtest_cluster.py image target/loadtest-image/bin-next "$next_helper_testing" >> "$run/vm-helper.txt"
 # The chart's schema Job creates the witness role/database using secret values.
 sed '/^CREATE ROLE lash_witness /d; /^CREATE DATABASE lash_witness /d' runbooks/restate-postgres-workers/witness.sql > target/loadtest-image/witness.sql
 image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repository"])' "$run/build-settings.json"):$name"
@@ -288,12 +299,24 @@ if grep -E 'ERROR|Failed|failed' "$run/snapshots.txt"; then exit 1; fi
 [[ $(grep -c 'Snapshot created for partition' "$run/snapshots.txt") -eq 24 ]]
 "${k[@]}" scale "statefulset/${resource}-restate" --replicas=3
 "${k[@]}" rollout status "statefulset/${resource}-restate" --timeout=180s
+# Recovered means every node's own failure detector sees the restarted node
+# alive: `ctl status` lists it earlier, and a census query it coordinates
+# before then loses its scanners.
+peer_views() {
+  for index in 0 1 2; do
+    "${k[@]}" exec "${resource}-restate-$index" -c restate -- restatectl sql --json \
+      'SELECT plain_node_id, gen_node_id, name, state FROM nodes' > "$run/peers-$index.txt" || return 1
+  done
+}
+peers=("$run/peers-0.txt" "$run/peers-1.txt" "$run/peers-2.txt")
 for attempt in $(seq 1 90); do
   if ctl status > "$run/recovered-status.txt" && \
-      python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2" > "$run/recovery.txt"; then break; fi
+      python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2" > "$run/recovery.txt" && \
+      peer_views && python3 scripts/check_loadtest_cluster.py peers "$run/nodes.json" "$resource-restate-2" "${peers[@]}" >> "$run/recovery.txt"; then break; fi
   sleep 2
 done
 python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2"
+python3 scripts/check_loadtest_cluster.py peers "$run/nodes.json" "$resource-restate-2" "${peers[@]}"
 fi
 for attempt in $(seq 1 60); do
   "${k[@]}" exec "deployment/${resource}-proxy-${generation}" -- wget -qO- "http://${resource}-metrics:9090/api/v1/targets" > "$run/metrics-targets.json"

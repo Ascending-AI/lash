@@ -21,7 +21,7 @@ lash_store_sql::statements! {
 
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2 FOR UPDATE";
 
@@ -29,7 +29,7 @@ lash_store_sql::statements! {
         /// caller's transaction.
         select_by_source_key_for_update = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2 FOR UPDATE";
 
@@ -42,7 +42,7 @@ lash_store_sql::statements! {
         /// Session `?1`'s inputs from `?2` onwards, locked: the suffix a cancel
         /// anchored at one input covers.
         select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC
@@ -53,7 +53,7 @@ lash_store_sql::statements! {
         /// that no checkpoint admitted.
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -73,21 +73,22 @@ lash_store_sql::statements! {
         /// lane is one FIFO over both admission tables.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
-               AND {{deferred_next_turn_turn_input_state(state)}}
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                      AND commands.terminal_cause IS NULL
                       AND commands.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS turn_work
                     WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
                       AND turn_work.admitted_root IS NULL
+                      AND turn_work.terminal_cause IS NULL
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
              ORDER BY enqueue_seq ASC
@@ -102,7 +103,7 @@ lash_store_sql::statements! {
         /// bound boundary cannot seek the open-row index.
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -120,7 +121,7 @@ lash_store_sql::statements! {
         /// at the `before_completion` checkpoint, which admits both boundaries.
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
-                    admitted_root, admitted_by, run_spec_hash
+                    admitted_root, admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}

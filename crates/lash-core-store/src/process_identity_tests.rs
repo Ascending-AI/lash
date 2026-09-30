@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn a_process_execution_environment_rejects_unknown_fields() {
     let spec = ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::empty(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let encoded = spec.to_store_bytes().expect("encode the environment");

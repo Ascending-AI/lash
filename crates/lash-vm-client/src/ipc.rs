@@ -54,7 +54,7 @@ impl Worker {
             child,
             reaped: false,
             pipe,
-            codec: FrameCodec::new(config.entry.build.clone(), config.protocol.decode),
+            codec: FrameCodec::new(config.protocol.decode),
             cpu_nanos: 0,
         })
     }

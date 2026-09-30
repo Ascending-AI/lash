@@ -43,8 +43,7 @@ use lash_vm_broker::{
     Invocation, ParentEffects, ParentFault, Performed, RequestFingerprint, RunStart, ToolRoute,
 };
 use lash_vm_protocol::{
-    BuildIdentity, DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, VmLimits,
-    VmOwner,
+    DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, VmLimits, VmOwner,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -69,10 +68,7 @@ const CHECKOUT_WAIT: Duration = Duration::from_secs(10);
 const TURN_BUDGET: Duration = Duration::from_secs(120);
 
 fn codec() -> FrameCodec {
-    FrameCodec::new(
-        BuildIdentity::new("lash conformance vm-broker law build"),
-        DecodeLimits::standard(),
-    )
+    FrameCodec::new(DecodeLimits::standard())
 }
 
 fn contract() -> lash_vm_protocol::VmContractReads {

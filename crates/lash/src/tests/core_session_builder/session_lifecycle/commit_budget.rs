@@ -1,6 +1,7 @@
 //! Commit budgets reach the host typed, terminal and actionable: a turn's
-//! commit, a park's, and a host append's, whose command settles failed with
-//! the budget refusal (FIG-4202).
+//! commit, a park's, a host append's, whose command settles failed with the
+//! budget refusal (FIG-4202), and a creation whose head no commit fits
+//! (FIG-4393).
 
 use super::*;
 
@@ -332,20 +333,77 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
     Ok(())
 }
 
+/// Creation measures the head it creates (FIG-4393): a config whose
+/// created head no commit fits under the core's budget is refused typed,
+/// terminal and actionable, and nothing is written.
+#[tokio::test]
+async fn create_byte_budget_failure_is_typed_terminal_and_writes_nothing() -> Result<()> {
+    const CONFIGURED_BYTE_LIMIT: usize = 256;
+    let backend = double_backend().await;
+    let factory = backend.session_store_factory();
+    let core = core_over_backend_with_commit_budget(
+        backend,
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    )?;
+
+    let error = match core
+        .session("create-byte-budget-surface")
+        .create(crate::SessionCreation::default())
+        .await
+    {
+        Ok(_) => panic!("creation must refuse a head no commit fits under the budget"),
+        Err(error) => error,
+    };
+
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Store(lash_core::StoreError::CommitByteBudgetExceeded { max_bytes, .. })
+                if *max_bytes == CONFIGURED_BYTE_LIMIT
+        ),
+        "expected typed byte-budget rejection, got {error}"
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+    assert!(
+        matches!(
+            factory
+                .lookup_session(&SessionId::from("create-byte-budget-surface"))
+                .await?,
+            lash_core::SessionLookup::Absent
+        ),
+        "a refused creation writes nothing"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
     const CONFIGURED_BYTE_LIMIT: usize = 256;
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-        crate::CommitBudgetLimit::Unbounded,
-    ))
+    let backend = double_backend().await;
+    // The session was created under a budget its head fits; the park's
+    // host runs under a lower one.
+    core_over_backend_with_commit_budget(
+        backend.clone(),
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::Unbounded,
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    )?
+    .session("park-byte-budget-surface")
+    .create(crate::SessionCreation::default())
     .await?;
-    let session = core
-        .session("park-byte-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
+    let core = core_over_backend_with_commit_budget(
+        backend,
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    )?;
+    let session = core.session("park-byte-budget-surface").open().await?;
     session
         .admin()
         .state()

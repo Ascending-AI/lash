@@ -605,6 +605,12 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::EmitEvent { .. } => {
                 lash_core::ToolIntentKind::EmitProcessEvent
             }
+            lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
+                return Err(Self::outside_protocol_outcome("complete_external"));
+            }
+            lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
+                return Err(Self::outside_protocol_outcome("validate_visible"));
+            }
             lash_core::ProcessEffectOutcome::List { .. } => {
                 return Err(Self::outside_protocol_outcome("list"));
             }
@@ -649,6 +655,12 @@ impl ToolIntentIngress {
             .unwrap_or(serde_json::Value::Null),
             lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
                 serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
+            }
+            lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
+                return Err(Self::outside_protocol_outcome("complete_external"));
+            }
+            lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
+                return Err(Self::outside_protocol_outcome("validate_visible"));
             }
             lash_core::ProcessEffectOutcome::List { .. } => {
                 return Err(Self::outside_protocol_outcome("list"));

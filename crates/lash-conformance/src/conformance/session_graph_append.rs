@@ -270,6 +270,7 @@ async fn abandoned_branch_scenario(
         node_id: fork_point.clone().into(),
         relation: crate::SessionRelation::Root,
         policy: source_request.config.session_policy(),
+        plugin_config: Default::default(),
     };
     factory
         .fork_session(&branch_request)
@@ -477,7 +478,10 @@ async fn append_conformance_runtime(
         Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
-            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            crate::plugin::SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         )),
         None => host.build_session(PluginSessionRequest::creation(
             request.session_id.clone(),

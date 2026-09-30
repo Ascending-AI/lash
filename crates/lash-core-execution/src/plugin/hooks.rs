@@ -188,6 +188,11 @@ pub type AssistantStreamFinishedHook = Arc<
 #[derive(Clone)]
 pub struct PromptHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub sessions: Arc<dyn SessionStateService>,
     pub state: SessionReadView,
     pub protocol_turn_options: ProtocolTurnOptions,
@@ -197,6 +202,11 @@ pub struct PromptHookContext {
 #[derive(Clone)]
 pub struct TurnHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
     pub turn_context: crate::TurnContext,
@@ -213,6 +223,11 @@ pub struct SessionConfigChangedContext {
 #[derive(Clone)]
 pub struct SessionStateChangedContext<'run> {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_graph: Arc<dyn SessionGraphService>,
@@ -260,6 +275,11 @@ impl TurnHookReport {
 pub struct ToolCallHookContext {
     /// Who the call runs for: a session, or a process runtime.
     pub owner: crate::RuntimeOwner,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -270,6 +290,7 @@ pub struct ToolCallHookContext {
 impl ToolCallHookContext {
     pub fn new(
         owner: crate::RuntimeOwner,
+        plugin_config: super::AdmittedPluginConfig,
         tool_name: String,
         args: serde_json::Value,
         argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -278,6 +299,7 @@ impl ToolCallHookContext {
     ) -> Self {
         Self {
             owner,
+            plugin_config,
             tool_name,
             args,
             argument_projection,
@@ -313,6 +335,11 @@ impl ToolCallHookContext {
 pub struct ToolResultHookContext {
     /// Who the call runs for: a session, or a process runtime.
     pub owner: crate::RuntimeOwner,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     /// The durable identity of the prepared call this observation belongs to:
     /// the same value the attempt body saw as [`crate::AttemptContext::call_id`]
     /// and the executed-call record carries as [`crate::ToolCallRecord::call_id`].
@@ -333,6 +360,7 @@ impl ToolResultHookContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         owner: crate::RuntimeOwner,
+        plugin_config: super::AdmittedPluginConfig,
         call_id: crate::ToolCallId,
         tool_name: String,
         args: serde_json::Value,
@@ -343,6 +371,7 @@ impl ToolResultHookContext {
     ) -> Self {
         Self {
             owner,
+            plugin_config,
             call_id,
             tool_name,
             args,
@@ -396,6 +425,11 @@ pub struct ToolResultProjectionContext {
 #[derive(Clone)]
 pub struct TurnResultHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionStateService>,
 }
@@ -403,6 +437,11 @@ pub struct TurnResultHookContext {
 #[derive(Clone)]
 pub struct CheckpointHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub checkpoint: CheckpointKind,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
@@ -413,6 +452,11 @@ pub struct CheckpointHookContext {
 #[derive(Clone)]
 pub struct AssistantStreamHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub chunk: String,
 }
 
@@ -433,6 +477,11 @@ pub struct AssistantStreamTransform {
 #[derive(Clone)]
 pub struct AssistantResponseHookContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub response: crate::LlmResponse,
     /// The state this plugin's [`AssistantStreamFinishedHook`] returned when
     /// the completion's stream finished, as phase 1 journaled it. `None` when
@@ -460,6 +509,11 @@ pub enum AssistantStreamFinishReason {
 #[derive(Clone)]
 pub struct AssistantStreamFinishedContext {
     pub session_id: SessionId,
+    /// The plugin configuration this hook runs under (FIG-4379): the
+    /// running root's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a root — never today's head
+    /// inside a root.
+    pub plugin_config: super::AdmittedPluginConfig,
     pub reason: AssistantStreamFinishReason,
 }
 

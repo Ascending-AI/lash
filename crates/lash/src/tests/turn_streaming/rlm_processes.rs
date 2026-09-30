@@ -599,17 +599,17 @@ finish(value);"#,
         .open()
         .await?;
     let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
+    let mut turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("start tool"))
             .output()
             .await
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(5), entered_rx)
-        .await
-        .expect("tool process should start")
-        .expect("tool provider entered");
+    tokio::select! {
+        entered = entered_rx => entered.expect("tool provider entered"),
+        result = &mut turn => panic!("turn completed before its process entered the tool: {result:?}"),
+    };
 
     let processes = session.admin().processes().list().await?;
     // #1529 retired the `defineProcess` name: a lifted process literal's label
@@ -685,17 +685,17 @@ finish(value);"#,
         .open()
         .await?;
     let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
+    let mut turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("start tool"))
             .output()
             .await
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(5), entered_rx)
-        .await
-        .expect("tool process should start")
-        .expect("tool provider entered");
+    tokio::select! {
+        entered = entered_rx => entered.expect("tool provider entered"),
+        result = &mut turn => panic!("turn completed before its process entered the tool: {result:?}"),
+    };
 
     let processes = session.admin().processes().list().await?;
     // The trace names the source export; the run identity names its definition.
@@ -1135,17 +1135,17 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         .open()
         .await?;
     let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
+    let mut turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("start tool"))
             .output()
             .await
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(5), entered_rx)
-        .await
-        .expect("tool process should start")
-        .expect("tool provider entered");
+    tokio::select! {
+        entered = entered_rx => entered.expect("tool provider entered"),
+        result = &mut turn => panic!("turn completed before its process entered the tool: {result:?}"),
+    };
     release_tx.send(()).expect("release tool provider");
 
     let result = turn.await.expect("turn task")?;

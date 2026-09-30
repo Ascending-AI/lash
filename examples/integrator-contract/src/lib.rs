@@ -86,20 +86,6 @@ impl ProtocolSessionPlugin for Integrator {
     ) -> Result<(), SessionError> {
         unreachable!("external signature witness")
     }
-    fn configure_runtime_on_materialize(
-        &self,
-        _ctx: ProtocolRuntimeContext<'_>,
-        _materialization: ProtocolSessionMaterialization<'_>,
-    ) -> Result<(), SessionError> {
-        unreachable!("external signature witness")
-    }
-    fn apply_session_config_patch(
-        &self,
-        recorded: &ProtocolTurnOptions,
-        plugin_options: &PluginOptions,
-    ) -> Result<ProtocolTurnOptions, SessionError> {
-        unreachable!("external signature witness")
-    }
     async fn before_llm_call(
         &self,
         _ctx: ProtocolBeforeLlmCallContext,
@@ -111,6 +97,46 @@ impl ProtocolSessionPlugin for Integrator {
         &self,
         _ctx: ProtocolSessionContext<'_>,
     ) -> Result<Option<Arc<str>>, SessionError> {
+        unreachable!("external signature witness")
+    }
+}
+
+impl PluginFactory for Integrator {
+    fn id(&self) -> &'static str {
+        unreachable!("external signature witness")
+    }
+    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        let recorded: &AdmittedPluginConfig = &ctx.plugin_config;
+        unreachable!("external signature witness")
+    }
+    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+        reg.owner(IntegratorConfigOwner)
+    }
+}
+
+struct IntegratorConfigOwner;
+
+impl ConfigOwner for IntegratorConfigOwner {
+    type Create = lash::messages::JsonValue;
+    type Recorded = lash::messages::JsonValue;
+    type Refusal = lash::messages::JsonValue;
+
+    fn implementation(&self) -> &str {
+        unreachable!("external signature witness")
+    }
+    fn create(
+        &self,
+        input: Option<Self::Create>,
+        facts: CreationFacts<'_, Self::Recorded>,
+    ) -> Result<Option<Self::Recorded>, Self::Refusal> {
+        unreachable!("external signature witness")
+    }
+    fn validate(
+        &self,
+        value: &Self::Recorded,
+        base: Option<&Self::Recorded>,
+        facts: &CandidateFacts<'_>,
+    ) -> Result<(), Self::Refusal> {
         unreachable!("external signature witness")
     }
 }

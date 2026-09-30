@@ -31,7 +31,7 @@ The store admission answer decides which racing create succeeds. Hosts that
 want create-or-open state that sequence explicitly. Open-time options govern
 tool-source policy, enqueue-only mode, process-local plugin factories and the
 provider resolver. The resolver must match the recorded provider pin. Config
-updates use `SessionConfigPatch`.
+changes are typed config commands (ADR 0126).
 
 An open session's `session.durable()` reuses the Session Binding's store and
 owner-issued ports. Catalog-derived and binding-derived handles share

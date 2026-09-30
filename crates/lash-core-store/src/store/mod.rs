@@ -31,8 +31,9 @@ mod head_ownership;
 pub mod history;
 #[cfg(test)]
 mod history_gate_tests;
-mod identity_projection;
 pub mod ingress_obligation;
+mod ingress_terminal;
+pub use ingress_terminal::{IngressTerminal, IngressTerminalCause};
 mod lease_timings;
 mod maintenance;
 pub use enumeration::*;
@@ -91,7 +92,7 @@ pub use attachment_referrers::{
     MAX_ATTACHMENT_DELETE_ATTEMPTS, SessionReferrerState, StoredAttachmentCondemnation,
     decode_attachment_condemnation_record,
 };
-pub use catalog::SessionCatalogStore;
+pub use catalog::{SessionCatalogStore, admit_created_session};
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
@@ -169,10 +170,10 @@ pub use retention::{RetentionBound, RetentionReport};
 pub use root::{
     AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
     InMemoryRootLedger, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
-    RootCommittedOutcome, RootEnd, RootEndedTurns, RootExecutor, RootStore, RootTerminal,
-    RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision,
-    StoredRootTerminal, TurnCommitId, UnfinishedRoot, decide_root_terminal_write,
-    refused_run_owns_root, root_binding_conflict,
+    RootCommittedOutcome, RootEnd, RootExecutor, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision, RootTurns, StoredRootTerminal,
+    TurnCommitId, UnfinishedRoot, decide_root_terminal_write, refused_run_owns_root,
+    root_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
@@ -232,8 +233,6 @@ mod prompt_persistence_compat_tests;
 
 #[cfg(test)]
 mod guarded_surface_tests;
-#[cfg(test)]
-mod identity_roll_tests;
 #[cfg(test)]
 mod persisted_state_tests;
 
@@ -522,7 +521,6 @@ fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::Pers
         turn_index: state.turn_index,
         token_usage: state.token_usage.clone(),
         last_prompt_usage: state.last_prompt_usage.clone(),
-        protocol_turn_options: state.protocol_turn_options.clone(),
     }
 }
 
@@ -1487,6 +1485,14 @@ pub trait QueuedWorkStore: Send + Sync {
 
     /// Persist a queued-work batch and expose whether receiver idempotency
     /// absorbed it. The wake driver uses this for delivery evidence.
+    ///
+    /// Admission records the draft's
+    /// [`submission_digest`](crate::QueuedWorkBatchDraft::submission_digest)
+    /// (ADR 0101 §8). A draft whose source key the session already filed
+    /// answers that batch, open or a tombstone, as
+    /// [`Existing`](crate::QueuedWorkEnqueueOutcome::Existing) when the
+    /// digests are equal, and nothing reopens; a changed digest is
+    /// [`StoreError::QueuedWorkSourceKeyConflict`] and nothing is stored.
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -1496,10 +1502,9 @@ pub trait QueuedWorkStore: Send + Sync {
     /// to apply (ADR 0101 §4, design §2.7). Takes no admission.
     ///
     /// The run is returned only when the earliest open batch is classified
-    /// as [`QueuedWorkClass::SessionCommand`]. A non-config command is a run
-    /// of one; an adjacent `ApplyConfigPatch` prefix is returned together (up
-    /// to [`MAX_SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN))
-    /// so the lane applies it in one commit. In one transaction fenced by
+    /// as [`QueuedWorkClass::SessionCommand`]. Every command is a run of one
+    /// ([`SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN)),
+    /// applied alone in the commit that settles it. In one transaction fenced by
     /// `fence`, the run's ingress obligations are acknowledged delivered
     /// (ADR 0109 §3). The applying commit settles the rows
     /// ([`RuntimeCommit::applied_commands`]). The read admits the run: a
@@ -1511,21 +1516,22 @@ pub trait QueuedWorkStore: Send + Sync {
         fence: &DriveFence,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
-    /// Remove an open queued-work batch from durable ingress.
+    /// Withdraw an open queued-work batch from durable ingress into its
+    /// `cancelled` tombstone (ADR 0101 §8).
     ///
-    /// Returns the removed batch when cancellation won the race. Returns `None`
-    /// when the batch is missing or a root admitted it; callers must treat
-    /// that as "already admitted or completed" and must not restore any stale
-    /// local draft state. A session command is admitted by the drive's
-    /// fenced read of its run ([`Self::open_session_command_run`]), which
-    /// delivers its obligation: from that read on, the command is being
-    /// applied and a withdrawal returns `None` (FIG-4202).
+    /// Returns the batch as it stood open when cancellation won the race.
+    /// Returns `None` when the batch is missing, a tombstone, or held by a
+    /// root; callers must treat that as "already admitted or completed" and
+    /// must not restore any stale local draft state.
+    /// A command whose fenced read delivered its obligation is being applied
+    /// and cannot be withdrawn.
     ///
     /// Cancelling a process-wake batch is a terminal transition of that wake:
     /// the session's redelivery fence rises to `max(floor, sequence)` in the
-    /// same transaction as the removal, so a later redelivery of the same
-    /// `(process, sequence)` is refused with
-    /// [`StoreError::ProcessWakeSequenceRewound`] rather than re-admitted.
+    /// same transaction as the tombstone. A redelivery of the same
+    /// `(process, sequence)` answers the tombstone and reopens nothing; after
+    /// host vacuum it is refused with
+    /// [`StoreError::ProcessWakeSequenceRewound`].
     async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,

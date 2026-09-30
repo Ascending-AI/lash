@@ -546,6 +546,11 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             )? {
                 support::TurnInputDraftAdmission::Existing { input_id } => input_id,
                 support::TurnInputDraftAdmission::New => {
+                    if let Some(turn_id) = draft.ingress.active_turn_id() {
+                        let evidence =
+                            turn_address_evidence_tx(&mut tx, session_id, turn_id).await?;
+                        support::require_known_turn_address(session_id, turn_id, evidence)?;
+                    }
                     let enqueue_seq =
                         super::allocate_ingress_sequence_tx(&mut tx, session_id).await?;
                     let input_id = match draft.input_id.clone() {
@@ -1075,4 +1080,37 @@ async fn check_unsourced_steering_run_spec_tx(
         support::check_running_root_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
     }
     Ok(())
+}
+
+/// What session `session_id` records about turn `turn_id`, read under the
+/// session's write authority the admitting transaction holds (ADR 0101
+/// §5.1).
+async fn turn_address_evidence_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    turn_id: &lash_core_execution::TurnId,
+) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
+    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let ended: bool = sqlx::query_scalar(
+        crate::turn_ingress::turn_ingress_sql()
+            .family
+            .turn_address_ended
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .bind(root.as_str())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let running = crate::session_roots::unfinished_root_turns_conn(tx, session_id).await?;
+    let owed = pending_follow_on_tx(tx, session_id, false).await?;
+    Ok(
+        lash_core_execution::store_backend_support::turn_address_evidence(
+            turn_id,
+            running.as_ref(),
+            owed.as_ref(),
+            ended,
+        ),
+    )
 }

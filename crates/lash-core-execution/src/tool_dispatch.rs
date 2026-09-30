@@ -20,7 +20,9 @@ pub use pending_resolver::{
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptLineage, coordinate_tool_invocation,
 };
-pub(crate) use attempt_coordinator::{commit_group_child_boundary, group_child_cancelled};
+pub(crate) use attempt_coordinator::{
+    commit_deferred_group_child, drain_committed_group_child, group_child_cancelled,
+};
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]

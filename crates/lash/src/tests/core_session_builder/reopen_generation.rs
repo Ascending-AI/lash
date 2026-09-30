@@ -5,7 +5,7 @@ const SEED: u64 = 0x5c_f103;
 
 /// FIG-4099, FIG-4112: generation is creation config. A reopen runs with
 /// what the session recorded and writes nothing; the overlay's merge, replace
-/// and clear are `update(SessionConfigPatch)` changes, each durable.
+/// and clear are `SetGeneration` config transactions, each durable.
 #[tokio::test]
 async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<()> {
     let double = restate_double(SEED).await;
@@ -67,15 +67,14 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
 
     let config = reopened.admin().config();
     config
-        .update(crate::SessionConfigPatch {
-            generation: Some(crate::GenerationOverlay::Merge(
-                lash_core::GenerationOptions {
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetGeneration {
+                generation: crate::GenerationOverlay::Merge(lash_core::GenerationOptions {
                     output_token_cap: std::num::NonZeroUsize::new(37),
                     ..Default::default()
-                },
-            )),
-            ..crate::SessionConfigPatch::default()
-        })
+                }),
+            },
+        ))
         .await?;
     let generation = reopened.policy_snapshot().generation;
     assert_eq!(generation.seed, Some(73), "a merge keeps unstated options");
@@ -83,15 +82,14 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     assert_eq!(recorded_generation().await, generation);
 
     config
-        .update(crate::SessionConfigPatch {
-            generation: Some(crate::GenerationOverlay::Replace(
-                lash_core::GenerationOptions {
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetGeneration {
+                generation: crate::GenerationOverlay::Replace(lash_core::GenerationOptions {
                     seed: Some(91),
                     ..Default::default()
-                },
-            )),
-            ..crate::SessionConfigPatch::default()
-        })
+                }),
+            },
+        ))
         .await?;
     assert_eq!(reopened.policy_snapshot().generation.seed, Some(91));
     assert_eq!(
@@ -102,10 +100,11 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     assert_eq!(recorded_generation().await.seed, Some(91));
 
     config
-        .update(crate::SessionConfigPatch {
-            generation: Some(crate::GenerationOverlay::Replace(Default::default())),
-            ..crate::SessionConfigPatch::default()
-        })
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetGeneration {
+                generation: crate::GenerationOverlay::Replace(Default::default()),
+            },
+        ))
         .await?;
     assert_eq!(reopened.policy_snapshot().generation, Default::default());
     assert_eq!(recorded_generation().await, Default::default());

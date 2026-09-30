@@ -56,6 +56,11 @@ struct StopAfterTerminalAdmission {
     /// input first (ADR 0101 §5) and the wake reaches the turn only there.
     arriving_wake: Mutex<Option<crate::QueuedWorkBatchDraft>>,
     arrived_wake: Mutex<Option<crate::QueuedWorkBatch>>,
+    /// Inject-now inputs sent while the turn runs, accepted just before its
+    /// terminal checkpoint admits: an input addressed to a turn that has not
+    /// started is refused (ADR 0101 §5.1).
+    arriving_inputs: Mutex<Vec<crate::PendingTurnInputDraft>>,
+    arrived_inputs: Mutex<Vec<crate::InputId>>,
 }
 
 #[async_trait::async_trait]
@@ -84,6 +89,19 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
                     .await
                     .expect("accept the wake that arrives during the turn");
                 *self.arrived_wake.lock().expect("arrived wake") = Some(batch);
+            }
+            let arriving =
+                std::mem::take(&mut *self.arriving_inputs.lock().expect("arriving inputs"));
+            for draft in arriving {
+                let accepted = self
+                    .inner
+                    .enqueue_pending_turn_input(draft)
+                    .await
+                    .expect("accept inject-now input for the running turn");
+                self.arrived_inputs
+                    .lock()
+                    .expect("arrived inputs")
+                    .push(accepted.input_id);
             }
         }
         let admission = self.inner.admit_at_checkpoint(request).await?;
@@ -247,22 +265,29 @@ async fn withheld_cancel_case(
 
     // Inject-now input sent while the turn runs: the terminal checkpoint
     // admits and withholds it for a follow-on turn.
-    let mut input_ids = Vec::new();
-    for text in texts {
-        let accepted = harness
-            .store
-            .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+    *harness
+        .decorated
+        .arriving_inputs
+        .lock()
+        .expect("arriving inputs") = texts
+        .iter()
+        .map(|text| {
+            crate::PendingTurnInputDraft::new(
                 &session_id,
                 crate::TurnInputIngress::active_turn(
                     &cancelled_turn_id,
                     crate::TurnInputCheckpointBoundary::BeforeCompletion,
                 ),
                 crate::TurnInput::text(*text),
-            ))
-            .await
-            .expect("enqueue inject-now input for the running turn");
-        input_ids.push(accepted.input_id);
-    }
+            )
+        })
+        .collect();
+    harness
+        .decorated
+        .arrived_inputs
+        .lock()
+        .expect("arrived inputs")
+        .clear();
 
     let local = CancellationToken::new();
     let stop = match disposition {
@@ -287,6 +312,17 @@ async fn withheld_cancel_case(
     let run = harness
         .run(&cancelled_turn_id, "summarise the repo", local)
         .await;
+    let input_ids = harness
+        .decorated
+        .arrived_inputs
+        .lock()
+        .expect("arrived inputs")
+        .clone();
+    assert_eq!(
+        input_ids.len(),
+        texts.len(),
+        "{case}: every inject-now input arrived while the turn ran"
+    );
 
     assert_eq!(
         *harness
@@ -334,7 +370,9 @@ async fn withheld_cancel_case(
             .all(|application| !input_ids.contains(&application.input_id)),
         "{case}: the cancelled turn must not settle withheld input as completed: {applications:?}"
     );
-    // Deferred rows stay pending for the next turn; dropped rows leave.
+    // Deferred rows stay pending exactly as submitted, next-turn input by
+    // rule once the cancelled turn ended (ADR 0101 §5.1); dropped rows
+    // leave.
     let pending = harness
         .store
         .list_pending_turn_inputs(&session_id)
@@ -347,11 +385,25 @@ async fn withheld_cancel_case(
     let expected_pending = match disposition {
         crate::TurnCancelUndeliveredInputPolicy::Defer => input_ids
             .iter()
-            .map(|input_id| (input_id.clone(), crate::TurnInputState::DeferredNextTurn))
+            .map(|input_id| {
+                (
+                    input_id.clone(),
+                    crate::TurnInputState::PendingActive(lash_core::ActiveTurnIngress {
+                        turn_id: cancelled_turn_id.clone(),
+                        min_boundary: crate::TurnInputCheckpointBoundary::BeforeCompletion,
+                    }),
+                )
+            })
             .collect(),
         crate::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
     };
     assert_eq!(pending, expected_pending, "{case}: rows after the cancel");
+    assert!(
+        pending
+            .iter()
+            .all(|(_, state)| state.is_next_turn_input(None)),
+        "{case}: every deferred row is next-turn input"
+    );
 
     // The same record an unadmitted row gets, in enqueue order, on the turn
     // result and on the durable cancellation.
@@ -442,6 +494,8 @@ async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimeStore>) -
         withheld_batches: Mutex::new(Vec::new()),
         arriving_wake: Mutex::new(None),
         arrived_wake: Mutex::new(None),
+        arriving_inputs: Mutex::new(Vec::new()),
+        arrived_inputs: Mutex::new(Vec::new()),
     });
     let runtime_store: Arc<dyn crate::RuntimeStore> = decorated.clone();
     let requests = Arc::new(Mutex::new(Vec::<crate::LlmRequest>::new()));

@@ -21,7 +21,9 @@
 //!   events and plugin state, and its model usage is delivered by the engine
 //!   per call (ADR 0125). A task's effects are journaled under
 //!   the command's own queue-drain scope, so a redrive of the unsettled
-//!   command replays them.
+//!   command replays them. A host's cancel reaches an admitted task through
+//!   its cancel gate ([`task_cancel`]), and a cancel that won settles the
+//!   command `Cancelled`.
 //! - A frame open opens the frame in the commit that settles it and restarts
 //!   the live interpreter from the frame's seed (F5).
 //!
@@ -32,6 +34,10 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::turn_boundary::SeedCarries;
+
+mod task_cancel;
+use task_cancel::PluginTaskCancelGate;
+pub use task_cancel::{PluginTaskCancelRequest, request_plugin_task_cancel};
 
 /// The named phase a runtime's turn-phase probe sees when a host command
 /// starts to apply: the drive read its run, and nothing of it has run.
@@ -51,7 +57,7 @@ pub(super) enum HostPluginOperation {
 }
 
 /// How a host command's settling commit ended.
-enum CommandCommit {
+pub(super) enum CommandCommit {
     /// The commit landed, or met the receipt of its first landing: the
     /// command is settled.
     Landed,
@@ -70,7 +76,7 @@ enum CommandCommit {
 /// The frame a command's commit opens: the frame it leaves and the scope of
 /// the command's own execution, which gates the ended frame's cleanup
 /// (ADR 0113 §3.1).
-struct CommandFrameSwitch {
+pub(super) struct CommandFrameSwitch {
     ended: Option<crate::FrameNodeId>,
     committing: crate::ExecutionScope,
 }
@@ -196,8 +202,10 @@ impl LashRuntime {
 
     /// Apply a host's plugin command or task (FIG-4202): the plugin's code
     /// runs here, after admission, with services that join the command's
-    /// commit, and its events, state and queued turns settle with it.
-    /// `false` when the command was withdrawn since the lane was read.
+    /// commit, and its events, state and queued turns settle with it. A task
+    /// whose cancel gate a host's cancel won settles `Cancelled` instead
+    /// (FIG-4391). `false` when the command was withdrawn since the lane was
+    /// read.
     pub(super) async fn apply_plugin_operation_command(
         &mut self,
         operation: HostPluginOperation,
@@ -208,15 +216,42 @@ impl LashRuntime {
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
-        let ran = Box::pin(self.run_host_plugin_operation(
-            operation,
-            &name,
-            args,
-            &batch_id,
-            drive_fence,
-        ))
-        .await;
+        let cancel_gate = match operation {
+            HostPluginOperation::Command => None,
+            HostPluginOperation::Task => {
+                PluginTaskCancelGate::open(
+                    self.effect_host(),
+                    &self.state.session_id,
+                    batch_id.as_str(),
+                )
+                .await?
+            }
+        };
+        let cancelled_before_it_ran = match &cancel_gate {
+            Some(gate) => gate.cancel_won().await?,
+            None => false,
+        };
+        let ran = if cancelled_before_it_ran {
+            Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled)
+        } else {
+            Box::pin(self.run_host_plugin_operation(
+                operation,
+                &name,
+                args,
+                &batch_id,
+                drive_fence,
+                cancel_gate.as_ref(),
+            ))
+            .await?
+        };
         let outcome = match ran {
+            Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled) => {
+                // Nothing of a cancelled task stays resident: the
+                // settlement is written over the durable head.
+                self.invalidate_resident_session_state();
+                self.reload_invalidated_resident_session_state().await?;
+                crate::runtime::PluginOperationCommandOutcome::Cancelled
+            }
             Ok(outcome) => outcome,
             Err(error) => {
                 // Nothing of a failed operation stays resident: the
@@ -241,6 +276,12 @@ impl LashRuntime {
     /// Run a host plugin operation's code against the boundary's resident
     /// state, and fold what it did into that state: its graph appends, its
     /// runtime events, its plugin state and the turns it queued.
+    ///
+    /// A task runs under `cancel_gate`'s watch, and the gate is sealed the
+    /// moment its code returns: a host's cancel that won the gate answers
+    /// `Cancelled`, with nothing of the task folded into resident state. The
+    /// outer `Err` is the drive's fault (the seal did not answer), which
+    /// settles nothing; the inner one is the operation's failure.
     async fn run_host_plugin_operation(
         &mut self,
         operation: HostPluginOperation,
@@ -248,22 +289,29 @@ impl LashRuntime {
         args: serde_json::Value,
         batch_id: &crate::BatchId,
         drive_fence: &crate::store::DriveFence,
-    ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
+        cancel_gate: Option<&PluginTaskCancelGate>,
+    ) -> Result<
+        Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
+        RuntimeError,
+    > {
         let draft = super::turn_commit_draft::TurnGraphAppendDraft::from_resident_state(
             &self.state,
             Arc::clone(&self.host.core.clock),
         );
         // The operation's services join the command as in-turn services join
         // a turn: its appends ride the command's commit.
-        let services = self.runtime_session_services_for_turn(Some(drive_fence), &draft)?;
+        let services = match self.runtime_session_services_for_turn(Some(drive_fence), &draft) {
+            Ok(services) => services,
+            Err(error) => return Ok(Err(error)),
+        };
         let session_id = self.state.session_id.clone();
         let Some(session) = self.session.as_ref() else {
-            return Err(PluginOperationInvokeError::Unknown(
+            return Ok(Err(PluginOperationInvokeError::Unknown(
                 "runtime session not available".to_string(),
-            ));
+            )));
         };
         let plugins = Arc::clone(session.plugins());
-        let (plugin_id, outcome) = match operation {
+        let ran = match operation {
             HostPluginOperation::Command => {
                 plugins
                     .run_plugin_command(
@@ -276,48 +324,92 @@ impl LashRuntime {
                         services.graph_service(),
                         services.process_service(),
                     )
-                    .await?
+                    .await
             }
             HostPluginOperation::Task => {
                 // The task's effects are journaled under the command's own
                 // scope, so a redrive of the unsettled command replays them.
-                let controller = self
-                    .effect_host()
-                    .scoped_static(crate::AdmittedScope::queue_drain(
-                        session_id.clone(),
-                        batch_id.as_str(),
-                    ))
-                    .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?
-                    .ok_or_else(|| {
-                        PluginOperationInvokeError::Failed(
-                            "plugin task execution requires an effect host that can create a \
+                let controller =
+                    match self
+                        .effect_host()
+                        .scoped_static(crate::AdmittedScope::queue_drain(
+                            session_id.clone(),
+                            batch_id.as_str(),
+                        )) {
+                        Ok(Some(controller)) => controller,
+                        Ok(None) => {
+                            return Ok(Err(PluginOperationInvokeError::Failed(
+                                "plugin task execution requires an effect host that can create a \
                              static scope for the command"
-                                .to_string(),
-                        )
-                    })?;
-                plugins
-                    .run_plugin_task(
-                        name,
-                        args,
-                        Some(session_id.clone()),
-                        true,
-                        services.state_service(),
-                        services.lifecycle_service(),
-                        services.graph_service(),
-                        services.process_service(),
-                        controller,
-                        tokio_util::sync::CancellationToken::new(),
-                    )
-                    .await?
+                                    .to_string(),
+                            )));
+                        }
+                        Err(error) => {
+                            return Ok(Err(PluginOperationInvokeError::Failed(error.to_string())));
+                        }
+                    };
+                let stop = tokio_util::sync::CancellationToken::new();
+                let task = plugins.run_plugin_task(
+                    name,
+                    args,
+                    Some(session_id.clone()),
+                    true,
+                    services.state_service(),
+                    services.lifecycle_service(),
+                    services.graph_service(),
+                    services.process_service(),
+                    controller,
+                    stop.clone(),
+                );
+                let ran = match cancel_gate {
+                    Some(gate) => run_until_returned(task, gate.watch(&stop)).await,
+                    None => task.await,
+                };
+                // The task's code returned: the gate's winner decides whether
+                // anything of it settles.
+                if let Some(gate) = cancel_gate
+                    && gate.seal().await?
+                {
+                    drop(services);
+                    return Ok(Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled));
+                }
+                ran
             }
         };
         drop(services);
+        let (plugin_id, outcome) = match ran {
+            Ok(ran) => ran,
+            Err(error) => return Ok(Err(error)),
+        };
+        Ok(self
+            .fold_host_plugin_operation(
+                plugin_id,
+                outcome.output,
+                outcome.events,
+                outcome.directives,
+                draft,
+                batch_id,
+            )
+            .await)
+    }
+
+    /// Fold what a host plugin operation's code did into the boundary's
+    /// resident state: its graph appends, its runtime events, its plugin
+    /// state and the turns it queued.
+    async fn fold_host_plugin_operation(
+        &mut self,
+        plugin_id: String,
+        output: serde_json::Value,
+        events: Vec<crate::PluginRuntimeEvent>,
+        directives: Vec<crate::PluginRuntimeDirective>,
+        draft: super::turn_commit_draft::TurnGraphAppendDraft,
+        batch_id: &crate::BatchId,
+    ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
         draft
             .fold_into_final_state(&mut self.state)
             .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
-        if !outcome.events.is_empty() {
-            let nodes = outcome
-                .events
+        if !events.is_empty() {
+            let nodes = events
                 .iter()
                 .map(|event| {
                     crate::plugin_runtime_protocol_event(&plugin_id, event.clone())
@@ -350,7 +442,7 @@ impl LashRuntime {
         // source key takes one from the command, so a redrive of the
         // unsettled command enqueues the same turn once.
         let mut pending_turn_inputs = Vec::new();
-        for (index, directive) in outcome.directives.into_iter().enumerate() {
+        for (index, directive) in directives.into_iter().enumerate() {
             match directive {
                 crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {
                     let source_key = source_key
@@ -373,8 +465,8 @@ impl LashRuntime {
         }
         Ok(crate::runtime::PluginOperationCommandOutcome::Completed {
             plugin_id,
-            output: outcome.output,
-            events: outcome.events,
+            output,
+            events,
             pending_turn_inputs,
         })
     }
@@ -472,8 +564,12 @@ impl LashRuntime {
     /// of it durable: that admission's drive applies the command.
     ///
     /// A commit over the session's commit budget settles the command failed
-    /// with the budget refusal instead, over the durable head.
-    async fn commit_host_command(
+    /// with the budget refusal instead, over the durable head. A head whose
+    /// bare settlement exceeds the budget is one a host lowered the budget
+    /// below (ADR 0058, FIG-4393): the settlement's typed refusal ends the
+    /// command root, the drive stops at it, and the command stays open until
+    /// the host raises the budget again.
+    pub(super) async fn commit_host_command(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
         drive_fence: &crate::store::DriveFence,
@@ -510,8 +606,10 @@ impl LashRuntime {
         match settled {
             Ok(CommandCommit::Landed) => Ok(CommandCommit::OverBudget),
             Ok(committed) => Ok(committed),
-            // Even the settlement alone exceeds the budget.
-            Err(_) => Err(over_budget),
+            // Even the bare settlement exceeds the budget: the live head
+            // itself is over it (ADR 0058), and its refusal names the size
+            // the host must raise the budget to.
+            Err(bare_over_budget) => Err(bare_over_budget),
         }
     }
 
@@ -616,5 +714,19 @@ impl LashRuntime {
                 }
             }
         }
+    }
+}
+
+/// Await `task` to its own end while `watch` runs beside it: the watch may
+/// fire the task's cancellation token, and never ends the task itself.
+async fn run_until_returned<T>(
+    task: impl std::future::Future<Output = T>,
+    watch: impl std::future::Future<Output = ()>,
+) -> T {
+    let task = std::pin::pin!(task);
+    let watch = std::pin::pin!(watch);
+    match futures_util::future::select(task, watch).await {
+        futures_util::future::Either::Left((returned, _watch)) => returned,
+        futures_util::future::Either::Right(((), task)) => task.await,
     }
 }

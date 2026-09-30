@@ -297,8 +297,8 @@ impl Engine {
 
     /// The names of `invocation`'s journaled `ctx.run` commands, in order,
     /// where the server keeps the journal of a completed invocation: the
-    /// double does, a live server's default retention does not.
-    fn run_names(&self, invocation: &str) -> Option<Vec<String>> {
+    /// double does, a live server only under a journal retention.
+    async fn run_names(&self, invocation: &str) -> Option<Vec<String>> {
         match self {
             Self::Double(backend) => Some(
                 backend
@@ -310,7 +310,19 @@ impl Engine {
                     .filter_map(|entry| entry.name)
                     .collect(),
             ),
-            Self::Live { .. } => None,
+            Self::Live { backend, .. } => {
+                let journal = backend
+                    .journal(invocation)
+                    .await
+                    .expect("read the invocation's journal");
+                (!journal.is_empty()).then(|| {
+                    journal
+                        .iter()
+                        .filter_map(|entry| entry.split_once(":Command: Run:"))
+                        .map(|(_, name)| name.to_owned())
+                        .collect()
+                })
+            }
         }
     }
 
@@ -509,7 +521,7 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
 /// The environment every process of this file runs in.
 fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -942,7 +954,7 @@ async fn a_presentation_put_before_its_journal_crash_replays_one_presentation(en
         children[0].status, "completed",
         "the child ended: {children:#?}"
     );
-    if let Some(runs) = engine.run_names(&children[0].id) {
+    if let Some(runs) = engine.run_names(&children[0].id).await {
         let presentations: Vec<_> = runs
             .into_iter()
             .filter(|name| name.ends_with(":present"))
@@ -1196,7 +1208,17 @@ async fn created_session(
     core.session(session_id)
 }
 
-// ADR 0099 W9-W11: the deployment dies at the group close and at each
+/// The index handlers the matrix crashes while the turn runs; every other cut
+/// lands in the retirement saga after it.
+const TURN_CUTS: [&str; 4] = [
+    "subscribe",
+    "register_dispatch",
+    "record_settlement",
+    "close",
+];
+
+// ADR 0099 W2-W4 and W9-W11: the deployment dies where the group index
+// answers its own notices (FIG-4344), at the group close, and at each
 // boundary of the retirement saga. The workload uses the same counted tool
 // and retained presentation fixture as the presentation crash law above.
 async fn group_close_and_retirement_crash_matrix(engine: Engine) {
@@ -1209,6 +1231,20 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
         Engine::Live { backend, .. } => backend.service_name("EffectGroupIndex"),
     };
     for (service, handler, ty) in [
+        // The group's own notifications (FIG-4344): a subscription whose
+        // answer was lost, a registration and a seat that stored their
+        // decision and died before answering, each redriven.
+        ("EffectGroupIndex", "subscribe", MessageType::OutputCommand),
+        (
+            "EffectGroupIndex",
+            "register_dispatch",
+            MessageType::OutputCommand,
+        ),
+        (
+            "EffectGroupIndex",
+            "record_settlement",
+            MessageType::OutputCommand,
+        ),
         ("EffectGroupIndex", "close", MessageType::SetStateCommand),
         ("EffectGroupIndex", "close", MessageType::OutputCommand),
         ("EffectGroupIndex", "retire", MessageType::SetStateCommand),
@@ -1245,11 +1281,6 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             "delete_bytes",
             MessageType::OutputCommand,
         ),
-        (
-            "LashDurableWaitIndex",
-            "retain_resolution",
-            MessageType::OutputCommand,
-        ),
     ] {
         let witness = Arc::new(StepWitness::default());
         let executions = Arc::new(AtomicUsize::new(0));
@@ -1269,7 +1300,8 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             .into_iter()
             .map(|invocation| invocation.id)
             .collect::<std::collections::HashSet<_>>();
-        if handler == "close" {
+        let turn_cut = TURN_CUTS.contains(&handler);
+        if turn_cut {
             engine.crash_on(
                 CrashRule::new(CrashPoint::BeforeFrame { ty })
                     .service(&index)
@@ -1297,7 +1329,7 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             .expect("the production turn dispatched its tool group");
         let (route, tail) = dispatch.target.split_once('/').expect("dispatch target");
         let group_key = tail.strip_suffix("/run").expect("dispatch workflow key");
-        if handler != "close" {
+        if !turn_cut {
             engine.crash_on(
                 CrashRule::new(CrashPoint::BeforeFrame { ty })
                     .service(if service == "EffectGroupIndex" {
@@ -1660,3 +1692,6 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
 mod attachment_delivery;
 #[path = "crash_windows/process_root_recovery.rs"]
 mod process_root_recovery;
+
+#[path = "crash_windows/journal_settlement_cleanup.rs"]
+mod journal_settlement_cleanup;

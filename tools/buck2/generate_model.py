@@ -14,6 +14,7 @@ import tomllib
 from dataclasses import dataclass, field
 
 import feature_variants
+import vm_worker_runfiles
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -729,9 +730,6 @@ def target_support(
     # binary's support; its own run data is the `bin-unit-test` policy.
     kind = "bin" if kind == "bin-unit-test" else kind
     policy = target_policy(package["name"], kind, target["name"], targets)
-    if package["name"] == "lash-internal-vm-worker" and target["name"] == "build_identity_laws":
-        policy.data.extend(label for label in worker_identity_inputs()
-                           if not label.startswith("//crates/lash-vm-worker:"))
     return policy.compile_data, policy.data, policy.env, policy.args
 
 
@@ -753,7 +751,7 @@ def filegroups(package_name: str) -> str:
     return "".join(chunks)
 
 
-def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
+def render_package(package: dict, features: list[str], worker_tests: bool = False) -> tuple[str, dict]:
     manifest = relative(package["manifest_path"])
     package_dir = pathlib.PurePosixPath(manifest).parent.as_posix()
     version = package["version"]
@@ -784,20 +782,12 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
-        build_data = worker_identity_inputs() if package["name"] in ("lash-internal-vm-worker", "lash-internal-vm-client") else []
-        build_data_argument = (
-            f"    extra_data = {string_list(build_data)},\n"
-            '    build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": ".lash-workspace"},\n'
-        ) if build_data else ""
-        if package["name"] == "lash-internal-vm-client":
-            build_data_argument += '    extra_srcs = ["//crates/lash-vm-worker:rust_sources"],\n'
         chunks.append(
             "lash_rust_build_script(\n"
             "    name = \"build_script\",\n"
             f"    crate_features = {string_list(features)},\n"
             f"    declared_features = {string_list(declared_features)},\n"
             f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]),\n"
-            f"{build_data_argument}"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
             f"    version = {quote(version)},\n"
@@ -904,7 +894,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 + ")\n\n"
             )
             if (
-                not unit_args
+                not worker_tests
+                and not unit_args
                 and not unit_test_env
                 and not unit_shards
                 and not unit_timeout
@@ -1052,10 +1043,12 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    fixtures = {string_list([f'tests/ui/{f}.rs' for f in fixtures])},\n"
                 f"    expected = {string_list([f'tests/ui/{f}.stderr' for f in fixtures])},\n"
                 '    tags = ["manual"],\n'
+                f"    tests = {string_list([':ui_store_seam'] if ui_store_seam else [])},\n"
                 ")\n\n"
             )
         if (
             kind == "test"
+            and not worker_tests
             and not target_args
             and not test_env
             and not target_shards
@@ -1133,7 +1126,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
             if (
-                not bin_unit_policy.data
+                not worker_tests
+                and not bin_unit_policy.data
                 and not bin_unit_policy.env
                 and not bin_unit_tags
                 and batchable_run(package["name"], crate_name)
@@ -1239,6 +1233,18 @@ def generated(
     RESOLVED_TEST_RUNS.clear()
     RESOLVED_BATCH_BUDGETS.clear()
     features = package_features(metadata)
+    # Discover helper users from the ordinary emitted graph before choosing
+    # batches. A batch runs executables directly and drops each test's env.
+    ordinary = {
+        pathlib.Path(package["manifest_path"]).parent / "BUCK": render_package(
+            package, features[package["id"]]
+        )[0]
+        for package in metadata["packages"] if package["id"] in set(metadata["workspace_members"])
+    }
+    worker_packages = vm_worker_runfiles.Graph(metadata, ordinary, ROOT).test_packages()
+    EMITTED_TEST_LABELS.clear()
+    RESOLVED_TEST_RUNS.clear()
+    RESOLVED_BATCH_BUDGETS.clear()
     outputs = {}
     inventory = []
     workspace_members = set(metadata["workspace_members"])
@@ -1246,7 +1252,11 @@ def generated(
         manifest = pathlib.Path(package["manifest_path"]).resolve()
         if package["id"] not in workspace_members:
             continue
-        content, item = render_package(package, features[package["id"]])
+        content, item = render_package(
+            package,
+            features[package["id"]],
+            package["id"] in worker_packages,
+        )
         outputs[manifest.parent / "BUCK"] = content
         inventory.append(item)
     inventory.sort(key=lambda item: item["manifest"])
@@ -1470,6 +1480,7 @@ def generated(
     if variant_failures:
         raise ValueError("VM worker/client feature mismatch:\n  " + "\n  ".join(variant_failures))
     validate_test_run_sizes()
+    vm_worker_runfiles.add(metadata, outputs, ROOT)
     return outputs, inventory
 
 
@@ -2013,23 +2024,20 @@ class FeatureLaneGraph:
         rustc_env, binary_data = cargo_bin_env(
             pathlib.Path(target["src_path"]),
             {
-                candidate["name"]: label_name(
-                    candidate, library is None and len(binaries) == 1
+                candidate["name"]: (
+                    f"{label_name(candidate, library is None and len(binaries) == 1)}__fv_{suffix}"
                 )
                 for candidate in binaries
                 if set(candidate.get("required-features", [])) <= set(target_features)
             },
         )
-        # A binary referenced through `CARGO_BIN_EXE_*` is a runtime input of
-        # the ordinary label; a variant must reach the variant of that binary,
-        # never the default-feature one.
-        binary_data = [
-            f"{d}__fv_{suffix}" if d.startswith(":") else d for d in binary_data
-        ]
-        rustc_env = {
-            key: value.replace(")", f"__fv_{suffix})")
-            for key, value in rustc_env.items()
-        }
+        # Cargo builds enabled binaries for integration tests even when a
+        # named-test selection does not select binaries as root targets.
+        # Emit each referenced binary in this resolution, without enabling
+        # missing required features or falling back to the workspace binary.
+        for candidate in binaries:
+            if f"CARGO_BIN_EXE_{candidate['name']}" in rustc_env:
+                self.emit_target(package_name, resolution, candidate, "bin", False, [])
         tags = list(FEATURE_VARIANT_TAGS)
         policy_tags, _reason = cargo_test_policy(package_name, kind, target["name"])
         # Variant test rules retain the target's execution policy. This is
@@ -2613,6 +2621,39 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
     return failures
 
 
+def reconcile_cargo_bin_env(outputs: dict[pathlib.Path, str]) -> list[str]:
+    """Every Cargo binary path must resolve to an emitted binary rule."""
+    binaries = set()
+    references = []
+    for path, content in outputs.items():
+        if path.name != "BUCK":
+            continue
+        directory = path.parent.relative_to(ROOT).as_posix()
+        for node in ast.parse(content).body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)):
+                continue
+            call = node.value
+            args = {arg.arg: arg.value for arg in call.keywords}
+            if "name" not in args:
+                continue
+            label = f"//{directory}:{ast.literal_eval(args['name'])}"
+            if call.func.id in {"lash_rust_binary", "lash_rust_feature_binary"}:
+                binaries.add(label)
+            for attribute in ("rustc_env", "test_env"):
+                env = ast.literal_eval(args[attribute]) if attribute in args else {}
+                for key, value in env.items():
+                    if key.startswith("CARGO_BIN_EXE_"):
+                        binary = value.removeprefix("$(location ").removesuffix(")")
+                        if binary.startswith(":"):
+                            binary = f"//{directory}{binary}"
+                        references.append((label, key, binary))
+    return [
+        f"{label}: {key} references missing binary {binary}"
+        for label, key, binary in sorted(set(references)) if binary not in binaries
+    ]
+
+
 def reconcile_vm_worker_variants(outputs: dict[pathlib.Path, str]) -> list[str]:
     """Check each emitted worker target's actual paired client feature set."""
     libraries = {}
@@ -2641,33 +2682,3 @@ def reconcile_vm_worker_variants(outputs: dict[pathlib.Path, str]) -> list[str]:
         if error:
             failures.append(f"{label} -> {client}: {error}")
     return failures
-
-
-def worker_identity_inputs() -> list[str]:
-    """Declare the closure's files; the build script hashes their current contents."""
-    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["dependencies"]
-    pending = [ROOT / "crates/lash-vm-worker/Cargo.toml"]
-    seen = set()
-    while pending:
-        manifest = pending.pop()
-        if manifest in seen:
-            continue
-        seen.add(manifest)
-        data = tomllib.loads(manifest.read_text())
-        tables = [data.get("dependencies", {})]
-        tables.extend(target.get("dependencies", {}) for target in data.get("target", {}).values())
-        for table in tables:
-            for name, declaration in table.items():
-                if not isinstance(declaration, dict):
-                    continue
-                base = manifest.parent
-                if declaration.get("workspace"):
-                    declaration = workspace.get(name, {})
-                    base = ROOT
-                if isinstance(declaration, dict) and "path" in declaration:
-                    pending.append((base / declaration["path"] / "Cargo.toml").resolve())
-    labels = ["//:Cargo.toml", "//:Cargo.lock", "//:rust-toolchain.toml"]
-    for manifest in sorted(seen):
-        package = manifest.parent.relative_to(ROOT).as_posix()
-        labels.extend([f"//{package}:Cargo.toml", f"//{package}:buildscript_sources"])
-    return labels

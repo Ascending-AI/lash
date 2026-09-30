@@ -30,11 +30,10 @@ use lash::plugins::{
     ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError, ProcessRunOutcome,
     PromptFingerprint, ProtocolBeforeLlmCallContext, ProtocolBuildInput, ProtocolDriverHandle,
-    ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
-    ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolTurnOptionsError,
-    RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext, SessionPluginSource,
-    ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization, TurnHookReport,
-    TurnPreparation,
+    ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+    ProtocolTurnOptionsError, RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext,
+    SessionPluginSource, ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization,
+    TurnHookReport, TurnPreparation,
 };
 use lash::process::{
     ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
@@ -48,9 +47,8 @@ use lash::provider::{
     ProviderRateLimiter,
 };
 use lash::runtime::{
-    ApplyConfigPatch, OutputState, RuntimeControlConfig, RuntimeDurabilityConfig,
-    RuntimeNamedPhase, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
-    RuntimeTurnPhaseProbeSlot,
+    OutputState, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeNamedPhase,
+    RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhaseProbeSlot,
 };
 use lash::tools::{
     CompactToolContract, PreparedToolBatch, PreparedToolBatchCall, ToolBatchReplies,
@@ -157,8 +155,7 @@ fn snapshot_agent_frame_is_constructible_from_the_facade() {
         previous_frame_node_id: None,
         reason: AgentFrameReason::initial(),
         created_at: "2026-08-25T00:00:00Z".to_string(),
-        assignment: AgentFrameAssignment::from_policy(policy),
-        protocol_turn_options: Default::default(),
+        assignment: AgentFrameAssignment::unconfigured(policy),
     });
 
     let record = snapshot

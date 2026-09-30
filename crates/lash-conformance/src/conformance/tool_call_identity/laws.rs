@@ -739,26 +739,48 @@ pub async fn external_completion_without_observer_writes_nothing(tier: ToolCallI
     )
     .expect("encode events");
     let service = runtime.process_service().expect("session service");
-    let scoped = tier
-        .effect_host
-        .scoped_static(crate::admit(crate::ExecutionScope::runtime_operation(
-            "external-observer-law",
-        )))
-        .expect("scope")
-        .expect("static controller");
     let output = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
         serde_json::json!("terminal"),
     ));
-    let refused = service
-        .complete_external(
-            &world.session_id,
-            &process.id,
-            output.clone(),
-            crate::ProcessOpScope::new(scoped.clone()),
-        )
-        .await;
+    let complete = async |operation: &str| {
+        let (send, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let id = process.id.clone();
+        let owned_service = service.clone();
+        let session = world.session_id.clone();
+        let output = output.clone();
+        tier.runner
+            .run_turn(
+                crate::admit(crate::ExecutionScope::runtime_operation(operation)),
+                Arc::new(move |scope| {
+                    let (service, id, session, output, send) = (
+                        owned_service.clone(),
+                        id.clone(),
+                        session.clone(),
+                        output.clone(),
+                        send.clone(),
+                    );
+                    Box::pin(async move {
+                        send.send(
+                            service
+                                .complete_external(
+                                    &session,
+                                    &id,
+                                    output,
+                                    crate::ProcessOpScope::new(scope),
+                                )
+                                .await,
+                        )
+                        .expect("report completion");
+                        crate::ConformanceTurnEnd::Settled
+                    })
+                }),
+            )
+            .await;
+        received.recv().await.expect("handler attempted completion")
+    };
+    let refused = complete("unobserved-external-completion").await;
     assert!(
-        matches!(refused, Err(crate::PluginError::Session(ref message)) if message.contains("is not visible")),
+        matches!(refused, Err(crate::PluginError::RuntimeEffectController(ref error)) if error.code == crate::RuntimeErrorCode::ProcessNotVisible),
         "{refused:?}"
     );
     assert_eq!(
@@ -797,44 +819,8 @@ pub async fn external_completion_without_observer_writes_nothing(tier: ToolCallI
         )
         .await
         .expect("add observer");
-    let (send, mut received) = tokio::sync::mpsc::unbounded_channel();
-    let id = process.id.clone();
-    let owned_service = service.clone();
-    let session = world.session_id.clone();
-    tier.runner
-        .run_turn(
-            crate::admit(crate::ExecutionScope::runtime_operation(
-                "observed-external-completion",
-            )),
-            Arc::new(move |scope| {
-                let (service, id, session, output, send) = (
-                    owned_service.clone(),
-                    id.clone(),
-                    session.clone(),
-                    output.clone(),
-                    send.clone(),
-                );
-                Box::pin(async move {
-                    send.send(
-                        service
-                            .complete_external(
-                                &session,
-                                &id,
-                                output,
-                                crate::ProcessOpScope::new(scope),
-                            )
-                            .await,
-                    )
-                    .expect("report completion");
-                    crate::ConformanceTurnEnd::Settled
-                })
-            }),
-        )
-        .await;
-    received
-        .recv()
+    complete("observed-external-completion")
         .await
-        .expect("handler attempted completion")
         .expect("observed external process completes");
     runtime.park().await.expect("park runtime");
 }
@@ -1399,6 +1385,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
                         source_node_id: leaf.clone(),
                     },
                     policy: crate::testing::mock_session_policy(),
+                    plugin_config: Default::default(),
                 })
                 .await
                 .expect("fork after source journal settled");

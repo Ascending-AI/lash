@@ -1080,17 +1080,32 @@ pub(crate) async fn apply_model_selection_to_session(
     reason: &str,
 ) -> Result<(), AppError> {
     state.set_selected_model(ModelSelection::from_spec(&model));
-    session
-        .admin()
-        .config()
-        .update(lash::SessionConfigPatch {
-            model: Some(model.clone()),
-            ..lash::SessionConfigPatch::default()
-        })
+    // The transaction returns only once its outcome is durable: written
+    // against the revision read here, under an id naming the change. A stale
+    // or refused outcome, like a queue rejection or a settlement failure,
+    // remains an internal control error.
+    let config = session.admin().config();
+    let revision = config.revision().await.map_err(AppError::internal)?;
+    let outcome = config
+        .apply(
+            lash::config::ConfigWrite::new(
+                format!("model-selection:{}:{revision}", model.id),
+                revision,
+            ),
+            lash::config::ConfigTransaction::of(lash::config::SetModel {
+                model: model.clone(),
+            }),
+        )
         .await
-        // The setter returns only after the model override is durable; queue
-        // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
+    if !matches!(
+        outcome,
+        lash::config::ConfigTransactionOutcome::Applied { .. }
+    ) {
+        return Err(AppError::internal(format!(
+            "the model selection did not apply: {outcome:?}"
+        )));
+    }
     state.trace_for_session(
         &session.session_id(),
         "model_selection.applied",

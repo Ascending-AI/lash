@@ -101,7 +101,7 @@ mod tests {
     async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
         let backend = crate::support::sqlite_memory_store_backend().await;
         let spec = crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         );
         let pin = crate::testing::host_pin_claim_for_testing();

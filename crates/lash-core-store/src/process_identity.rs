@@ -402,17 +402,19 @@ pub fn process_id_for_test(label: &str) -> ProcessId {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessExecutionEnvSpec {
-    #[serde(default)]
-    pub plugin_options: crate::PluginOptions,
+    /// The plugin configuration the process's creator ran under, at its
+    /// config revision: every runtime built for the process reads it
+    /// (FIG-4379).
+    pub plugin_config: crate::AdmittedPluginConfig,
     pub policy: crate::SessionPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::run_spec::RecordedRender>,
 }
 impl ProcessExecutionEnvSpec {
     /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
-    pub fn new(plugin_options: crate::PluginOptions, policy: crate::SessionPolicy) -> Self {
+    pub fn new(plugin_config: crate::AdmittedPluginConfig, policy: crate::SessionPolicy) -> Self {
         Self {
-            plugin_options,
+            plugin_config,
             policy,
             render: None,
         }

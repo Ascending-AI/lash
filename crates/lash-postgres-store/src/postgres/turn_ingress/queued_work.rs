@@ -18,19 +18,22 @@ lash_store_sql::statements! {
              LIMIT ?2
              FOR UPDATE SKIP LOCKED";
 
+        /// `?10` is the submission digest. The source key was read under the
+        /// session's write authority in the same transaction, so its unique
+        /// constraint is only the backstop.
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-                 authority_json, merge_key, enqueued_at_ms
+                 authority_json, merge_key, enqueued_at_ms, submission_digest
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT (session_id, source_key) DO NOTHING
-             RETURNING batch_id";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
-        /// The facts the settlement verdict consults about batch `?2` of
-        /// session `?1`, locked for the caller's transaction.
+        /// The facts the settlement verdict consults about live batch `?2`
+        /// of session `?1`, locked for the caller's transaction: a tombstone
+        /// answers nothing, as a missing row would.
         settlement_facts = "SELECT admitted_root
              FROM queued_work_batches
-             WHERE session_id = ?1 AND batch_id = ?2 LIMIT 1 FOR UPDATE";
+             WHERE session_id = ?1 AND batch_id = ?2 AND terminal_cause IS NULL
+             LIMIT 1 FOR UPDATE";
 
         /// Batch `?2` of session `?1`, if it is open and not yet read by the
         /// command lane, locked for the caller's transaction.
@@ -40,22 +43,15 @@ lash_store_sql::statements! {
         /// read is the command's admission (FIG-4202). A delivered open
         /// command is being applied, so a withdrawal no longer reaches it.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL
+               AND admitted_root IS NULL AND terminal_cause IS NULL
                AND NOT (work_kind = 'control'
                    AND obligation_state IS NOT DISTINCT FROM 'delivered')
              FOR UPDATE";
-
-        /// Withdraw batch `?1`.
-        ///
-        /// Keyed by id alone because the row lock
-        /// [`select_cancelable`](Self::select_cancelable) took is what holds the
-        /// openness decision; SQLite has no row lock, so it repeats the
-        /// predicate on its delete.
-        delete_cancelled = "DELETE FROM queued_work_batches WHERE batch_id = ?1";
 
         /// Session `?1`'s admission candidates with no turn in progress, up to
         /// `?2` of them.
@@ -67,16 +63,17 @@ lash_store_sql::statements! {
         admission_candidates_idle = "WITH queued_work_head_candidate AS (
                  SELECT enqueue_seq AS head_enqueue_seq, work_kind AS head_work_kind
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND admitted_root IS NULL
+                 WHERE session_id = ?1 AND admitted_root IS NULL AND terminal_cause IS NULL
                  ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
-               AND admitted_root IS NULL
+               AND admitted_root IS NULL AND terminal_cause IS NULL
                AND enqueue_seq >= head_enqueue_seq
                AND work_kind = head_work_kind
              ORDER BY enqueue_seq ASC
@@ -94,20 +91,22 @@ lash_store_sql::statements! {
         admission_candidates_turn_lane = "WITH queued_work_head_candidate AS (
                  SELECT enqueue_seq AS head_enqueue_seq
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_root IS NULL
+               AND admitted_root IS NULL AND terminal_cause IS NULL
                AND enqueue_seq >= head_enqueue_seq
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                      AND commands.terminal_cause IS NULL
                       AND commands.enqueue_seq < queued_work_batches.enqueue_seq
                )
              ORDER BY enqueue_seq ASC
@@ -122,16 +121,17 @@ lash_store_sql::statements! {
                  SELECT enqueue_seq AS head_enqueue_seq,
                         delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_root IS NULL
+               AND admitted_root IS NULL AND terminal_cause IS NULL
                AND head_delivery_policy = 'earliest_safe_boundary'
                AND enqueue_seq >= head_enqueue_seq
              ORDER BY enqueue_seq ASC

@@ -190,47 +190,56 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_protocol_turn_options_round_trip_through_the_committed_head(
+pub async fn session_plugin_config_round_trips_through_the_committed_head(
     store: Arc<dyn RuntimeStore>,
 ) {
-    let expected = crate::ProtocolTurnOptions::from_payload(serde_json::json!({
-        "dialect": "conformance-dialect",
-        "termination": {"kind": "conformance-termination"},
-    }));
+    let mut expected = crate::PluginConfig::for_protocol(Some("conformance-protocol".to_string()));
+    expected.insert(
+        "conformance-protocol",
+        serde_json::json!({
+            "dialect": "conformance-dialect",
+            "termination": {"kind": "conformance-termination"},
+        }),
+    );
+    expected.insert("conformance-plugin", serde_json::json!({"turn_cap": 12}));
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from("session-protocol-turn-options"),
+        session_id: SessionId::from("session-plugin-config"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    state.protocol_turn_options = expected.clone();
+    state.authority.plugin_config = expected.clone();
 
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),
-        "session-protocol-turn-options",
+        "session-plugin-config",
     )
     .await
-    .expect("commit session protocol turn options");
+    .expect("commit session plugin config");
 
     let head = store
-        .load_session_head_meta(&SessionId::from("session-protocol-turn-options"))
+        .load_session_head_meta(&SessionId::from("session-plugin-config"))
         .await
         .expect("load session head")
         .expect("committed session head");
     assert_eq!(
-        head.config.protocol_turn_options,
-        Some(expected.clone()),
-        "the committed head row must carry the settled protocol turn options"
+        head.config.plugin_config, expected,
+        "the committed head row must carry every owner's recorded namespace"
     );
     let restored = crate::conformance::helpers::load_window_state(
         &store,
-        &SessionId::from("session-protocol-turn-options"),
+        &SessionId::from("session-plugin-config"),
     )
     .await
     .expect("load persisted session state")
     .expect("committed session state");
     assert_eq!(
-        restored.protocol_turn_options, expected,
-        "cold load must restore the protocol turn options from the head"
+        restored.authority.plugin_config, expected,
+        "cold load must restore the recorded plugin config from the head"
+    );
+    assert_eq!(
+        restored.effective_protocol_turn_options(),
+        expected.protocol_turn_options(),
+        "the protocol turn options are the protocol owner's recorded namespace"
     );
 }
 
@@ -403,7 +412,6 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeSt
         follow_on_turn_id: crate::TurnId::from("oversized:agent-frame:1"),
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized"),
         task: "q".repeat(BYTE_LIMIT * 2),
-        options: None,
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
@@ -531,7 +539,6 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
             .clone()
             .expect("the initial frame is current"),
         task: "follow-up".to_string(),
-        options: None,
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,

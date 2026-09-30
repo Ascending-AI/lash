@@ -93,6 +93,7 @@ async fn fork_store(
         node_id: node_id.to_string().into(),
         relation: SessionRelation::Root,
         policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        plugin_config: Default::default(),
     };
     factory
         .fork_session(&fork_request)

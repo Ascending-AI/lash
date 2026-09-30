@@ -81,7 +81,7 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes() {
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );

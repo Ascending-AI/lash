@@ -95,8 +95,8 @@ impl<'de> Deserialize<'de> for StateDigest {
 ///
 /// `vm_contract` carries the version of each VM component. A reader admits
 /// every component against its own declared read range. A live transfer
-/// between a parent and its worker also shares the exact
-/// [`crate::BuildIdentity`]; parked state can cross builds within these ranges.
+/// between a parent and its worker also checks the wire protocol version;
+/// parked state can cross builds within these VM contract ranges.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpaqueVmState {

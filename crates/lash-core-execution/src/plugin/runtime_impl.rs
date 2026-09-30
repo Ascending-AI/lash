@@ -22,6 +22,9 @@ pub struct PluginHost {
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
+    /// Every factory's config registration, collected when the host is
+    /// built (FIG-4379).
+    config_registry: Arc<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
 }
 
 /// Inputs shared by new-session creation and reconstruction from durable
@@ -37,7 +40,7 @@ pub struct PluginSessionRequest<'a> {
 }
 
 impl<'a> PluginSessionRequest<'a> {
-    pub fn creation(session_id: impl Into<SessionId>, config: SessionCreationConfig) -> Self {
+    pub fn creation(session_id: impl Into<SessionId>, config: SessionAuthorityContext) -> Self {
         Self {
             owner: RuntimeOwner::Session(session_id.into()),
             parent_session_id: None,
@@ -52,7 +55,7 @@ impl<'a> PluginSessionRequest<'a> {
 
     /// A process runtime's plugin session, built from the process's captured
     /// execution environment. No session lookup finds it.
-    pub fn process_creation(process_id: crate::ProcessId, config: SessionCreationConfig) -> Self {
+    pub fn process_creation(process_id: crate::ProcessId, config: SessionAuthorityContext) -> Self {
         Self {
             owner: RuntimeOwner::Process(process_id),
             parent_session_id: None,
@@ -68,7 +71,7 @@ impl<'a> PluginSessionRequest<'a> {
     pub fn rematerialization(
         session_id: impl Into<SessionId>,
         snapshot: &'a PluginState,
-        config: RecordedSessionConfig,
+        config: SessionAuthorityContext,
     ) -> Self {
         Self {
             owner: RuntimeOwner::Session(session_id.into()),
@@ -84,16 +87,17 @@ impl<'a> PluginSessionRequest<'a> {
 }
 
 /// Creation may seed a fork from its spawn-time capture. Rematerialization
-/// requires the snapshot and protocol configuration already recorded on disk.
+/// requires the snapshot already recorded on disk. Both build under the
+/// session's recorded authority and plugin configuration.
 #[derive(Clone, Debug)]
 pub enum PluginSessionMaterializationRequest<'a> {
     Creation {
-        config: SessionCreationConfig,
+        config: SessionAuthorityContext,
         seed_snapshot: Option<&'a PluginState>,
     },
     Rematerialization {
         snapshot: &'a PluginState,
-        config: RecordedSessionConfig,
+        config: SessionAuthorityContext,
     },
 }
 
@@ -104,40 +108,16 @@ struct BuiltSessionContributions {
     triggers: crate::TriggerEventCatalog,
 }
 
+/// The recorded facts a plugin session is built under: the session's tool
+/// authority and its recorded plugin configuration (or a process's captured
+/// one).
 #[derive(Clone, Debug, Default)]
 pub struct SessionAuthorityContext {
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
-    pub plugin_options: PluginOptions,
-}
-
-/// Configuration used while constructing a genuinely new plugin session.
-///
-/// Protocol options may be empty here because protocol materialization owns
-/// applying create-time defaults after factories have selected their surface.
-#[derive(Clone, Debug, Default)]
-pub struct SessionCreationConfig {
-    pub authority: SessionAuthorityContext,
-    pub protocol_turn_options: crate::ProtocolTurnOptions,
-}
-
-/// Durable configuration required to reconstruct an existing plugin session.
-///
-/// This deliberately has no [`Default`] implementation: every restore-shaped
-/// construction site must name the recorded protocol options explicitly.
-#[derive(Clone, Debug)]
-pub struct RecordedSessionConfig {
-    pub authority: SessionAuthorityContext,
-    pub protocol_turn_options: crate::ProtocolTurnOptions,
-}
-
-impl RecordedSessionConfig {
-    pub fn new(protocol_turn_options: crate::ProtocolTurnOptions) -> Self {
-        Self {
-            authority: SessionAuthorityContext::default(),
-            protocol_turn_options,
-        }
-    }
+    /// The recorded plugin configuration the session is built with
+    /// (FIG-4379).
+    pub plugin_config: super::AdmittedPluginConfig,
 }
 
 impl PluginHost {
@@ -165,11 +145,13 @@ impl PluginHost {
                 .iter()
                 .flat_map(|factory| factory.extension_contributions()),
         );
+        let config_registry = Arc::new(super::ConfigRegistry::build(&all_factories).map(Arc::new));
         Self {
             factories: Arc::new(all_factories),
             export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
+            config_registry,
         }
     }
 
@@ -184,6 +166,7 @@ impl PluginHost {
             export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
+            config_registry: Arc::clone(&self.config_registry),
         }
     }
 
@@ -193,6 +176,31 @@ impl PluginHost {
 
     pub fn factories(&self) -> &[Arc<dyn PluginFactory>] {
         self.factories.as_ref().as_slice()
+    }
+
+    /// Every config registration of this host's plugins, and the core
+    /// owner's (FIG-4379): the one list config creation, command ingress,
+    /// resolution and the command catalog are generated from. A factory's
+    /// invalid registration refuses here, on every use.
+    pub fn config_registry(
+        &self,
+    ) -> Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError> {
+        self.config_registry.as_ref().clone()
+    }
+
+    /// The recorded plugin configuration of a session created on this host
+    /// (FIG-4379): every registered owner creates its namespace from
+    /// `requested`, and `protocol_plugin_id` names the protocol owner.
+    pub fn resolve_creation_plugin_config(
+        &self,
+        protocol_plugin_id: Option<&str>,
+        requested: &crate::PluginOptions,
+        parent: Option<&super::PluginConfig>,
+        is_root_session: bool,
+    ) -> Result<super::PluginConfig, crate::SessionConfigRefusal> {
+        self.config_registry()
+            .map_err(crate::SessionConfigRefusal::new)?
+            .resolve_creation(protocol_plugin_id, requested, parent, is_root_session)
     }
 
     /// Ask every factory for its process-engine contributions and register them
@@ -235,32 +243,28 @@ impl PluginHost {
             tool_catalog_overlay,
             tool_snapshot,
         } = request;
-        let (authority, protocol_turn_options, materialization, snapshot, forked) =
-            match materialization {
-                PluginSessionMaterializationRequest::Creation {
-                    config,
-                    seed_snapshot,
-                } => (
-                    config.authority,
-                    config.protocol_turn_options,
-                    PluginSessionMaterialization::Creation,
-                    seed_snapshot,
-                    seed_snapshot.is_some(),
-                ),
-                PluginSessionMaterializationRequest::Rematerialization { snapshot, config } => (
-                    config.authority,
-                    config.protocol_turn_options,
-                    PluginSessionMaterialization::Rematerialization,
-                    Some(snapshot),
-                    false,
-                ),
-            };
+        let (authority, materialization, snapshot, forked) = match materialization {
+            PluginSessionMaterializationRequest::Creation {
+                config,
+                seed_snapshot,
+            } => (
+                config,
+                PluginSessionMaterialization::Creation,
+                seed_snapshot,
+                seed_snapshot.is_some(),
+            ),
+            PluginSessionMaterializationRequest::Rematerialization { snapshot, config } => (
+                config,
+                PluginSessionMaterialization::Rematerialization,
+                Some(snapshot),
+                false,
+            ),
+        };
         let ctx = PluginSessionContext {
             owner,
             tool_access: authority.tool_access.clone(),
             subagent: authority.subagent.clone(),
-            plugin_options: authority.plugin_options.clone(),
-            protocol_turn_options,
+            plugin_config: authority.plugin_config.clone(),
             materialization,
             extensions: self.extensions.clone(),
             parent_session_id,
@@ -292,6 +296,7 @@ impl PluginHost {
                 super::session_obj::LiveSessionAuthority {
                     tool_access: authority.tool_access,
                     subagent: authority.subagent,
+                    plugin_config: authority.plugin_config,
                 },
             )),
             extensions: self.extensions.clone(),
@@ -387,8 +392,7 @@ impl PluginHost {
             owner: RuntimeOwner::Session(SessionId::from("lash-core-tool-catalog")),
             tool_access: SessionToolAccess::default(),
             subagent: None,
-            plugin_options: PluginOptions::default(),
-            protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            plugin_config: super::AdmittedPluginConfig::default(),
             materialization: PluginSessionMaterialization::Creation,
             extensions: self.extensions.clone(),
             parent_session_id: None,

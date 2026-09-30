@@ -118,13 +118,16 @@ impl EffectLayer for CloseMutation {
     ) -> Result<(), RuntimeEffectControllerError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         self.started.notify_one();
+        // Seat the scoped cancellation before sweeping sibling waits. A sweep
+        // first can commit the loser before close and mask the isolation defect.
+        inner.close_effect_group(handle, disposition).await?;
         if let (Some(host), Some(session)) = (&self.host, &self.cancel_session) {
             host.cancel_await_events_for_session(session)
                 .await
                 .expect("the mutation cancels every registered session wait");
             self.swept.notify_one();
         }
-        inner.close_effect_group(handle, disposition).await
+        Ok(())
     }
 }
 

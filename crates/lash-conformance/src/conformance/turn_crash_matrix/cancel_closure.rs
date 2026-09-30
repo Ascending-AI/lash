@@ -43,7 +43,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
         let scenario = format!("cancel-closure-{}", point_key(&point));
         let identity = ReferenceIdentity::for_scenario(&scenario);
         let store = make(&scenario);
-        seed_reference_ingress_for_drive(&store, &identity, &scenario).await;
+        seed_reference_ingress_for_drive(&store, &identity).await;
         let address = crate::TurnAddress::new(&identity.session_id, &identity.turn_id);
         let receipt = crate::TurnWorkDriver::for_session(
             host.host(),
@@ -88,7 +88,11 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
             let point = point.clone();
             Arc::new(move |scoped| {
                 let stores = Arc::clone(&stores);
-                let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
+                let store = SeamStore::steering(
+                    Arc::clone(&store),
+                    seam.control.clone(),
+                    vec![reference_steer(&identity)],
+                );
                 let host = host.clone();
                 let identity = identity.clone();
                 let seam = seam.clone();

@@ -22,15 +22,15 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
 use lash_core::{
-    EffectGroupHandle, ExecutionScope, GroupSettlement, RankedGroupSettlement,
-    RuntimeEffectControllerError, RuntimeErrorCode,
+    EffectGroupHandle, GroupSettlement, RankedGroupSettlement, RuntimeEffectControllerError,
+    RuntimeErrorCode,
 };
 
 use crate::durable_wait::RestateTurnCancelRaceOutcome;
 use crate::effect_group::{
-    EffectGroupPayloadGetResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
-    EffectGroupServedRank, EffectGroupWaitResolution, decode_wait_resolution, group_shape_error,
-    rank_wait_request, settlement_from_payload,
+    EffectGroupNotice, EffectGroupNotification, EffectGroupPayloadGetResponse,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupServedRank,
+    group_shape_error, settlement_from_payload,
 };
 
 use super::{
@@ -224,8 +224,8 @@ where
     Ok(settlement)
 }
 
-/// Reads the run from `rank` for the caller, parking on the rank's wait when
-/// it is not yet seated. `rank` is returned; the ranks after it are kept
+/// Reads the run from `rank` for the caller, parking on the group index's
+/// `Rank` notice when it is not yet inside the seated prefix (FIG-4344). `rank` is returned; the ranks after it are kept
 /// ahead.
 async fn read_from_rank<'ctx, C>(
     controller: &RestateRuntimeEffectController<'ctx, C>,
@@ -251,28 +251,25 @@ where
         .await
         .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
     if matches!(read, EffectGroupReadRankResponse::NotSettled) {
-        let scope = ExecutionScope::runtime_operation(group_key);
-        let request = rank_wait_request(&scope, group_key, rank)?;
         // A turn-observing rank wait races the turn's durable cancellation
         // gate, and a process drive's rank wait that observes no turn races
         // the segment's durable cancel promise; never a live token. The
         // journal records which completed first (FIG-3672 P9, FIG-3673).
         let turn_cancel =
             restate_group_turn_cancel_wait_request(&controller.authority_id, &cancel)?;
-        let resolution = match controller
+        let notification = match controller
             .context
-            .await_effect_group_wait(
+            .await_effect_group_notice(
                 &controller.namespace,
-                request,
                 group_key.to_string(),
+                EffectGroupNotice::Rank { rank },
                 turn_cancel,
                 controller.options.process_cancel,
             )
             .await
-            .map_err(|error| {
-                effect_group_engine_error("LashDurableWaitWorkflow/await_resolution(RANK)", error)
-            })? {
-            RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/subscribe(Rank)", error))?
+        {
+            RestateTurnCancelRaceOutcome::Completed(notification) => notification,
             RestateTurnCancelRaceOutcome::TurnCancelled
             | RestateTurnCancelRaceOutcome::ProcessCancelled => {
                 return Err(RuntimeEffectControllerError::new(
@@ -286,9 +283,9 @@ where
                 ));
             }
         };
-        match decode_wait_resolution(resolution)? {
-            EffectGroupWaitResolution::Rank => {}
-            EffectGroupWaitResolution::Retired => {
+        match notification {
+            EffectGroupNotification::Rank => {}
+            EffectGroupNotification::Retired => {
                 return Err(group_shape_error(format!(
                     "effect group {group_key} was retired while awaiting rank {rank}"
                 )));

@@ -1,16 +1,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::{PoolError, build_identity};
-use lash_vm_protocol::{BuildIdentity, ProtocolBounds, VmLimits};
+use crate::PoolError;
+use lash_vm_protocol::{ProtocolBounds, VmLimits};
 
 /// An explicit helper executable, or the host executable with an early entry.
 #[derive(Clone, Debug)]
 pub struct WorkerEntry {
     pub executable: PathBuf,
     pub args: Vec<String>,
-    /// The entry's own compiled identity, never an identity echoed from argv.
-    pub build: BuildIdentity,
 }
 
 impl WorkerEntry {
@@ -18,7 +16,6 @@ impl WorkerEntry {
         Self {
             executable: executable.into(),
             args: Vec::new(),
-            build: build_identity(),
         }
     }
 
@@ -26,11 +23,10 @@ impl WorkerEntry {
         clippy::disallowed_methods,
         reason = "host explicitly selects its own early re-exec entry"
     )]
-    pub fn reexec(build: BuildIdentity) -> Result<Self, PoolError> {
+    pub fn reexec() -> Result<Self, PoolError> {
         Ok(Self {
             executable: std::env::current_exe().map_err(PoolError::io)?,
             args: Vec::new(),
-            build,
         })
     }
 }

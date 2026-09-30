@@ -49,8 +49,12 @@ lash_rust_unit_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_harness", "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -84,12 +88,16 @@ lash_rust_unit_test(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_node", "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-upgrade-harness",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_integration_test(
@@ -102,6 +110,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "phase_a", "//crates/lash-upgrade-harness:phase_a__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-upgrade-harness",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
@@ -121,6 +133,10 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "rolling", "//crates/lash-upgrade-harness:rolling__test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-upgrade-harness",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
@@ -128,20 +144,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-upgrade-harness:test_batch"),
-    jobs = 2,
-    tests = [
-        ":lash-upgrade-harness__unit_test",
-        ":lash-upgrade-node__bin__unit_test",
-        ":phase_a__test",
-        ":rolling__test",
-    ],
 )
 
 filegroup(
@@ -236,8 +238,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_harness", "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_4ac81179"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -259,8 +265,12 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_harness", "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_f1d937fa"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -329,6 +339,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_node", "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_4ac81179"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_4ac81179",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
@@ -353,6 +367,10 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "lash_upgrade_node", "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test__fv_f1d937fa"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_f1d937fa",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
@@ -375,11 +393,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "phase_a", "//crates/lash-upgrade-harness:phase_a__test__fv_4ac81179"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_4ac81179",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -400,11 +422,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "phase_a", "//crates/lash-upgrade-harness:phase_a__test__fv_f1d937fa"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_f1d937fa",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -423,11 +449,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "rolling", "//crates/lash-upgrade-harness:rolling__test__fv_4ac81179"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_4ac81179",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -448,11 +478,15 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-upgrade-harness", "rolling", "//crates/lash-upgrade-harness:rolling__test__fv_f1d937fa"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     library = "//crates/lash-upgrade-harness:lash-upgrade-harness__fv_f1d937fa",
     library_crate_name = "lash_upgrade_harness",
     manifest_dir = "crates/lash-upgrade-harness",
     package_name = "lash-upgrade-harness",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

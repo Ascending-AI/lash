@@ -492,6 +492,56 @@ fn single_slot_nested_compile_completes_by_parking_the_awaiting_run() {
 }
 
 #[test]
+fn parked_projected_tool_arguments_keep_the_recorded_request() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut input = start(
+        "finish(await tools.echo({ value: session_projection.length }));",
+        ExecutionMode::Foreground,
+    );
+    input.contexts[0].body = EncodedPayload(
+        rmp_serde::to_vec_named(&RunContext {
+            environment: lashlang::testing::harness::test_environment()
+                .with_globals(["session_projection".to_string()]),
+            mode: ExecutionMode::Foreground,
+            projected: vec![ProjectionDescription {
+                name: "session_projection".into(),
+                key: 0,
+                type_name: "string".into(),
+                scalar: Some(lashlang::Value::String("session:durable".into())),
+            }],
+            ..RunContext::default()
+        })
+        .expect("projected context"),
+    );
+    let mut worker = checkout(&pool);
+    let WorkerMessage::EffectRequest(request) = worker.start(input.clone()).expect("start") else {
+        panic!("the cell requests its projected tool call");
+    };
+    assert_eq!(request.kind, EffectKind::ResourceOperation);
+    input.state = StartState::Continuation(parked(worker.park().expect("park")));
+    worker.release().expect("release the one slot");
+    let mut resumed = checkout(&pool);
+    let WorkerMessage::EffectRequest(again) = resumed.start(input).expect("resume") else {
+        panic!("the cell reissues its pending tool call");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (request.kind, &request.payload),
+        "parking must preserve the issued request, including a derived projected scalar"
+    );
+    let message = resumed.effect_result(answer(again)).expect("answer");
+    let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
+        panic!("the resumed cell completes");
+    };
+    let outcome: lashlang::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("outcome");
+    let lashlang::ExecutionOutcome::Finished(lashlang::Value::Projected(value)) = outcome else {
+        panic!("the terminal value keeps its projected provenance: {outcome:?}");
+    };
+    assert_eq!(value.scalar_value(), Some(&lashlang::Value::Number(15.0)));
+    resumed.release().expect("release");
+}
+
+#[test]
 fn process_boundary_releases_and_resumes_on_one_worker() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let mut worker = checkout(&pool);
@@ -595,15 +645,49 @@ fn parent_effect_wait_pauses_deadlines() {
 }
 
 #[test]
-fn wrong_build_is_refused_before_model_code() {
-    let mut cfg = config("");
-    cfg.entry.build = BuildIdentity::new("another-build");
-    assert!(matches!(
-        WorkerPool::new(cfg),
-        Err(PoolError::Infrastructure(
-            InfrastructureOutcome::ProtocolViolation { .. }
-        ))
-    ));
+fn out_of_range_protocol_is_typed_and_refused_before_model_code() {
+    for (mode, version) in [
+        ("protocol_below", MIN_SUPPORTED_WORKER_PROTOCOL_VERSION - 1),
+        ("protocol_above", WORKER_PROTOCOL_VERSION + 1),
+    ] {
+        let Err(PoolError::ProtocolVersion(refusal)) = WorkerPool::new(config(mode)) else {
+            panic!("{mode}: expected a typed protocol refusal");
+        };
+        assert_eq!(refusal.parent_version, WORKER_PROTOCOL_VERSION);
+        assert_eq!(
+            refusal.minimum_supported_version,
+            MIN_SUPPORTED_WORKER_PROTOCOL_VERSION
+        );
+        assert_eq!(refusal.worker_version, version);
+        assert_eq!(refusal.parent_crate_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(refusal.worker_crate_version, "9.8.7-diagnostic-only");
+    }
+}
+
+#[test]
+fn synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake() {
+    let Err(PoolError::ProtocolVersion(refusal)) = WorkerPool::new(config("opposite_generation"))
+    else {
+        panic!("opposite generation must fail before model code");
+    };
+    assert_eq!(
+        refusal.parent_version,
+        1 + u32::from(cfg!(feature = "synthetic-next"))
+    );
+    assert_eq!(
+        refusal.worker_version,
+        if cfg!(feature = "synthetic-next") {
+            1
+        } else {
+            2
+        }
+    );
+}
+
+#[test]
+fn equal_protocol_accepts_a_different_crate_version() {
+    let pool = WorkerPool::new(config("crate_version")).expect("crate version is diagnostic only");
+    assert_eq!(pool.stats().workers, 1);
 }
 
 #[test]
@@ -641,6 +725,52 @@ fn helper_entry_preserves_effect_values_losslessly() {
     assert_eq!(values[0], Value::Undefined);
     assert_eq!(values[1], Value::Number(f64::NEG_INFINITY));
     worker.release().expect("reset");
+}
+
+#[test]
+fn cell_completion_carries_state_metadata_and_reset_clears_the_projection() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut input = start(
+        "const planted = 7; print(planted); finish(planted);",
+        ExecutionMode::Foreground,
+    );
+    let mut context: RunContext =
+        rmp_serde::from_slice(&input.contexts[0].body.0).expect("context");
+    context.capture_state_view = true;
+    input.contexts[0].body = EncodedPayload(rmp_serde::to_vec_named(&context).expect("context"));
+    let message = worker.start(input).expect("start");
+    let WorkerMessage::Complete { state, value } = drive(&mut worker, message) else {
+        panic!("the cell completes with its state metadata");
+    };
+    let completion: service::CellCompletion =
+        rmp_serde::from_slice(&value.0).expect("cell completion");
+    let metadata: service::StateMetadata =
+        rmp_serde::from_slice(&completion.state.0).expect("state metadata");
+    assert_eq!(
+        completion.outcome,
+        lashlang::ExecutionOutcome::Finished(lashlang::Value::Number(7.0))
+    );
+    assert!(metadata.names.contains("planted"));
+    assert_eq!(
+        metadata.globals.get("planted"),
+        Some(&lashlang::Value::Number(7.0))
+    );
+    assert!(
+        metadata
+            .definition_ids
+            .iter()
+            .eq(state.definition_ids().iter())
+    );
+    worker.release().expect("reset cell");
+
+    let mut next = checkout(&pool);
+    let (_, value) = complete(&mut next, "finish(typeof planted);");
+    assert_eq!(
+        rmp_serde::from_slice::<lashlang::ExecutionOutcome>(&value).expect("plain outcome"),
+        lashlang::ExecutionOutcome::Finished(lashlang::Value::String("undefined".into()))
+    );
+    next.release().expect("reset plain run");
 }
 
 #[test]

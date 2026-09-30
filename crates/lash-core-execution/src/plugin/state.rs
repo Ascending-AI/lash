@@ -373,21 +373,27 @@ impl PluginStateRegistry {
     pub(super) fn was_hydrated_from(&self, snapshot: &PluginState) -> bool {
         self.source.as_ref() == Some(&state_ref(snapshot)) || self.data == *snapshot
     }
-    pub(super) fn hydrate_live(
-        &mut self,
-        snapshot: &PluginState,
-    ) -> Result<(), super::PluginError> {
+    /// Adopt a recorded head's plugin state as the live state. The recorded
+    /// head is durable truth: the drive that committed it owned the head
+    /// (FIG-4202), so an accepted write the head does not carry is an
+    /// uncommitted tail, and the live state drops it exactly as a cold
+    /// rebuild from that head would (ADR 0078 §5). A namespace bound live
+    /// but absent from the head stays bound, at its default.
+    pub(super) fn hydrate_live(&mut self, snapshot: &PluginState) {
         if self.was_hydrated_from(snapshot) {
-            return Ok(());
+            return;
         }
+        let empty = PluginNamespaceState::default();
         for (id, live) in &self.data.plugins {
-            let incoming = snapshot.plugins.get(id).cloned().unwrap_or_default();
-            if incoming.generation < live.generation
-                || (incoming.generation == live.generation && incoming.values != live.values)
-            {
-                return Err(super::PluginError::Session(format!(
-                    "plugin state for `{id}` would rewind accepted writes; rebuild the session from its durable checkpoint"
-                )));
+            let recorded = snapshot.plugins.get(id).unwrap_or(&empty);
+            if recorded.generation <= live.generation && recorded != live {
+                tracing::info!(
+                    event = "plugin_state.uncommitted_tail_dropped",
+                    plugin_id = %id,
+                    live_generation = live.generation,
+                    recorded_generation = recorded.generation,
+                    "live plugin state adopted a recorded head that does not carry its accepted writes"
+                );
             }
         }
         let resident_ids = self.data.plugins.keys().cloned().collect::<Vec<_>>();
@@ -396,7 +402,6 @@ impl PluginStateRegistry {
             self.data.plugins.entry(id).or_default();
         }
         self.source = Some(state_ref(snapshot));
-        Ok(())
     }
 }
 #[expect(

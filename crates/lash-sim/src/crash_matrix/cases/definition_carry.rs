@@ -230,6 +230,62 @@ fn core(
     })
 }
 
+/// Drive only artifact cleanup past its guarded deferral once this root's
+/// journal settles. The recovery interval retains its ordinary clock and
+/// lapsed-claim bound; storage reclamation gets its own deterministic pass.
+async fn deferred_cleanup(
+    world: &CrashWorld,
+    session: &lash_core::SessionId,
+    root: &str,
+) -> Result<(), String> {
+    use lash_core::runtime::artifact_cleanup::{
+        ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
+    };
+    use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
+    let backend = world.backend();
+    let journal = lash_core::ExecutionScope::turn(session.clone(), root)
+        .journal_identity()
+        .map_err(|error| error.to_string())?;
+    if backend
+        .effect_host()
+        .journal_replay(&journal)
+        .await
+        .map_err(|error| error.to_string())?
+        != lash_core::JournalReplay::Settled
+    {
+        return Ok(());
+    }
+    let administration = world.core()?.session_administration().await;
+    let relay = ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+        ledger: backend.artifact_cleanup(),
+        authorities: Arc::new(StoreSetAuthorities {
+            effect_host: backend.effect_host(),
+            sessions: backend.session_store_factory(),
+            processes: backend.process_registry(),
+            triggers: backend.trigger_store(),
+        }),
+        process_env: backend.process_env_store(),
+        modules: backend.module_artifacts(),
+        definitions: backend.definition_store(),
+        engines: administration.process_engines().clone(),
+        attachments: backend.attachment_referrers(),
+        clock: backend.clock(),
+    });
+    let clock = lash_core::testing::TestClock::new(
+        world
+            .now_ms()
+            .saturating_add(RelayPolicy::default().max_backoff_ms),
+    );
+    relay_due(
+        &relay,
+        &clock,
+        std::num::NonZeroUsize::MIN.saturating_add(63),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// The successor keeps its complete share until the predecessor's end is
 /// delivered, then everything is reclaimed after an uncarried switch. The
 /// carry turn is held open until the first check after a recovery tick
@@ -255,6 +311,14 @@ fn carried_then_reclaimed(
         Box::pin(async move {
             if world.ticks_run() > ticks_at_restart {
                 hold.release();
+            }
+            let root = if carried.load(Ordering::SeqCst) {
+                "uncarry"
+            } else {
+                "carry"
+            };
+            if let Err(error) = deferred_cleanup(world, &session, root).await {
+                return vec![error];
             }
             if !carried.load(Ordering::SeqCst) {
                 let frames = store.frames();

@@ -480,7 +480,7 @@ impl LoadWorker {
         .into_process_input()
         .map_err(terminal)?;
         let environment = lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy {
                 model: self.model.clone(),
                 ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)

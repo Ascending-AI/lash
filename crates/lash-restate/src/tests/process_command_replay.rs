@@ -165,8 +165,10 @@ pub(super) async fn a_list_replayed_after_the_listed_processes_change_answers_as
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-list"),
             RuntimeEffectCommand::process(ProcessCommand::List {
-                session_scope: scope.clone(),
-                mode: lash_core::ProcessListMode::Live,
+                selection: lash_core::ProcessListSelection::Observed {
+                    session_scope: scope.clone(),
+                    mode: lash_core::ProcessListMode::Live,
+                },
             }),
         )
     };

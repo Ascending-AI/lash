@@ -1,25 +1,28 @@
 //! A dispatched child's durable cancel fact (ADR 0105 §4, FIG-3904).
 //!
-//! The fact is the child's `Cancel` group wait. The index resolves it
-//! `Cancel` when a close or a retirement decides the child's cancel, `Retired`
-//! when the group retires, and `Settled` once the child's own settlement is
-//! seated (FIG-3709). Every terminal but `Settled` is a cancel.
+//! The fact is the group index's own record of the child (FIG-4344): a
+//! decided cancel is a cancel, a retirement is a cancel, and a seated
+//! settlement is past every cancel. The index answers it as the child's
+//! `ChildCancel` notice.
 //!
 //! A child reads the fact three ways, one per place it runs:
 //!
-//! - a durable wait of the child races it as a journaled arm, a call on the
-//!   cancel wait beside the wait's own command, so a replay takes the arm the
-//!   first execution took;
-//! - a tool child's drive peeks it at each step boundary, a journaled call;
+//! - a durable wait of the child races the notice's awakeable as a journaled
+//!   arm, subscribed beside the wait's own command, so a replay takes the arm
+//!   the first execution took;
+//! - a tool child's drive reads it at each step boundary, one journaled shared
+//!   read of the index;
 //! - a recorded step body watches it live through the ingress, which the
 //!   journal never sees: the body's recorded outcome is what a replay serves.
 
 use super::*;
 
-/// One child's cancel fact, as the controller that drives the child holds it.
+/// One child's cancel fact, as the controller that drives the child holds it:
+/// the group and the child's position in it.
 #[derive(Clone)]
 pub(crate) struct GroupChildCancel {
-    key: AwaitEventKey,
+    group_key: String,
+    position: usize,
     watch: Arc<dyn lash_core::GroupChildCancelWatch>,
 }
 
@@ -27,32 +30,29 @@ impl GroupChildCancel {
     pub(crate) fn new(
         ingress: RestateIngressClient,
         namespace: crate::RestateNamespace,
-        key: AwaitEventKey,
+        group_key: String,
+        position: usize,
     ) -> Self {
         Self {
             watch: Arc::new(IngressChildCancelWatch {
                 ingress,
                 namespace,
-                key: key.clone(),
+                group_key: group_key.clone(),
+                position,
             }),
-            key,
+            group_key,
+            position,
         }
     }
 
-    /// The journaled arm's request: an await on the child's cancel wait.
-    pub(crate) fn await_request(&self) -> RestateDurableWaitAwaitRequest {
-        RestateDurableWaitAwaitRequest {
-            key: self.key.clone(),
-            deadline: None,
-        }
+    /// The group whose index holds the fact.
+    pub(crate) fn group_key(&self) -> &str {
+        &self.group_key
     }
 
-    /// The peek's address and replay key.
-    pub(crate) fn peek_target(&self) -> (RestateDurableWaitAddress, String) {
-        (
-            RestateDurableWaitAddress::for_key(&self.key),
-            self.key.key_id.clone(),
-        )
+    /// The child's position in its group.
+    pub(crate) fn position(&self) -> usize {
+        self.position
     }
 
     /// The live watch a recorded step body of the child races.
@@ -64,54 +64,63 @@ impl GroupChildCancel {
 impl std::fmt::Debug for GroupChildCancel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GroupChildCancel")
-            .field("key", &self.key.key_id)
+            .field("group_key", &self.group_key)
+            .field("position", &self.position)
             .finish_non_exhaustive()
     }
 }
 
-/// Whether a resolution of a child's cancel wait is a cancel: every terminal
-/// but the child's own `Settled`.
-pub(crate) fn group_child_cancel_verdict(resolution: Resolution) -> bool {
-    !matches!(
-        decode_wait_resolution(resolution),
-        Ok(EffectGroupWaitResolution::Settled)
-    )
-}
-
-/// The live watch: an ingress observer of the child's cancel wait, kept out
-/// of the child's journal (`WaitObserver::GroupChildCancel`). A decided
-/// wait answers from its promise without registering, and every watch of one
-/// child shares one server-side waiter, however often it reattaches
-/// (FIG-4345). A wait that ends `Settled` is no cancel, and the watch stays
-/// pending. An attach-ceiling timeout reattaches to the same durable wait.
-/// Other ingress failures reach the caller's shared retry ladder.
+/// The live watch: an ingress observer of the child's cancel fact, kept out
+/// of the child's journal. A decided fact answers from the index's shared
+/// read; otherwise every watch of one child attaches to one `await_notice`
+/// invocation under the same idempotency key, however often it reattaches
+/// (FIG-4345). A child whose settlement seated is past every cancel, and the
+/// watch stays pending. An attach-ceiling timeout reattaches to the same
+/// waiter. Other ingress failures reach the caller's shared retry ladder.
 struct IngressChildCancelWatch {
     ingress: RestateIngressClient,
     namespace: crate::RestateNamespace,
-    key: AwaitEventKey,
+    group_key: String,
+    position: usize,
 }
 
 #[async_trait::async_trait]
 impl lash_core::GroupChildCancelWatch for IngressChildCancelWatch {
     async fn cancelled(&self) -> Result<(), lash_core::RuntimeError> {
-        let request = RestateDurableWaitAwaitRequest {
-            key: self.key.clone(),
-            deadline: None,
-        };
-        let durable_wait_workflow = self
+        let index = self
             .namespace
-            .stable(crate::LashService::DurableWaitWorkflow)
+            .stable(crate::LashService::EffectGroupState)
             .name();
-        let resolution = loop {
-            match crate::durable_wait::observe_durable_wait(
-                &self.ingress,
-                &durable_wait_workflow,
-                crate::durable_wait::WaitObserver::GroupChildCancel,
-                &request,
-            )
-            .await
-            {
-                Ok(resolution) => break resolution,
+        let notice = EffectGroupNotice::ChildCancel {
+            position: self.position,
+        };
+        let notification = loop {
+            let read = self
+                .ingress
+                .call_lash_object::<_, Option<EffectGroupNotification>>(
+                    &index,
+                    &self.group_key,
+                    "child_cancel",
+                    &EffectGroupChildCancelRequest {
+                        position: self.position,
+                    },
+                )
+                .await;
+            let observed = match read {
+                Ok(Some(notification)) => Ok(notification),
+                Ok(None) => {
+                    super::notifications::await_group_notice_via_ingress(
+                        &self.ingress,
+                        &index,
+                        &self.group_key,
+                        &notice,
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+            match observed {
+                Ok(notification) => break notification,
                 Err(error)
                     if error.is_timeout()
                         && error.classification() == crate::RestateHttpErrorClass::Transient => {}
@@ -124,7 +133,7 @@ impl lash_core::GroupChildCancelWatch for IngressChildCancelWatch {
                 }
             }
         };
-        if !group_child_cancel_verdict(resolution) {
+        if !notification.is_child_cancel() {
             std::future::pending::<()>().await;
         }
         Ok(())

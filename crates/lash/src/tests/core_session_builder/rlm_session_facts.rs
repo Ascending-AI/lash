@@ -31,35 +31,39 @@ async fn create_stating_termination(
         .await
 }
 
-/// State RLM facts on an open session through the one durable config command
-/// (FIG-4099): a guarded set-if-unset with a typed conflict (ADR 0066).
+/// Set the session's RLM render through its one config command, written
+/// against `revision`, and answer how it settled.
 #[cfg(feature = "rlm")]
-async fn update_rlm_config(
+async fn set_render(
     session: &crate::LashSession,
-    config: crate::rlm::RlmSessionConfig,
-) -> crate::Result<crate::rlm::RlmSessionConfig> {
-    use crate::rlm::RlmSessionExt as _;
-
+    id: &str,
+    revision: u64,
+    print_chars: usize,
+) -> crate::Result<crate::config::ConfigTransactionOutcome> {
     session
         .admin()
         .config()
-        .update(crate::rlm::rlm_session_config_patch(&config)?)
-        .await?;
-    Ok(session.rlm_config().expect("recorded config decodes"))
+        .apply(
+            crate::config::ConfigWrite::new(id, revision),
+            crate::config::ConfigTransaction::of(crate::rlm::SetRlmRender {
+                print: crate::rlm::RenderParamsPatch {
+                    max_chars: Some(print_chars),
+                    ..Default::default()
+                },
+                preview: crate::rlm::RenderParamsPatch::default(),
+            }),
+        )
+        .await
 }
 
-/// The typed RLM conflict an update was refused with.
+/// The session's recorded RLM namespace, as its owner records it.
 #[cfg(feature = "rlm")]
-fn termination_conflict(
-    error: &crate::EmbedError,
-) -> (crate::rlm::RlmTermination, crate::rlm::RlmTermination) {
-    match crate::rlm::rlm_session_config_conflict(error) {
-        Some(crate::rlm::RlmSessionConfigConflict::Termination {
-            recorded,
-            requested,
-        }) => ((**recorded).clone(), (**requested).clone()),
-        _ => panic!("expected the typed termination conflict, got: {error:?}"),
-    }
+fn recorded_rlm(session: &crate::LashSession) -> crate::rlm::RlmRecordedConfig {
+    session
+        .read_view()
+        .protocol_turn_options()
+        .decode()
+        .expect("the recorded RLM namespace decodes")
 }
 
 #[cfg(feature = "rlm")]
@@ -304,8 +308,8 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
 }
 
 /// A per-turn protocol override naming another `dialect` cannot re-point the
-/// language a turn is served in, and never replaces the session's recorded
-/// dialect.
+/// language a turn is served in: the RLM owner refuses the run's shape before
+/// any provider call, and the session's recorded dialect stands.
 ///
 /// `SendBuilder::protocol_turn_options` is public host surface and the merge
 /// behind it is a shallow key merge, so a host-supplied `{"dialect":"..."}` is
@@ -375,12 +379,25 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
         serde_json::json!("lashlang"),
         "the override must actually reach the turn for this to be an attack"
     );
-    attacked.output().await?;
+    let refused = attacked
+        .output()
+        .await
+        .expect_err("the RLM owner refuses a run that re-points its dialect");
+    assert!(
+        matches!(
+            &refused,
+            crate::EmbedError::Runtime(error)
+                if error.code == lash_core::RuntimeErrorCode::RunShapeRefused
+                    && error.message.contains(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+        ),
+        "the refusal is the run shape's, naming the RLM owner: {refused:?}"
+    );
     drop(session);
 
-    // Every prompt the provider was handed, including the attacked turn's.
+    // The attacked turn reached no provider; the one prompt served the
+    // recorded language.
     let prompts = seen.lock_recover().clone();
-    assert_eq!(prompts.len(), 2);
+    assert_eq!(prompts.len(), 1);
     for prompt in &prompts {
         assert!(
             prompt.contains("## TypeScript execution") && !prompt.contains("<lashlang>"),
@@ -432,10 +449,11 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
         Ok(_) => panic!("the create contract carries no language choice"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("invalid RLM create options"));
+    let refusal = rlm_creation_refusal(&error);
+    assert_eq!(refusal.owner, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
     assert!(
-        error.to_string().contains("dialect"),
-        "the refusal names the field the host stated: {error}"
+        refusal.message.contains("invalid creation config") && refusal.message.contains("dialect"),
+        "the refusal names the field the host stated: {refusal:?}"
     );
     Ok(())
 }
@@ -520,11 +538,12 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
     Ok(())
 }
 
-/// The typed read reports the facts as recorded, and the guarded write is
-/// idempotent on a fact the session already carries (ADR 0066).
+/// The typed read reports the facts as recorded (ADR 0066), and the RLM
+/// owner admits exactly one command: its render. No command changes a
+/// recorded fact (FIG-4379).
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_no_op() -> Result<()>
+async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_changes() -> Result<()>
 {
     use crate::rlm::RlmSessionExt as _;
 
@@ -549,65 +568,68 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
         "a fact the session never stated reads as absent, not as its default"
     );
 
-    let unchanged = update_rlm_config(
-        &session,
-        crate::rlm::RlmSessionConfig::new()
-            .final_answer_format(crate::rlm::RlmFinalAnswerFormat::Markdown),
-    )
-    .await
-    .expect("restating the recorded final-answer format is a no-op");
-    assert_eq!(unchanged, recorded);
-    Ok(())
-}
-
-/// A guarded write lands on a fact the session has not recorded, and the fact
-/// it lands on is the only one it touches.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
-    let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("rlm-guarded-write")
-        .created()
+    let catalog = session.admin().config().commands().await?;
+    let rlm_commands = catalog
+        .commands
+        .iter()
+        .filter(|command| command.owner == crate::rlm::RLM_PROTOCOL_PLUGIN_ID)
+        .map(|command| command.command.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(rlm_commands, vec!["set_render"]);
+    let revision = catalog.revision;
+    let error = session
+        .admin()
+        .config()
+        .apply(
+            crate::config::ConfigWrite::new("rlm-termination", revision),
+            crate::config::ConfigTransaction::new().then_entry(crate::config::ConfigCommandEntry {
+                owner: crate::rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                command: "set_termination".to_string(),
+                args: serde_json::json!({ "termination": { "kind": "natural" } }),
+            }),
+        )
         .await
-        .open()
-        .await?;
-
-    let written = update_rlm_config(
-        &session,
-        crate::rlm::RlmSessionConfig::new()
-            .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-    )
-    .await
-    .expect("an unrecorded termination accepts a write");
-    assert_eq!(
-        written.termination,
-        Some(crate::rlm::RlmTermination::FinishRequired { schema: None })
+        .expect_err("no RLM command changes the termination");
+    assert!(
+        matches!(
+            &error,
+            crate::EmbedError::ConfigSubmit(
+                crate::config::ConfigSubmitError::UnknownCommand { .. }
+            )
+        ),
+        "{error:?}"
     );
+
+    let outcome = set_render(&session, "rlm-render", revision, 900).await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+    let after = recorded_rlm(&session);
     assert_eq!(
-        written.final_answer_format,
-        Some(crate::rlm::RlmFinalAnswerFormat::Markdown),
-        "the fact the session already recorded is untouched"
+        after
+            .render
+            .as_ref()
+            .and_then(|render| render.print.max_chars),
+        Some(900)
     );
     assert_eq!(
         session.rlm_config().expect("recorded config decodes"),
-        written,
-        "the write is visible through the read half of the pair"
+        recorded,
+        "the render command leaves every recorded fact as it was"
     );
     Ok(())
 }
 
-/// A guarded RLM fact write publishes its durable revision. The session's
-/// creation head already carries its RLM config, so the open publishes
-/// nothing and the commanded fact commit is the only publication (FIG-4099).
+/// A render change publishes its durable revision. The session's creation
+/// head already carries its RLM config, so the open publishes nothing and the
+/// command's commit is the only publication (FIG-4099).
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
+async fn a_render_change_emits_its_committed_revision() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -619,19 +641,21 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
         .open()
         .await?;
     let before = session.observe().current_observation();
+    let revision = session.admin().config().revision().await?;
 
-    update_rlm_config(
-        &session,
-        crate::rlm::RlmSessionConfig::new()
-            .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-    )
-    .await
-    .expect("commit RLM fact");
+    let outcome = set_render(&session, "rlm-render-publication", revision, 700).await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
 
     let lash_core::facade_support::SessionResume::Replayed { events } =
         session.observe().resume_from_cursor(&before.cursor)?
     else {
-        panic!("committed fact publication must remain replayable");
+        panic!("committed render publication must remain replayable");
     };
     assert_eq!(
         events
@@ -639,7 +663,7 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
             .map(|event| event.revision())
             .collect::<Vec<_>>(),
         vec![lash_core::SessionRevision::new(1)],
-        "the commanded fact commit publishes once and the open publishes nothing"
+        "the command's commit publishes once and the open publishes nothing"
     );
     assert!(events.iter().all(|event| matches!(
         event.payload,
@@ -648,57 +672,13 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
     Ok(())
 }
 
-/// A guarded write that disagrees with a recorded fact is refused as a typed
-/// value carrying both sides — no host ever has to read the prose to tell a pin
-/// conflict from an unrelated failure.
+/// A writer whose resident state was invalidated after another writer
+/// changed the render writes against the revision it read: its transaction
+/// settles stale and publishes nothing, and its view then reads the other
+/// writer's durable render.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
-    let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    create_stating_termination(
-        &core,
-        "rlm-refused-write",
-        crate::rlm::RlmTermination::FinishRequired { schema: None },
-    )
-    .await?;
-    let session = core.session("rlm-refused-write").open().await?;
-
-    let error = update_rlm_config(
-        &session,
-        crate::rlm::RlmSessionConfig::new().termination(crate::rlm::RlmTermination::Natural),
-    )
-    .await
-    .expect_err("a recorded termination cannot be set to another one");
-    let (recorded, requested) = termination_conflict(&error);
-    assert_eq!(
-        recorded,
-        crate::rlm::RlmTermination::FinishRequired { schema: None }
-    );
-    assert_eq!(requested, crate::rlm::RlmTermination::Natural);
-    assert_eq!(
-        session
-            .rlm_config()
-            .expect("recorded config decodes")
-            .termination,
-        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-        "a refused write leaves the recorded fact exactly as it was"
-    );
-    Ok(())
-}
-
-/// A writer whose resident bag was invalidated must decide set-if-unset from
-/// the reloaded durable head. Otherwise a stale `None` smooths over the value
-/// another writer recorded between resident reads.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_termination() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
+async fn a_render_change_written_against_a_stale_revision_settles_stale() -> Result<()> {
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
 
@@ -711,24 +691,26 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
     let stale_core = build_core()?;
     let concurrent_core = build_core()?;
     let stale = stale_core
-        .session("rlm-stale-guarded-write")
+        .session("rlm-stale-render")
         .created()
         .await
         .open()
         .await?;
     let concurrent = concurrent_core
-        .session("rlm-stale-guarded-write")
+        .session("rlm-stale-render")
         .created()
         .await
         .open()
         .await?;
-    update_rlm_config(
-        &concurrent,
-        crate::rlm::RlmSessionConfig::new()
-            .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-    )
-    .await
-    .expect("the concurrent writer records the previously unset termination");
+    let read = stale.admin().config().revision().await?;
+    let concurrent_outcome = set_render(&concurrent, "rlm-concurrent-render", read, 500).await?;
+    assert!(
+        matches!(
+            concurrent_outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{concurrent_outcome:?}"
+    );
 
     {
         let writer = stale.runtime.writer();
@@ -736,95 +718,21 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
         lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
     }
 
-    let error = update_rlm_config(
-        &stale,
-        crate::rlm::RlmSessionConfig::new().termination(crate::rlm::RlmTermination::Natural),
-    )
-    .await
-    .expect_err("the stale writer must reload and refuse the recorded termination");
-    let (recorded, requested) = termination_conflict(&error);
+    let outcome = set_render(&stale, "rlm-stale-render", read, 300).await?;
     assert_eq!(
-        recorded,
-        crate::rlm::RlmTermination::FinishRequired { schema: None }
+        outcome,
+        crate::config::ConfigTransactionOutcome::Stale {
+            expected: read,
+            actual: read + 1,
+        }
     );
-    assert_eq!(requested, crate::rlm::RlmTermination::Natural);
-
-    let verifier_core = build_core()?;
-    let verifier = verifier_core
-        .session("rlm-stale-guarded-write")
-        .created()
-        .await
-        .open()
-        .await?;
     assert_eq!(
-        verifier
-            .rlm_config()
-            .expect("the durable verifier config decodes")
-            .termination,
-        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-        "the refused stale write must leave the concurrently recorded head intact"
-    );
-    Ok(())
-}
-
-/// A guarded write that agrees with a concurrently recorded fact performs no
-/// durable change, but reloading that fact must still refresh the facade view.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
-    let double = restate_double(SEED).await;
-    let backend = double.lash_backend();
-
-    let build_core = || {
-        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())
-    };
-    let stale_core = build_core()?;
-    let concurrent_core = build_core()?;
-    let stale = stale_core
-        .session("rlm-stale-same-value-guarded-write")
-        .created()
-        .await
-        .open()
-        .await?;
-    let concurrent = concurrent_core
-        .session("rlm-stale-same-value-guarded-write")
-        .created()
-        .await
-        .open()
-        .await?;
-    let termination = crate::rlm::RlmTermination::FinishRequired { schema: None };
-    update_rlm_config(
-        &concurrent,
-        crate::rlm::RlmSessionConfig::new().termination(termination.clone()),
-    )
-    .await
-    .expect("the concurrent writer records the previously unset termination");
-
-    {
-        let writer = stale.runtime.writer();
-        let mut runtime = writer.lock().await;
-        lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
-    }
-
-    let resolved = update_rlm_config(
-        &stale,
-        crate::rlm::RlmSessionConfig::new().termination(termination.clone()),
-    )
-    .await
-    .expect("the stale writer agrees with the concurrently recorded termination");
-    assert_eq!(resolved.termination, Some(termination.clone()));
-    assert_eq!(
-        stale
-            .rlm_config()
-            .expect("the refreshed facade config decodes")
-            .termination,
-        Some(termination),
-        "a successful no-op guarded write must publish the reloaded config"
+        recorded_rlm(&stale)
+            .render
+            .as_ref()
+            .and_then(|render| render.print.max_chars),
+        Some(500),
+        "the stale writer reads the concurrently recorded render"
     );
     Ok(())
 }
@@ -895,13 +803,11 @@ async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()
 // was deleted with the session language pin (ADR 0096): there is no dialect to
 // default, compare, or drift away from the running plugin.
 
-/// A guarded write is durable: the fact it lands on is still recorded when the
-/// session is closed and reopened cold.
+/// A render change is durable: it is still recorded when the session is
+/// closed and reopened cold.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
+async fn a_render_change_survives_a_cold_reopen() -> Result<()> {
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
 
@@ -911,31 +817,46 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
-        .session("rlm-write-roundtrip")
+        .session("rlm-render-roundtrip")
         .created()
         .await
         .open()
         .await?;
-    update_rlm_config(
-        &session,
-        crate::rlm::RlmSessionConfig::new()
-            .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-    )
-    .await
-    .expect("an unrecorded termination accepts a write");
+    let revision = session.admin().config().revision().await?;
+    let outcome = set_render(&session, "rlm-render-roundtrip", revision, 640).await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
     Box::pin(session.close()).await?;
 
     let reopened = core
-        .session("rlm-write-roundtrip")
+        .session("rlm-render-roundtrip")
         .created()
         .await
         .open()
         .await?;
-    let recorded = reopened.rlm_config().expect("recorded config decodes");
     assert_eq!(
-        recorded.termination,
-        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
-        "the written termination is still recorded after a cold reopen"
+        recorded_rlm(&reopened)
+            .render
+            .as_ref()
+            .and_then(|render| render.print.max_chars),
+        Some(640),
+        "the render is still recorded after a cold reopen"
     );
     Ok(())
+}
+
+#[cfg(feature = "rlm")]
+fn rlm_creation_refusal(error: &crate::EmbedError) -> &lash_core::ConfigRefusal {
+    let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = error
+    else {
+        panic!("expected a typed session config refusal, got: {error:?}");
+    };
+    refusal
+        .downcast_ref::<lash_core::ConfigRefusal>()
+        .expect("an owner's creation refusal")
 }

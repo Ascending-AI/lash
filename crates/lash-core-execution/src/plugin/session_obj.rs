@@ -182,12 +182,17 @@ where
     Ok(out)
 }
 
-/// The two inputs of the plugin catalog projection, held under one lock so a
+/// The session's resident authority. Tool access and subagent context are
+/// the two inputs of the plugin catalog projection, held under one lock so a
 /// catalog resolution never observes one without the other.
 #[derive(Clone)]
 pub(super) struct LiveSessionAuthority {
     pub(super) tool_access: SessionToolAccess,
     pub(super) subagent: Option<SubagentSessionContext>,
+    /// The plugin configuration the session's hooks run under (FIG-4379):
+    /// the running root's admitted configuration, the head's outside a root,
+    /// or a process's captured configuration.
+    pub(super) plugin_config: super::AdmittedPluginConfig,
 }
 
 #[derive(Clone)]
@@ -228,6 +233,19 @@ impl PluginSession {
     /// Returns a snapshot of the session's current resident subagent context.
     pub fn subagent_context(&self) -> Option<SubagentSessionContext> {
         self.authority.read_recover().subagent.clone()
+    }
+
+    /// The plugin configuration this session's hooks run under: a running
+    /// root's admitted configuration and revision, taken from its recorded
+    /// run (FIG-4379), never the session's current head.
+    pub fn admitted_plugin_config(&self) -> super::AdmittedPluginConfig {
+        self.authority.read_recover().plugin_config.clone()
+    }
+
+    /// Publish the configuration view the runtime installed — a root's
+    /// recorded one, or the head's — to this session's hooks.
+    pub fn publish_plugin_config(&self, plugin_config: super::AdmittedPluginConfig) {
+        self.authority.write_recover().plugin_config = plugin_config;
     }
 
     pub(super) fn live_authority(&self) -> LiveSessionAuthority {
@@ -293,6 +311,22 @@ impl PluginSession {
 
     pub fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
         Arc::clone(&self.tool_registry)
+    }
+
+    /// The id of the plugin that registered this session's protocol: the
+    /// owner whose recorded namespace is the session's protocol turn options
+    /// (FIG-4379).
+    #[expect(
+        clippy::expect_used,
+        reason = "session assembly refuses a contribution set without a protocol session before this object exists"
+    )]
+    pub fn protocol_plugin_id(&self) -> &str {
+        &self
+            .contributions
+            .protocol_session
+            .as_ref()
+            .expect("plugin session must have a protocol session")
+            .plugin_id
     }
 
     #[expect(
@@ -614,6 +648,7 @@ impl PluginSession {
         for registered in &self.contributions.assistant_stream_hooks {
             let transform = (registered.hook)(AssistantStreamHookContext {
                 session_id: SessionId::from(session_id.to_string()),
+                plugin_config: self.admitted_plugin_config(),
                 chunk: current.clone(),
             })
             .await?;
@@ -641,6 +676,7 @@ impl PluginSession {
                 .map(|recorded| recorded.state.clone());
             let transform = (registered.hook)(AssistantResponseHookContext {
                 session_id: SessionId::from(session_id.to_string()),
+                plugin_config: self.admitted_plugin_config(),
                 response: current.clone(),
                 stream_state,
             })
@@ -665,6 +701,7 @@ impl PluginSession {
         for registered in &self.contributions.assistant_stream_finished_hooks {
             let state = (registered.hook)(AssistantStreamFinishedContext {
                 session_id: SessionId::from(session_id.to_string()),
+                plugin_config: self.admitted_plugin_config(),
                 reason,
             })
             .await?;
@@ -881,19 +918,21 @@ impl PluginSession {
         }
     }
 
-    pub fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+    /// Adopt `snapshot`, a recorded head's plugin state, as the live state:
+    /// an accepted write the head does not carry is dropped, as a cold
+    /// rebuild from that head drops it (FIG-4392).
+    pub fn hydrate_state(&self, snapshot: &PluginState) {
         let mut live = self.state.lock_recover();
-        live.hydrate_live(snapshot)?;
+        live.hydrate_live(snapshot);
         for plugin in &self.plugins {
             live.data.plugins.entry(plugin.id().into()).or_default();
         }
-        Ok(())
     }
 
     pub fn fork_for_session(
         &self,
         session_id: impl Into<SessionId>,
-        config: super::SessionCreationConfig,
+        config: super::SessionAuthorityContext,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.capture_state();
         self.host.build_session(PluginSessionRequest {

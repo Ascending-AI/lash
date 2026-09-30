@@ -41,7 +41,6 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> TurnLaneCandidate {
     TurnLaneCandidate {
         batch_id: format!("qwb-{enqueue_seq}").into(),
         enqueue_seq,
-        config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
         authority: QueuedWorkAuthority::new("principal"),
@@ -130,7 +129,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = TurnLaneCandidate> {
                 TurnLaneCandidate {
                     batch_id: format!("qwb-{enqueue_seq}").into(),
                     enqueue_seq,
-                    config_patch_command: false,
                     delivery_policy,
                     kind,
                     authority,
@@ -236,21 +234,6 @@ fn refusal_spellings_are_stable() {
 }
 
 #[test]
-fn absent_merge_key_never_merges() {
-    let candidates = vec![candidate(1, None), candidate(2, None)];
-    assert_eq!(
-        select_turn_work_prefix(
-            &candidates,
-            AdmissionBoundary::Idle,
-            &policy(1_000, 100),
-            1_000,
-        )
-        .unwrap(),
-        1
-    );
-}
-
-#[test]
 fn matching_key_groups_prefix_up_to_row_bound() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
     let mut admission_policy = policy(1_000, 100);
@@ -267,28 +250,123 @@ fn matching_key_groups_prefix_up_to_row_bound() {
     );
 }
 
+fn drain_all(max_context_tokens: usize, action_token_reserve: usize) -> TurnLaneAdmissionPolicy {
+    let mut admission_policy = policy(max_context_tokens, action_token_reserve);
+    admission_policy.drain_policy =
+        std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
+    admission_policy
+}
+
+/// ADR 0101 §5.2: `authority` and `merge_key` are per-item data, not
+/// equality gates. A prefix of rows with different principals, elevations
+/// and merge keys, an absent key included, is offered whole, and each
+/// candidate carries its own values to the drain policy.
 #[test]
-fn authority_and_elevation_are_independent_compatibility_gates() {
-    let first = candidate(1, Some("wake"));
+fn authority_and_merge_key_are_per_item_data_not_composition_gates() {
     let mut different_principal = candidate(2, Some("wake"));
     different_principal.authority = QueuedWorkAuthority::new("other");
-    let mut different_elevation = candidate(2, Some("wake"));
+    let mut different_elevation = candidate(3, Some("other"));
     different_elevation.authority = QueuedWorkAuthority::new("principal").with_elevation("root");
-    for candidates in [
-        vec![first.clone(), different_principal],
-        vec![first.clone(), different_elevation],
-    ] {
-        assert_eq!(
-            select_turn_work_prefix(
-                &candidates,
-                AdmissionBoundary::Idle,
-                &policy(1_000, 100),
-                1_000
-            )
-            .unwrap(),
-            1
-        );
+    let candidates = vec![
+        candidate(1, None),
+        different_principal,
+        different_elevation,
+        candidate(4, None),
+    ];
+    assert_eq!(
+        select_turn_work_indices(
+            &candidates,
+            AdmissionBoundary::Idle,
+            &drain_all(1_000, 100),
+            1_000,
+        )
+        .unwrap(),
+        vec![0, 1, 2, 3]
+    );
+
+    #[derive(Debug)]
+    struct Offered(std::sync::Mutex<Vec<(Option<String>, QueuedWorkAuthority)>>);
+    impl crate::QueuedDrainPolicy for Offered {
+        fn name(&self) -> &str {
+            "test_offered"
+        }
+
+        fn select_drain(
+            &self,
+            request: &crate::QueuedDrainRequest<'_>,
+        ) -> crate::QueuedDrainSelection {
+            *self.0.lock().unwrap() = request
+                .candidates()
+                .iter()
+                .map(|candidate| (candidate.merge_key.clone(), candidate.authority.clone()))
+                .collect();
+            crate::QueuedDrainSelection::head_only()
+        }
     }
+    let offered = std::sync::Arc::new(Offered(std::sync::Mutex::new(Vec::new())));
+    let mut admission_policy = policy(1_000, 100);
+    admission_policy.drain_policy = offered.clone();
+    select_turn_work_indices(
+        &candidates,
+        AdmissionBoundary::Idle,
+        &admission_policy,
+        1_000,
+    )
+    .unwrap();
+    assert_eq!(
+        *offered.0.lock().unwrap(),
+        candidates
+            .iter()
+            .map(|candidate| (candidate.merge_key.clone(), candidate.authority.clone()))
+            .collect::<Vec<_>>(),
+        "every candidate reaches the policy with its own merge key and authority"
+    );
+}
+
+/// A host that keeps principals apart does it in its drain policy: the
+/// selection stops where the principal changes, and the rest stays queued.
+#[test]
+fn a_host_policy_keeps_principals_apart() {
+    #[derive(Debug)]
+    struct OnePrincipalPerTurn;
+    impl crate::QueuedDrainPolicy for OnePrincipalPerTurn {
+        fn name(&self) -> &str {
+            "test_one_principal_per_turn"
+        }
+
+        fn select_drain(
+            &self,
+            request: &crate::QueuedDrainRequest<'_>,
+        ) -> crate::QueuedDrainSelection {
+            let candidates = request.candidates();
+            let Some(head) = candidates.first() else {
+                return crate::QueuedDrainSelection::head_only();
+            };
+            crate::QueuedDrainSelection::leading(
+                candidates
+                    .iter()
+                    .take_while(|candidate| {
+                        candidate.authority.principal == head.authority.principal
+                    })
+                    .count(),
+            )
+        }
+    }
+    let mut other = candidate(3, Some("wake"));
+    other.authority = QueuedWorkAuthority::new("other");
+    let candidates = vec![candidate(1, Some("wake")), candidate(2, None), other];
+    let mut admission_policy = policy(1_000, 100);
+    admission_policy.drain_policy = std::sync::Arc::new(OnePrincipalPerTurn);
+    assert_eq!(
+        select_turn_work_indices(
+            &candidates,
+            AdmissionBoundary::Idle,
+            &admission_policy,
+            1_000
+        )
+        .unwrap(),
+        vec![0, 1]
+    );
 }
 
 #[test]
@@ -316,14 +394,13 @@ fn control_kind_is_a_command_barrier() {
 }
 
 #[test]
-fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
+fn delivery_and_work_class_mismatches_break_prefix() {
     let first = candidate(1, Some("a"));
     let mut different_delivery = candidate(2, Some("a"));
     different_delivery.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
     let mut command = candidate(2, Some("a"));
     command.kind = QueuedWorkKind::Control;
     for candidates in [
-        vec![first.clone(), candidate(2, Some("b"))],
         vec![first.clone(), different_delivery],
         vec![first.clone(), command],
     ] {
@@ -331,7 +408,7 @@ fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
             select_turn_work_prefix(
                 &candidates,
                 AdmissionBoundary::Idle,
-                &policy(1_000, 100),
+                &drain_all(1_000, 100),
                 1_000
             )
             .unwrap(),
@@ -584,19 +661,14 @@ fn leading_session_command_blocks_turn_work_admission() {
 }
 
 #[test]
-fn adjacent_config_commands_share_one_admission_but_not_other_commands() {
+fn every_session_command_is_admitted_alone() {
     let mut first = candidate(1, None);
     first.kind = QueuedWorkKind::Control;
-    first.config_patch_command = true;
     let mut second = first.clone();
     second.batch_id = "qwb-2".into();
     second.enqueue_seq = 2;
-    let mut refresh = second.clone();
-    refresh.batch_id = "qwb-3".into();
-    refresh.enqueue_seq = 3;
-    refresh.config_patch_command = false;
 
-    assert_eq!(select_leading_session_command(&[first, second, refresh]), 2);
+    assert_eq!(select_leading_session_command(&[first, second]), 1);
 }
 
 #[test]

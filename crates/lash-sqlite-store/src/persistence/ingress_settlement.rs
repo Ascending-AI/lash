@@ -10,7 +10,7 @@
 use super::*;
 
 /// Settle `commit`'s ingress and applied commands, and, for an interrupted
-/// turn, re-defer or drop the open input addressed to it, at `now`. Returns
+/// turn, record or drop the open input addressed to it, at `now`. Returns
 /// the cancel outcome the commit's cancellation records.
 pub(super) fn settle_commit_ingress_conn(
     tx: &Connection,
@@ -20,7 +20,7 @@ pub(super) fn settle_commit_ingress_conn(
     let session_id = &commit.session_id;
     if let Some(commands) = commit.applied_commands.as_ref() {
         for batch_id in &commands.batch_ids {
-            crate::queued_work::settle_open_command_conn(tx, session_id, batch_id)?;
+            crate::queued_work::settle_open_command_conn(tx, session_id, batch_id, now)?;
         }
     }
     let interrupted = commit.interrupted_turn_input_turn_id.as_ref();
@@ -59,6 +59,7 @@ pub(super) fn settle_commit_ingress_conn(
                     root,
                     input_id,
                     lash_core_execution::runtime::TurnInputStateKind::Completed,
+                    now,
                 )?;
                 // The completing commit binds the input to the root that
                 // applied it: a checkpoint-admitted input carries no binding
@@ -68,7 +69,16 @@ pub(super) fn settle_commit_ingress_conn(
         }
         for completion in &ingress.completed_batches {
             for batch_id in &completion.batch_ids {
-                crate::queued_work::complete_admitted_batch_conn(tx, session_id, root, batch_id)?;
+                crate::queued_work::complete_admitted_batch_conn(
+                    tx,
+                    session_id,
+                    root,
+                    batch_id,
+                    lash_core_execution::store::IngressTerminal {
+                        cause: lash_core_execution::store::IngressTerminalCause::Delivered,
+                        at_ms: now,
+                    },
+                )?;
             }
         }
         for (rows, disposition) in [
@@ -97,6 +107,7 @@ pub(super) fn settle_commit_ingress_conn(
                                     root,
                                     input_id,
                                     lash_core_execution::runtime::TurnInputStateKind::Cancelled,
+                                    now,
                                 )?;
                             }
                         }
@@ -125,7 +136,15 @@ pub(super) fn settle_commit_ingress_conn(
                             }
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                                 crate::queued_work::complete_admitted_batch_conn(
-                                    tx, session_id, root, batch_id,
+                                    tx,
+                                    session_id,
+                                    root,
+                                    batch_id,
+                                    lash_core_execution::store::IngressTerminal {
+                                        cause:
+                                            lash_core_execution::store::IngressTerminalCause::Cancelled,
+                                        at_ms: now,
+                                    },
                                 )?;
                             }
                         }
@@ -139,13 +158,25 @@ pub(super) fn settle_commit_ingress_conn(
         return Ok(outcome);
     };
     // The open input addressed to the interrupted turn that no checkpoint
-    // admitted names a turn that is over: it is re-deferred, or dropped by
-    // the cancellation's disposition, which governs host-authored input only.
+    // admitted names a turn that is over: by rule it is next-turn input at
+    // its own position, its submitted delivery unchanged (ADR 0101 §5.1),
+    // unless the cancellation's disposition, which governs host-authored
+    // input only, drops it. Once the turn's root has terminal evidence its
+    // terminal write has already applied the disposition, and what it left
+    // open is next-turn input no teardown of that turn reaches.
     let disposition = cancellation.map_or(
         lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
         |evidence| evidence.undelivered,
     );
     let sql = crate::turn_ingress::turn_ingress_sql();
+    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let root_ended: bool = tx
+        .query_row(
+            sql.family.root_ended.sql(),
+            params![session_id.as_str(), root.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
     let open_rows = {
         let mut stmt = tx
             .prepare_cached(sql.pending_inputs_sqlite.select_pending_active.sql())
@@ -158,44 +189,32 @@ pub(super) fn settle_commit_ingress_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
-    let deferred_ingress = encode_json(&deferred.ingress())?;
     for row in open_rows {
         let ingress = decode_turn_input_ingress(row.ingress_json.clone())?;
-        if ingress.active_turn_id() != Some(turn_id) {
+        // A row this commit released is back where it was submitted and is
+        // already recorded above.
+        let released = affected_inputs
+            .iter()
+            .any(|(_, affected)| affected.input_id.as_str() == row.input_id.as_str());
+        if root_ended || released || ingress.active_turn_id() != Some(turn_id) {
             continue;
         }
         let payload = decode_stored_json(&row.input_json, "turn input")?;
-        // Two dispositions, two named statements: deferring rewrites the
-        // ingress so the row stops naming a turn that is over, dropping is
-        // the withdrawal this table already has.
-        match disposition {
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
-                crate::conn::cached_execute(
-                    tx,
-                    sql.pending_inputs.defer_to_next_turn.sql(),
-                    params![
-                        session_id.as_str(),
-                        row.input_id.as_str(),
-                        deferred.as_str(),
-                        deferred_ingress.as_str(),
-                    ],
-                )
-            }
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
-                crate::conn::cached_execute(
-                    tx,
-                    sql.pending_inputs.cancel.sql(),
-                    params![
-                        session_id.as_str(),
-                        row.input_id.as_str(),
-                        lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
-                        crate::clamp_epoch_ms(now),
-                    ],
-                )
-            }
+        // Deferring writes nothing: the row stays where it was submitted.
+        // Dropping is the withdrawal this table already has.
+        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
+            crate::conn::cached_execute(
+                tx,
+                sql.pending_inputs.cancel.sql(),
+                params![
+                    session_id.as_str(),
+                    row.input_id.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    crate::clamp_epoch_ms(now),
+                ],
+            )
+            .map_err(sqlite_error)?;
         }
-        .map_err(sqlite_error)?;
         affected_inputs.push((
             row.enqueue_seq,
             lash_core_execution::TurnCancelAffectedInput {
@@ -280,13 +299,15 @@ fn admitted_batch_conn(
     queued_work_batch_from_conn(tx, row)
 }
 
-/// Settle input `input_id`, held by `root`, into the terminal `state`.
+/// Settle input `input_id`, held by `root`, into the terminal `state` at
+/// `now`.
 fn settle_admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     root: &TurnId,
     input_id: &lash_core_execution::InputId,
     state: lash_core_execution::runtime::TurnInputStateKind,
+    now: u64,
 ) -> Result<(), StoreError> {
     let settled = crate::conn::cached_execute(
         tx,
@@ -298,7 +319,8 @@ fn settle_admitted_input_conn(
             session_id.as_str(),
             input_id.as_str(),
             state.as_str(),
-            root.as_str()
+            root.as_str(),
+            crate::clamp_epoch_ms(now),
         ],
     )
     .map_err(sqlite_error)?;
@@ -312,20 +334,13 @@ fn release_admitted_input_conn(
     root: &TurnId,
     input_id: &lash_core_execution::InputId,
 ) -> Result<(), StoreError> {
-    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
     let released = crate::conn::cached_execute(
         tx,
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs
             .release_admitted
             .sql(),
-        params![
-            session_id.as_str(),
-            input_id.as_str(),
-            root.as_str(),
-            deferred.as_str(),
-            encode_json(&deferred.ingress())?,
-        ],
+        params![session_id.as_str(), input_id.as_str(), root.as_str()],
     )
     .map_err(sqlite_error)?;
     require_settlement_applied(session_id, root, input_row(input_id), released)

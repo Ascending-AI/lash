@@ -315,11 +315,13 @@ pub fn turn_lane_head<'a>(
 }
 
 /// The head of the session's accepted next-turn input, among its `open`
-/// inputs: the oldest one deferred to the next turn.
+/// inputs at idle: the oldest one. With no turn running, every open input is
+/// next-turn input, whatever turn its submitted delivery addresses (ADR 0101
+/// §5.1).
 #[must_use]
 pub fn head_input(open: &[crate::PendingTurnInputRead]) -> Option<&crate::PendingTurnInputRead> {
     open.iter()
-        .filter(|read| read.input.state == crate::TurnInputState::DeferredNextTurn)
+        .filter(|read| read.input.state.is_next_turn_input(None))
         .min_by_key(|read| read.input.enqueue_seq)
 }
 

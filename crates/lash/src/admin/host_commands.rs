@@ -118,8 +118,11 @@ impl SessionAdmin {
     /// writer is held only to submit it, and the plugin's code runs in the
     /// drive at the next turn boundary, its events, state and queued turns
     /// settling with the command. `cancellation` withdraws a command no drive
-    /// has admitted yet; one a drive already admitted runs to its settlement.
-    /// A storeless session runs the operation directly under the writer.
+    /// has admitted yet. A task a drive already admitted is cancelled through
+    /// its cancel gate (FIG-4391): its drive stops the task's code and
+    /// settles it cancelled, unless the task's code returned first; an
+    /// admitted plugin command runs to its settlement. A storeless session
+    /// runs the operation directly under the writer.
     pub(super) async fn run_plugin_operation(
         &self,
         operation: HostPluginOperation,
@@ -191,7 +194,7 @@ impl SessionAdmin {
         let receipt = match submitted {
             SubmittedCommand::Applied(receipt) => receipt,
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.settle_or_withdraw(receipt, cancellation)).await? {
+                match Box::pin(self.settle_or_withdraw(receipt, operation, cancellation)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {
@@ -227,6 +230,18 @@ impl SessionAdmin {
                     } => {
                         return Err(EmbedError::Plugin(lash_core::PluginError::Invoke(message)));
                     }
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        receipt,
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Cancelled,
+                            },
+                    } => {
+                        return Err(EmbedError::Session(SessionError::SessionCommandCancelled(
+                            receipt,
+                        )));
+                    }
                     settlement => return Err(unsettled_command_error(settlement)),
                 }
             }
@@ -235,13 +250,17 @@ impl SessionAdmin {
         Ok(receipt)
     }
 
-    /// Await the settlement of the command `receipt` names; if `cancellation`
-    /// fires first, withdraw it. A command no drive admitted is withdrawn
-    /// transactionally and answers `Cancelled`; one a drive already admitted
-    /// is settled by that drive, and its settlement is awaited (FIG-4202).
+    /// Await the settlement of the plugin `operation` `receipt` names; if
+    /// `cancellation` fires first, cancel it. A command no drive admitted is
+    /// withdrawn transactionally and answers `Cancelled` (FIG-4202). One a
+    /// drive already admitted is settled by that drive, and its settlement is
+    /// awaited: for a task, after its cancel gate was resolved cancelled, so
+    /// the drive stops the task's code and settles it cancelled unless the
+    /// task's code returned first (FIG-4391).
     pub(super) async fn settle_or_withdraw(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
+        operation: HostPluginOperation,
         cancellation: CancellationToken,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         tokio::select! {
@@ -252,6 +271,9 @@ impl SessionAdmin {
                         Ok(lash_core::runtime::SessionCommandSettlement::Cancelled(receipt))
                     }
                     SessionCommandWithdrawal::AlreadyAdmitted => {
+                        if operation == HostPluginOperation::Task {
+                            self.cancel_admitted_plugin_task(&receipt).await?;
+                        }
                         Box::pin(self.await_command_settlement(receipt, None)).await
                     }
                 }
@@ -259,23 +281,56 @@ impl SessionAdmin {
         }
     }
 
+    /// Resolve the cancel gate of the admitted plugin task `receipt` names
+    /// (FIG-4391), without the runtime's writer, which the drive applying the
+    /// task holds. Whether the cancel won the gate or the task's code
+    /// returned first, the command's settlement says how it ended.
+    async fn cancel_admitted_plugin_task(
+        &self,
+        receipt: &lash_core::runtime::SessionCommandReceipt,
+    ) -> Result<lash_core::runtime::PluginTaskCancelRequest> {
+        self.require_own_command(receipt)?;
+        lash_core::runtime::request_plugin_task_cancel(&self.runtime.observe().effect_host, receipt)
+            .await
+            .map_err(EmbedError::Runtime)
+    }
+
+    /// Refuse a host operation on a command of another session than this
+    /// one.
+    fn require_own_command(
+        &self,
+        receipt: &lash_core::runtime::SessionCommandReceipt,
+    ) -> Result<()> {
+        let session_id = SessionId::from(self.runtime.observe().session_id());
+        if session_id != receipt.session_id {
+            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::StoreCommitFailed,
+                lash_core::StoreError::ForeignSessionRequest {
+                    view_session_id: session_id,
+                    request_session_id: receipt.session_id.clone(),
+                }
+                .to_string(),
+            )));
+        }
+        Ok(())
+    }
+
     /// Withdraw the command `receipt` names (FIG-4202): transactionally,
     /// while no drive has admitted it. A command a drive already read, or
     /// that already settled, answers
     /// [`SessionCommandWithdrawal::AlreadyAdmitted`] and settles as that
-    /// drive applies it.
+    /// drive applies it. The withdrawal takes no runtime writer, so it never
+    /// waits for the drive applying the session's commands (FIG-4391).
     pub(super) async fn withdraw_session_command(
         &self,
         receipt: &lash_core::runtime::SessionCommandReceipt,
     ) -> Result<SessionCommandWithdrawal> {
+        self.require_own_command(receipt)?;
         let withdrawn = self
-            .with_writer(async |runtime: &mut LashRuntime| {
-                runtime
-                    .cancel_queued_work_batch(&receipt.session_id, receipt.batch_id.as_str())
-                    .await
-                    .map_err(EmbedError::Runtime)
-            })
-            .await?;
+            .runtime
+            .cancel_queued_work_batch(receipt.batch_id.as_str())
+            .await
+            .map_err(EmbedError::Runtime)?;
         Ok(match withdrawn {
             Some(_) => SessionCommandWithdrawal::Withdrawn,
             None => SessionCommandWithdrawal::AlreadyAdmitted,

@@ -27,13 +27,16 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
     session
         .admin()
         .config()
-        .update(SessionConfigPatch {
-            model: Some(expected_model.clone()),
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
-                expected_generation.clone(),
-            )),
-            ..SessionConfigPatch::default()
-        })
+        .configure(
+            crate::config::ConfigTransaction::of(crate::config::SetModel {
+                model: expected_model.clone(),
+            })
+            .then(crate::config::SetGeneration {
+                generation: lash_core::facade_support::GenerationOverlay::Replace(
+                    expected_generation.clone(),
+                ),
+            }),
+        )
         .await?;
 
     let parked = Box::pin(session.park()).await?;
@@ -79,13 +82,16 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
     session
         .admin()
         .config()
-        .update(SessionConfigPatch {
-            model: Some(commanded_model.clone()),
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
-                commanded_generation.clone(),
-            )),
-            ..SessionConfigPatch::default()
-        })
+        .configure(
+            crate::config::ConfigTransaction::of(crate::config::SetModel {
+                model: commanded_model.clone(),
+            })
+            .then(crate::config::SetGeneration {
+                generation: lash_core::facade_support::GenerationOverlay::Replace(
+                    commanded_generation.clone(),
+                ),
+            }),
+        )
         .await?;
     Box::pin(session.close()).await?;
 

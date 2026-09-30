@@ -290,17 +290,29 @@ impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
     }
 }
 
-impl From<lash_core::PluginOptions> for RemoteProcessPluginOptions {
-    fn from(value: lash_core::PluginOptions) -> Self {
-        let lash_core::PluginOptions { plugins } = value;
-        Self { plugins }
+impl From<lash_core::AdmittedPluginConfig> for RemoteProcessPluginConfig {
+    fn from(value: lash_core::AdmittedPluginConfig) -> Self {
+        let lash_core::AdmittedPluginConfig { revision, config } = value;
+        let (protocol, namespaces) = std::sync::Arc::unwrap_or_clone(config).into_recorded_parts();
+        Self {
+            revision,
+            protocol,
+            namespaces,
+        }
     }
 }
 
-impl From<RemoteProcessPluginOptions> for lash_core::PluginOptions {
-    fn from(value: RemoteProcessPluginOptions) -> Self {
-        let RemoteProcessPluginOptions { plugins } = value;
-        Self { plugins }
+impl From<RemoteProcessPluginConfig> for lash_core::AdmittedPluginConfig {
+    fn from(value: RemoteProcessPluginConfig) -> Self {
+        let RemoteProcessPluginConfig {
+            revision,
+            protocol,
+            namespaces,
+        } = value;
+        Self::new(
+            lash_core::PluginConfig::from_recorded_parts(protocol, namespaces),
+            revision,
+        )
     }
 }
 
@@ -444,12 +456,12 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
 impl From<lash_core::ProcessExecutionEnvSpec> for RemoteProcessExecutionEnvSpec {
     fn from(value: lash_core::ProcessExecutionEnvSpec) -> Self {
         let lash_core::ProcessExecutionEnvSpec {
-            plugin_options,
+            plugin_config,
             policy,
             render,
         } = value;
         Self {
-            plugin_options: plugin_options.into(),
+            plugin_config: plugin_config.into(),
             policy: policy.into(),
             render: render.map(|record| crate::processes::RemoteRecordedRender {
                 renderer_id: record.renderer_id,
@@ -465,12 +477,12 @@ impl TryFrom<RemoteProcessExecutionEnvSpec> for lash_core::ProcessExecutionEnvSp
     fn try_from(value: RemoteProcessExecutionEnvSpec) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessExecutionEnvSpec")?;
         let RemoteProcessExecutionEnvSpec {
-            plugin_options,
+            plugin_config,
             policy,
             render,
         } = value;
         Ok(Self {
-            plugin_options: plugin_options.into(),
+            plugin_config: plugin_config.into(),
             policy: policy.try_into()?,
             render: render.map(|record| lash_core::RecordedRender {
                 renderer_id: record.renderer_id,

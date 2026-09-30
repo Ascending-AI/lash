@@ -847,7 +847,7 @@ mod tests {
                 crate::Lifetime::Detached,
             )
             .with_env_ref(
-                crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy)
+                crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy)
                     .stable_ref()
                     .expect("environment digest"),
             ),

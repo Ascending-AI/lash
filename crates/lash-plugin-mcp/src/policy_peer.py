@@ -33,7 +33,9 @@ if behavior == 'reset_attempts_after_success' and starts in (0, 2):
 
 def send(message):
     with lock:
-        sys.stdout.write(json.dumps(message, separators=(',', ':')) + '\n')
+        sys.stdout.write(json.dumps(message, separators=(',', ':')))
+        sys.stdout.flush()
+        sys.stdout.write('\n')
         sys.stdout.flush()
 
 def result(request_id):

@@ -235,7 +235,7 @@ class FakeDocker:
 
 
 class WithServiceBehaviour(unittest.TestCase):
-    def test_server_double_ci_recipe_gets_postgres_and_propagates_failure(self) -> None:
+    def test_postgres_ci_recipes_get_service_and_propagate_failure(self) -> None:
         step = workflow_text().split("      - name: Run functional E2E\n", 1)[1]
         step = step.split("      - name:", 1)[0]
         run = re.search(r"^        run: (.*)\n((?:          .*\n)*)", step, re.MULTILINE)
@@ -246,6 +246,8 @@ class WithServiceBehaviour(unittest.TestCase):
             ("server-double-e2e", 0),
             ("server-double-e2e", 7),
             ("effect-group-conformance-e2e", 0),
+            ("effect-group-conformance-e2e", 7),
+            ("workflow-graph-roundtrip-e2e", 0),
         )
         for recipe, exit_code in cases:
             with self.subTest(recipe=recipe, exit_code=exit_code), tempfile.TemporaryDirectory() as raw:
@@ -262,7 +264,7 @@ class WithServiceBehaviour(unittest.TestCase):
                 env = docker.env()
                 env.pop("LASH_POSTGRES_DATABASE_URL", None)
                 env.pop("LASH_REQUIRE_POSTGRES", None)
-                name = "server-double" if recipe == "server-double-e2e" else "effect-group-conformance"
+                name = recipe.removesuffix("-e2e")
                 rendered = command.replace("${{ matrix.recipe }}", recipe).replace(
                     "${{ matrix.name }}", name
                 )
@@ -277,12 +279,21 @@ class WithServiceBehaviour(unittest.TestCase):
                 )
                 self.assertEqual(1 if exit_code else 0, result.returncode, result.stderr)
                 self.assertEqual(recipe, result.stdout.splitlines()[0])
-                if recipe == "server-double-e2e":
+                if recipe in ("server-double-e2e", "effect-group-conformance-e2e"):
                     self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n1\n")
                     self.assertTrue(any(call.startswith("rm --force") for call in docker.logged()))
                 else:
                     self.assertEqual(f"{recipe}\n\n\n", result.stdout)
                     self.assertEqual([], docker.logged())
+
+    def test_effect_group_recipe_requires_postgres_before_both_legs(self) -> None:
+        justfile = (ROOT / "justfile").read_text(encoding="utf-8")
+        recipe = justfile.split("\neffect-group-conformance-e2e:\n", 1)[1]
+        recipe = recipe.split("\n# ", 1)[0]
+        self.assertIn('${LASH_POSTGRES_DATABASE_URL:?', recipe)
+        self.assertLess(recipe.index('${LASH_POSTGRES_DATABASE_URL:?'), recipe.index("restate_suite.py"))
+        for leg in ("live", "replay"):
+            self.assertIn(f"suite effect-group --leg {leg}", recipe)
 
     def run_wrapper(
         self,

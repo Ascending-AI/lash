@@ -223,13 +223,6 @@
     "peak_bytes": 91000832,
     "samples": 19
   },
-  "//crates/lash-perf:test_batch": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 17973248,
-    "samples": 10
-  },
   "//crates/lash-perf:tool_batch_baseline__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 1048576,
@@ -398,13 +391,6 @@
     "peak_bytes": 19738624,
     "samples": 3
   },
-  "//crates/lash-provider-google:test_batch": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 2.15,
-    "peak_bytes": 57552896,
-    "samples": 19
-  },
   "//crates/lash-provider-openai:codex_websocket_runtime__test": {
     "cpu_count": 1,
     "memory_kb": 1048576,
@@ -418,13 +404,6 @@
     "p95_cores": 0.81,
     "peak_bytes": 18980864,
     "samples": 3
-  },
-  "//crates/lash-provider-openai:test_batch": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.8,
-    "peak_bytes": 84217856,
-    "samples": 19
   },
   "//crates/lash-regress:integration__test": {
     "cpu_count": 2,
@@ -846,13 +825,6 @@
     "peak_bytes": 376401920,
     "samples": 17
   },
-  "//examples/workflow-graph-roundtrip:test_batch": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 17264640,
-    "samples": 17
-  },
   "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 1048576,
@@ -894,13 +866,6 @@
     "p95_cores": 0.0,
     "peak_bytes": 19619840,
     "samples": 3
-  },
-  "//runbooks/restate-postgres-workers:test_batch": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 18853888,
-    "samples": 19
   },
   "//runbooks/rlm-smoke:rlm-smoke__unit_test": {
     "cpu_count": 1,

@@ -1,36 +1,120 @@
 use super::*;
 
+const LINEAGE: &str = "lineage-roots";
+
+/// An owner that records, as its namespace, whether the session it resolved
+/// for was a root (FIG-4379): the lineage an owner sees is the creator's, once.
 #[derive(Default)]
-struct MaterializationRoots {
-    roots: StdMutex<Vec<bool>>,
+struct LineageRoots {
+    resolved: Arc<StdMutex<Vec<bool>>>,
 }
 
-impl lash_core::plugin::ProtocolSessionPlugin for MaterializationRoots {
-    fn configure_runtime_on_materialize(
+/// The `lineage` namespace: whether the session was created a root.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct LineageConfig {
+    root: bool,
+}
+
+/// The `lineage` owner refuses nothing.
+#[derive(serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+enum LineageRefusal {}
+
+impl std::fmt::Display for LineageRefusal {
+    fn fmt(&self, _formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+struct LineageOwner {
+    resolved: Arc<StdMutex<Vec<bool>>>,
+}
+
+impl lash_core::ConfigOwner for LineageOwner {
+    type Create = LineageConfig;
+    type Recorded = LineageConfig;
+    type Refusal = LineageRefusal;
+
+    fn implementation(&self) -> &str {
+        "lineage:1"
+    }
+
+    fn create(
         &self,
-        _runtime: lash_core::plugin::ProtocolRuntimeContext<'_>,
-        materialization: lash_core::plugin::ProtocolSessionMaterialization<'_>,
-    ) -> std::result::Result<(), lash_core::SessionError> {
-        self.roots
-            .lock_recover()
-            .push(materialization.is_root_session);
+        _input: Option<LineageConfig>,
+        facts: lash_core::CreationFacts<'_, LineageConfig>,
+    ) -> std::result::Result<Option<LineageConfig>, LineageRefusal> {
+        self.resolved.lock_recover().push(facts.is_root_session);
+        Ok(Some(LineageConfig {
+            root: facts.is_root_session,
+        }))
+    }
+
+    fn validate(
+        &self,
+        _value: &LineageConfig,
+        _base: Option<&LineageConfig>,
+        _facts: &lash_core::CandidateFacts<'_>,
+    ) -> std::result::Result<(), LineageRefusal> {
         Ok(())
     }
 }
 
+struct LineageRootsPlugin;
+
+impl lash_core::facade_support::SessionPlugin for LineageRootsPlugin {
+    fn id(&self) -> &'static str {
+        LINEAGE
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+impl lash_core::facade_support::PluginFactory for LineageRoots {
+    fn id(&self) -> &'static str {
+        LINEAGE
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        Ok(Arc::new(LineageRootsPlugin))
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> std::result::Result<(), lash_core::ConfigRegistrationError> {
+        registrar.owner(LineageOwner {
+            resolved: Arc::clone(&self.resolved),
+        })
+    }
+}
+
+/// An ordinary child is classified from its recorded lineage once, when it is
+/// created; the facade and engine opens deliver that recorded classification
+/// and never ask the owner again.
 #[tokio::test]
 async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()> {
-    let protocol = Arc::new(MaterializationRoots::default());
+    let owner = Arc::new(LineageRoots::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .protocol_plugin(
-        lash_core::testing::test_standard_protocol_factory_with_runtime_state(
-            protocol.clone(),
-            None,
-        ),
-    )
+    .plugin(owner.clone())
     .provider(mock_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -42,30 +126,33 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
             ..Default::default()
         })
         .await?;
-    protocol.roots.lock_recover().clear();
+    assert_eq!(*owner.resolved.lock_recover(), vec![false]);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
     let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
     assert!(state.authority.subagent.is_none());
+    assert_eq!(
+        state.authority.plugin_config.get(LINEAGE),
+        Some(&serde_json::json!({ "root": false }))
+    );
 
     let session = core.session(id).open().await?;
     assert_eq!(session.parent_session_id(), Some("ordinary-lineage-parent"));
-    assert_eq!(*protocol.roots.lock_recover(), vec![false]);
     drop(session);
     durable
         .send(TurnInput::text("open through the engine"))
         .output()
         .await?;
     assert_eq!(
-        *protocol.roots.lock_recover(),
-        vec![false, false],
-        "both openers must classify the ordinary child from recorded lineage"
+        *owner.resolved.lock_recover(),
+        vec![false],
+        "opens deliver the recorded config and never re-resolve it"
     );
     Ok(())
 }
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn rlm_openers_default_from_lineage_and_preserve_recorded_formats() -> Result<()> {
+async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
     let double = restate_double(0x4252).await;
@@ -84,66 +171,59 @@ async fn rlm_openers_default_from_lineage_and_preserve_recorded_formats() -> Res
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     for engine in [false, true] {
-        for (case, parent, recorded, expected) in [
+        for (case, parent, stated, expected) in [
             (
-                "child-empty",
+                "child-unstated",
                 Some("lineage-parent"),
                 None,
                 RlmFinalAnswerFormat::RawFinalValue,
             ),
-            ("root-empty", None, None, RlmFinalAnswerFormat::Markdown),
+            ("root-unstated", None, None, RlmFinalAnswerFormat::Markdown),
             (
-                "child-recorded",
+                "child-stated",
                 Some("lineage-parent"),
                 Some(RlmFinalAnswerFormat::Markdown),
                 RlmFinalAnswerFormat::Markdown,
             ),
             (
-                "root-recorded",
+                "root-stated",
                 None,
                 Some(RlmFinalAnswerFormat::RawFinalValue),
                 RlmFinalAnswerFormat::RawFinalValue,
             ),
         ] {
             let id = SessionId::from(format!("{case}-engine-{engine}"));
-            let mut policy = core.policy.clone();
-            policy.session_id = Some(id.clone());
-            let mut config = lash_core::PersistedSessionConfig::from(&policy);
-            let empty_options = recorded.is_none();
-            if let Some(format) = recorded {
-                config.protocol_turn_options = Some(lash_core::ProtocolTurnOptions::typed(
+            let plugin_options = match stated {
+                Some(ref format) => lash_core::PluginOptions::typed(
+                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
                     lash_rlm_types::RlmCreateExtras {
-                        final_answer_format: Some(format),
+                        final_answer_format: Some(format.clone()),
                         ..Default::default()
                     },
-                )?);
-            }
-            // Admit the exact empty-options case without facade creation,
-            // which normally resolves and records RLM defaults beforehand.
-            let store = lash_core::runtime::admit_session_view(
-                &core.store_factory,
-                &lash_core::SessionStoreCreateRequest {
-                    owning_process_id: None,
-                    pending_observer_intents: Vec::new(),
-                    session_id: id.clone(),
-                    relation: parent
-                        .map(|parent| lash_core::SessionRelation::Child {
-                            parent_session_id: parent.into(),
-                            caused_by: None,
-                        })
-                        .unwrap_or_default(),
-                    config,
-                    head: lash_core::SessionCreationHead::Config,
-                },
-            )
-            .await?;
+                )?,
+                None => lash_core::PluginOptions::default(),
+            };
+            let durable = core
+                .session(id.clone())
+                .create(crate::SessionCreation {
+                    parent: parent.map(Into::into),
+                    plugin_options,
+                    ..Default::default()
+                })
+                .await?;
+            let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
+            let policy = core.policy.clone();
             let state = crate::session::load_state_from_store(&id, &policy, &store).await?;
             assert!(state.authority.subagent.is_none());
-            assert_eq!(state.protocol_turn_options.is_empty(), empty_options);
+            assert_eq!(
+                lash_protocol_rlm::rlm_session_config(&state.effective_protocol_turn_options())
+                    .expect("recorded RLM config")
+                    .final_answer_format,
+                Some(expected.clone()),
+                "creation records the lineage default: {case}"
+            );
             if engine {
-                core.session(id.clone())
-                    .durable()
-                    .await?
+                durable
                     .send(TurnInput::text("resolve the format through the engine"))
                     .output()
                     .await?;
@@ -153,9 +233,9 @@ async fn rlm_openers_default_from_lineage_and_preserve_recorded_formats() -> Res
             assert_eq!(
                 session
                     .rlm_config()
-                    .expect("materialized RLM options")
+                    .expect("recorded RLM options")
                     .final_answer_format,
-                Some(expected),
+                Some(expected.clone()),
                 "{case}, engine={engine}"
             );
         }

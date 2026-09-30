@@ -1004,6 +1004,13 @@ fn enqueue_pending_turn_inputs_conn(
         )? {
             support::TurnInputDraftAdmission::Existing { input_id } => input_id,
             support::TurnInputDraftAdmission::New => {
+                if let Some(turn_id) = draft.ingress.active_turn_id() {
+                    support::require_known_turn_address(
+                        session_id,
+                        turn_id,
+                        turn_address_evidence_conn(tx, session_id, turn_id)?,
+                    )?;
+                }
                 let input_id = draft.input_id.clone().unwrap_or_else(|| {
                     support::derive_pending_turn_input_id(
                         session_id,
@@ -1047,6 +1054,36 @@ fn enqueue_pending_turn_inputs_conn(
         );
     }
     Ok(admitted)
+}
+
+/// What session `session_id` records about turn `turn_id`, read under the
+/// write lock the admitting transaction holds (ADR 0101 §5.1).
+fn turn_address_evidence_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    turn_id: &lash_core_execution::TurnId,
+) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
+    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let ended: bool = tx
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .turn_address_ended
+                .sql(),
+            params![session_id.as_str(), turn_id.as_str(), root.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    let running = crate::session_roots::unfinished_root_turns_conn(tx, session_id)?;
+    let owed = pending_follow_on_conn(tx, session_id)?;
+    Ok(
+        lash_core_execution::store_backend_support::turn_address_evidence(
+            turn_id,
+            running.as_ref(),
+            owed.as_ref(),
+            ended,
+        ),
+    )
 }
 
 /// The fused admission (FIG-3975): inside the one enqueue transaction, answer

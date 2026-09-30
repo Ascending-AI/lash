@@ -59,7 +59,8 @@ pub struct InputRow {
     pub table: String,
     pub session: String,
     pub id: String,
-    /// The input's state; a queued batch's row has none of its own.
+    /// The input's state; a queued batch's terminal cause once it is a
+    /// tombstone, and none while it is open.
     pub state: Option<String>,
     pub admitted_root: Option<String>,
     pub obligation_state: Option<String>,
@@ -262,14 +263,14 @@ impl StoreSnapshot {
         for row in read(
             stores,
             core,
-            "SELECT session_id, batch_id, admitted_root, obligation_state \
+            "SELECT session_id, batch_id, terminal_cause, admitted_root, obligation_state \
              FROM queued_work_batches ORDER BY session_id, enqueue_seq",
         )? {
             snapshot.inputs.push(InputRow {
                 table: "queued_work_batches".to_owned(),
                 session: required(&row, "session_id"),
                 id: required(&row, "batch_id"),
-                state: None,
+                state: text(&row, "terminal_cause"),
                 admitted_root: text(&row, "admitted_root"),
                 obligation_state: text(&row, "obligation_state"),
             });

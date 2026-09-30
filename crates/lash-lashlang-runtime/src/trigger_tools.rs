@@ -34,7 +34,7 @@ pub fn register_trigger_tool_definition() -> ToolDefinition {
         lashlang::register_trigger_tool_output_schema(),
     )
     .with_examples(vec![
-        r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan }, inputs: { tick: trigger.event } })"#
+        r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan }, inputs: (event) => ({ tick: event }) })"#
             .into(),
     ])
     .with_tool_binding(lash_core::ToolBinding::new(["triggers"], "register"))

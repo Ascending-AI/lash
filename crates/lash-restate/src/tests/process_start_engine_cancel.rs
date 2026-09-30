@@ -31,7 +31,7 @@ impl CancelledStart {
         start_key: &str,
     ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         let spec = lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::empty(),
+            lash_core::AdmittedPluginConfig::default(),
             recovery_session_policy(),
         );
         RestateRuntimeEffectController::new_for_test(Arc::clone(&self.context))

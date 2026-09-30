@@ -5,10 +5,10 @@ use lash_core::facade_support::{
     empty_trigger_source_key,
 };
 use lash_core::{
-    CommitBudget, LashSchema, PluginError, PluginOptions, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessOriginator, QueuedWorkBatchingConfig, SessionPolicy,
-    TriggerCommand, TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft, TurnBudget,
+    CommitBudget, LashSchema, PluginError, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessOriginator, QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand,
+    TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TurnBudget,
 };
 use lash_lashlang_runtime::{
     LashlangProcessEngine, LashlangProcessInput, LashlangSurface, LashlangSurfaceContribution,
@@ -54,7 +54,7 @@ fn session_surface_factory() -> Arc<dyn lash_core::facade_support::PluginFactory
         SURFACE_PLUGIN_ID,
         Arc::new(|ctx: &PluginSessionContext| {
             let granted = ctx
-                .plugin_options
+                .plugin_config
                 .decode::<SessionSurfaceOptions>(SURFACE_PLUGIN_ID)
                 .map_err(|error| {
                     PluginError::Registration(format!("invalid session surface options: {error}"))
@@ -83,14 +83,16 @@ fn session_policy() -> SessionPolicy {
     }
 }
 
-fn plugin_options() -> PluginOptions {
-    PluginOptions::typed(
+fn plugin_config() -> lash_core::AdmittedPluginConfig {
+    let mut config = lash_core::PluginConfig::default();
+    config.insert(
         SURFACE_PLUGIN_ID,
-        SessionSurfaceOptions {
+        serde_json::to_value(SessionSurfaceOptions {
             grant_vocabulary: true,
-        },
-    )
-    .expect("session surface options encode")
+        })
+        .expect("session surface options encode"),
+    );
+    lash_core::AdmittedPluginConfig::new(config, 0)
 }
 
 /// `const requires = async (event: ui.ButtonPressed) => true;`
@@ -122,7 +124,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         session_surface_factory(),
     ]);
 
-    let env_spec = ProcessExecutionEnvSpec::new(plugin_options(), session_policy());
+    let env_spec = ProcessExecutionEnvSpec::new(plugin_config(), session_policy());
     let surface = factory
         .lashlang_compile_surface(
             &plugin_host,
@@ -180,7 +182,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &host_pin_claim(),
-        &ProcessExecutionEnvSpec::new(plugin_options(), session_policy()),
+        &ProcessExecutionEnvSpec::new(plugin_config(), session_policy()),
     )
     .await
     .expect("process execution env publishes");

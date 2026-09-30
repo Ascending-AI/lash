@@ -224,7 +224,7 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
             restate.lash_backend().process_env_store().as_ref(),
             &lash_core::testing::host_pin_claim_for_testing(),
             &(lash_core::ProcessExecutionEnvSpec::new(
-                lash_core::PluginOptions::default(),
+                lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: model_spec(),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)

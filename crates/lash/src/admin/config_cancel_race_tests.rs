@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::ConfigureExt as _;
 use crate::tests::CreatedSession as _;
 use lash_core::store::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
@@ -140,14 +141,11 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     let setter = tokio::spawn(async move {
         admin
             .config()
-            .update(SessionConfigPatch {
-                model: Some(crate::tests::model_spec(
-                    "cancelled-next-model",
-                    None,
-                    64_000,
-                )),
-                ..SessionConfigPatch::default()
-            })
+            .configure(crate::config::ConfigTransaction::of(
+                crate::config::SetModel {
+                    model: crate::tests::model_spec("cancelled-next-model", None, 64_000),
+                },
+            ))
             .await
     });
     entered.notified().await;

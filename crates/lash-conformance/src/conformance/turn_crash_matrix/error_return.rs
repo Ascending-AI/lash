@@ -203,7 +203,7 @@ async fn run_error_return_case(
     identity: &ReferenceIdentity,
 ) {
     let raw = (law.make)(scenario);
-    seed_reference_ingress(&raw, identity, scenario).await;
+    seed_reference_ingress(&raw, identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let placement = ruling.placement;

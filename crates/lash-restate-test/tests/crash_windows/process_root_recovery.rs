@@ -30,14 +30,14 @@ use lash_core::engine::{EnginePage, RootRef};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 
 #[derive(Clone, Copy, Debug)]
-enum Storage {
+pub(super) enum Storage {
     Memory,
     File,
     Postgres,
 }
 
 /// The store set a law runs over, and what keeps it alive.
-struct Stores {
+pub(super) struct Stores {
     stores: Arc<dyn StoreSet>,
     _directory: tempfile::TempDir,
     _database: Option<IsolatedDatabase>,
@@ -83,13 +83,13 @@ impl Stores {
     }
 }
 
-enum Harness {
+pub(super) enum Harness {
     Double(RestateTestBackend<dyn StoreSet>),
     Live(LiveRestateBackend<dyn StoreSet>),
 }
 
 impl Harness {
-    async fn new(storage: Storage, live: bool) -> (Self, Stores) {
+    pub(super) async fn new(storage: Storage, live: bool) -> (Self, Stores) {
         let mut retained = None;
         if live {
             let backend = LiveRestateBackend::start_with_store_set(
@@ -132,7 +132,7 @@ impl Harness {
         }
     }
 
-    fn backend(&self) -> lash_core::Backend {
+    pub(super) fn backend(&self) -> lash_core::Backend {
         match self {
             Self::Double(backend) => backend.lash_backend(),
             Self::Live(backend) => backend.lash_backend(),
@@ -141,7 +141,7 @@ impl Harness {
 
     /// The session work whose recovery pass only the law runs: a wall-clock
     /// reconciliation would run it at a time the law does not choose.
-    fn session_work(&self) -> Arc<dyn lash_core::SessionWorkEngine> {
+    pub(super) fn session_work(&self) -> Arc<dyn lash_core::SessionWorkEngine> {
         match self {
             Self::Double(backend) => backend.explicit_reconcile_session_work(),
             Self::Live(backend) => backend.explicit_reconcile_session_work(),
@@ -167,7 +167,7 @@ impl Harness {
         .unwrap();
     }
 
-    async fn finish(self) {
+    pub(super) async fn finish(self) {
         if let Self::Live(backend) = self {
             backend.finish().await;
             backend.stop_serving(true);
@@ -177,13 +177,13 @@ impl Harness {
 
 /// The child's one model call: it reports that it started, then answers
 /// once the law releases it.
-struct HeldModelCall {
-    started: tokio::sync::Notify,
-    release: tokio::sync::Semaphore,
+pub(super) struct HeldModelCall {
+    pub(super) started: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Semaphore,
 }
 
 impl HeldModelCall {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             started: tokio::sync::Notify::new(),
             release: tokio::sync::Semaphore::new(0),
@@ -191,7 +191,7 @@ impl HeldModelCall {
     }
 }
 
-fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCore {
+pub(super) fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCore {
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(harness.backend())
         .with_session_work(harness.session_work())
         .into_backend();
@@ -243,7 +243,7 @@ fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCore {
 /// Start one detached `SessionTurn` child in a host handler and answer its
 /// process id. The child runs in `session`, or in a session derived from
 /// its process id when none is named.
-async fn start_child(
+pub(super) async fn start_child(
     harness: &Harness,
     core: &lash::LashCore,
     session: Option<&lash_core::SessionId>,

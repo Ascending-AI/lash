@@ -207,11 +207,18 @@
       ]
     }
   },
-  "crates/lash-vm-worker": {
+  "crates/lash-vm-client": {
     "tests": {
-      "build_identity_laws": [
-        "tests/build_identity_laws.rs",
-        "build/fingerprint.rs"
+      "wire_schema": [
+        "tests/wire_schema.rs",
+        "src/service.rs",
+        "src/artifact.rs",
+        "src/context.rs"
+      ]
+    },
+    "test_data": {
+      "wire_schema": [
+        "tests/snapshots/*.snap"
       ]
     }
   }

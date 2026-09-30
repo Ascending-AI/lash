@@ -127,6 +127,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub fn into_config_resolution(
+        self,
+    ) -> Result<crate::ConfigResolution, RuntimeEffectControllerError> {
+        match self {
+            Self::ResolveConfigTransaction { resolution } => Ok(*resolution),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::ResolveConfigTransaction,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_session_command_run(
         self,
     ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeEffectControllerError> {

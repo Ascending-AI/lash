@@ -11,7 +11,7 @@ pub struct ReopenableProcessExecutionEnvStore {
 
 fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         SessionPolicy::new(crate::TurnBudget::Unbounded),
     )
 }

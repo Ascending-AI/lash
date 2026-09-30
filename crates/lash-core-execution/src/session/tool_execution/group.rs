@@ -546,9 +546,8 @@ impl RuntimeExecutionContext<'_> {
     /// cancelled. Consumption stops with only the consumed prefix filled, and
     /// the group is closed under [`LoserPolicy::Cancel`]: the close records
     /// `closing` through the FIG-3410 driver, cancel-decides and seats every
-    /// undecided child and fires the group's token, so a child that ignores
-    /// cooperative cancellation is dropped as the batch path's cancel grace
-    /// dropped it. A committed child keeps its authority to finish its drain
+    /// undecided child and fires the group's token without joining cancelled
+    /// attempt bodies. A committed child keeps its authority to finish its drain
     /// (§4) and seats its own final. The group — with the cursor after its
     /// incorporated prefix — is then handed to the opener, whose end
     /// incorporates the ranks that land after the close. The consumer answers

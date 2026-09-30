@@ -85,7 +85,7 @@ impl LawRig {
         let registry = stores.process_registry();
 
         let spec = crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         );
         let env_ref = spec.stable_ref().expect("stable env ref");

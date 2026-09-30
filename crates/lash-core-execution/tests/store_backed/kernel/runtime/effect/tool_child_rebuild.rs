@@ -118,7 +118,7 @@ mod tests {
 
     fn spec() -> ProcessExecutionEnvSpec {
         ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::bounded(3)),
         )
     }

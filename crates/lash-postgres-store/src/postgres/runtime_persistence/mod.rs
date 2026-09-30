@@ -205,19 +205,58 @@ async fn enqueue_queued_work_with_outcome_tx(
         .map_err(store_sqlx_error)?;
     crate::attachments::acquire_attachment_refs_tx(tx, &claim, &batch.stored_attachment_ids(), now)
         .await?;
-    let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
-        if let Some(source_key) = batch.source_key.as_deref() {
-            lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
+    use lash_core_execution::store_backend_support as support;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let submission_digest = support::queued_work_submission_digest(batch)?;
+    if batch.process_wake_source.is_some()
+        && let Some(source_key) = batch.source_key.as_deref()
+    {
+        lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
+    }
+    // The session's write authority, taken before the source-key read and
+    // held to the commit, so the absence it answers holds until the insert.
+    lock_session_history_mutation_tx(tx, &batch.session_id).await?;
+    if let Some(source_key) = batch.source_key.as_deref() {
+        let by_source_key: Option<(String, String)> =
+            sqlx::query_as(sql.queued_batches.select_id_by_source_key.sql())
+                .bind(batch.session_id.as_str())
+                .bind(source_key)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        if let support::QueuedWorkDraftAdmission::Existing { batch_id } =
+            support::decide_queued_work_draft_admission(batch, &submission_digest, by_source_key)?
+        {
+            let existing = load_queued_batch(tx, batch_id.as_str())
+                .await?
+                .ok_or_else(|| {
+                    StoreError::Backend("queued work source row disappeared".to_string())
+                })?;
+            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
         }
-        sqlx::query_scalar::<_, i64>(crate::process_sql::process_sql().fence.select_floor.sql())
-            .bind(batch.session_id.as_str())
-            .bind(wake_source.process_id.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-    } else {
-        None
-    };
+    }
+    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        let allocation_floor = sqlx::query_scalar::<_, i64>(
+            crate::process_sql::process_sql().fence.select_floor.sql(),
+        )
+        .bind(batch.session_id.as_str())
+        .bind(wake_source.process_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+        .transpose()?;
+        if let Some(allocation_floor) = allocation_floor
+            && wake_source.sequence <= allocation_floor
+        {
+            return Err(StoreError::ProcessWakeSequenceRewound {
+                session_id: batch.session_id.clone(),
+                process_id: wake_source.process_id.clone(),
+                sequence: wake_source.sequence,
+                allocation_floor,
+            });
+        }
+    }
     let enqueue_seq = allocate_ingress_sequence_tx(tx, &batch.session_id).await?;
     let enqueue_seq_u64 = u64_from_sql("QueuedWorkBatch", "enqueue_seq", enqueue_seq)?;
     let batch_id = derive_batch_id(
@@ -226,55 +265,20 @@ async fn enqueue_queued_work_with_outcome_tx(
         now,
         Some(enqueue_seq_u64),
     );
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    let inserted_id: Option<String> =
-        sqlx::query_scalar(sql.queued_batches_postgres.insert_new.sql())
-            .bind(enqueue_seq)
-            .bind(&batch_id)
-            .bind(batch.session_id.as_str())
-            .bind(&batch.source_key)
-            .bind(batch.delivery_policy.as_str())
-            .bind(batch.kind().as_str())
-            .bind(encode_json(&batch.authority)?)
-            .bind(&batch.merge_key)
-            .bind(now as i64)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    let Some(inserted_id) = inserted_id else {
-        let source_key = batch.source_key.as_deref().ok_or_else(|| {
-            StoreError::Backend("queued work insert without source key was ignored".to_string())
-        })?;
-        let existing_id: Option<String> =
-            sqlx::query_scalar(sql.queued_batches.select_id_by_source_key.sql())
-                .bind(batch.session_id.as_str())
-                .bind(source_key)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        let existing_id = existing_id.ok_or_else(|| {
-            StoreError::Backend("queued work conflict row disappeared".to_string())
-        })?;
-        let existing = load_queued_batch(tx, &existing_id)
-            .await?
-            .ok_or_else(|| StoreError::Backend("queued work source row disappeared".to_string()))?;
-        return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
-    };
-    debug_assert_eq!(inserted_id, batch_id);
-    let allocation_floor = allocation_floor
-        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
-        .transpose()?;
-    if let (Some(wake_source), Some(allocation_floor)) =
-        (batch.process_wake_source.as_ref(), allocation_floor)
-        && wake_source.sequence <= allocation_floor
-    {
-        return Err(StoreError::ProcessWakeSequenceRewound {
-            session_id: batch.session_id.clone(),
-            process_id: wake_source.process_id.clone(),
-            sequence: wake_source.sequence,
-            allocation_floor,
-        });
-    }
+    sqlx::query(sql.queued_batches_postgres.insert_new.sql())
+        .bind(enqueue_seq)
+        .bind(&batch_id)
+        .bind(batch.session_id.as_str())
+        .bind(&batch.source_key)
+        .bind(batch.delivery_policy.as_str())
+        .bind(batch.kind().as_str())
+        .bind(encode_json(&batch.authority)?)
+        .bind(&batch.merge_key)
+        .bind(now as i64)
+        .bind(submission_digest.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
         sqlx::query(sql.queued_items.insert_new.sql())
@@ -407,6 +411,7 @@ pub(crate) use admission::{
 };
 pub(crate) mod drive_epoch;
 mod history;
+pub(crate) use history::read_tx;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;

@@ -4,7 +4,7 @@
 
 use lash_core_execution::{
     PendingTurnInputDraft, StoreMaintenance, TurnCancelUndeliveredInputPolicy, TurnInput,
-    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
+    TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
 use lash_postgres_store::PostgresStorage;
@@ -60,11 +60,14 @@ async fn seed_cancelled_inputs(
     lash_core_execution::PendingTurnInput,
 ) {
     let store = storage.store();
+    // The receipt's evidence is the child-table snapshot below, not the rows'
+    // delivery: the rows are plain next-turn input, since an input addressed
+    // to a turn that never ran is refused (ADR 0101 §5.1).
     let first = store
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
                 session_id,
-                TurnInputIngress::active_turn(turn_id, TurnInputCheckpointBoundary::AfterWork),
+                TurnInputIngress::NextTurn,
                 TurnInput::text("first exact payload"),
             )
             .with_input_id(format!("{session_id}:first")),
@@ -75,10 +78,7 @@ async fn seed_cancelled_inputs(
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
                 session_id,
-                TurnInputIngress::active_turn(
-                    turn_id,
-                    TurnInputCheckpointBoundary::BeforeCompletion,
-                ),
+                TurnInputIngress::NextTurn,
                 TurnInput::text("second exact payload"),
             )
             .with_input_id(format!("{session_id}:second")),
@@ -98,7 +98,7 @@ async fn seed_cancelled_inputs(
         .expect("seed cancel request");
     sqlx::query(
         "UPDATE lash_pending_turn_inputs
-         SET state = $2
+         SET state = $2, terminal_at_ms = 0
          WHERE session_id = $1",
     )
     .bind(session_id.as_str())

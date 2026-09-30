@@ -369,7 +369,12 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         {
             self.services
                 .processes
-                .validate_model_tool_process_handles(&self.services.current, owner, handle_ids)
+                .validate_model_tool_process_handles(
+                    &self.services.current,
+                    owner,
+                    handle_ids,
+                    scope,
+                )
                 .await
         } else {
             self.services

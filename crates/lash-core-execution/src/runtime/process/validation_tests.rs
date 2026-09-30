@@ -449,7 +449,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
 }
 
 #[test]
-fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
+fn typed_signal_id_with_fold_validation_suffix_does_not_panic() {
     let registration = fixture_registration("host-signal-fold-validation-key")
         .with_extra_event_types([crate::ProcessEventType {
             name: "signal.ready".to_string(),
@@ -458,13 +458,16 @@ fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
         }]);
     let record =
         ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
-    let request = ProcessEventAppendRequest::new(
-        "signal.ready",
-        serde_json::json!({
-            "value": "ready",
-        }),
+    let request = crate::ProcessSignal::new(
+        crate::ProcessSignalIdentity::new(
+            record.id.clone(),
+            "ready",
+            "host-supplied:fold-validation",
+        )
+        .expect("valid signal identity"),
+        serde_json::json!({"value": "ready"}),
     )
-    .with_replay_key("host-supplied:fold-validation");
+    .append_request();
 
     let plan = prepare_process_event_append(
         &record,
@@ -477,7 +480,7 @@ fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
         None,
         crate::FleetFormat::current(),
     )
-    .expect("host-supplied signal replay key should retain the existing append contract");
+    .expect("typed signal id with the fold-validation suffix should append");
     assert!(matches!(plan, ProcessEventAppendPlan::Insert { .. }));
 }
 
@@ -499,8 +502,16 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
     let selected = |record: &ProcessRecord, before: Option<u64>| {
         prepare_process_event_append(
             record,
-            ProcessEventAppendRequest::new("signal.ready", serde_json::json!(1))
-                .with_replay_key("signal-wait-selection"),
+            crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(
+                    record.id.clone(),
+                    "ready",
+                    "signal-wait-selection",
+                )
+                .expect("valid signal identity"),
+                serde_json::json!(1),
+            )
+            .append_request(),
             4,
             Some(3),
             None,

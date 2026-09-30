@@ -107,7 +107,7 @@ macro_rules! runtime_persistence_tests {
             (an_unfinished_roots_batch_survives_host_cancellation_after_lane_rotation, "root-admission-batch-cancel-fence"),
             (an_admitted_row_is_not_withdrawable_until_its_root_releases_it, "admitted-row-withdrawal"),
             (no_row_stays_bound_after_a_roots_terminal_commit, "no-bound-row-commit"),
-            (no_open_row_is_addressed_to_a_turn_of_an_ended_root, "addressed-to-ended-root"),
+            (open_input_addressed_to_an_ended_root_is_next_turn_input, "addressed-to-ended-root"),
             (a_stale_fence_writes_nothing, "stale-fence-writes-nothing"),
             (the_command_lane_is_bindless, "command-lane-bindless"),
             (settlement_is_predicated_on_the_root, "settlement-predicated-on-root"),
@@ -126,7 +126,7 @@ macro_rules! runtime_persistence_tests {
             (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
             (session_read_loads_persisted_history, "branchy"),
             (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
-            (session_protocol_turn_options_round_trip_through_the_committed_head, "session-protocol-turn-options"),
+            (session_plugin_config_round_trips_through_the_committed_head, "session-plugin-config"),
             (session_metadata_round_trips, "root"),
             (head_and_window_reads_agree_for_each_named_session, "read-agreement"),
             (session_metadata_relation_is_write_once, "root"),
@@ -169,8 +169,8 @@ macro_rules! runtime_persistence_tests {
             (queued_work_cancel_removes_only_open_batches, "queued-work-cancel"),
             (queued_work_classes_gate_command_and_turn_admissions, "queued-work-classes"),
             (queued_work_admission_respects_boundaries_and_stale_completion, "queued-work-boundaries"),
-            (queued_work_respects_membership_limits_exclusivity_and_sessions, "queued-membership"),
-            (queued_work_join_groups_by_delivery_policy_and_merge_key, "queued-join"),
+            (queued_work_respects_membership_limits_and_sessions, "queued-membership"),
+            (queued_work_join_groups_by_delivery_policy, "queued-join"),
             (a_resumed_root_drives_exactly_its_recorded_admission, "resumed-root-admission"),
             (process_wakes_batch_by_default, "wake-default-batch"),
             (queued_work_completion_is_fenced_and_root_keyed, "queued-completion-fence"),
@@ -201,6 +201,13 @@ macro_rules! runtime_persistence_tests {
             (a_checkpoint_admission_rerun_returns_its_own_rows, "fig905-active-reacquire"),
             (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
             (committed_turn_receipt_answers_the_parent_end_recovery_read, "root"),
+            (a_deferred_input_keeps_its_submitted_delivery, "ingress-immutable-delivery"),
+            (an_unknown_turn_address_is_refused_without_a_row_or_sequence, "ingress-turn-address"),
+            (a_changed_resubmission_is_a_typed_conflict_for_every_kind, "ingress-content-conflict"),
+            (every_terminal_ingress_item_leaves_a_tombstone, "ingress-tombstones"),
+            (a_settled_command_resubmitted_under_its_key_is_not_a_new_command, "ingress-command-resubmission"),
+            (composition_offers_mixed_authorities_and_merge_keys_as_one_prefix, "ingress-per-item-data"),
+            (a_host_drain_policy_keeps_principals_apart, "ingress-principal-policy"),
             ]
             hosted_stores [
             (identical_retry_after_defer_is_existing_not_conflict, "root"),
@@ -327,6 +334,7 @@ macro_rules! process_registry_tests {
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
                 (signal_admission_retains_its_identity_and_selected_wait, "signal-admission"),
+                (raw_signal_appends_are_refused, "raw-signal-refusal"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
@@ -1445,7 +1453,7 @@ macro_rules! session_store_factory_tests {
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
-            (ingress_follow_on_fork_and_command_coalescing_matrix, "ingress-follow-on-fork-commands"),
+            (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
             (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
             (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),
@@ -1507,8 +1515,9 @@ macro_rules! __session_config_settlement_register {
     };
 }
 
-/// Register the session-config settlement laws. The fixture hands back a guard
-/// and a maker of fresh backends; each law builds its runtime over one.
+/// Register the session-config settlement laws, and the creation-budget law
+/// (FIG-4393). The fixture hands back a guard and a maker of fresh backends;
+/// each law builds its runtime, or its creation, over one.
 #[macro_export]
 macro_rules! session_config_settlement_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -1516,6 +1525,7 @@ macro_rules! session_config_settlement_tests {
             (session_config_settlement_pending_returns_without_wait, "config-settlement-pending"),
             (cancelled_session_config_settlement_is_typed, "config-settlement-cancelled"),
             (superseded_config_settlement_adopts_the_newer_head, "config-settlement-superseded"),
+            (session_creation_refuses_a_head_no_commit_fits, "creation-budget"),
         ]);
     };
     (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

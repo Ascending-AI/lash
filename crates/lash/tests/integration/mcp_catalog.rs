@@ -26,7 +26,9 @@ root = os.environ['FIXTURE_ROOT']
 
 def send(message):
     with lock:
-        sys.stdout.write(json.dumps(message, separators=(',', ':')) + '\n')
+        sys.stdout.write(json.dumps(message, separators=(',', ':')))
+        sys.stdout.flush()
+        sys.stdout.write('\n')
         sys.stdout.flush()
 
 def reply_lists():

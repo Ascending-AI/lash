@@ -778,39 +778,6 @@ impl ArtifactCleanup {
         serde_json::to_string(self)
     }
 
-    /// The journal whose settlement this record's delivery waits on, if any
-    /// (ADR 0113 §2.5): its gate first, which defers every plan; otherwise
-    /// the journal its guard awaits — an execution referrer's own journal, a
-    /// prepared frame's creator, an absent start's starter, or a subscription
-    /// revision's creator. An `Ended` record without a gate, and the upload and
-    /// session-graph guards, await none. A store keeps its key beside the
-    /// row, so the journal's settlement nudges the row
-    /// (`ArtifactCleanupLedger::nudge_awaiting_journal`).
-    #[must_use]
-    pub fn awaited_journal(&self) -> Option<&EffectJournalIdentity> {
-        if let Some(gate) = &self.gate {
-            return Some(gate);
-        }
-        match (&self.plan, &self.referrer) {
-            (ArtifactCleanupPlan::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
-                Some(journal)
-            }
-            (
-                ArtifactCleanupPlan::AwaitFrame { creator }
-                | ArtifactCleanupPlan::AwaitSubscriptionRevision { creator },
-                _,
-            ) => Some(creator),
-            (ArtifactCleanupPlan::AwaitStart { starter }, _) => Some(starter),
-            (
-                ArtifactCleanupPlan::Ended { .. }
-                | ArtifactCleanupPlan::AwaitJournal
-                | ArtifactCleanupPlan::AwaitUploadExpiry { .. }
-                | ArtifactCleanupPlan::AwaitSessionGraphRetired,
-                _,
-            ) => None,
-        }
-    }
-
     /// Decode a stored `cleanup_json`, and check it names `referrer`.
     ///
     /// # Errors

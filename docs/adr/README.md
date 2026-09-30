@@ -158,4 +158,5 @@ The generated region below is checked against the live filenames and headings.
 | 0123 | [Model code runs in resettable worker processes](0123-model-code-runs-in-resettable-worker-processes.md) |
 | 0124 | [Attachments are kept alive only by their referrers](0124-attachments-are-kept-alive-only-by-their-referrers.md) |
 | 0125 | [Model usage is engine-owned accounting delivered per call](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md) |
+| 0126 | [Session config changes are typed owner commands](0126-session-config-changes-are-typed-owner-commands.md) |
 <!-- adr-index:end -->

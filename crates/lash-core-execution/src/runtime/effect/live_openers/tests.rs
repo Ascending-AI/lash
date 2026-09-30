@@ -50,7 +50,7 @@ fn live_context() -> LiveOpenerContext {
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {

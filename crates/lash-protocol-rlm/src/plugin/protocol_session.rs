@@ -2,24 +2,19 @@ use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::plugin::{
-    CheckpointHookContext, PluginDirective, PluginError, ProtocolRuntimeContext,
-    ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
-    TurnPluginDirective,
+    CheckpointHookContext, PluginDirective, PluginError, ProtocolSessionContext,
+    ProtocolSessionPlugin, TurnPluginDirective,
 };
-use lash_core::{CheckpointKind, PluginOptions, ProtocolTurnOptions, SessionError};
-use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
-};
+use lash_core::{CheckpointKind, ProtocolTurnOptions, SessionError};
+use lash_rlm_types::{RlmCreateExtras, RlmSessionConfig};
 
+use super::RlmProtocolPluginConfig;
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
-use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
 use crate::rlm_support::effective_budget_tokens;
 
 pub(crate) struct RlmProtocolSession {
     config: RlmProtocolPluginConfig,
-    /// The host-selected dialect's language id, recorded on materialization.
-    language_id: &'static str,
     runtime_state: Arc<RlmRuntimeState>,
     warned_at_threshold: Mutex<bool>,
 }
@@ -27,13 +22,11 @@ pub(crate) struct RlmProtocolSession {
 impl RlmProtocolSession {
     pub(crate) fn new(
         config: RlmProtocolPluginConfig,
-        language_id: &'static str,
         runtime_state: Arc<RlmRuntimeState>,
     ) -> Self {
         Self {
             runtime_state,
             config,
-            language_id,
             warned_at_threshold: Mutex::new(false),
         }
     }
@@ -131,30 +124,6 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
             .await
             .map(Some)
     }
-
-    fn configure_runtime_on_materialize(
-        &self,
-        mut ctx: ProtocolRuntimeContext<'_>,
-        materialization: ProtocolSessionMaterialization<'_>,
-    ) -> Result<(), SessionError> {
-        let options = resolve_rlm_session_options(
-            ctx.protocol_turn_options(),
-            materialization.plugin_options,
-            materialization.is_root_session,
-        )?;
-        let options = super::channel::record_channel(options, self.config.channel);
-        let options = super::channel::record_dialect(options, self.language_id);
-        ctx.set_protocol_turn_options_all_frames(options);
-        Ok(())
-    }
-
-    fn apply_session_config_patch(
-        &self,
-        recorded: &ProtocolTurnOptions,
-        plugin_options: &PluginOptions,
-    ) -> Result<ProtocolTurnOptions, SessionError> {
-        patch_rlm_session_options(recorded, plugin_options)
-    }
 }
 
 /// The durable RLM facts recorded on a set of protocol turn options.
@@ -189,148 +158,6 @@ impl std::fmt::Display for RlmSessionConfigDecodeError {
 }
 
 impl std::error::Error for RlmSessionConfigDecodeError {}
-
-/// The guarded set-if-unset write for the durable RLM bag (ADR 0066).
-///
-/// Every field the request states is written only while the session has
-/// recorded nothing for it. Restating the value already recorded is a no-op
-/// rather than an error — set-if-unset is idempotent, which is what lets a host
-/// call it on every open. Stating a *different* value is refused with a typed
-/// [`RlmSessionConfigConflict`]; there is no smoothing path, by design.
-///
-/// Fields the request leaves unstated are carried through untouched: a reopen
-/// that names no format no longer resets one the session recorded.
-pub fn apply_rlm_session_config_if_unset(
-    existing: &RlmSessionConfig,
-    requested: &RlmSessionConfig,
-) -> Result<RlmSessionConfig, RlmSessionConfigConflict> {
-    let mut next = existing.clone();
-    if let Some(requested) = requested.final_answer_format.clone() {
-        match existing.final_answer_format.clone() {
-            Some(recorded) if recorded != requested => {
-                return Err(RlmSessionConfigConflict::FinalAnswerFormat {
-                    recorded,
-                    requested,
-                });
-            }
-            Some(_) => {}
-            None => next.final_answer_format = Some(requested),
-        }
-    }
-    if let Some(requested) = requested.termination.clone() {
-        match existing.termination.clone() {
-            Some(recorded) if recorded != requested => {
-                return Err(RlmSessionConfigConflict::Termination {
-                    recorded: Box::new(recorded),
-                    requested: Box::new(requested),
-                });
-            }
-            Some(_) => {}
-            None => next.termination = Some(requested),
-        }
-    }
-    Ok(next)
-}
-
-/// Encode a config back into the durable options bag.
-pub fn rlm_session_config_options(
-    config: &RlmSessionConfig,
-) -> Result<ProtocolTurnOptions, SessionError> {
-    Ok(ProtocolTurnOptions::typed(RlmCreateExtras::from(config))?)
-}
-
-/// Materialize the durable RLM options for a session that is opening.
-///
-/// Config is baked at creation (FIG-4099). A session that has recorded its RLM
-/// options keeps them exactly as recorded: a reopen states nothing, whatever
-/// the materialization's plugin options say, and later changes go through
-/// the session config patch ([`patch_rlm_session_options`]). A session that
-/// has recorded nothing yet — its creation — takes the creator's stated facts
-/// and fills the one fact the runtime cannot start without from its default:
-/// the presentation format the prompt is written against (`Markdown` for
-/// root sessions, `RawFinalValue` for children). The session's channel and
-/// dialect are recorded beside these facts by the materializing session
-/// itself, from the host's selection (ADR 0096).
-pub(crate) fn resolve_rlm_session_options(
-    existing: &ProtocolTurnOptions,
-    plugin_options: &PluginOptions,
-    is_root_session: bool,
-) -> Result<ProtocolTurnOptions, SessionError> {
-    if !existing.is_empty() {
-        // Read strictly: a recorded bag that does not decode refuses rather
-        // than runs.
-        rlm_session_config(existing).map_err(|err| SessionError::Protocol(err.to_string()))?;
-        return Ok(existing.clone());
-    }
-    let requested = plugin_options
-        .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
-        .map_err(|err| SessionError::Protocol(format!("invalid RLM create options: {err}")))?
-        .unwrap_or_default();
-    let mut extras = requested.clone();
-    extras.final_answer_format = Some(requested.final_answer_format.unwrap_or({
-        if is_root_session {
-            RlmFinalAnswerFormat::Markdown
-        } else {
-            RlmFinalAnswerFormat::RawFinalValue
-        }
-    }));
-    Ok(ProtocolTurnOptions::typed(extras)?)
-}
-
-/// Apply a session config patch's RLM facts to what the session recorded
-/// (FIG-4099, ADR 0066).
-///
-/// The durable RLM facts are a guarded set-if-unset: each stated fact is
-/// written only where the session recorded nothing, restating a recorded fact
-/// is a no-op, and stating a *different* value is refused with the typed
-/// [`RlmSessionConfigConflict`], carried as
-/// [`SessionError::SessionConfigRefused`]. A key for another plugin is
-/// refused as [`lash_core::PluginOptionsUnaccepted`]: the RLM protocol is the
-/// only reader of session plugin options. The recorded channel is carried
-/// through untouched.
-pub(crate) fn patch_rlm_session_options(
-    recorded: &ProtocolTurnOptions,
-    plugin_options: &PluginOptions,
-) -> Result<ProtocolTurnOptions, SessionError> {
-    let unaccepted: Vec<String> = plugin_options
-        .plugins
-        .keys()
-        .filter(|plugin_id| plugin_id.as_str() != RLM_PROTOCOL_PLUGIN_ID)
-        .cloned()
-        .collect();
-    if !unaccepted.is_empty() {
-        return Err(refused(lash_core::PluginOptionsUnaccepted {
-            plugin_ids: unaccepted,
-        }));
-    }
-    let Some(requested) = plugin_options
-        .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
-        .map_err(refused)?
-    else {
-        return Ok(recorded.clone());
-    };
-    let recorded_config = rlm_session_config(recorded).map_err(refused)?;
-    let next =
-        apply_rlm_session_config_if_unset(&recorded_config, &RlmSessionConfig::from(&requested))
-            .map_err(refused)?;
-    let recorded_render = super::channel::without_session_pins(recorded)
-        .decode::<RlmCreateExtras>()
-        .map_err(refused)?
-        .render;
-    let mut extras = RlmCreateExtras::from(&next);
-    extras.render = recorded_render.or(requested.render);
-    let mut options = ProtocolTurnOptions::typed(extras)?;
-    for pin in ["channel", "dialect"] {
-        if let Some(value) = recorded.payload.get(pin) {
-            options.payload[pin] = value.clone();
-        }
-    }
-    Ok(options)
-}
-
-fn refused(refusal: impl std::error::Error + Send + Sync + 'static) -> SessionError {
-    SessionError::SessionConfigRefused(lash_core::SessionConfigRefusal::new(refusal))
-}
 
 #[cfg(test)]
 mod tests {
@@ -386,240 +213,9 @@ mod tests {
     #[async_trait::async_trait]
     impl lash_core::plugin::runtime_host::SessionGraphService for NoopPromptManager {}
 
-    /// A session that recorded something is never re-defaulted: the reopen
-    /// carries every recorded fact through and adds nothing it did not state.
-    #[test]
-    fn resolve_rlm_session_options_preserves_existing_termination() {
-        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
-            termination: Some(lash_rlm_types::RlmTermination::Natural),
-            final_answer_format: None,
-            render: None,
-        })
-        .expect("existing options");
-
-        let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
-            .expect("resolve options");
-        let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(
-            extras.termination,
-            Some(lash_rlm_types::RlmTermination::Natural)
-        );
-        assert_eq!(
-            extras.final_answer_format, None,
-            "a reopen must not invent a format the session never recorded"
-        );
-    }
-
-    #[test]
-    fn resolve_rlm_session_options_defaults_child_to_raw_final_value() {
-        let options = resolve_rlm_session_options(
-            &ProtocolTurnOptions::empty(),
-            &PluginOptions::default(),
-            false,
-        )
-        .expect("resolve options");
-        let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(
-            extras.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue)
-        );
-    }
-
-    #[test]
-    fn resolve_rlm_session_options_applies_explicit_extras() {
-        let plugin_options = PluginOptions::typed(
-            RLM_PROTOCOL_PLUGIN_ID,
-            RlmCreateExtras {
-                termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                render: None,
-            },
-        )
-        .expect("plugin options");
-
-        let options =
-            resolve_rlm_session_options(&ProtocolTurnOptions::empty(), &plugin_options, false)
-                .expect("resolve options");
-        let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(
-            extras.termination,
-            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None })
-        );
-        assert_eq!(
-            extras.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue)
-        );
-    }
-
-    #[test]
-    fn resolve_rlm_session_options_rejects_malformed_extras() {
-        let mut plugin_options = PluginOptions::default();
-        plugin_options.plugins.insert(
-            RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            serde_json::json!({ "termination": { "kind": "unknown" } }),
-        );
-        let err =
-            resolve_rlm_session_options(&ProtocolTurnOptions::empty(), &plugin_options, false)
-                .expect_err("malformed extras should error");
-        assert!(err.to_string().contains("invalid RLM create options"));
-    }
-
-    /// A create request cannot choose the dialect: the host selects it where
-    /// it constructs the protocol, the create contract has no such field and
-    /// `RlmCreateExtras` denies unknown keys, so the host learns at once
-    /// rather than having its choice silently dropped.
-    #[test]
-    fn create_options_naming_a_dialect_are_refused() {
-        let mut plugin_options = PluginOptions::default();
-        plugin_options.plugins.insert(
-            RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            serde_json::json!({ "dialect": "typescript" }),
-        );
-        let error =
-            resolve_rlm_session_options(&ProtocolTurnOptions::empty(), &plugin_options, true)
-                .expect_err("the create contract carries no language choice");
-        assert!(
-            error.to_string().contains("invalid RLM create options"),
-            "{error}"
-        );
-    }
-
-    /// FIG-1555 clobber 1: a reopen that names no format must keep the one the
-    /// session recorded, instead of resetting it to the root default.
-    #[test]
-    fn reopen_without_an_explicit_format_keeps_the_recorded_final_answer_format() {
-        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
-            termination: Some(lash_rlm_types::RlmTermination::Natural),
-            final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-            render: None,
-        })
-        .expect("existing options");
-
-        let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
-            .expect("resolve options");
-        let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(
-            extras.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue),
-            "a reopen that states no format must not reset the recorded one"
-        );
-    }
-
-    /// FIG-1555 clobber 2: a patch that states one fact and nothing else must
-    /// not reset a recorded `FinishRequired` termination to the default.
-    #[test]
-    fn a_patch_stating_only_a_format_keeps_the_recorded_termination() {
-        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
-            termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-            final_answer_format: None,
-            render: None,
-        })
-        .expect("existing options");
-        let requested = PluginOptions::typed(
-            RLM_PROTOCOL_PLUGIN_ID,
-            RlmCreateExtras {
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                ..RlmCreateExtras::default()
-            },
-        )
-        .expect("format-only options");
-
-        let options = patch_rlm_session_options(&existing, &requested).expect("patch options");
-        let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(
-            extras.termination,
-            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-            "stating a format must not silently restate the termination"
-        );
-        assert_eq!(
-            extras.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue),
-            "the unrecorded fact the patch states is written"
-        );
-    }
-
-    /// FIG-4099: a reopen's options do not reach a session that recorded its
-    /// facts. A conflicting statement is neither applied nor refused: the
-    /// recorded bag comes back exactly as it was.
-    #[test]
-    fn a_reopen_statement_leaves_the_recorded_bag_as_recorded() {
-        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
-            termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-            final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
-            render: None,
-        })
-        .expect("existing options");
-        let conflicting = PluginOptions::typed(
-            RLM_PROTOCOL_PLUGIN_ID,
-            RlmCreateExtras {
-                termination: Some(lash_rlm_types::RlmTermination::Natural),
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                render: None,
-            },
-        )
-        .expect("conflicting options");
-
-        let options = resolve_rlm_session_options(&existing, &conflicting, true)
-            .expect("a reopen is not refused");
-        assert_eq!(options, existing);
-    }
-
-    /// FIG-4099: a patch that disagrees with a recorded fact is refused with
-    /// the typed `RlmSessionConfigConflict`, carried as a session config
-    /// refusal — never as prose.
-    #[test]
-    fn a_conflicting_patch_is_refused_with_the_typed_conflict() {
-        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
-            termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-            final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
-            render: None,
-        })
-        .expect("existing options");
-        let conflicting = PluginOptions::typed(
-            RLM_PROTOCOL_PLUGIN_ID,
-            RlmCreateExtras {
-                termination: Some(lash_rlm_types::RlmTermination::Natural),
-                ..RlmCreateExtras::default()
-            },
-        )
-        .expect("conflicting options");
-
-        let Err(SessionError::SessionConfigRefused(refusal)) =
-            patch_rlm_session_options(&existing, &conflicting)
-        else {
-            panic!("a conflicting patch must be refused typed");
-        };
-        assert_eq!(
-            refusal.downcast_ref::<RlmSessionConfigConflict>(),
-            Some(&RlmSessionConfigConflict::Termination {
-                recorded: Box::new(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
-                requested: Box::new(lash_rlm_types::RlmTermination::Natural),
-            })
-        );
-    }
-
-    /// A patch keyed for another plugin is refused typed: the RLM protocol is
-    /// the only reader of session plugin options.
-    #[test]
-    fn a_patch_for_another_plugin_is_refused_as_unaccepted() {
-        let options =
-            PluginOptions::typed("another-plugin", serde_json::json!({ "k": 1 })).expect("options");
-        let Err(SessionError::SessionConfigRefused(refusal)) =
-            patch_rlm_session_options(&ProtocolTurnOptions::empty(), &options)
-        else {
-            panic!("an unread key must be refused typed");
-        };
-        assert_eq!(
-            refusal.downcast_ref::<lash_core::PluginOptionsUnaccepted>(),
-            Some(&lash_core::PluginOptionsUnaccepted {
-                plugin_ids: vec!["another-plugin".to_string()],
-            })
-        );
-    }
-
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
         let runtime_state = Arc::new(RlmRuntimeState::new_for_tests().expect("runtime state"));
-        RlmProtocolSession::new(config, "typescript", runtime_state)
+        RlmProtocolSession::new(config, runtime_state)
     }
 
     #[tokio::test]
@@ -713,6 +309,7 @@ mod tests {
                 sessions: Arc::new(NoopPromptManager),
                 session_lifecycle: Arc::new(NoopPromptManager),
                 session_graph: Arc::new(NoopPromptManager),
+                plugin_config: Default::default(),
             })
             .expect("warning directives");
 
@@ -772,6 +369,7 @@ mod tests {
                 sessions: Arc::new(NoopPromptManager),
                 session_lifecycle: Arc::new(NoopPromptManager),
                 session_graph: Arc::new(NoopPromptManager),
+                plugin_config: Default::default(),
             })
             .expect("warning directives");
         assert!(directives.is_empty());
@@ -810,6 +408,7 @@ mod tests {
                 sessions: Arc::new(NoopPromptManager),
                 session_lifecycle: Arc::new(NoopPromptManager),
                 session_graph: Arc::new(NoopPromptManager),
+                plugin_config: Default::default(),
             })
             .expect("warning directives");
 

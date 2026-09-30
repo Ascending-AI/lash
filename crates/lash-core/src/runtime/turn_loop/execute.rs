@@ -311,7 +311,6 @@ impl LashRuntime {
                 PreparedLogicalTurn {
                     messages,
                     previous_prompt_usage,
-                    protocol_turn_options,
                     turn_context,
                     initial_turn_causes,
                     trace_turn_id,
@@ -346,11 +345,9 @@ impl LashRuntime {
             .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
             .await;
         let turn_policy = self.state.effective_policy().clone();
-        let session_protocol_turn_options = self.state.effective_protocol_turn_options().clone();
-        let effective_protocol_turn_options = protocol_turn_options
-            .clone()
-            .map(|options| session_protocol_turn_options.merged_with_override(&options))
-            .unwrap_or(session_protocol_turn_options);
+        // The root's recorded view: its protocol turn options are a view of
+        // the protocol namespace of the configuration it was admitted under.
+        let effective_protocol_turn_options = self.state.effective_protocol_turn_options();
         let manager = self
             .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {

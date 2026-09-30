@@ -10,6 +10,15 @@ pub enum RlmChannel {
     /// Programs appear in the provider's execute_code tool call.
     NativeTool,
 }
+impl RlmChannel {
+    /// The channel's recorded spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cell => "cell",
+            Self::NativeTool => "native_tool",
+        }
+    }
+}
 impl std::str::FromStr for RlmChannel {
     type Err = String;
 
@@ -34,17 +43,6 @@ pub(super) fn without_session_pins(options: &ProtocolTurnOptions) -> ProtocolTur
         object.remove("channel");
         object.remove(DIALECT_FIELD);
     }
-    options
-}
-#[expect(
-    clippy::expect_used,
-    reason = "RlmChannel is a crate-owned enum of strings, so serde_json encoding cannot fail"
-)]
-pub(super) fn record_channel(
-    mut options: ProtocolTurnOptions,
-    channel: RlmChannel,
-) -> ProtocolTurnOptions {
-    options.payload["channel"] = serde_json::to_value(channel).expect("channel serializes");
     options
 }
 #[expect(
@@ -83,17 +81,6 @@ pub(super) fn validate_channel(
         }
         None => Ok(()),
     }
-}
-
-/// Records the host's selected dialect on a materializing session. A session
-/// keeps the id it first recorded; the factory refuses a later build under
-/// another dialect ([`validate_dialect`]).
-pub(super) fn record_dialect(
-    mut options: ProtocolTurnOptions,
-    language_id: &'static str,
-) -> ProtocolTurnOptions {
-    options.payload[DIALECT_FIELD] = serde_json::Value::String(language_id.to_string());
-    options
 }
 
 /// The session's recorded dialect against the host's selection: a different
@@ -135,6 +122,19 @@ pub(super) fn validate_dialect(
 mod tests {
     use super::*;
 
+    /// The options a session records with only its pins, in the RLM owner's
+    /// recorded form.
+    fn pinned(channel: Option<RlmChannel>, dialect: Option<&str>) -> ProtocolTurnOptions {
+        ProtocolTurnOptions::from_payload(
+            serde_json::to_value(super::super::RlmRecordedConfig {
+                channel,
+                dialect: dialect.map(str::to_string),
+                ..super::super::RlmRecordedConfig::default()
+            })
+            .unwrap(),
+        )
+    }
+
     #[test]
     fn from_str_accepts_all_channel_spellings() {
         assert_eq!("cell".parse(), Ok(RlmChannel::Cell));
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn recorded_channel_refuses_substitution_and_missing_pin() {
         for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
-            let options = record_channel(ProtocolTurnOptions::default(), channel);
+            let options = pinned(Some(channel), None);
             let options: ProtocolTurnOptions =
                 serde_json::from_str(&serde_json::to_string(&options).unwrap()).unwrap();
             validate_channel(
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn recorded_dialect_refuses_substitution_and_missing_pin() {
-        let options = record_dialect(ProtocolTurnOptions::default(), "typescript");
+        let options = pinned(None, Some("typescript"));
         let options: ProtocolTurnOptions =
             serde_json::from_str(&serde_json::to_string(&options).unwrap()).unwrap();
         validate_dialect(
@@ -203,7 +203,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            without_session_pins(&record_channel(options, RlmChannel::Cell))
+            without_session_pins(&pinned(Some(RlmChannel::Cell), Some("typescript")))
                 .payload
                 .as_object()
                 .is_none_or(serde_json::Map::is_empty)

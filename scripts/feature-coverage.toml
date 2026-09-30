@@ -192,8 +192,9 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-worker", "--bins", "--no-default-features", "--locked"],
+  # Check the library and production entry together without test targets,
+  # whose self dev-dependency would turn testing on.
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
 ]
 
@@ -311,6 +312,12 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "subagents", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "http-transport", "--locked"],
+  # The figments facade request (FIG-4423): `rlm,testing` in one resolution,
+  # which compiles the `lash-seam-proof-worker` bin too and pairs the
+  # `lash-vm-worker?/testing` forward with the worker's own
+  # `lash-vm-client/testing` forward -- a testing worker with a testing
+  # client, the pairing FIG-4409's invariant checks.
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "rlm,testing", "--locked"],
 ]
 
 [[lane]]
@@ -413,6 +420,12 @@ commands = [
 [[lane]]
 name = "upgrade-harness-synthetic-next"
 features = [
+  "lash-internal-vm-protocol/synthetic-next:on",
+  "lash-internal-vm-protocol/synthetic-next:off",
+  "lash-internal-vm-broker/synthetic-next:on",
+  "lash-internal-vm-broker/synthetic-next:off",
+  "lash-internal-vm-client/synthetic-next:on",
+  "lash-internal-vm-client/synthetic-next:off",
   "lash-upgrade-harness/synthetic-next:on",
   "lash-upgrade-harness/synthetic-next:off",
   "lash-runtime/synthetic-next:on",
@@ -439,6 +452,16 @@ features = [
   "lash-internal-protocol-rlm/synthetic-next:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm-worker", "--test", "pool_laws", "--no-default-features", "--features", "testing,synthetic-next", "--locked", "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-remote-protocol", "--test", "decode_limits", "--no-default-features", "--features", "synthetic-next", "--locked"],
@@ -475,16 +498,21 @@ commands = [
 ]
 
 # The FIG-4169 rolling deploy replaces the load-test workers with the same
-# worker built as the synthetic N+1; `just multi-node-load` builds it both ways.
+# worker built as the synthetic N+1; `just multi-node-load` builds it both ways,
+# each beside the VM helper built with its worker's features.
 [[lane]]
 name = "loadtest-worker-synthetic-next"
 features = [
   "lash-restate-postgres-workers-e2e/synthetic-next:on",
   "lash-restate-postgres-workers-e2e/synthetic-next:off",
+  "lash-internal-vm-worker/synthetic-next:on",
+  "lash-internal-vm-worker/synthetic-next:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-restate-postgres-workers-e2e", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
 # The operator binary used by Phase A must carry the same N+1 Restate epoch.

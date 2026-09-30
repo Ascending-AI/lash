@@ -152,10 +152,11 @@ fn workbench_plugin_observes_session_config_policy_transition() {
         session
             .admin()
             .config()
-            .update(lash::SessionConfigPatch {
-                model: Some(patched_model),
-                ..Default::default()
-            })
+            .configure(lash::config::ConfigTransaction::of(
+                lash::config::SetModel {
+                    model: patched_model,
+                },
+            ))
             .await
             .expect("patch workbench session model");
 

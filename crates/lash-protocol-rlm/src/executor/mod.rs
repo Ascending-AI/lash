@@ -391,7 +391,14 @@ impl RlmCheckpointPerfFixture {
         self.state.acknowledge_execution_state_capture();
     }
 
-    pub async fn assign_one(&mut self, index: usize, turn: usize) -> Result<(), SessionError> {
+    /// Run the edit under the backend's scoped controller and this cell's
+    /// invocation, including the production projected-bindings journal.
+    pub async fn assign_one(
+        &mut self,
+        index: usize,
+        turn: usize,
+        ctx: RuntimeExecutionContext<'_>,
+    ) -> Result<(), SessionError> {
         let binding = index % self.binding_count.max(1);
         // A seeded global is an ambient `const` to a TypeScript cell, so the
         // per-turn edit is a re-declaration carrying an equivalent payload
@@ -405,15 +412,7 @@ impl RlmCheckpointPerfFixture {
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             self.dialect.as_ref(),
             &mut self.state,
-            // The fixture measures state capture over pure bindings: no
-            // effect, environment or attachment is reached, so the context
-            // runs over no host and would refuse one.
-            lash_core::testing::TestExecutionContextBuilder::over_controller(Arc::new(
-                lash_core::testing::UnavailableEffectController,
-            )
-                as Arc<dyn lash_core::RuntimeEffectController>)
-            .build()
-            .into_runtime(),
+            ctx,
             ExecRequest { code },
             self.artifact_store.clone(),
             LashlangSurface::default(),
@@ -576,6 +575,31 @@ async fn execute_code_in_worker_scope(
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
+    // A frame handoff changes the session's live projections. Re-execution
+    // links against this cell's recorded inputs, under the exec_code address
+    // its parent installed, before it reaches its recorded command keys.
+    let session_projected_bindings = match ctx
+        .parent_invocation()
+        .and_then(lash_core::RuntimeInvocation::effect_address)
+    {
+        Some(address) => match session_projected_bindings
+            .journaled(&ctx, &address.replay_key)
+            .await
+        {
+            Ok(bindings) => bindings,
+            Err(error) => {
+                let message = error.message.clone();
+                ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(&cell, error));
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    message,
+                );
+            }
+        },
+        None => session_projected_bindings,
+    };
     let (parsed, referenced) = match workers
         .request_accounted(lash_vm_client::service::Request::References {
             source: code.to_string(),
@@ -956,6 +980,7 @@ async fn execute_code_in_worker_scope(
         context: lash_vm_client::RunContext {
             environment: host.host_environment_description(),
             mode: lashlang::ExecutionMode::Foreground,
+            capture_state_view: true,
             projected: Vec::new(),
             observe_execution: lashlang_execution_trace.is_some(),
             ..Default::default()
@@ -969,35 +994,26 @@ async fn execute_code_in_worker_scope(
     .await;
     let (result, runtime_failure) = match run {
         Ok(lash_vm_broker::BrokeredEnd::Complete { value, checkpoint }) => {
-            if let Err(error) = workers.mark_running().await {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-            if let Err(error) = state
+            let outcome = match state
                 .vm
                 .state_mut()
-                .install_bytes(checkpoint.vm.bytes().to_vec())
+                .install_completion(&checkpoint.vm, &value)
             {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error,
-                );
-            }
-            let outcome = match rmp_serde::from_slice::<ExecutionOutcome>(&value.0) {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
+                    let mut response = exec_setup_failure(lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Host,
                         format!("invalid worker completion: {error}"),
+                    ));
+                    fail_cell_on_nested_error(
+                        &ctx,
+                        &mut response,
+                        lash_core::RuntimeEffectControllerError::new(
+                            lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
+                            format!("invalid worker completion: {error}"),
+                        ),
                     );
+                    return response;
                 }
             };
             (Ok(outcome), None)

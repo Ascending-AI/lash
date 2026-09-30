@@ -134,7 +134,7 @@ request. Pending requests use handle ids.
 
 `processes.await` parks on the Durable Wait seam. In an effect group it is a
 resumable child, retained across segment boundaries, and takes its rank when
-completion arrives. There is no running attempt body requiring cancel grace.
+completion arrives. There is no running attempt body to join at close.
 A raw process handle at an aggregate element must be replaced by the
 `processes.await` call so the wait participates in group settlement.
 

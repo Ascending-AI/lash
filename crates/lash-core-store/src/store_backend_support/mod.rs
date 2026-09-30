@@ -5,6 +5,7 @@ use lash_sansio::SessionId;
 mod append_identity;
 mod head_path;
 mod process_lifecycle_sql;
+mod queued_work_admission;
 mod run_spec_admission;
 mod session_meta;
 mod turn_input_batch;
@@ -16,6 +17,11 @@ pub use process_lifecycle_sql::{
     live_process_status_predicate_sql, nonterminal_process_status_predicate_sql,
     retired_process_status_predicate_sql, undelivered_wake_delivery_state_predicate_sql,
     wake_delivery_state_sql_literal,
+};
+pub use queued_work_admission::{
+    QueuedWorkDraftAdmission, TurnAddressEvidence, decide_queued_work_draft_admission,
+    decode_ingress_terminal, queued_work_submission_digest, require_known_turn_address,
+    turn_address_evidence,
 };
 pub use run_spec_admission::{
     RunSpecAdmission, check_running_root_run_spec, check_steering_run_spec,
@@ -32,7 +38,8 @@ pub use turn_input_lifecycle_sql::{
     accepted_turn_input_state_predicate_sql, active_turn_input_state_predicate_sql,
     cancelled_turn_input_state_predicate_sql, deferred_next_turn_turn_input_state_predicate_sql,
     nonterminal_turn_input_state_predicate_sql, pending_active_turn_input_state_predicate_sql,
-    terminal_turn_input_state_predicate_sql, undelivered_turn_input_state_predicate_sql,
+    released_turn_input_state_sql, terminal_turn_input_state_predicate_sql,
+    undelivered_turn_input_state_predicate_sql,
 };
 
 /// Reserved runtime-receipt identity used as the durable completion marker

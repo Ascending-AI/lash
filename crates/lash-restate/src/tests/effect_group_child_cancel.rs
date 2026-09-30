@@ -1,9 +1,10 @@
 //! D20 (FIG-3904): an effect-group child's cancel race is recorded.
 //!
 //! The dispatched child handler learns of its cancel from the group's durable
-//! cancel fact: the child's cancel wait, which the index resolves when it
-//! decides the child's cancel (a `close(Cancel)` or a retirement) and ends
-//! `Settled` once the child's settlement is seated. These laws drive the
+//! cancel fact: the group index's record of the child, answered as the
+//! child's `ChildCancel` notice — `Cancel` once the index decided the child's
+//! cancel (a `close(Cancel)` or a retirement), `Settled` once the child's
+//! settlement is seated (FIG-4344). These laws drive the
 //! deployed `EffectGroupDispatch/child` handler through the endpoint protocol,
 //! with the index's answers scripted and the deployment's ingress replaced by
 //! a transport the law controls:
@@ -36,8 +37,8 @@ use super::endpoint_protocol::{
     restate_error_message, restate_message_types, restate_recorded_commands,
 };
 use crate::effect_group::{
-    EffectGroupChildRequest, EffectGroupRecordSettlementRequest, EffectGroupSettlementTerminal,
-    EffectGroupShape, EffectGroupWaitResolution,
+    EffectGroupChildRequest, EffectGroupNotification, EffectGroupRecordSettlementRequest,
+    EffectGroupSettlementTerminal, EffectGroupShape,
 };
 
 const DISPATCH: &str = "EffectGroupDispatch";
@@ -67,7 +68,6 @@ fn child_request(command: RuntimeEffectCommand) -> EffectGroupChildRequest {
             wake: GroupWakePolicy::All,
             loser_disposition: LoserPolicy::Cancel,
             replay_keys: vec![envelope.invocation.effect_replay_key().to_string()],
-            wait_scope: scope(),
             opener: lash_core::AdmittedScope::runtime_operation("fig-3904"),
         },
         position: 0,
@@ -78,7 +78,7 @@ fn child_request(command: RuntimeEffectCommand) -> EffectGroupChildRequest {
 /// What one answer of the deployment's ingress does.
 #[derive(Clone, Copy, Debug)]
 enum WatchReply {
-    /// Answers the cancel wait's resolution `Cancel` at once.
+    /// Answers the child's cancel fact `Cancel` at once.
     Cancel,
     /// Answers `Cancel` after a delay: a watch whose round trip is slower
     /// than a replayed journal.
@@ -122,11 +122,10 @@ impl ScriptedIngress {
     }
 }
 
+/// The index's answer of a decided cancel, to the watch's read and to its
+/// `await_notice` attach alike.
 fn cancel_resolution_body() -> HttpResponseBody {
-    let resolution = lash_core::Resolution::Ok(
-        serde_json::to_value(EffectGroupWaitResolution::Cancel).expect("encode the cancel wake"),
-    );
-    HttpResponseBody::buffered(crate::wire::reply_json(&resolution))
+    HttpResponseBody::buffered(crate::wire::reply_json(&EffectGroupNotification::Cancel))
 }
 
 #[async_trait::async_trait]
@@ -234,11 +233,11 @@ fn index_answer(handler: &str) -> Option<serde_json::Value> {
     Some(match handler {
         "admit_child" => serde_json::json!({ "type": "admitted" }),
         "record_group_child" => serde_json::json!(true),
-        // The child's cancel wait, resolved `Cancel` by the deciding index.
-        "await_resolution" => serde_json::to_value(lash_core::Resolution::Ok(
-            serde_json::to_value(EffectGroupWaitResolution::Cancel).expect("encode the wake"),
-        ))
-        .expect("encode the resolution"),
+        // The child's cancel fact, which the deciding index answers `Cancel`.
+        "subscribe" => serde_json::json!({
+            "type": "notified",
+            "notification": { "type": "cancel" },
+        }),
         "commit_child" => serde_json::json!({
             "type": "committed",
             "rank": 1,
@@ -275,9 +274,9 @@ fn settled_terminal(output: &[u8]) -> Option<EffectGroupSettlementTerminal> {
 }
 
 /// A wait child whose live run lost its wait to its cancel is replayed with
-/// the timer fired too: the journal holds the cancel's completion first and
-/// the timer's after it. The replay takes the arm the journal completed
-/// first, issues no command the journal does not hold and settles
+/// the timer fired too: the journal holds the cancel's answer first and the
+/// timer's completion after it. The replay takes the arm the journal
+/// recorded, issues no command the journal does not hold and settles
 /// `Cancelled` again.
 ///
 /// Red before D20: the child raced its wait against a live ingress watch, so
@@ -311,7 +310,7 @@ async fn a_replayed_wait_child_whose_live_run_was_cancelled_settles_cancelled() 
         named_answers(&[
             "admit_child",
             "record_group_child",
-            "await_resolution",
+            "subscribe",
             "commit_child",
             "record_settlement",
         ]),

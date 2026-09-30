@@ -36,7 +36,7 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
     let scenario = "layered-group-child";
     let raw = make(scenario) as Arc<dyn RuntimeStore>;
     let identity = ReferenceIdentity::for_scenario(scenario);
-    seed_reference_ingress(&raw, &identity, scenario).await;
+    seed_reference_ingress(&raw, &identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let law_host = LawSeamHost::over(host);
@@ -59,7 +59,11 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
             let reports = reports.clone();
             Box::pin(async move {
                 law_host.route_to(&seam);
-                let store = SeamStore::wrap(raw, seam.control.clone());
+                let store = SeamStore::steering(
+                    raw,
+                    seam.control.clone(),
+                    vec![reference_steer(&identity)],
+                );
                 let mut runtime = Box::pin(try_build_runtime_over_host(
                     Arc::clone(&stores),
                     store,

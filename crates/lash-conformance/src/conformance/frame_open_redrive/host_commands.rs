@@ -16,9 +16,13 @@
 //! ended root's fence, never waits on a command settlement and never
 //! deadlocks its drive; a dirty park while the bound turn owns the head is
 //! refused busy, keeps its runtime and loses nothing, and lands once the
-//! boundary passed, while a clean park writes nothing; and a command
-//! withdrawn before the drive read it never applies, while one the drive
-//! already read is no longer withdrawn.
+//! boundary passed, while a clean park writes nothing; a plugin-state-dirty
+//! park re-parks from the recorded head once the bound turn moved it
+//! (FIG-4392); and a command withdrawn before the drive read it never
+//! applies, while one the drive already read is no longer withdrawn. A
+//! host's cancel still reaches a plugin task the drive admitted, through the
+//! task's cancel gate: the drive stops the task's code and settles the
+//! command cancelled, with nothing of the task committed (FIG-4391).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -79,6 +83,9 @@ const HOST_APPEND_NOTE: &str = "a note the host appended";
 const PLUGIN_COMMAND_NOTE: &str = "a note the host's plugin command appended";
 /// The text a host's plugin task appends.
 const PLUGIN_TASK_NOTE: &str = "a note the host's plugin task appended";
+/// The text a host's cancellable plugin task would append after its
+/// cancellation.
+const CANCELLED_TASK_NOTE: &str = "a note the host's cancelled plugin task appended";
 /// The seed a host's frame open carries.
 const HOST_FRAME_SEED: &str = "the seed of the host's frame";
 /// The reason a host's frame open names.
@@ -110,6 +117,21 @@ impl crate::plugin::PluginOperation for HostNoteTask {
 
 impl crate::plugin::PluginTask for HostNoteTask {}
 
+/// A plugin task that runs until its cancellation, and then appends the
+/// note its arguments name.
+struct HostCancellableTask;
+
+impl crate::plugin::PluginOperation for HostCancellableTask {
+    const NAME: &'static str = "conformance_host_cancellable_task";
+    const DESCRIPTION: &'static str =
+        "Run until cancelled, then append a note to the session, as a host's plugin task.";
+    const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
+    type Args = serde_json::Value;
+    type Output = serde_json::Value;
+}
+
+impl crate::plugin::PluginTask for HostCancellableTask {}
+
 /// What the host-command plugin saw, shared by every runtime a law builds.
 #[derive(Clone, Default)]
 struct HostPluginProbe {
@@ -117,6 +139,10 @@ struct HostPluginProbe {
     command_runs: Arc<AtomicUsize>,
     /// How many times the plugin task's code ran.
     task_runs: Arc<AtomicUsize>,
+    /// How many times the cancellable plugin task's code ran.
+    cancellable_task_runs: Arc<AtomicUsize>,
+    /// Notified each time the cancellable plugin task's code starts.
+    cancellable_task_entered: Arc<tokio::sync::Notify>,
     /// Holds the plugin command's code after it counted its run.
     command_hold: Option<SummaryHold>,
     /// Whether the terminal callback appends a note on every persisted turn.
@@ -171,9 +197,10 @@ async fn append_note(
 fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
     let command_probe = probe.clone();
     let task_probe = probe.clone();
+    let cancellable_probe = probe.clone();
     let event_probe = probe.clone();
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-host-commands",
+        HOST_PLUGIN_ID,
         crate::facade_support::PluginSpec::new()
             .with_plugin_command_value::<HostNoteCommand, _, _>(move |ctx, args| {
                 let probe = command_probe.clone();
@@ -189,6 +216,15 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                 let probe = task_probe.clone();
                 async move {
                     probe.task_runs.fetch_add(1, Ordering::SeqCst);
+                    append_note(&ctx.session_graph, ctx.session_id, &args).await
+                }
+            })
+            .with_plugin_task_value::<HostCancellableTask, _, _>(move |ctx, args| {
+                let probe = cancellable_probe.clone();
+                async move {
+                    probe.cancellable_task_runs.fetch_add(1, Ordering::SeqCst);
+                    probe.cancellable_task_entered.notify_one();
+                    ctx.cancellation_token.cancelled().await;
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
             })
@@ -359,15 +395,59 @@ async fn a_lane_less_write_is_refused(law: &LawSession) {
         )
         .await
         .expect_err("the bound turn owns the head");
+    let bound = law
+        .store
+        .unfinished_root(&law.session_id)
+        .await
+        .expect("read the bound root")
+        .expect("a root is bound")
+        .root;
     assert!(
-        refused.to_string().contains("is owned by unfinished root"),
-        "the refusal names the head's owner: {refused}"
+        matches!(
+            &refused,
+            crate::PluginError::SessionHeadOwned { session_id, owner }
+                if *session_id == law.session_id
+                    && *owner == crate::store::SessionHeadOwner::Root { root: bound }
+        ),
+        "the typed refusal names the session and the bound root: {refused:?}"
     );
     assert_eq!(
         law.head().await.head_revision,
         before,
         "the refused write wrote nothing"
     );
+}
+
+/// A lane-less append during a bound turn returns the typed ownership
+/// refusal with the exact session and root, without changing the head.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the bound turn is released once the refusal is checked"
+)]
+pub async fn a_lane_less_append_names_the_bound_head_owner(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let (law, _, hold) = bound_turn_session(
+        prefix,
+        "lane-less-append-owner",
+        effect_host,
+        stores,
+        runner,
+        &HostPluginProbe::default(),
+    )
+    .await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(
+            law.run_root("root-2"),
+            hold.while_held(a_lane_less_write_is_refused(&law)),
+        ),
+    )
+    .await
+    .expect("the bound turn ends after the typed refusal");
 }
 
 /// The position of the one committed message on `path` whose text is
@@ -549,7 +629,12 @@ pub async fn host_append_waits_for_the_bound_turn(
 /// output in the commit that lands what its services appended. Killed at
 /// `crash` and redriven, each settles once; a crash before the commit runs
 /// the command's code again (a plugin's code before its commit is
-/// at-least-once), and its note still lands once.
+/// at-least-once), and its note still lands once. A host's cancel of the
+/// settled task finds its drive's seal and reaches nothing (FIG-4391).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn host_plugin_command_applies_at_the_boundary(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -558,6 +643,7 @@ pub async fn host_plugin_command_applies_at_the_boundary(
     crash: Option<HostCommandCrash>,
 ) {
     let probe = HostPluginProbe::default();
+    let host_effects = Arc::clone(&effect_host);
     let (law, model, hold) = bound_turn_session(
         prefix,
         &format!("host-plugin-command-{crash:?}").to_lowercase(),
@@ -624,6 +710,13 @@ pub async fn host_plugin_command_applies_at_the_boundary(
         "the command's code ran after admission, again only after a crash before its commit"
     );
     assert_eq!(probe.task_runs.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipts[1])
+            .await
+            .expect("cancel the settled task"),
+        lash_core::runtime::PluginTaskCancelRequest::TaskSettled,
+        "a cancel after the task's code returned finds its drive's seal (FIG-4391)"
+    );
     let head = law.head().await;
     assert_eq!(
         head.head_revision,
@@ -893,6 +986,189 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 
+/// The plugin namespace of the laws' host plugin.
+const HOST_PLUGIN_ID: &str = "conformance-host-commands";
+
+/// `runtime`'s own plugin-state handle for the laws' host plugin: the one
+/// the plugin receives, so a write through it is an accepted plugin write
+/// the runtime holds uncommitted until its next boundary.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+fn host_plugin_state(runtime: &crate::LashRuntime) -> lash_core::PluginStateStore {
+    lash_core::testing::runtime_internals::plugin_state_store(
+        &runtime
+            .plugin_session()
+            .expect("a law runtime has a plugin session"),
+        HOST_PLUGIN_ID,
+    )
+}
+
+/// The laws' host plugin namespace the session's recorded head carries.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn recorded_host_plugin_namespace(law: &LawSession) -> lash_core::PluginNamespaceState {
+    crate::conformance::helpers::load_window_state(&law.store, &law.session_id)
+        .await
+        .expect("read the recorded head")
+        .expect("the session committed")
+        .plugin_state()
+        .and_then(|state| state.plugins.get(HOST_PLUGIN_ID).cloned())
+        .unwrap_or_default()
+}
+
+/// A plugin-state-dirty park never wedges (FIG-4392). A host runtime holding
+/// an accepted, uncommitted plugin write is refused busy while the bound
+/// turn owns the head, and hands its runtime back. Once the bound turn's
+/// boundary passed, the head it committed has moved past the runtime: the
+/// same runtime re-parks by rehydrating from the recorded head, whose plugin
+/// namespace does not carry the uncommitted write, as a cold rebuild would,
+/// and writes nothing. A runtime built on that head parks clean, and one
+/// whose accepted write sits on the recorded head commits it at its park.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    const TAIL_KEY: &str = "uncommitted-tail";
+    const LANDED_KEY: &str = "landed-on-the-recorded-head";
+    let probe = HostPluginProbe::default();
+    let (law, model, hold) = bound_turn_session(
+        prefix,
+        "plugin-state-dirty-park",
+        effect_host,
+        stores,
+        runner,
+        &probe,
+    )
+    .await;
+    let recorded_before = recorded_host_plugin_namespace(&law).await;
+    let refused_runtime = std::sync::OnceLock::new();
+    let while_held = hold.while_held(async {
+        let before = law.head().await.head_revision;
+        let dirty = build_runtime(&law.parts, None).await;
+        let accepted = host_plugin_state(&dirty)
+            .set(
+                TAIL_KEY,
+                serde_json::json!("accepted while the turn was bound"),
+            )
+            .expect("the plugin write is accepted");
+        assert_eq!(accepted, recorded_before.generation + 1);
+        let Err(refused) = Box::pin(dirty.park()).await else {
+            panic!("a plugin-state-dirty park while the bound turn owns the head is busy");
+        };
+        let bound = law
+            .store
+            .unfinished_root(&law.session_id)
+            .await
+            .expect("read the bound root")
+            .expect("a root is bound")
+            .root;
+        assert_eq!(
+            refused.busy_owner(),
+            Some(&crate::store::SessionHeadOwner::Root { root: bound }),
+            "the refusal names the bound root: {:?}",
+            refused.error
+        );
+        assert_eq!(
+            law.head().await.head_revision,
+            before,
+            "the refused park wrote nothing"
+        );
+        assert!(
+            refused_runtime.set(refused.runtime).is_ok(),
+            "one refused park"
+        );
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(law.run_root("root-2"), while_held),
+    )
+    .await
+    .expect("the bound turn's drive ends");
+
+    let runtime = refused_runtime
+        .into_inner()
+        .expect("the dirty park was refused while the turn was bound");
+    let after_turn = law.head().await.head_revision;
+    let parked = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        Box::pin((*runtime).park()),
+    )
+    .await
+    .expect("the re-park settles");
+    let parked = match parked {
+        Ok(parked) => parked,
+        Err(refused) => panic!(
+            "the refused runtime re-parks from the recorded head once the boundary passed: {:?}",
+            refused.error
+        ),
+    };
+    assert_eq!(parked.session_id(), &law.session_id);
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn,
+        "a re-park rehydrated from the recorded head writes nothing"
+    );
+    let recorded = recorded_host_plugin_namespace(&law).await;
+    assert_eq!(
+        (recorded.values.get(TAIL_KEY), recorded.generation),
+        (None, recorded_before.generation),
+        "the recorded head does not carry the uncommitted write"
+    );
+    let clean = build_runtime(&law.parts, None).await;
+    assert_eq!(
+        host_plugin_state(&clean).generation(),
+        recorded.generation,
+        "a runtime built on the recorded head holds its namespace"
+    );
+    Box::pin(clean.park())
+        .await
+        .expect("a clean park is never busy");
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn,
+        "a clean park writes nothing"
+    );
+
+    let on_the_head = build_runtime(&law.parts, None).await;
+    host_plugin_state(&on_the_head)
+        .set(
+            LANDED_KEY,
+            serde_json::json!("accepted on the recorded head"),
+        )
+        .expect("the plugin write is accepted");
+    Box::pin(on_the_head.park())
+        .await
+        .expect("a plugin-state-dirty park on the recorded head lands");
+    assert_eq!(
+        law.head().await.head_revision,
+        after_turn + 1,
+        "the park commits the accepted write once"
+    );
+    let landed = recorded_host_plugin_namespace(&law).await;
+    assert_eq!(
+        (landed.values.get(LANDED_KEY), landed.generation),
+        (
+            Some(&serde_json::json!("accepted on the recorded head")),
+            recorded.generation + 1
+        ),
+        "the park committed the write it accepted on the recorded head"
+    );
+
+    let path = active_path(&law.head().await.graph);
+    position_of_once(&path, "answer 2");
+    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
+}
+
 /// A host withdraws a command transactionally until the drive admits it
 /// (FIG-4202): an append submitted while the bound turn holds its pressure
 /// summary, and withdrawn before any drive read it, never applies, and a
@@ -999,4 +1275,139 @@ pub async fn command_cancellation_before_admission_withdraws_it(
         "the withdrawn append never landed: {path:?}"
     );
     position_of_once(&path, PLUGIN_COMMAND_NOTE);
+}
+
+/// FIG-4391: a host's cancel reaches a plugin task a drive already admitted.
+/// The task runs until its cancellation; once the drive runs its code, a
+/// withdrawal no longer reaches it, and the host's cancel wins the task's
+/// cancel gate instead. The drive stops the task's code through its
+/// cancellation token and settles the command `Cancelled` in the one commit
+/// that makes its settlement, with nothing of the task committed (the note
+/// it appends after its cancellation never lands), and a submitter reads
+/// that settlement back by the command's receipt. The lane goes on: the
+/// input queued after the task runs in the same drive. Killed at `crash`
+/// and redriven, the task settles cancelled once, and a redrive that finds
+/// the cancel already won runs none of the task's code again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    crash: Option<HostCommandCrash>,
+) {
+    let probe = HostPluginProbe::default();
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![
+            (protocol.answer("answer 1"), 1),
+            (protocol.answer("answer 2"), 1),
+        ],
+    });
+    let host_effects = Arc::clone(&effect_host);
+    let mut law = LawSession::open(
+        prefix,
+        &format!("host-task-cancel-{crash:?}").to_lowercase(),
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    law.parts.host_plugins.push(host_plugin(&probe));
+    law.enqueue("first question").await;
+    law.run_root("root-1").await;
+    let before = law.head().await.head_revision;
+
+    let receipt = law
+        .submit_command(
+            crate::SessionCommand::RunPluginTask {
+                name: <HostCancellableTask as crate::plugin::PluginOperation>::NAME.to_string(),
+                args: serde_json::json!({"text": CANCELLED_TASK_NOTE}),
+            },
+            "cancelled-task",
+        )
+        .await;
+    law.enqueue("second question").await;
+    let mut host = build_runtime(&law.parts, None).await;
+    let cancel = async {
+        probe.cancellable_task_entered.notified().await;
+        assert!(
+            law.store
+                .cancel_queued_work_batch(&law.session_id, receipt.batch_id.as_str())
+                .await
+                .expect("try to withdraw the admitted task")
+                .is_none(),
+            "a task the drive admitted is no longer withdrawn"
+        );
+        assert_eq!(
+            lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipt)
+                .await
+                .expect("cancel the admitted task"),
+            lash_core::runtime::PluginTaskCancelRequest::Requested,
+            "the host's cancel wins the admitted task's cancel gate"
+        );
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(drive_next(&law, "root-2", crash), cancel),
+    )
+    .await
+    .expect("the drive applying the cancelled task ends");
+
+    assert!(
+        matches!(
+            law.command_outcome(&receipt).await,
+            Some(crate::SessionCommandOutcome::PluginOperation {
+                outcome: crate::PluginOperationCommandOutcome::Cancelled,
+            })
+        ),
+        "the admitted task settles cancelled through its command's commit"
+    );
+    assert!(
+        matches!(
+            host.settle_session_command(receipt.clone())
+                .await
+                .expect("settle the cancelled task"),
+            crate::SessionCommandSettlement::Applied {
+                outcome: crate::SessionCommandOutcome::PluginOperation {
+                    outcome: crate::PluginOperationCommandOutcome::Cancelled,
+                },
+                ..
+            }
+        ),
+        "a submitter reads the cancelled settlement back by the command's receipt"
+    );
+    assert_eq!(
+        lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipt)
+            .await
+            .expect("cancel the settled task again"),
+        lash_core::runtime::PluginTaskCancelRequest::Requested,
+        "the gate keeps the cancel that won it"
+    );
+    assert_eq!(
+        probe.cancellable_task_runs.load(Ordering::SeqCst),
+        1,
+        "the task's code ran once, after admission: a redrive after the cancel won runs none of it"
+    );
+    let head = law.head().await;
+    assert_eq!(
+        head.head_revision,
+        before + 2,
+        "the cancelled task's settlement and the next root each commit once"
+    );
+    let path = active_path(&head.graph);
+    assert!(
+        !path.iter().any(|text| text == CANCELLED_TASK_NOTE),
+        "nothing of the cancelled task commits: {path:?}"
+    );
+    assert!(
+        position_of_once(&path, "answer 1") < position_of_once(&path, "second question"),
+        "the input queued after the task runs once the task settled: {path:?}"
+    );
+    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }

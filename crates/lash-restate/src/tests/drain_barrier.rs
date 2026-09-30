@@ -1,81 +1,51 @@
-//! The §5 barrier on the Restate controller (FIG-3598): the index names the
-//! blocking siblings and the scope their wakes live under, and the drain parks
-//! on each one's durable drained wake, never polling the index.
+//! The §5 barrier on the Restate controller (FIG-3598, FIG-4344): the drain
+//! awaits the group index's own `Drained` notice for its rank, one
+//! subscription whatever the barrier's size, never polling the index.
 
 use super::*;
 use crate::effect_group::{
-    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_STATE_FORMATS,
-    EffectGroupDrainBlockersResponse, EffectGroupWaitResolution, drained_wait_request,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_STATE_FORMATS, EffectGroupNotice,
+    EffectGroupNotification,
 };
 use lash_core::RuntimeErrorCode;
 
-fn resolved(value: EffectGroupWaitResolution) -> Resolution {
-    Resolution::Ok(serde_json::to_value(value).expect("encode the wake"))
-}
-
+/// The drain awaits exactly its own rank's barrier, once, and a lifted
+/// barrier, a retirement's release or a group the index has no record of all
+/// admit it.
 #[tokio::test]
-pub(super) async fn an_admitted_drain_awaits_no_wake() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    controller
-        .await_group_child_drain_admission("group", 1)
-        .await
-        .expect("nothing blocks the drain");
-    assert!(context.group_waits.lock_recover().is_empty());
-}
-
-/// Every blocker's drained wake is awaited once, keyed under the scope the
-/// index retained for the group — not one re-derived from the group key.
-#[tokio::test]
-pub(super) async fn a_blocked_drain_parks_on_each_blockers_drained_wake_under_the_retained_scope() {
-    let retained = ExecutionScope::runtime_operation("retained-wait-scope");
-    let context = Arc::new(RecordingContext::default());
-    *context.drain_blockers.lock_recover() = Some(Ok(EffectGroupDrainBlockersResponse::Blocked {
-        wait_scope: retained.clone(),
-        positions: vec![0, 2],
-    }));
+pub(super) async fn a_drain_awaits_its_ranks_barrier_notice_once() {
     for lifted in [
-        EffectGroupWaitResolution::Drained,
-        EffectGroupWaitResolution::Retired,
+        EffectGroupNotification::Drained,
+        EffectGroupNotification::Retired,
+        EffectGroupNotification::Absent,
     ] {
-        context.group_waits.lock_recover().clear();
-        *context.group_wait_resolution.lock_recover() = Some(resolved(lifted));
+        let context = Arc::new(RecordingContext::default());
+        *context.group_notice_answer.lock_recover() = Some(Ok(lifted));
         let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
         controller
             .await_group_child_drain_admission("group", 3)
             .await
-            .expect("the drained or retired wakes lift the barrier");
-        let awaited: Vec<_> = context
-            .group_waits
-            .lock_recover()
-            .iter()
-            .map(|request| request.key.clone())
-            .collect();
-        let expected: Vec<_> = [0, 2]
-            .into_iter()
-            .map(|position| {
-                drained_wait_request(&retained, "group", position)
-                    .expect("drained wake request")
-                    .key
-            })
-            .collect();
-        assert_eq!(awaited, expected);
+            .expect("the answered barrier admits the drain");
+        assert_eq!(
+            *context.group_notices.lock_recover(),
+            vec![("group".to_string(), EffectGroupNotice::Drained { rank: 3 })]
+        );
+        assert!(
+            context.group_notice_turn_cancels.lock_recover().is_empty(),
+            "a barrier races no turn gate"
+        );
     }
 }
 
 #[tokio::test]
-pub(super) async fn a_drained_wake_resolved_as_anything_else_is_a_shape_error() {
+pub(super) async fn a_barrier_answered_as_anything_else_is_a_shape_error() {
     let context = Arc::new(RecordingContext::default());
-    *context.drain_blockers.lock_recover() = Some(Ok(EffectGroupDrainBlockersResponse::Blocked {
-        wait_scope: ExecutionScope::runtime_operation("group"),
-        positions: vec![0],
-    }));
-    *context.group_wait_resolution.lock_recover() = Some(resolved(EffectGroupWaitResolution::Rank));
+    *context.group_notice_answer.lock_recover() = Some(Ok(EffectGroupNotification::Rank));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let error = controller
         .await_group_child_drain_admission("group", 2)
         .await
-        .expect_err("a rank wake is not a drained wake");
+        .expect_err("a rank answer is not a barrier's");
     assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
 }
 
@@ -91,7 +61,7 @@ pub(super) async fn an_index_of_another_stored_format_is_refused_typed() {
         &EFFECT_GROUP_STATE_FORMATS,
     );
     let context = Arc::new(RecordingContext::default());
-    *context.drain_blockers.lock_recover() = Some(Err(TerminalError::new(
+    *context.group_notice_answer.lock_recover() = Some(Err(TerminalError::new(
         serde_json::to_string(&refusal).expect("encode the refusal"),
     )));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
@@ -104,7 +74,6 @@ pub(super) async fn an_index_of_another_stored_format_is_refused_typed() {
         RuntimeErrorCode::EngineObjectStateFormatUnsupported
     );
     assert!(error.code.is_terminal());
-    assert!(context.group_waits.lock_recover().is_empty());
 }
 
 /// FIG-3672 P9: a turn-observing rank wait races the turn's durable
@@ -135,7 +104,12 @@ pub(super) async fn a_turn_observing_rank_wait_races_the_turn_gate_and_never_a_t
         RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
     );
     assert_eq!(handle.consumed(), 0, "a cancelled await leaves the cursor");
-    let raced = context.group_wait_turn_cancels.lock_recover().clone();
+    assert_eq!(
+        *context.group_notices.lock_recover(),
+        vec![("group".to_string(), EffectGroupNotice::Rank { rank: 1 })],
+        "the rank wait is the group index's rank notice"
+    );
+    let raced = context.group_notice_turn_cancels.lock_recover().clone();
     assert_eq!(raced.len(), 1, "one gate raced the one rank wait");
     assert_eq!(raced[0].key.scope, turn);
     assert_eq!(
@@ -145,8 +119,7 @@ pub(super) async fn a_turn_observing_rank_wait_races_the_turn_gate_and_never_a_t
 
     // An unobserved wait races no gate, and a cancelled token does not end
     // it: the wake resolves as recorded (here, a retirement).
-    *context.group_wait_resolution.lock_recover() =
-        Some(resolved(EffectGroupWaitResolution::Retired));
+    *context.group_notice_answer.lock_recover() = Some(Ok(EffectGroupNotification::Retired));
     let cancelled = tokio_util::sync::CancellationToken::new();
     cancelled.cancel();
     let error = controller
@@ -157,5 +130,5 @@ pub(super) async fn a_turn_observing_rank_wait_races_the_turn_gate_and_never_a_t
         .await
         .expect_err("the retired wake is a shape error");
     assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
-    assert_eq!(context.group_wait_turn_cancels.lock_recover().len(), 1);
+    assert_eq!(context.group_notice_turn_cancels.lock_recover().len(), 1);
 }

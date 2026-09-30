@@ -26,6 +26,21 @@ impl RecoveryExecution {
             .map_err(recovery_error)
     }
 }
+/// `reserved`, raised field by field to no less than `carried`: the totals
+/// an execution continuing earlier scopes' work starts from.
+pub(crate) fn at_least(
+    reserved: WorkerRecoveryTotals,
+    carried: WorkerRecoveryTotals,
+) -> WorkerRecoveryTotals {
+    WorkerRecoveryTotals {
+        attempts: reserved.attempts.max(carried.attempts),
+        cpu_nanos: reserved.cpu_nanos.max(carried.cpu_nanos),
+        replacement: reserved.replacement,
+        unknown_cpu_attempts: reserved
+            .unknown_cpu_attempts
+            .max(carried.unknown_cpu_attempts),
+    }
+}
 pub(crate) fn recovery_error(error: WorkerRecoveryError) -> PoolError {
     match error {
         WorkerRecoveryError::CpuExhausted => {

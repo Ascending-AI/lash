@@ -1,6 +1,236 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// Raw signal appends cannot bypass the identity-derived append key.
+#[expect(clippy::expect_used, reason = "conformance-law fixture")]
+pub(super) async fn raw_signal_appends_are_refused(registry: Arc<dyn ProcessRegistry>) {
+    let base = registry
+        .register_process(
+            ProcessRegistration::new(
+                ProcessInput::Engine {
+                    kind: "raw-signal-refusal".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+                "process-env:raw-signal-refusal",
+            )))
+            .with_extra_event_types([
+                plain_event_type("signal.ready"),
+                plain_event_type("producer.note"),
+            ]),
+        )
+        .await
+        .expect("register signal target");
+    let signal = lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(base.id.clone(), "ready", "one")
+            .expect("signal identity"),
+        serde_json::json!(1),
+    );
+    for request in [
+        ProcessEventAppendRequest::new("signal.ready", signal.payload.clone()),
+        ProcessEventAppendRequest::new("signal.ready", signal.payload.clone())
+            .with_replay_key("arbitrary-key"),
+        ProcessEventAppendRequest::new("signal.ready", signal.payload.clone())
+            .with_replay_key(signal.identity.append_key()),
+    ] {
+        let error = registry
+            .append_event(&base.id, request)
+            .await
+            .expect_err("raw signal must be refused, even with the derived key");
+        assert!(
+            matches!(error, PluginError::ReservedProcessEvent { ref event_type } if event_type == "signal.ready"),
+            "raw signal refusal must be typed: {error:?}"
+        );
+        assert_eq!(
+            registry.get_process(&base.id).await.expect("record"),
+            Some(base.clone())
+        );
+        assert!(
+            registry
+                .full_event_window(&base.id, 0)
+                .await
+                .expect("events")
+                .is_empty()
+        );
+    }
+    let first = registry
+        .append_event(&base.id, signal.append_request())
+        .await
+        .expect("typed signal");
+    let error = registry
+        .append_event(
+            &base.id,
+            ProcessEventAppendRequest::new("signal.ready", signal.payload.clone())
+                .with_replay_key(signal.identity.append_key()),
+        )
+        .await
+        .expect_err("raw replay must be refused before key lookup coalesces it");
+    assert!(matches!(error, PluginError::ReservedProcessEvent { .. }));
+    let replay = registry
+        .append_event(&base.id, signal.append_request())
+        .await
+        .expect("typed replay");
+    assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
+    assert_eq!(replay.event.sequence, first.event.sequence);
+
+    let round_trip = serde_json::from_value(
+        serde_json::to_value(signal.append_request()).expect("encode typed append"),
+    )
+    .expect("decode typed append");
+    assert_eq!(
+        registry
+            .append_event(&base.id, round_trip)
+            .await
+            .expect("typed round trip")
+            .event
+            .sequence,
+        first.event.sequence
+    );
+
+    let mut changed_type = signal.append_request();
+    changed_type.event_type = "producer.note".to_string();
+    let mut missing_key = signal.append_request();
+    missing_key.replay = None;
+    let wrong_target = lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(ProcessId::fixture("other-process"), "ready", "one")
+            .expect("another signal target"),
+        signal.payload.clone(),
+    )
+    .append_request();
+    let before = registry
+        .get_process(&base.id)
+        .await
+        .expect("record preimage");
+    let events = serde_json::to_value(
+        registry
+            .full_event_window(&base.id, 0)
+            .await
+            .expect("event preimage"),
+    )
+    .expect("encode events");
+    for request in [
+        changed_type,
+        missing_key,
+        wrong_target,
+        signal.append_request().with_replay_key("changed-key"),
+        signal.append_request().without_wake(),
+        ProcessEventAppendRequest::new("signal.", serde_json::Value::Null),
+        ProcessEventAppendRequest::new("signal.invalid.name", serde_json::Value::Null),
+    ] {
+        assert!(matches!(
+            registry.append_event(&base.id, request).await,
+            Err(PluginError::ReservedProcessEvent { .. })
+        ));
+    }
+    assert_eq!(
+        registry
+            .get_process(&base.id)
+            .await
+            .expect("unchanged record"),
+        before
+    );
+    assert_eq!(
+        serde_json::to_value(
+            registry
+                .full_event_window(&base.id, 0)
+                .await
+                .expect("unchanged events")
+        )
+        .expect("encode events"),
+        events
+    );
+
+    let authority =
+        crate::ProcessExecutionWriteAuthority::invocation(base.id.clone(), "raw-signal-worker")
+            .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            &base.id,
+            authority.invocation_started().expect("bound attempt"),
+            &authority,
+        )
+        .await
+        .expect("start signal target");
+    let before = registry
+        .get_process(&base.id)
+        .await
+        .expect("boundary preimage");
+    let events = serde_json::to_value(
+        registry
+            .full_event_window(&base.id, 0)
+            .await
+            .expect("boundary events"),
+    )
+    .expect("encode events");
+    let raw = || ProcessEventAppendRequest::new("signal.ready", serde_json::json!(2));
+    let batch = || {
+        vec![
+            ProcessEventAppendRequest::new("producer.note", serde_json::json!("rollback")),
+            raw(),
+        ]
+    };
+    assert!(matches!(
+        registry
+            .append_event_with_authority(&base.id, raw(), &authority)
+            .await,
+        Err(PluginError::ReservedProcessEvent { .. })
+    ));
+    assert!(matches!(
+        registry.append_events(&base.id, batch(), &authority).await,
+        Err(PluginError::ReservedProcessEvent { .. })
+    ));
+    assert!(matches!(
+        registry
+            .set_process_wait_with_authority(
+                &base.id,
+                WaitState {
+                    since_ms: base.created_at_ms,
+                    kind: WaitKind::Signal {
+                        name: "ready".to_string(),
+                        event_type: "signal.ready".to_string(),
+                        key: lash_core::runtime::process_signal_wait_key(&base.id, "ready", 2),
+                        ordinal: 2,
+                    },
+                },
+                batch(),
+                &authority,
+            )
+            .await,
+        Err(PluginError::ReservedProcessEvent { .. })
+    ));
+    assert!(matches!(
+        registry
+            .complete_process_with_prelude(
+                &base.id,
+                settled_success(serde_json::Value::Null),
+                batch(),
+                ProcessCompletionAuthority::workflow_key("raw-signal-refusal"),
+            )
+            .await,
+        Err(PluginError::ReservedProcessEvent { .. })
+    ));
+    assert_eq!(
+        registry
+            .get_process(&base.id)
+            .await
+            .expect("boundary record unchanged"),
+        before
+    );
+    assert_eq!(
+        serde_json::to_value(
+            registry
+                .full_event_window(&base.id, 0)
+                .await
+                .expect("boundary events unchanged")
+        )
+        .expect("encode events"),
+        events
+    );
+}
+
 /// A signal's append is its admission (FIG-4298, FIG-4299).
 ///
 /// The append request a signal makes is derived from its identity alone, so

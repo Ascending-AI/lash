@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use lash_core::facade_support::{PluginSessionContext, PluginSpec, PluginSpecFactory};
 use lash_core::{
-    AdmittedProcessIdentity, Lifetime, PluginError, PluginOptions, ProcessExecutionEnvSpec,
+    AdmittedPluginConfig, AdmittedProcessIdentity, Lifetime, PluginError, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     SessionPolicy, TurnBudget,
 };
@@ -91,7 +91,7 @@ fn surface_plugin_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
         SURFACE_PLUGIN_ID,
         Arc::new(|ctx: &PluginSessionContext| {
             let grant_vocabulary = ctx
-                .plugin_options
+                .plugin_config
                 .decode::<SessionSurfaceOptions>(SURFACE_PLUGIN_ID)
                 .map_err(|error| {
                     PluginError::Registration(format!("invalid session surface options: {error}"))
@@ -142,21 +142,21 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     let harness = crate::lib_tests::double_process_harness().await;
     let backend = harness.backend().clone();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
-    let plugin_options = if grant {
-        PluginOptions::typed(
+    let mut plugin_config = lash_core::PluginConfig::default();
+    if grant {
+        plugin_config.insert(
             SURFACE_PLUGIN_ID,
-            SessionSurfaceOptions {
+            serde_json::to_value(SessionSurfaceOptions {
                 grant_vocabulary: true,
-            },
-        )
-        .expect("session surface options encode")
-    } else {
-        PluginOptions::empty()
-    };
+            })
+            .expect("session surface options encode"),
+        );
+    }
+    let plugin_config = AdmittedPluginConfig::new(plugin_config, 0);
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &crate::lib_tests::host_claim(),
-        &ProcessExecutionEnvSpec::new(plugin_options, session_policy()),
+        &ProcessExecutionEnvSpec::new(plugin_config, session_policy()),
     )
     .await
     .expect("process execution env publishes");
@@ -358,7 +358,7 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &crate::lib_tests::host_claim(),
-        &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
+        &ProcessExecutionEnvSpec::new(AdmittedPluginConfig::default(), session_policy()),
     )
     .await
     .expect("publish process env");
@@ -505,7 +505,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &crate::lib_tests::host_claim(),
-        &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
+        &ProcessExecutionEnvSpec::new(AdmittedPluginConfig::default(), session_policy()),
     )
     .await
     .expect("publish failing process env");

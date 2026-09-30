@@ -91,9 +91,9 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
             },
         },
         disposition: match disposition.as_str() {
-            "reported" => UsageDisposition::Reported,
-            "unreported" => UsageDisposition::Unreported,
-            "reconciled" => UsageDisposition::Reconciled,
+            "reported" => UsageReporting::Reported,
+            "unreported" => UsageReporting::Unreported,
+            "reconciled" => UsageReporting::Reconciled,
             _ => return Err(corrupt("invalid disposition")),
         },
         run: run.map(UsageRunId::try_from).transpose()?,
@@ -431,7 +431,7 @@ impl UsageAccountingStore for SqliteStore {
                 let Some(mut record) = target else {
                     return Err(UsageAppendError::CorrectionTargetMissing { identity });
                 };
-                if record.disposition != UsageDisposition::Unreported {
+                if record.disposition != UsageReporting::Unreported {
                     return Err(UsageAppendError::CorrectionTargetReported { identity });
                 }
                 let hash = usage_correction_payload_hash(
@@ -441,7 +441,7 @@ impl UsageAccountingStore for SqliteStore {
                     &record.model,
                 );
                 record.identity.kind = UsageFactKind::Correction;
-                record.disposition = UsageDisposition::Reconciled;
+                record.disposition = UsageReporting::Reconciled;
                 record.run = None;
                 record.usage = correction.usage.clone();
                 record.generation_id = Some(correction.generation_id.clone());

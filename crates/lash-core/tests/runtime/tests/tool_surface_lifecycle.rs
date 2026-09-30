@@ -26,36 +26,13 @@ async fn set_tool_access_through_drive(
     access: lash_core::SessionToolAccess,
     request: &str,
 ) {
-    let receipt = match runtime.set_tool_access(access.clone()).await {
-        Err(SessionError::SessionCommandPending(receipt)) => receipt,
-        other => panic!("expected an accepted command awaiting its drive: {other:?}"),
-    };
-    let handler = double
-        .open_handler(AdmittedScope::queue_drain(
-            SessionId::from(runtime.session_id()),
-            request,
-        ))
-        .await
-        .expect("open config drive handler");
-    runtime
-        .drive_next_root(
-            request,
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect("engine drives config command");
-    handler.close().await.expect("close config drive handler");
-    assert!(matches!(
-        runtime
-            .settle_session_command(receipt)
-            .await
-            .expect("read config command settlement"),
-        lash_core::runtime::SessionCommandSettlement::Durable(_)
-    ));
-    runtime
-        .set_tool_access(access)
-        .await
-        .expect("settled config is current");
+    Box::pin(crate::runtime_support::configure(
+        runtime,
+        double,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetToolAccess { access }),
+        request,
+    ))
+    .await;
 }
 
 #[derive(Clone, Debug)]
@@ -219,24 +196,11 @@ fn build_hidden_session(
     match snapshot {
         Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
             parent_session_id: Some(SessionId::from("parent")),
-            ..PluginSessionRequest::rematerialization(
-                session_id,
-                snapshot,
-                lash_core::plugin::RecordedSessionConfig {
-                    authority,
-                    protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-                },
-            )
+            ..PluginSessionRequest::rematerialization(session_id, snapshot, authority)
         }),
         None => plugin_host.build_session(PluginSessionRequest {
             parent_session_id: Some(SessionId::from("parent")),
-            ..PluginSessionRequest::creation(
-                session_id,
-                lash_core::plugin::SessionCreationConfig {
-                    authority,
-                    ..Default::default()
-                },
-            )
+            ..PluginSessionRequest::creation(session_id, authority)
         }),
     }
     .expect("hidden child plugin session")
@@ -369,13 +333,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     let plugins = plugin_host
         .build_session(PluginSessionRequest {
             parent_session_id: Some(SessionId::from("authority-parent")),
-            ..PluginSessionRequest::creation(
-                "authority-child",
-                lash_core::plugin::SessionCreationConfig {
-                    authority,
-                    ..Default::default()
-                },
-            )
+            ..PluginSessionRequest::creation("authority-child", authority)
         })
         .expect("initial authority plugin session");
     let store = double_unbound_recording_store(&double).await;
@@ -442,10 +400,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     let plugins = plugin_host
         .build_session(PluginSessionRequest::creation(
             "persisted-broader",
-            lash_core::plugin::SessionCreationConfig {
-                authority: hidden_authority(hidden.name),
-                ..Default::default()
-            },
+            hidden_authority(hidden.name),
         ))
         .expect("narrower live-authority plugin session");
     let store = double_unbound_recording_store(&double).await;
@@ -691,52 +646,6 @@ async fn updated_tool_access_survives_park_and_resume() {
     assert!(
         !catalog_names(&resumed).contains(&hidden.name.to_string()),
         "the resumed tool surface must use the updated persisted authority"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
-    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
-    let env = runtime_environment(&backend, plugin_host);
-    let store = double_unbound_recording_store(&double).await;
-    create_fixture_session(store.as_ref(), "tool-access-no-op").await;
-    let mut runtime = LashRuntime::from_environment(
-        &env,
-        standard_test_policy(),
-        root_state(&SessionId::from("tool-access-no-op")),
-        Some(session_view(store.clone(), "tool-access-no-op")),
-        lash_core::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("persistent runtime");
-    let narrowed = lash_core::SessionToolAccess::ambient()
-        .with_hidden_tools(["hidden-after-reload"])
-        .expect("valid hidden tool");
-    set_tool_access_through_drive(&mut runtime, &double, narrowed.clone(), "initial-authority")
-        .await;
-    let commits_after_change = *store.runtime_commit_count.lock_recover();
-
-    Box::pin(runtime.set_tool_access(narrowed.clone()))
-        .await
-        .expect("equal authority is accepted");
-    assert_eq!(
-        *store.runtime_commit_count.lock_recover(),
-        commits_after_change,
-        "restating the resident value must not commit"
-    );
-
-    runtime.edit_resident_state_for_test(|state| state.authority.tool_access = Default::default());
-    runtime.invalidate_resident_session_state();
-    Box::pin(runtime.set_tool_access(narrowed.clone()))
-        .await
-        .expect("reload before comparing authority");
-    assert_eq!(runtime.state().authority.tool_access, narrowed);
-    assert_eq!(
-        *store.runtime_commit_count.lock_recover(),
-        commits_after_change,
-        "the setter must reload the durable equal value before deciding to commit"
     );
 }
 
@@ -1732,7 +1641,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     let child = parent
         .fork_for_session(
             "broader-child",
-            lash_core::plugin::SessionCreationConfig::default(),
+            lash_core::plugin::SessionAuthorityContext::default(),
         )
         .expect("fork with broader child authority");
     let session = lash_core::testing::runtime_internals::Session::new(

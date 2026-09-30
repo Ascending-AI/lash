@@ -710,6 +710,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-base-acceptor:turn");
+    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
     store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -1016,6 +1017,8 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
             .admit_view(&request)
             .await
             .expect("create cancellation crash store");
+        crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id)
+            .await;
         let dropped = store
             .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
                 &request.session_id,
@@ -1549,6 +1552,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-intent-first:turn");
+    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1653,6 +1657,9 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-first:turn");
+    let root =
+        crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id)
+            .await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1665,23 +1672,21 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .await
         .expect("enqueue active-turn input");
     let fence = lease(store.store(), &request.session_id, "repair-first-owner").await;
-    // The turn's root ends first: its terminal re-defers the input
-    // addressed to it (FIG-3927 §2.6).
+    // The turn's root ends first: the input addressed to it is next-turn
+    // input by rule, its submitted delivery unchanged (ADR 0101 §5.1).
     crate::conformance::end_root(
         store.store(),
         &fence,
-        crate::store::IngressSettlement::new(turn_id.clone()),
+        crate::conformance::completing_admission(turn_id.as_str(), &root),
     )
     .await;
     let redeferred = store
         .list_pending_turn_inputs()
         .await
-        .expect("read the re-deferred input");
+        .expect("read the deferred input");
     assert_eq!(redeferred[0].input.input_id, row.input_id);
-    assert_eq!(
-        redeferred[0].input.state.kind(),
-        crate::TurnInputStateKind::DeferredNextTurn
-    );
+    assert_eq!(redeferred[0].input.state, row.state);
+    assert!(redeferred[0].input.state.is_next_turn_input(None));
     let cancel = crate::TurnCancelRequest::new(
         crate::TurnAddress::new(&request.session_id, &turn_id),
         "turn-cancel-repair-first:request",
@@ -1731,6 +1736,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-completion-wins:turn");
+    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1812,6 +1818,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .await
         .expect("create CAS store");
     let turn_id = TurnId::from("turn-cancel-final-cas:turn");
+    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
     let pending = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(

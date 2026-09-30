@@ -111,19 +111,50 @@ pub(super) async fn run_once_turn_checkpoint(
 const CHECKPOINT_STATE_BINDINGS: usize = 300;
 const CHECKPOINT_STATE_BODY_BYTES: usize = 3 * 1024 + 512;
 
+pub(super) async fn assign_checkpoint_binding(
+    fixture: &mut lash_protocol_rlm::RlmCheckpointPerfFixture,
+    backend: &lash_restate_test::RestateTestBackend,
+    session_id: &SessionId,
+    index: usize,
+    turn: usize,
+) -> anyhow::Result<()> {
+    let turn_id = TurnId::from(format!("checkpoint-perf-turn-{turn}"));
+    let scope = lash_core::ExecutionScope::turn(session_id.clone(), turn_id.clone());
+    let invocation = lash_core::runtime::causal::turn_effect_invocation(
+        &scope,
+        session_id,
+        &turn_id,
+        turn,
+        0,
+        lash_core::sansio::EffectId(0),
+        lash_core::RuntimeEffectKind::ExecCode,
+    )
+    .into_runtime_invocation();
+    let handler = backend
+        .open_handler(lash_core::AdmittedScope::turn(session_id.clone(), turn_id))
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let context = lash_core::testing::code_execution_context_with_invocation(
+        lash_core::testing::TestExecutionPorts::lent(&backend.lash_backend(), handler.scoped()),
+        invocation,
+    );
+    let assignment = fixture.assign_one(index, turn, context).await;
+    handler.close().await.map_err(anyhow::Error::msg)?;
+    assignment.map_err(anyhow::Error::from)
+}
+
 pub(super) async fn run_once_checkpoint_state_hot_paths(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::CheckpointStateHotPaths;
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (mut fixture, store, mut runtime_state) = run
+    let (mut fixture, artifacts, store, mut runtime_state) = run
         .build(async {
-            // The fixture's cells keep their Lashlang artifacts in a memory
-            // store set of their own; the state they capture is what is measured.
-            let artifacts = lash_sqlite_store::SqliteStoreSet::memory().await?;
-            let artifacts_backend =
-                lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
+            // Cells run on the production effect controller over a memory
+            // store set; their captured state is what is measured.
+            let artifacts = restate_backend().await?;
+            let artifacts_backend = artifacts.lash_backend();
             let fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
                 std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &artifacts_backend,
@@ -142,7 +173,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                     &runtime_state.session_id,
                 ))
                 .await?;
-            Ok((fixture, store, runtime_state))
+            Ok((fixture, artifacts, store, runtime_state))
         })
         .await?;
 
@@ -181,7 +212,14 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let mut last_changed_components = 0_u64;
     let mut last_hydrated_bytes = 0_u64;
     for turn_index in 0..chat_turns {
-        fixture.assign_one(turn_index, turn_index).await?;
+        assign_checkpoint_binding(
+            &mut fixture,
+            &artifacts,
+            &runtime_state.session_id,
+            turn_index,
+            turn_index,
+        )
+        .await?;
         run.turn(
             turn_index,
             async {

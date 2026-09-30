@@ -448,15 +448,9 @@ impl Shared {
         Ok(())
     }
 
-    fn on_frame(
-        self: &Arc<Self>,
-        key: InvKey,
-        number: u32,
-        frame: Frame,
-        received_us: u128,
-    ) -> Flow {
+    fn on_frame(self: &Arc<Self>, key: InvKey, number: u32, frame: Frame) -> Flow {
         let mut state = self.lock();
-        let flow = state.on_frame(self, key, number, frame, received_us);
+        let flow = state.on_frame(self, key, number, frame);
         drop(state);
         flow
     }
@@ -628,6 +622,19 @@ impl JournalEntryView {
         }
     }
 
+    /// The input an `InputCommand` entry carried — the invocation's request
+    /// body; `None` on every other entry.
+    pub fn input(&self) -> Option<bytes::Bytes> {
+        use prost::Message as _;
+        if self.ty != MessageType::InputCommand {
+            return None;
+        }
+        crate::protocol::generated::InputCommandMessage::decode(self.payload.clone())
+            .ok()?
+            .value
+            .map(|value| value.content)
+    }
+
     /// The call a `CallCommand` entry issued — its target service, handler,
     /// key and headers; `None` on every other entry.
     pub fn call_command(&self) -> Option<crate::protocol::generated::CallCommandMessage> {
@@ -636,6 +643,51 @@ impl JournalEntryView {
             return None;
         }
         crate::protocol::generated::CallCommandMessage::decode(self.payload.clone()).ok()
+    }
+
+    /// The send a `OneWayCallCommand` entry issued — its target service,
+    /// handler, key and headers; `None` on every other entry.
+    pub fn one_way_call_command(
+        &self,
+    ) -> Option<crate::protocol::generated::OneWayCallCommandMessage> {
+        use prost::Message as _;
+        if self.ty != MessageType::OneWayCallCommand {
+            return None;
+        }
+        crate::protocol::generated::OneWayCallCommandMessage::decode(self.payload.clone()).ok()
+    }
+
+    /// The state key a `SetStateCommand` or `ClearStateCommand` entry wrote;
+    /// `None` on every other entry.
+    pub fn written_state_key(&self) -> Option<String> {
+        use crate::protocol::generated::{ClearStateCommandMessage, SetStateCommandMessage};
+        use prost::Message as _;
+        let key = match self.ty {
+            MessageType::SetStateCommand => {
+                SetStateCommandMessage::decode(self.payload.clone())
+                    .ok()?
+                    .key
+            }
+            MessageType::ClearStateCommand => {
+                ClearStateCommandMessage::decode(self.payload.clone())
+                    .ok()?
+                    .key
+            }
+            _ => return None,
+        };
+        Some(String::from_utf8_lossy(&key).into_owned())
+    }
+
+    /// The awakeable a `CompleteAwakeableCommand` entry completed; `None` on
+    /// every other entry.
+    pub fn completed_awakeable(&self) -> Option<String> {
+        use prost::Message as _;
+        if self.ty != MessageType::CompleteAwakeableCommand {
+            return None;
+        }
+        crate::protocol::generated::CompleteAwakeableCommandMessage::decode(self.payload.clone())
+            .ok()
+            .map(|complete| complete.awakeable_id)
     }
 }
 

@@ -12,12 +12,12 @@ Generation intent belongs to `SessionPolicy.generation`. Creation resolves the
 `SessionCreation.spec` overlay against the core policy and records it with the
 session's initial configuration. Only `create` creates a facade session. Open
 loads the recorded configuration; it does not reconcile a new generation
-setting, model, or session prompt into it. Later changes use
-`update(SessionConfigPatch)`.
+setting, model, or session prompt into it. Later changes use the
+core `SetGeneration` config command (ADR 0126).
 
 `GenerationOverlay::Merge` keeps unstated options. `Replace` discards them, and
 replacing with default options clears the intent. The same vocabulary applies
-to creation, child-policy resolution, and configuration patches. A child that
+to creation, child-policy resolution, and `SetGeneration`. A child that
 sets only its cap therefore keeps an inherited temperature and seed unless it
 explicitly replaces them.
 

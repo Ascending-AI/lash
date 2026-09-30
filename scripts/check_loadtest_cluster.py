@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Fail closed on the committed Restate metadata and Prometheus evidence."""
+import ast
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 
@@ -101,6 +104,35 @@ def recovery(node_document, status, restarted_name):
     return f'recovered_nodes=3 metadata_members=3 stable_node_ids=3 restarted_node={restarted_name} generation={restarted_generation}'
 
 
+def peers(node_document, views, restarted_name):
+    """Every node's own failure detector sees all three nodes alive, the
+    restarted one at its new generation. `ctl status` lists a restarted node
+    before its peers stop suspecting it, and a distributed query it
+    coordinates then loses its scanners."""
+    expected = {value['name']: (key, value['current_generation'][1])
+                for key, value in nodes(node_document)}
+    if len(views) != len(expected):
+        raise ValueError(f'expected {len(expected)} peer views, found {len(views)}')
+    generations = set()
+    for view in views:
+        if sorted(row['name'] for row in view) != sorted(expected):
+            raise ValueError('a peer view does not list all three original nodes')
+        for row in view:
+            node_id, generation = expected[row['name']]
+            if row['plain_node_id'] != f'N{node_id}' or row['state'] != 'alive':
+                raise ValueError(f"{row['name']} is {row['state']} as N{node_id} in a peer view")
+            seen = int(row['gen_node_id'].split(':')[1])
+            if row['name'] == restarted_name:
+                if seen <= generation:
+                    raise ValueError(f'a peer still sees {restarted_name} at its old generation')
+                generations.add(seen)
+            elif seen != generation:
+                raise ValueError(f"a peer sees {row['name']} restarted")
+    if len(generations) != 1:
+        raise ValueError(f'peers disagree on the generation of {restarted_name}')
+    return f'peer_views={len(views)} alive={len(expected)} restarted_node={restarted_name} generation={generations.pop()}'
+
+
 def metrics(document):
     targets = [target for target in document['data']['activeTargets'] if target['labels']['job'] == 'restate']
     if len(targets) != 3 or any(target['health'] != 'up' for target in targets):
@@ -116,13 +148,96 @@ def job(documents, suffix):
     return jobs[0]
 
 
+def build_rules(path):
+    """The literal attributes of each rule in a generated BUILD file, by name."""
+    rules = {}
+    for statement in ast.parse(Path(path).read_text()).body:
+        call = getattr(statement, 'value', None)
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+            continue
+        rule = {'kind': call.func.id}
+        for keyword in call.keywords:
+            try:
+                rule[keyword.arg] = ast.literal_eval(keyword.value)
+            except ValueError:
+                pass
+        if 'name' in rule:
+            rules[rule['name']] = rule
+    return rules
+
+
+def resolve(root, label):
+    package, name = label.removeprefix('//').split(':')
+    return build_rules(Path(root) / package / 'BUCK')[name]
+
+
+def vm_helper(root, worker):
+    """The helper binary that speaks the protocol of the worker's linked helper library.
+
+    Synthetic-next helpers advertise the next wire-protocol version at the
+    handshake. The helper is the binary on the worker's own helper library
+    or, as Cargo ships it, the one standalone binary whose lash-vm-worker
+    features equal that library's, read from the generated feature variants.
+    Its `testing` must match the linked lash-vm-client's."""
+    deps = resolve(root, worker).get('variant_deps', {})
+    client_label = '//crates/lash-vm-client:lash-vm-client'
+    worker_label = '//crates/lash-vm-worker:lash-vm-worker'
+    client = deps.get(client_label, client_label)
+    library = deps.get(worker_label, worker_label)
+    testing = 'testing' in resolve(root, client)['crate_features']
+    features = set(resolve(root, library)['crate_features'])
+    if ('testing' in features) != testing:
+        raise ValueError(f'{worker} links {library} and {client}, which do not pair on testing')
+    helpers = {}
+    for name, rule in build_rules(Path(root) / 'crates/lash-vm-worker/BUCK').items():
+        if rule.get('crate_name') == 'lash_vm_worker' and rule.get('crate_root') == 'src/main.rs':
+            helpers[name] = rule['library'] if rule['library'].startswith('//') else '//crates/lash-vm-worker' + rule['library']
+    exact = [name for name, own in helpers.items() if own == library]
+    equal = [name for name, own in helpers.items() if set(resolve(root, own)['crate_features']) == features]
+    matches = exact or equal
+    if not matches:
+        raise ValueError(f'no lash-vm-worker helper binary with features {sorted(features)} of {library}, which {worker} links')
+    if len(matches) != 1:
+        raise ValueError(f'expected one lash-vm-worker helper binary for {library}, found {matches}')
+    return f'//crates/lash-vm-worker:{matches[0]}', testing
+
+
+def image_helper(bin_dir, testing):
+    """One image generation ships an executable helper that pairs with its worker."""
+    helper = Path(bin_dir) / 'lash-vm-worker'
+    if not helper.is_file() or not os.access(helper, os.X_OK):
+        raise ValueError(f'{bin_dir} has no executable lash-vm-worker beside lash-e2e-worker')
+    info = json.loads(subprocess.run([str(helper), '--version'], capture_output=True, text=True,
+                                    check=True, timeout=30).stdout)
+    if info['testing'] != testing:
+        raise ValueError(f'{helper} diagnostics {info!r} does not pair with a testing={testing} worker')
+    return info
+
+
 def main():
     mode, *paths = sys.argv[1:]
+    if mode == 'helper':
+        root, worker = paths
+        label, testing = vm_helper(root, worker)
+        print(label, str(testing).lower())
+        return
+    if mode == 'image':
+        bin_dir, testing = paths
+        print(image_helper(bin_dir, testing == 'true'))
+        return
     if mode == 'job':
         import yaml
         (suffix,) = paths
         documents = [document for document in yaml.safe_load_all(sys.stdin) if document]
         sys.stdout.write(json.dumps(job(documents, suffix)))
+        return
+    if mode == 'peers':
+        node_path, restarted_name, *view_paths = paths
+        views = []
+        for path in view_paths:
+            text = Path(path).read_text()
+            views.append(json.loads(text[text.index('['):]))  # restatectl may print a row count first
+        print(peers(json.loads(Path(node_path).read_text()), views, restarted_name))
         return
     if mode in {'availability', 'recovery'}:
         node_path, status_path, restarted_name = paths

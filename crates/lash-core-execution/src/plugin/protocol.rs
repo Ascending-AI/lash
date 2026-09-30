@@ -19,8 +19,8 @@ use crate::{
 
 /// Session-scoped plugin that initializes, restores, and extends protocol
 /// state across a session's lifecycle. External protocol crates implement
-/// this via context wrappers ([`ProtocolSessionContext`],
-/// [`ProtocolRuntimeContext`]) so they don't need direct access to
+/// this via the [`ProtocolSessionContext`] wrapper so they don't need direct
+/// access to
 /// `Session`/`LashRuntime` internals — the context narrows what a
 /// plugin can poke at to the capabilities any protocol reasonably needs.
 #[async_trait::async_trait]
@@ -54,54 +54,6 @@ pub trait ProtocolSessionPlugin: Send + Sync {
     ) -> Result<(), crate::SessionError> {
         Err(crate::SessionError::Protocol(
             "protocol does not accept session extensions".to_string(),
-        ))
-    }
-
-    /// Fires on every session materialization — creation, reopen and child
-    /// create — so a protocol plugin can fill its per-session options.
-    ///
-    /// The [`ProtocolSessionMaterialization`] descriptor carries the
-    /// plugin-keyed options that reached this materialization (the creator's
-    /// options, or a child create's request options) and whether this is a
-    /// root session. The plugin reads/writes durable protocol turn options
-    /// through [`ProtocolRuntimeContext`].
-    ///
-    /// Config is baked at creation (FIG-4099): options stated here apply only
-    /// to a session that has recorded none. A session that recorded its
-    /// options keeps them as recorded, whatever this materialization states;
-    /// a later change goes through
-    /// [`apply_session_config_patch`](Self::apply_session_config_patch).
-    fn configure_runtime_on_materialize(
-        &self,
-        _ctx: ProtocolRuntimeContext<'_>,
-        _materialization: ProtocolSessionMaterialization<'_>,
-    ) -> Result<(), crate::SessionError> {
-        Ok(())
-    }
-
-    /// Apply the plugin-keyed options of a `SessionConfigPatch` to the
-    /// session's recorded protocol turn options, returning the options to
-    /// record (FIG-4099).
-    ///
-    /// This is the one durable write path for protocol and plugin session
-    /// config after creation: the runtime settles the returned value through
-    /// the commanded config patch, compare-and-set on the config revision.
-    /// A change the protocol will not make is refused typed, as
-    /// [`SessionError::SessionConfigRefused`](crate::SessionError::SessionConfigRefused);
-    /// nothing is written. The default reads no plugin options, so it refuses
-    /// every stated key with [`PluginOptionsUnaccepted`](crate::PluginOptionsUnaccepted).
-    fn apply_session_config_patch(
-        &self,
-        recorded: &crate::ProtocolTurnOptions,
-        plugin_options: &PluginOptions,
-    ) -> Result<crate::ProtocolTurnOptions, crate::SessionError> {
-        if plugin_options.plugins.is_empty() {
-            return Ok(recorded.clone());
-        }
-        Err(crate::SessionError::SessionConfigRefused(
-            crate::SessionConfigRefusal::new(crate::PluginOptionsUnaccepted {
-                plugin_ids: plugin_options.plugins.keys().cloned().collect(),
-            }),
         ))
     }
 
@@ -246,63 +198,6 @@ pub enum ProtocolLlmCallAction {
     },
 }
 
-/// Narrow wrapper around `LashRuntime` that protocol plugins use when
-/// configuring the runtime from a fresh `SessionCreateRequest`.
-///
-/// Exposes only the runtime-level capabilities protocols need to set
-/// (termination contract, etc.) so plugins don't reach into unrelated
-/// runtime internals.
-pub struct ProtocolRuntimeContext<'a> {
-    options: &'a mut crate::ProtocolTurnOptions,
-    /// The `F` the bound session's store recorded: options a materialization
-    /// records here are published durably, so the setters restamp them with
-    /// the fleet's writer version (FIG-3796).
-    fleet_format: crate::FleetFormat,
-}
-
-impl<'a> ProtocolRuntimeContext<'a> {
-    pub fn new(
-        options: &'a mut crate::ProtocolTurnOptions,
-        fleet_format: crate::FleetFormat,
-    ) -> Self {
-        Self {
-            options,
-            fleet_format,
-        }
-    }
-
-    /// The durable protocol turn options currently recorded on the session.
-    /// Protocol plugins read these to preserve fields (e.g. termination) they
-    /// are not overwriting.
-    pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
-        self.options
-    }
-
-    /// Record the durable protocol turn options this materialization resolved,
-    /// mirrored to the current agent frame only.
-    ///
-    /// Materialization is the initialization half of the FIG-2479 contract:
-    /// the value recorded here is published durably by the materialization
-    /// commit before any queued command work. Mid-run changes go through the
-    /// commanded `LashRuntime::set_protocol_turn_options` write instead.
-    pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        *self.options = options.restamped_for_fleet(self.fleet_format);
-    }
-
-    /// Record the durable protocol turn options this materialization resolved, mirrored to
-    /// **every** agent frame.
-    pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
-        *self.options = options.restamped_for_fleet(self.fleet_format);
-    }
-}
-
-pub struct ProtocolSessionMaterialization<'a> {
-    /// Plugin-keyed options that reached this materialization: builder options
-    /// for a root/builder open, request options for a child create.
-    pub plugin_options: &'a PluginOptions,
-    pub is_root_session: bool,
-}
-
 /// How the runtime settled the code effect after observing its response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodeExecutionOutcome {
@@ -440,36 +335,5 @@ pub trait ProtocolDriverPlugin: Send + Sync {
         _options: &crate::ProtocolTurnOptions,
     ) -> Result<Option<crate::RecordedRender>, String> {
         Ok(None)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ProtocolRuntimeContext;
-
-    #[test]
-    fn materialization_context_borrows_only_protocol_options() {
-        let mut options = crate::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "termination": "initial" }),
-        );
-        {
-            let mut context =
-                ProtocolRuntimeContext::new(&mut options, crate::FleetFormat::current());
-            assert_eq!(
-                context.protocol_turn_options().payload,
-                serde_json::json!({ "termination": "initial" })
-            );
-            context.set_protocol_turn_options(crate::ProtocolTurnOptions::from_payload(
-                serde_json::json!({ "termination": "current" }),
-            ));
-            assert_eq!(
-                context.protocol_turn_options().payload,
-                serde_json::json!({ "termination": "current" })
-            );
-            context.set_protocol_turn_options_all_frames(crate::ProtocolTurnOptions::from_payload(
-                serde_json::json!({ "termination": "all" }),
-            ));
-        }
-        assert_eq!(options.payload, serde_json::json!({ "termination": "all" }));
     }
 }

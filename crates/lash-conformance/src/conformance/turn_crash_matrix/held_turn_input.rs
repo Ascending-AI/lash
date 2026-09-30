@@ -28,10 +28,10 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
-    seed_reference_ingress(&raw, &identity, scenario).await;
+    seed_reference_ingress(&raw, &identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let decorated = SeamStore::wrap(raw, control.clone());
+    let decorated = SeamStore::steering(raw, control.clone(), vec![reference_steer(&identity)]);
     let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
@@ -118,7 +118,11 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     );
 
     let successor_control = SeamControl::default();
-    let successor_store = SeamStore::wrap(make(scenario), successor_control.clone());
+    let successor_store = SeamStore::steering(
+        make(scenario),
+        successor_control.clone(),
+        vec![reference_steer(&identity)],
+    );
     let successor_effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: successor_control.clone(),
         executions,

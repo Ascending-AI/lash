@@ -185,6 +185,108 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
     }
 }
 
+/// W7 across an expired attach (ADR 0099 §5, §8): a child whose final
+/// committed, and whose invocation then died inside its drain and outlived its
+/// retention, is finished by its successor. The successor cannot run the
+/// child under an identity the group never recorded, and it does not need to:
+/// the point retained the committed final's drain input, so the successor
+/// drains the declared intents from it and seats that final. Its typed
+/// attach-expired refusal never replaces the committed final, and the tool's
+/// body never runs again (W15).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_successor_drains_the_final_its_expired_predecessor_committed(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+    expire: &ChildInvocationExpiry,
+) {
+    let session_id = crate::SessionId::from(format!("{prefix}-successor"));
+    let turn_id = crate::TurnId::from(format!("{prefix}-successor-turn"));
+    let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
+    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .expect("a turn scope derives an opener");
+    let group_key = format!("{prefix}-successor-group");
+    let call_0 = format!("{group_key}-call-0");
+
+    let host = (fixture.make_world)(ToolChildWorldSpec {
+        lease_ttl_ms: LIVE_LEASE_MS,
+    })
+    .await
+    .host;
+    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let sink = Arc::new(IntentSink::default());
+    sink.hold_all();
+    let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
+        sink: Arc::clone(&sink),
+    });
+    let _guard = register_opener_with_processes(
+        &host,
+        &scope,
+        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
+        processes,
+        Arc::clone(&scenario.process_env_store),
+        opener,
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let scoped = host
+        .scoped(crate::admit(scope.clone()))
+        .expect("the group scope binds");
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(commit_group(
+            &scope,
+            &session_id,
+            &group_key,
+            &scenario.env_ref,
+            1,
+            crate::LoserPolicy::RunToCompletion,
+            ToolChildCompletionRouting::Durable,
+            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
+        ))
+        .await
+        .expect("the group opens under the live opener");
+    // The child committed its final and is parked at its first intent: the
+    // committed final owes its whole drain.
+    sink.await_blocked(&call_0).await;
+    assert!(
+        sink.landed().is_empty(),
+        "nothing of the committed final's drain landed before its invocation died"
+    );
+    // The committing invocation dies before its seat and outlives its
+    // retention, and a successor is dispatched for the child.
+    expire(group_key.clone(), 0).await;
+    sink.release_all();
+    sink.await_landed_len(2).await;
+    assert_eq!(
+        sink.landed(),
+        vec![(call_0.clone(), "start"), (call_0.clone(), "event")],
+        "the successor drained the committed final's declared intents, in order"
+    );
+    let settled = next_settlement(&scoped, &mut handle, 0).await;
+    assert_eq!(settled.position, 0, "the child seats at its reserved rank");
+    assert!(
+        settled.outcome.is_ok(),
+        "the committed final seats, not the successor's refusal: {:?}",
+        settled.outcome.as_ref().err()
+    );
+    assert_eq!(
+        scenario.observation.executions_of("law_commit").len(),
+        1,
+        "the tool's body ran once: the successor drained the committed final and never re-ran it"
+    );
+    scoped
+        .controller()
+        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes");
+}
+
 /// W19/W20: drains are admitted in recorded final-commit order, not source
 /// order. Child B (source position 1) commits first and parks inside its
 /// drain; child A (position 0) commits second and must hold at the §5 barrier

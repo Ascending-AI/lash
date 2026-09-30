@@ -41,7 +41,7 @@ pub fn checks(
                 "external-occurrences" => report["external"]["started"] = json!([]),
                 "trigger-edits" => report["edit"]["after_delete"] = json!(["planted late target"]),
                 "promotion-reads" => {
-                    report["promotion"]["artifact_name"] = json!("planted other process")
+                    report["promotion"]["artifact_definition"] = json!("planted other definition")
                 }
                 _ => unreachable!("the behavior class list is exhaustive"),
             }

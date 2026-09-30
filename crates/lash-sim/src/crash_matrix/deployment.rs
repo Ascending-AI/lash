@@ -379,14 +379,6 @@ impl SessionDriver for DriverProxy {
             .close_root(controller, session, root)
             .await
     }
-
-    async fn root_run_ended(
-        &self,
-        session: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> Result<(), lash_core::StoreError> {
-        self.live().await.root_run_ended(session, root).await
-    }
 }
 
 // ---------------------------------------------------------------------------

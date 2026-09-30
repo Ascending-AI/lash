@@ -195,7 +195,7 @@ impl LashRuntime {
         }
         driven.trace_turn_id = Some(root.clone());
         let run = Box::pin(self.drive_logical_turn(
-            LogicalTurnStart::Input(driven, None),
+            LogicalTurnStart::Input(driven),
             sinks.events,
             sinks.turn_events,
             root_controller.clone(),

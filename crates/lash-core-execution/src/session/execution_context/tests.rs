@@ -112,7 +112,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -184,7 +184,7 @@ fn test_execution_context_with_env_store(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {

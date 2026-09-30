@@ -33,9 +33,9 @@ use crate::effect_group::{
     EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
     EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
-    EffectGroupWaitResolution, decode_wait_resolution, drained_wait_lifted, drained_wait_request,
-    group_shape_error, payload_key, rank_wait_request, ready_wait_request, settlement_from_payload,
+    await_group_notice_via_ingress, group_shape_error, payload_key, settlement_from_payload,
 };
+use crate::effect_group::{EffectGroupNotice, EffectGroupNotification};
 use crate::{LashService, RestateAuthorityId, RestateConnection, RestateIngressClient};
 
 mod journal_verdict;
@@ -1037,30 +1037,25 @@ impl RestateEffectHostController {
                     )
                     .await
                     .map_err(|error| ingress_group_error("EffectGroupDispatch/run", error))?;
-                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
-                let address = RestateDurableWaitAddress::for_key(&request.key);
-                let resolution = ingress
-                    .call_lash_workflow::<_, Resolution>(
-                        &self
-                            .await_event_ingress
-                            .service(LashService::DurableWaitWorkflow),
-                        &address.workflow_key,
-                        "await_resolution",
-                        &request,
-                    )
-                    .await
-                    .map_err(|error| {
-                        ingress_group_error(
-                            "LashDurableWaitWorkflow/await_resolution(READY)",
-                            error,
-                        )
-                    })?;
-                match decode_wait_resolution(resolution)? {
-                    EffectGroupWaitResolution::Ready => Ok(handle),
-                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
-                        format!("effect group {group_key} routing was refused: {reason:?}"),
-                    )),
-                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                // The group index's own readiness notice (FIG-4344).
+                let notification = await_group_notice_via_ingress(
+                    ingress,
+                    &self
+                        .await_event_ingress
+                        .service(LashService::EffectGroupState),
+                    &group_key,
+                    &EffectGroupNotice::Ready,
+                )
+                .await
+                .map_err(|error| {
+                    ingress_group_error("EffectGroupIndex/await_notice(Ready)", error)
+                })?;
+                match notification {
+                    EffectGroupNotification::Ready => Ok(handle),
+                    EffectGroupNotification::Refused { reason } => Err(group_shape_error(format!(
+                        "effect group {group_key} routing was refused: {reason:?}"
+                    ))),
+                    EffectGroupNotification::Retired => Err(group_shape_error(format!(
                         "effect group {group_key} was retired before it became ready"
                     ))),
                     other => Err(group_shape_error(format!(
@@ -1196,23 +1191,22 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
-            let scope = ExecutionScope::runtime_operation(handle.group_key());
-            let request = rank_wait_request(&scope, handle.group_key(), rank)?;
-            let address = RestateDurableWaitAddress::for_key(&request.key);
-            let wait_service = self
+            // The group index's own rank notice (FIG-4344).
+            let index_service = self
                 .await_event_ingress
-                .service(LashService::DurableWaitWorkflow);
-            let wait = ingress.call_lash_workflow::<_, Resolution>(
-                &wait_service,
-                &address.workflow_key,
-                "await_resolution",
-                &request,
+                .service(LashService::EffectGroupState);
+            let notice = EffectGroupNotice::Rank { rank };
+            let wait = await_group_notice_via_ingress(
+                ingress,
+                &index_service,
+                handle.group_key(),
+                &notice,
             );
             tokio::pin!(wait);
             // Unjournaled here: the turn's gate is raced over ingress (FIG-3672 P9).
-            let resolution = tokio::select! {
+            let notification = tokio::select! {
                 result = &mut wait => Some(result.map_err(|error| ingress_group_error(
-                    "LashDurableWaitWorkflow/await_resolution(RANK)", error
+                    "EffectGroupIndex/await_notice(Rank)", error
                 ))?),
                 _ = cancel.cancellation().cancelled() => None, // The waiter's own stop: no journal here.
                 stop = self.turn_stop(cancel.observed_scope()) => {
@@ -1220,7 +1214,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     None
                 }
             };
-            let Some(resolution) = resolution else {
+            let Some(notification) = notification else {
                 return Err(RuntimeEffectControllerError::new(
                     RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
                     format!(
@@ -1229,9 +1223,9 @@ impl RuntimeEffectController for RestateEffectHostController {
                     ),
                 ));
             };
-            match decode_wait_resolution(resolution)? {
-                EffectGroupWaitResolution::Rank => {}
-                EffectGroupWaitResolution::Retired => {
+            match notification {
+                EffectGroupNotification::Rank => {}
+                EffectGroupNotification::Retired => {
                     return Err(group_shape_error(format!(
                         "effect group {} was retired while awaiting rank {rank}",
                         handle.group_key()
@@ -1473,9 +1467,8 @@ impl RuntimeEffectController for RestateEffectHostController {
     /// The §4 boundary over ingress — the same route the ctx-based
     /// controller takes, with the durable membership record resolving which
     /// group's index owns this replay key. The serialized index handler is
-    /// the linearization point; `drain_input` is deliberately not retained
-    /// on this tier because the committed-but-unseated index state plus the
-    /// dispatch workflow's redrive is the resumable publication obligation.
+    /// the linearization point, and it retains `drain_input` as the child's
+    /// committed final, which `AlreadyCommitted` answers (ADR 0099 §5).
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::GroupChildFinalCommit,
@@ -1519,6 +1512,9 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "commit_child",
                 &crate::effect_group::EffectGroupCommitChildRequest {
                     replay_key: commit.replay_key.clone(),
+                    committed: crate::effect_group::EffectGroupCommittedFinal::Tool {
+                        drain_input: commit.drain_input,
+                    },
                 },
             )
             .await
@@ -1528,12 +1524,24 @@ impl RuntimeEffectController for RestateEffectHostController {
                 Outcome::Committed { group_key, rank }
             }
             crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
-                rank, ..
+                rank,
+                committed: crate::effect_group::EffectGroupCommittedFinal::Tool { drain_input },
             } => Outcome::AlreadyCommitted {
                 group_key,
                 rank,
-                drain_input: None,
+                drain_input,
             },
+            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
+                rank,
+                committed,
+            } => {
+                return Err(crate::controller::committed_final_is_not_a_tool_terminal(
+                    &group_key,
+                    &commit.replay_key,
+                    rank,
+                    &committed,
+                ));
+            }
             crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
                 Outcome::CancelDecided { group_key, rank }
             }
@@ -1560,48 +1568,27 @@ impl RuntimeEffectController for RestateEffectHostController {
         group_key: &str,
         rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
-        // The §5 barrier on the engine's own wake, over ingress: the index
-        // names every committed sibling ranked below `rank` that has not
-        // seated, and the barrier lifts once each drained wake resolves —
-        // seated, or released by retirement.
-        let ingress = &self.await_event_ingress.ingress;
-        let (wait_scope, positions) = match ingress
-            .call_lash_object::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
-                &self
-                    .await_event_ingress
-                    .service(LashService::EffectGroupState),
-                group_key,
-                "drain_blockers",
-                &crate::effect_group::EffectGroupDrainBlockersRequest { rank },
-            )
-            .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?
-        {
-            crate::effect_group::EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
-            crate::effect_group::EffectGroupDrainBlockersResponse::Blocked {
-                wait_scope,
-                positions,
-            } => (wait_scope, positions),
-        };
-        for position in positions {
-            let request = drained_wait_request(&wait_scope, group_key, position)?;
-            let address = RestateDurableWaitAddress::for_key(&request.key);
-            let resolution = ingress
-                .call_lash_workflow::<_, Resolution>(
-                    &self
-                        .await_event_ingress
-                        .service(LashService::DurableWaitWorkflow),
-                    &address.workflow_key,
-                    "await_resolution",
-                    &request,
-                )
-                .await
-                .map_err(|error| {
-                    ingress_group_error("LashDurableWaitWorkflow/await_resolution(DRAINED)", error)
-                })?;
-            drained_wait_lifted(group_key, position, resolution)?;
+        // The §5 barrier on the group index's own notice, over ingress
+        // (FIG-4344): the index answers once no committed sibling ranked
+        // below `rank` still owes its seat, or retirement releases the wait.
+        let notification = await_group_notice_via_ingress(
+            &self.await_event_ingress.ingress,
+            &self
+                .await_event_ingress
+                .service(LashService::EffectGroupState),
+            group_key,
+            &EffectGroupNotice::Drained { rank },
+        )
+        .await
+        .map_err(|error| ingress_group_error("EffectGroupIndex/await_notice(Drained)", error))?;
+        match notification {
+            EffectGroupNotification::Drained
+            | EffectGroupNotification::Retired
+            | EffectGroupNotification::Absent => Ok(()),
+            other => Err(group_shape_error(format!(
+                "effect group {group_key} barrier at rank {rank} answered {other:?}"
+            ))),
         }
-        Ok(())
     }
 
     /// Positional, as the in-handler controller answers: this controller's

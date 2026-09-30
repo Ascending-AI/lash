@@ -69,7 +69,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         None,
         processes,
         lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             session_policy,
         ),
     );

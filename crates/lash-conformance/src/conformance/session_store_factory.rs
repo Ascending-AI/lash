@@ -24,12 +24,14 @@ pub use process_successor::a_same_start_key_successor_after_prune_has_independen
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+#[path = "session_store_factory_creation_budget.rs"]
+mod creation_budget;
 pub use config_commands::{
-    cancelled_session_config_settlement_is_typed,
-    ingress_follow_on_fork_and_command_coalescing_matrix,
+    cancelled_session_config_settlement_is_typed, ingress_follow_on_fork_and_command_run_matrix,
     session_config_settlement_pending_returns_without_wait,
     superseded_config_settlement_adopts_the_newer_head,
 };
+pub use creation_budget::session_creation_refuses_a_head_no_commit_fits;
 mod state_version;
 mod turn_cancel;
 
@@ -105,7 +107,7 @@ where
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     turn_cancel::turn_cancel_undelivered_crash_matrix(make()).await;
     session_store_factory_admissible_queued_work_peek(make()).await;
-    config_commands::session_store_factory_bounds_config_command_runs(make()).await;
+    config_commands::session_store_factory_runs_every_config_command_alone(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     let (factory, attachments) = make_attached();
@@ -1408,6 +1410,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         node_id: source_tip_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: source_request.config.session_policy(),
+        plugin_config: Default::default(),
     };
     factory
         .fork_session(&delete_first_request)
@@ -1442,6 +1445,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             node_id: unpinned_past_node_id.clone(),
             relation: crate::SessionRelation::Root,
             policy: source_request.config.session_policy(),
+            plugin_config: Default::default(),
         })
         .await
         .expect_err("unpinned past turn must not be forkable");
@@ -1457,6 +1461,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         node_id: root_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: source_request.config.session_policy(),
+        plugin_config: Default::default(),
     };
     let forked = factory
         .fork_session(&fork_request)
@@ -1477,6 +1482,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 source_node_id: "no-such-node".into(),
             },
             policy: source_request.config.session_policy(),
+            plugin_config: Default::default(),
         })
         .await
         .expect("fork relation lineage must not gate a retained fork point");
@@ -1591,6 +1597,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             node_id: root_node_id,
             relation: crate::SessionRelation::Root,
             policy: source_request.config.session_policy(),
+            plugin_config: Default::default(),
         })
         .await
         .expect_err("forking must reject a previously deleted target session id");

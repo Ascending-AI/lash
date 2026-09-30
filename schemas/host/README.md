@@ -19,6 +19,9 @@ target runs all of them:
 | `workflow-type-facets` | `WorkflowNodeTypeFacets` | `WORKFLOW_TYPE_FACET_SCHEMA_VERSION` | `crates/lashlang/src/bin/workflow_schema_generator.rs` |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `trace-lashlang-graph` | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
+| `remote-config-transaction-request` | `RemoteConfigTransactionRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
+| `remote-config-transaction-outcome` | `RemoteConfigTransactionOutcome` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
+| `remote-config-command-catalog` | `RemoteConfigCommandCatalog` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-events-request` | `RemoteProcessEventsRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-events-response` | `RemoteProcessEventsResponse` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-observation-request` | `RemoteProcessObservationRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |

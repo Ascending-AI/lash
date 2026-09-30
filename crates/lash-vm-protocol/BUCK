@@ -21,7 +21,9 @@ lash_rust_library(
     build_script = None,
     crate_features = [],
     crate_name = "lash_vm_protocol",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-protocol",
@@ -42,7 +44,9 @@ lash_rust_unit_test(
     crate_features = [],
     crate_name = "lash_vm_protocol",
     crate_root = "src/lib.rs",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol", "//crates/lash-vm-protocol:lash-vm-protocol__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-protocol",
@@ -56,7 +60,9 @@ lash_rust_integration_test(
     crate_features = [],
     crate_name = "codec_bounds",
     crate_root = "tests/codec_bounds.rs",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-vm-protocol", "codec_bounds", "//crates/lash-vm-protocol:codec_bounds__test"),
     extra_compile_data = [],
     library = ":lash-vm-protocol",
@@ -109,6 +115,49 @@ export_file(
 load(
     "//tools/buck2:lash_rust.bzl",
     "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_library(
+    name = "lash-vm-protocol__fv_1cd1b09e",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_vm_protocol",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-vm-protocol",
+    package_name = "lash-internal-vm-protocol",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-vm-protocol__fv_59f21eb6",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lash_vm_protocol",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-vm-protocol",
+    package_name = "lash-internal-vm-protocol",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3a135246", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_93e49f58", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_9eaddfa4", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_4585dde7", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_5b221c5d", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_8af4df28", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_32f43af7", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ca9352be", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_49e398d7", "//crates/lashlang:lashlang": "//crates/lashlang:lashlang__fv_841620de"},
+    version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
@@ -116,7 +165,9 @@ lash_rust_feature_library(
     build_script = None,
     crate_features = [],
     crate_name = "lash_vm_protocol",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-protocol",
@@ -126,5 +177,50 @@ lash_rust_feature_library(
         "manual",
     ],
     variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_2516f9b5", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_2772d6c4", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_533a16c3", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4edd3932", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_ab87ac69", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_460f3964", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_4bcbd8c3", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_c1c7747b", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_8af4df28", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_9c1d1e1b", "//crates/lash-remote-protocol:lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_6ce91e0e", "//crates/lash-restate-test:lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_f1d1e8a8", "//crates/lash-restate:lash-restate": "//crates/lash-restate:lash-restate__fv_8a43596d", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_32f43af7", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c8e76e49", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ca9352be", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_478f5d2a", "//crates/lashlang:lashlang": "//crates/lashlang:lashlang__fv_d4bf64ca"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-vm-protocol__fv_fa269834",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lash_vm_protocol",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-vm-protocol",
+    package_name = "lash-internal-vm-protocol",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-vm-protocol__unit_test__fv_fa269834",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lash_vm_protocol",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-protocol", "lash_vm_protocol", "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_fa269834"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-vm-protocol",
+    package_name = "lash-internal-vm-protocol",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
     version = "0.0.0-dev",
 )

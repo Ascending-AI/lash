@@ -248,7 +248,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             direct_completions: None,
             process_env_store,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
+                crate::AdmittedPluginConfig::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             turn_context: crate::TurnContext::default(),

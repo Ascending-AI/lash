@@ -118,6 +118,18 @@ pub fn nonterminal_turn_input_state_predicate_sql(column: &str) -> String {
     format!("{column} NOT IN ({terminal})")
 }
 
+/// The state an admitted row in `column` takes when its root lets go of it
+/// without settling it: an `accepted` row is `pending_active` again, the
+/// state its submitted delivery names, and every other row keeps its own
+/// (ADR 0101 §5.1).
+pub fn released_turn_input_state_sql(column: &str) -> String {
+    format!(
+        "CASE WHEN {} THEN {} ELSE {column} END",
+        accepted_turn_input_state_predicate_sql(column),
+        super::state_sql_literal_list(&[TurnInputStateKind::PendingActive]),
+    )
+}
+
 #[cfg(test)]
 #[path = "turn_input_lifecycle_sql_tests.rs"]
 mod tests;

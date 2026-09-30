@@ -196,7 +196,7 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
             let returned = Arc::clone(&returned);
             Box::pin(async move {
                 let spec = lash_core::ProcessExecutionEnvSpec::new(
-                    lash_core::PluginOptions::empty(),
+                    lash_core::AdmittedPluginConfig::default(),
                     recovery_session_policy(),
                 );
                 let result = scoped

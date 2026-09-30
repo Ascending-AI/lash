@@ -58,6 +58,149 @@ pub struct HydratedExecutionState {
     pub root: Arc<[u8]>,
     pub components: BTreeMap<String, Arc<[u8]>>,
 }
+/// A session's recorded plugin configuration (FIG-4379): each installed
+/// owner's canonical namespace, keyed by plugin id, resolved defaults
+/// included, and which of them is the session's protocol plugin.
+///
+/// It is what the owners made of a request, never the request itself: a
+/// creation's or a patch's [`PluginOptions`] reach it only through their
+/// owner's validation. It is recorded with the session's config head, moves
+/// only with the config's revision, and every open delivers it unchanged.
+/// The protocol plugin's namespace is recorded here like every other owner's;
+/// the protocol turn options every turn reads are a view of it
+/// ([`Self::protocol_turn_options`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PluginConfig {
+    /// The session's protocol plugin: the owner whose namespace is the
+    /// session's protocol turn options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    namespaces: BTreeMap<String, serde_json::Value>,
+}
+impl PluginConfig {
+    /// A configuration recorded under the protocol plugin `protocol`.
+    pub fn for_protocol(protocol: Option<String>) -> Self {
+        Self {
+            protocol,
+            namespaces: BTreeMap::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.protocol.is_none() && self.namespaces.is_empty()
+    }
+
+    /// A configuration a transport decoded: the protocol owner and the
+    /// namespaces exactly as recorded where it was encoded.
+    pub fn from_recorded_parts(
+        protocol: Option<String>,
+        namespaces: BTreeMap<String, serde_json::Value>,
+    ) -> Self {
+        Self {
+            protocol,
+            namespaces,
+        }
+    }
+
+    /// The protocol owner and the namespaces, for a transport to encode.
+    pub fn into_recorded_parts(self) -> (Option<String>, BTreeMap<String, serde_json::Value>) {
+        (self.protocol, self.namespaces)
+    }
+
+    /// The session's protocol plugin id, if it recorded one.
+    pub fn protocol_plugin_id(&self) -> Option<&str> {
+        self.protocol.as_deref()
+    }
+
+    /// The namespace `plugin_id` recorded, if any.
+    pub fn get(&self, plugin_id: &str) -> Option<&serde_json::Value> {
+        self.namespaces.get(plugin_id)
+    }
+
+    /// Decode the namespace `plugin_id` recorded, if any.
+    pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
+    where
+        T: DeserializeOwned,
+    {
+        self.namespaces
+            .get(plugin_id)
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
+        self.namespaces.iter()
+    }
+
+    /// The session's protocol turn options: a view of the protocol plugin's
+    /// namespace, empty when it recorded none.
+    pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
+        self.protocol
+            .as_deref()
+            .and_then(|protocol| self.namespaces.get(protocol))
+            .cloned()
+            .map(crate::ProtocolTurnOptions::from_payload)
+            .unwrap_or_default()
+    }
+
+    /// Record `value` as `plugin_id`'s namespace, replacing what it held.
+    /// Only an owner's validated output, or a recorded run's override of the
+    /// protocol namespace, reaches this.
+    pub fn insert(&mut self, plugin_id: impl Into<String>, value: serde_json::Value) {
+        self.namespaces.insert(plugin_id.into(), value);
+    }
+
+    /// Replace each namespace `updates` names with its value.
+    pub fn apply_namespace_updates(&mut self, updates: &BTreeMap<String, serde_json::Value>) {
+        for (plugin_id, value) in updates {
+            self.namespaces.insert(plugin_id.clone(), value.clone());
+        }
+    }
+
+    /// Merge `overrides` over the protocol namespace, key by key (a run's
+    /// one-shot override; it never reaches the sticky config). A
+    /// configuration without a protocol plugin has no namespace to override.
+    pub fn override_protocol_turn_options(&mut self, overrides: &crate::ProtocolTurnOptions) {
+        let Some(protocol) = self.protocol.clone() else {
+            return;
+        };
+        let merged = self.protocol_turn_options().merged_with(overrides);
+        self.namespaces.insert(protocol, merged.payload);
+    }
+}
+
+/// A plugin configuration at the config revision it was recorded under
+/// (FIG-4379): what a root was admitted under (its recorded `ResolvedRun`),
+/// what a process captured with its execution environment, or the head's
+/// outside any root. Hooks read their configuration from this, never from
+/// the session's current head.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdmittedPluginConfig {
+    /// The session config revision this configuration was recorded under.
+    pub revision: u64,
+    pub config: Arc<PluginConfig>,
+}
+impl AdmittedPluginConfig {
+    pub fn new(config: PluginConfig, revision: u64) -> Self {
+        Self {
+            revision,
+            config: Arc::new(config),
+        }
+    }
+
+    /// Decode the namespace `plugin_id` recorded, if any.
+    pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
+    where
+        T: DeserializeOwned,
+    {
+        self.config.decode(plugin_id)
+    }
+}
+
 /// Plugin-owned options carried on a `SessionCreateRequest`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginOptions {

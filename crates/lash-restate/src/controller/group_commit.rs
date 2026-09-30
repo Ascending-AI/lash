@@ -1,5 +1,6 @@
 //! The §4 boundary for one group child's final record, and the §5 barrier its
-//! drain waits at, routed through the durable index objects.
+//! drain waits at, routed through the durable index objects: the barrier is
+//! the group index's own `Drained` notice (FIG-4344).
 //!
 //! Split out of `mod.rs` only for the production file-size budget: this is
 //! the routing half of
@@ -10,9 +11,9 @@
 //! its replay key, and that group's index takes the commit. The serialized
 //! object handler — not any state the controller holds — is the linearization
 //! point, so a cancel decision racing the commit is fenced inside the index.
-//! The Restate index does not retain `drain_input`: the durable publication
-//! obligation is the committed-but-unseated child plus the dispatch workflow's
-//! own redrive, so `AlreadyCommitted` reports it `None`.
+//! The index retains the commit's `drain_input` as the child's committed
+//! final, and `AlreadyCommitted` answers the one the winner sealed: a later
+//! invocation of the child drains exactly that final (ADR 0099 §5, W7).
 //!
 //! The controller keeps, per child, the rank its own commit was answered
 //! (FIG-4308): the child's dispatch handler publishes that rank at the seat
@@ -29,8 +30,8 @@ use lash_core::facade_support::{EffectGroupChildCommitOutcome, GroupChildFinalCo
 use lash_core::{ExecutionScope, RuntimeEffectControllerError};
 
 use crate::effect_group::{
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
-    EffectGroupDrainBlockersResponse, drained_wait_lifted, drained_wait_request, group_shape_error,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupCommittedFinal,
+    EffectGroupNotice, EffectGroupNotification, group_shape_error,
 };
 
 use super::{RestateControllerContext, effect_group_engine_error};
@@ -67,6 +68,9 @@ where
             group_key.clone(),
             EffectGroupCommitChildRequest {
                 replay_key: commit.replay_key.clone(),
+                committed: EffectGroupCommittedFinal::Tool {
+                    drain_input: commit.drain_input,
+                },
             },
         )
         .await
@@ -75,12 +79,21 @@ where
         EffectGroupCommitChildResponse::Committed { rank } => {
             Outcome::Committed { group_key, rank }
         }
-        EffectGroupCommitChildResponse::AlreadyCommitted { rank, .. } => {
-            Outcome::AlreadyCommitted {
-                group_key,
+        EffectGroupCommitChildResponse::AlreadyCommitted {
+            rank,
+            committed: EffectGroupCommittedFinal::Tool { drain_input },
+        } => Outcome::AlreadyCommitted {
+            group_key,
+            rank,
+            drain_input,
+        },
+        EffectGroupCommitChildResponse::AlreadyCommitted { rank, committed } => {
+            return Err(committed_final_is_not_a_tool_terminal(
+                &group_key,
+                &commit.replay_key,
                 rank,
-                drain_input: None,
-            }
+                &committed,
+            ));
         }
         EffectGroupCommitChildResponse::CancelDecided { rank } => {
             Outcome::CancelDecided { group_key, rank }
@@ -102,12 +115,36 @@ where
     })
 }
 
-/// The §5 barrier on the engine's own wake: the index names every committed
-/// sibling ranked below `rank` that has not seated, and the waits on their
-/// drained wakes are issued together, so one round trip covers them all.
-/// The barrier lifts once all lower committed siblings have seated, or
-/// retirement releases the wait — a release, not proof of seating: the
-/// semantic-admission fence still refuses any intent under a retired group.
+/// A tool child's commit that found the point holding a final that is not a
+/// tool terminal: one only an invocation that never drove the child commits,
+/// which exists only once the driving invocation is gone. The committed final
+/// wins, so this drive's own final is refused rather than drained over it.
+pub(crate) fn committed_final_is_not_a_tool_terminal(
+    group_key: &str,
+    replay_key: &str,
+    rank: u64,
+    committed: &EffectGroupCommittedFinal,
+) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "effect group {group_key} child `{replay_key}` drove to a tool terminal, but \
+         the §4 point already holds its final at rank {rank} ({committed:?}), \
+         committed by an invocation that did not drive it"
+    ))
+}
+
+/// The §5 barrier on the group index's own notice (FIG-4344): one
+/// subscription to the barrier for `rank`, which the index answers at once
+/// when no committed sibling ranked below it still owes its seat, and
+/// otherwise completes from the seat that lifts it. The barrier lifts once all
+/// lower committed siblings have seated, or retirement releases the wait — a
+/// release, not proof of seating: the semantic-admission fence still refuses
+/// any intent under a retired group.
+///
+/// The subscription is one call, awaited alone. Several SDK call futures must
+/// never be polled together here: one that has blocked on the invocation's
+/// input reads input again before it re-checks its own completion, so a
+/// sibling can take that completion off the input and leave the drain parked
+/// until the stream's inactivity timeout (FIG-4431).
 pub(super) async fn await_group_child_drain_admission<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,
@@ -117,76 +154,35 @@ pub(super) async fn await_group_child_drain_admission<'ctx, C>(
 where
     C: RestateControllerContext<'ctx>,
 {
-    let (wait_scope, positions) = match context
-        .effect_group_drain_blockers(namespace, group_key.to_string(), rank)
-        .await
-        .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blockers", error))?
-    {
-        EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
-        EffectGroupDrainBlockersResponse::Blocked {
-            wait_scope,
-            positions,
-        } => (wait_scope, positions),
-    };
-    let mut waits = Vec::with_capacity(positions.len());
-    for &position in &positions {
-        let request = drained_wait_request(&wait_scope, group_key, position)?;
-        let replay_key = request.key.key_id.clone();
-        waits.push(context.await_effect_group_wait(
+    let notification = match context
+        .await_effect_group_notice(
             namespace,
-            request,
-            replay_key,
+            group_key.to_string(),
+            EffectGroupNotice::Drained { rank },
             None,
             super::context::ProcessCancelRace::NotRaced,
-        ));
-    }
-    let resolved = join_in_order(waits).await;
-    for (position, resolved) in positions.into_iter().zip(resolved) {
-        let resolution = match resolved.map_err(|error| {
-            effect_group_engine_error("LashDurableWaitWorkflow/await_resolution(DRAINED)", error)
-        })? {
-            RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
-            RestateTurnCancelRaceOutcome::TurnCancelled
-            | RestateTurnCancelRaceOutcome::ProcessCancelled
-            | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
-                return Err(group_shape_error(format!(
-                    "effect group {group_key} drained wake for child {position} ended without \
-                     a resolution though it races no turn gate"
-                )));
-            }
-        };
-        drained_wait_lifted(group_key, position, resolution)?;
-    }
-    Ok(())
-}
-
-/// Drives every future to completion, polling them in their order on each
-/// wake, and returns their outputs in that order.
-///
-/// A journaled wait emits its call when it is first polled, so the first poll
-/// issues every call, in order, before any completes: one round trip covers
-/// them all, and the journal is the same on every replay.
-async fn join_in_order<F: std::future::Future + Unpin>(mut futures: Vec<F>) -> Vec<F::Output> {
-    let mut outputs = futures.iter().map(|_| None).collect::<Vec<_>>();
-    std::future::poll_fn(|cx| {
-        let mut pending = false;
-        for (future, output) in futures.iter_mut().zip(outputs.iter_mut()) {
-            if output.is_some() {
-                continue;
-            }
-            match std::pin::Pin::new(future).poll(cx) {
-                std::task::Poll::Ready(value) => *output = Some(value),
-                std::task::Poll::Pending => pending = true,
-            }
+        )
+        .await
+        .map_err(|error| effect_group_engine_error("EffectGroupIndex/subscribe(Drained)", error))?
+    {
+        RestateTurnCancelRaceOutcome::Completed(notification) => notification,
+        RestateTurnCancelRaceOutcome::TurnCancelled
+        | RestateTurnCancelRaceOutcome::ProcessCancelled
+        | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+            return Err(group_shape_error(format!(
+                "effect group {group_key} barrier at rank {rank} ended without an answer \
+                 though it races no turn gate"
+            )));
         }
-        if pending {
-            std::task::Poll::Pending
-        } else {
-            std::task::Poll::Ready(())
-        }
-    })
-    .await;
-    outputs.into_iter().flatten().collect()
+    };
+    match notification {
+        EffectGroupNotification::Drained
+        | EffectGroupNotification::Retired
+        | EffectGroupNotification::Absent => Ok(()),
+        other => Err(group_shape_error(format!(
+            "effect group {group_key} barrier at rank {rank} answered {other:?}"
+        ))),
+    }
 }
 
 /// The exact child a commit receipt is for: its group, its journal scope and

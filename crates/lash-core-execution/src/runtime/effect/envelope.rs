@@ -481,6 +481,17 @@ pub enum RuntimeEffectCommand {
     RecordCompactionBase {
         session: crate::SessionId,
     },
+    /// Resolve a config transaction once, before anything publishes
+    /// (FIG-4379): the base revision it resolved against and either the
+    /// complete replacements with each command's output, a stale base, or a
+    /// typed refusal. Keyed by the transaction's command, so a redrive
+    /// publishes the recorded resolution and never runs a reducer again. The
+    /// envelope names only the session and the transaction id: the
+    /// resolution is the step's outcome.
+    ResolveConfigTransaction {
+        session: crate::SessionId,
+        transaction: String,
+    },
     /// Read the session's leading open command run for a command root to
     /// apply (ADR 0101 §4, FIG-4201), acknowledging its obligations
     /// delivered under the root's fence. Keyed by the read's ordinal in the
@@ -613,6 +624,7 @@ impl RuntimeEffectCommand {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
@@ -625,6 +637,17 @@ impl RuntimeEffectCommand {
             Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
+}
+
+/// The scope and status selection recorded by a process listing.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProcessListSelection {
+    Observed {
+        session_scope: SessionScope,
+        mode: ProcessListMode,
+    },
+    HostRunning,
 }
 
 /// Serializable operation against the process admin plane.
@@ -644,9 +667,16 @@ pub enum ProcessCommand {
         execution_context: Box<ProcessExecutionContext>,
     },
     List {
+        selection: ProcessListSelection,
+    },
+    CompleteExternal {
         session_scope: SessionScope,
-        #[serde(default)]
-        mode: ProcessListMode,
+        process_id: ProcessId,
+        output: ProcessAwaitOutput,
+    },
+    ValidateVisible {
+        owner: crate::RuntimeOwner,
+        process_ids: Vec<ProcessId>,
     },
     Transfer {
         from_scope: SessionScope,
@@ -719,9 +749,16 @@ enum ProcessCommandDecode {
         execution_context: Box<ProcessExecutionContext>,
     },
     List {
+        selection: ProcessListSelection,
+    },
+    CompleteExternal {
         session_scope: SessionScope,
-        #[serde(default)]
-        mode: ProcessListMode,
+        process_id: ProcessId,
+        output: ProcessAwaitOutput,
+    },
+    ValidateVisible {
+        owner: crate::RuntimeOwner,
+        process_ids: Vec<ProcessId>,
     },
     Transfer {
         from_scope: SessionScope,
@@ -786,13 +823,19 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 observers,
                 execution_context,
             },
-            ProcessCommandDecode::List {
+            ProcessCommandDecode::List { selection } => Self::List { selection },
+            ProcessCommandDecode::CompleteExternal {
                 session_scope,
-                mode,
-            } => Self::List {
+                process_id,
+                output,
+            } => Self::CompleteExternal {
                 session_scope,
-                mode,
+                process_id,
+                output,
             },
+            ProcessCommandDecode::ValidateVisible { owner, process_ids } => {
+                Self::ValidateVisible { owner, process_ids }
+            }
             ProcessCommandDecode::Transfer {
                 from_scope,
                 to_scope,
@@ -899,11 +942,24 @@ impl ProcessCommand {
             Self::Start { registration, .. } => {
                 Self::start_effect_id(registration.start_key.as_ref())
             }
-            Self::List {
+            Self::List { selection } => match selection {
+                ProcessListSelection::Observed {
+                    session_scope,
+                    mode,
+                } => format!("process:list:{}:{}", session_scope.id(), mode.as_str()),
+                ProcessListSelection::HostRunning => "process:list:host:running".to_string(),
+            },
+            Self::CompleteExternal {
                 session_scope,
-                mode,
-            } => {
-                format!("process:list:{}:{}", session_scope.id(), mode.as_str())
+                process_id,
+                ..
+            } => format!(
+                "process:complete-external:{}:{process_id}",
+                session_scope.id()
+            ),
+            Self::ValidateVisible { owner, process_ids } => {
+                let digest = process_transfer_set_identity(process_ids);
+                format!("process:validate-visible:{owner}:{digest}")
             }
             Self::Transfer {
                 from_scope,
@@ -968,6 +1024,12 @@ pub enum ProcessEffectOutcome {
     },
     List {
         entries: Vec<ProcessRecord>,
+    },
+    CompleteExternal {
+        completion: Box<crate::ProcessCompletionOutcome>,
+    },
+    ValidateVisible {
+        not_visible: Option<ProcessId>,
     },
     Transfer,
     DeleteSession {
@@ -1253,6 +1315,10 @@ pub enum RuntimeEffectOutcome {
     /// ran.
     RecordCompactionBase {
         base: Box<CompactionBase>,
+    },
+    /// A config transaction's recorded resolution.
+    ResolveConfigTransaction {
+        resolution: Box<crate::ConfigResolution>,
     },
     /// The command run a command root read: the leading open batches, in
     /// `enqueue_seq` order, empty when the lane was.
@@ -1750,6 +1816,7 @@ impl RuntimeEffectOutcome {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,

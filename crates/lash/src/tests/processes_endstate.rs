@@ -114,7 +114,7 @@ impl LinkedTestProcess {
 
 fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
+        lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -193,10 +193,21 @@ async fn wait_for_terminal(
     process_id: &ProcessId,
     status: lash_core::ProcessStatus,
 ) -> lash_core::facade_support::ObservedProcess {
-    wait_for_process(core, process_id, "terminal process", |process| {
-        process.lifecycle == status
-    })
-    .await
+    core.processes()
+        .await_output(process_id)
+        .await
+        .expect("await terminal process");
+    let process = core
+        .processes()
+        .get(process_id)
+        .await
+        .expect("get terminal process")
+        .expect("the terminal process remains registered");
+    assert_eq!(
+        process.lifecycle, status,
+        "the process reached its expected terminal status"
+    );
+    process
 }
 
 async fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {

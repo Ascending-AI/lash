@@ -192,6 +192,7 @@ impl LashRuntime {
         };
         let ctx = crate::CompactionContext {
             session_id: self.state.session_id.clone(),
+            plugin_config: self.state.admitted_plugin_config(),
             state,
             instructions,
             system_prompt,

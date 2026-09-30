@@ -471,7 +471,9 @@ jobs:
           python3 scripts/test_fast_test.py
           python3 scripts/test_buck2_test_contract.py
           python3 scripts/test_buck2_action_sizes.py
-          python3 scripts/test_vm_worker_identity_generation.py
+          python3 scripts/test_vm_worker_runfile_generation.py
+          python3 scripts/check_worker_wire_schema.py
+          python3 scripts/test_worker_wire_schema.py
           python3 scripts/test_loadtest_measurements.py
           bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py
           python3 scripts/test_buck2_event_digest.py
@@ -1983,9 +1985,11 @@ jobs:
               //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
           else
             cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+            cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
             mkdir -p "${RUNNER_TEMP}/worker-artifacts"
             find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
               -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+            cp target/release/lash-vm-worker "${RUNNER_TEMP}/worker-artifacts/"
           fi
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
 
@@ -2191,8 +2195,8 @@ jobs:
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: |
           set -euo pipefail
-          # The crash-window attachment laws require PostgreSQL in both legs.
-          if [ "${{ matrix.name }}" = "server-double" ]; then
+          # The crash-window and effect-group attachment laws require PostgreSQL in both legs.
+          if [ "${{ matrix.name }}" = "server-double" ] || [ "${{ matrix.name }}" = "effect-group-conformance" ]; then
             bash scripts/ci/with-service.sh pg16 -- just ${{ matrix.recipe }}
           else
             just ${{ matrix.recipe }}

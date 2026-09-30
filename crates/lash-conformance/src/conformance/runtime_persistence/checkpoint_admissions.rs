@@ -507,6 +507,8 @@ async fn at_checkpoint(
 pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-work");
     let turn_id = crate::TurnId::from("checkpoint-turn");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-owner").await;
+    running_root(&store, &fence, &turn_id).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -524,7 +526,6 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
         ))
         .await
         .expect("enqueue checkpoint queued work");
-    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-owner").await;
 
     let admitted = at_checkpoint(
         &store,
@@ -579,6 +580,8 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
 ) {
     let session_id = SessionId::from("checkpoint-applied-binding");
     let turn = crate::TurnId::from("checkpoint-applied-binding:turn");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-applied-owner").await;
+    let root = running_root(&store, &fence, &turn).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -596,7 +599,6 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
         ),
         "an enqueued input reads open by id and in the list"
     );
-    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-applied-owner").await;
     let admission = admit_at_checkpoint_for_test(
         &store,
         &fence,
@@ -637,7 +639,7 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
     end_root(
         &store,
         &fence,
-        completing_checkpoint(IngressSettlement::new(turn.clone()), &admission),
+        completing_checkpoint(completing_admission(turn.as_str(), &root), &admission),
     )
     .await;
     assert_eq!(
@@ -702,6 +704,8 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(store: Arc<dyn 
     let session_id = SessionId::from("checkpoint-step-idempotence");
     let turn_id = crate::TurnId::from("checkpoint-step-idempotence:turn");
     let step = "checkpoint-step-idempotence:step";
+    let first = seal_drive_fence_for_test(&store, &session_id, "checkpoint-step-a").await;
+    running_root(&store, &first, &turn_id).await;
     store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -719,7 +723,6 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(store: Arc<dyn 
         ))
         .await
         .expect("enqueue checkpoint queued work");
-    let first = seal_drive_fence_for_test(&store, &session_id, "checkpoint-step-a").await;
     let admitted = at_checkpoint(
         &store,
         &first,
@@ -820,6 +823,8 @@ pub async fn a_checkpoint_refuses_a_stale_fence_whatever_its_caps(store: Arc<dyn
     let turn_id = crate::TurnId::from("checkpoint-stale-fence-caps:turn");
     let idle_turn = crate::TurnId::from("checkpoint-stale-fence-caps:idle-turn");
     let step = "checkpoint-stale-fence-caps:step";
+    let stale = seal_drive_fence_for_test(&store, &session_id, "checkpoint-stale-caps-a").await;
+    running_root(&store, &stale, &turn_id).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -829,7 +834,6 @@ pub async fn a_checkpoint_refuses_a_stale_fence_whatever_its_caps(store: Arc<dyn
         ))
         .await
         .expect("enqueue checkpoint input");
-    let stale = seal_drive_fence_for_test(&store, &session_id, "checkpoint-stale-caps-a").await;
     let live = seal_drive_fence_for_test(&store, &session_id, "checkpoint-stale-caps-b").await;
     assert!(live.epoch() > stale.epoch(), "the later seal supersedes");
 
@@ -900,6 +904,8 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_root(
 ) {
     let session_id = SessionId::from("checkpoint-admitted-listing");
     let turn_id = crate::TurnId::from("checkpoint-admitted-listing:turn");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-admitted-listing").await;
+    let root = running_root(&store, &fence, &turn_id).await;
     let before = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
             &session_id,
@@ -923,7 +929,6 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_root(
         ))
         .await
         .expect("enqueue the later next-turn input");
-    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-admitted-listing").await;
     let admitted = at_checkpoint(
         &store,
         &fence,
@@ -950,6 +955,13 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_root(
     assert_eq!(
         listed,
         vec![
+            (
+                root.input_ids()[0].clone(),
+                crate::TurnInputStateKind::DeferredNextTurn,
+                crate::PendingTurnInputReadStatus::Admitted {
+                    root: turn_id.clone()
+                },
+            ),
             (
                 before.input_id,
                 crate::TurnInputStateKind::DeferredNextTurn,
@@ -983,6 +995,9 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 ) {
     let session_id = SessionId::from("checkpoint-min-boundary");
     let turn_id = crate::TurnId::from("checkpoint-min-boundary:turn");
+    let fence =
+        seal_drive_fence_for_test(&store, &session_id, "checkpoint-min-boundary-owner").await;
+    running_root(&store, &fence, &turn_id).await;
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -992,8 +1007,6 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
         ))
         .await
         .expect("enqueue before-completion input");
-    let fence =
-        seal_drive_fence_for_test(&store, &session_id, "checkpoint-min-boundary-owner").await;
 
     let probed = at_checkpoint(
         &store,
@@ -1086,6 +1099,9 @@ pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
 pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-budget-atomicity");
     let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
+    let fence =
+        seal_drive_fence_for_test(&store, &session_id, "checkpoint-budget-atomicity-owner").await;
+    let root = running_root(&store, &fence, &turn_id).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -1104,8 +1120,6 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dy
         ))
         .await
         .expect("enqueue oversized checkpoint queued work");
-    let fence =
-        seal_drive_fence_for_test(&store, &session_id, "checkpoint-budget-atomicity-owner").await;
     let error = at_checkpoint(
         &store,
         &fence,
@@ -1135,16 +1149,16 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dy
     assert_eq!(
         pending
             .iter()
-            .map(|read| read.input.input_id.as_str())
+            .map(|read| read.input.input_id.to_string())
             .collect::<Vec<_>>(),
-        vec![input.input_id.as_str()],
+        vec![root.input_ids()[0].to_string(), input.input_id.to_string()],
         "the input binding must roll back with the refused queued-work admission"
     );
     assert_eq!(
-        pending[0].input.state.kind(),
+        pending[1].input.state.kind(),
         crate::TurnInputStateKind::PendingActive
     );
-    assert_eq!(pending[0].status, crate::PendingTurnInputReadStatus::Open);
+    assert_eq!(pending[1].status, crate::PendingTurnInputReadStatus::Open);
 }
 
 /// Prove checkpoint admission probes stay read-only for empty queues and for
@@ -1210,10 +1224,11 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         "a deferred queue head must not open a checkpoint write transaction"
     );
 
+    // The idle boundary starts the root whose checkpoint the rest probes.
     let idle = admitted_root(
         &store,
         &fence,
-        "counter-idle-root",
+        turn_id.as_str(),
         lash_core::store::AdmittedHead::Batch(deferred.batch_id.clone()),
     )
     .await;
@@ -1418,10 +1433,9 @@ pub(super) fn sample_session_node(
             SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 )),
-                protocol_turn_options: ProtocolTurnOptions::default(),
             }
         } else {
             SessionNodePayload::Event {

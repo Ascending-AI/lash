@@ -6,23 +6,29 @@
 //!   read — point or run, consuming or cursorless — is served past it.
 //! - Decision order: a cancel decided while a committed sibling still drains
 //!   ranks after that sibling, and is not observable until it seats.
-//! - A fallback seat over an already-committed child (an expired attach): its
-//!   commit answer is `AlreadyCommitted`, so it waits at the §5 barrier for
-//!   every lower committed sibling before it publishes, and then seats its
-//!   refusal at the reserved rank. Retirement releases that wait.
+//! - The committed final wins (ADR 0099 §5): a commit retains the final it
+//!   committed and answers it to every later commit of the child, and a
+//!   successor whose attach expired seats that final — a committed refusal as
+//!   recorded, and a final it cannot realize reported lost by name — never
+//!   its own refusal. Retirement clears every retained final.
 //! - The dispatch's one registration: its transitions and refusals.
+//! - A drain held by several blockers lifts whichever of them seats first
+//!   (FIG-4431), through the in-handler controller a tool child drains with.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use lash_core::RuntimeEffectEnvelope;
+use restate_sdk::context::WorkflowContext;
+use restate_sdk::errors::{HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
 
 use crate::RestateIngressClient;
 use crate::effect_group::{
     EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,
     EffectGroupChildRequest, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupDrainBlockersRequest,
-    EffectGroupDrainBlockersResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupCommittedFinal,
+    EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupProbeAdoptResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
     EffectGroupRecordSettlementRequest, EffectGroupRecordSettlementResponse,
     EffectGroupRegisterDispatchRequest, EffectGroupRegisterDispatchResponse,
@@ -35,15 +41,15 @@ use super::effect_group_conformance::{
 };
 
 /// One group of witness children and the index calls the laws make on it.
-struct Group {
-    ingress: RestateIngressClient,
-    key: String,
+pub(super) struct Group {
+    pub(super) ingress: RestateIngressClient,
+    pub(super) key: String,
     children: Vec<RuntimeEffectEnvelope>,
     shape: EffectGroupShape,
 }
 
 impl Group {
-    async fn open(ingress: RestateIngressClient, label: &str, width: usize) -> Self {
+    pub(super) async fn open(ingress: RestateIngressClient, label: &str, width: usize) -> Self {
         let key = witness_key(label);
         let children = (0..width)
             .map(|position| witness_child(&key, position))
@@ -75,7 +81,19 @@ impl Group {
         }
     }
 
-    async fn reopen(&self) {
+    /// A group the index holds no record of.
+    pub(super) fn unopened(ingress: RestateIngressClient, label: &str) -> Self {
+        let key = witness_key(label);
+        let shape = witness_shape(&key, &[]);
+        Self {
+            ingress,
+            key,
+            children: Vec::new(),
+            shape,
+        }
+    }
+
+    pub(super) async fn reopen(&self) {
         let reopened: EffectGroupOpenResponse = self
             .ingress
             .call_lash_object(
@@ -97,7 +115,18 @@ impl Group {
         );
     }
 
-    async fn commit(&self, position: usize) -> EffectGroupCommitChildResponse {
+    /// Commits `position` with an outcome only its committing invocation
+    /// holds, as an atomic child's commit does.
+    pub(super) async fn commit(&self, position: usize) -> EffectGroupCommitChildResponse {
+        self.commit_final(position, EffectGroupCommittedFinal::Held)
+            .await
+    }
+
+    pub(super) async fn commit_final(
+        &self,
+        position: usize,
+        committed: EffectGroupCommittedFinal,
+    ) -> EffectGroupCommitChildResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -105,13 +134,14 @@ impl Group {
                 "commit_child",
                 &EffectGroupCommitChildRequest {
                     replay_key: self.shape.replay_keys[position].clone(),
+                    committed,
                 },
             )
             .await
             .expect("a child of the law commits")
     }
 
-    async fn seat(&self, position: usize) -> EffectGroupRecordSettlementResponse {
+    pub(super) async fn seat(&self, position: usize) -> EffectGroupRecordSettlementResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -126,7 +156,12 @@ impl Group {
             .expect("a child of the law seats")
     }
 
-    async fn read(&self, rank: u64, for_caller: bool, run: bool) -> EffectGroupReadRankResponse {
+    pub(super) async fn read(
+        &self,
+        rank: u64,
+        for_caller: bool,
+        run: bool,
+    ) -> EffectGroupReadRankResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -144,7 +179,7 @@ impl Group {
 
     /// The (rank, position) pairs a run read from `rank` serves, or `None`
     /// when the read is not served.
-    async fn run_from(&self, rank: u64) -> Option<Vec<(u64, usize)>> {
+    pub(super) async fn run_from(&self, rank: u64) -> Option<Vec<(u64, usize)>> {
         match self.read(rank, false, true).await {
             EffectGroupReadRankResponse::SettledRun { ranks } => Some(
                 ranks
@@ -157,24 +192,27 @@ impl Group {
         }
     }
 
-    async fn blockers(&self, rank: u64) -> Vec<usize> {
-        let answer: EffectGroupDrainBlockersResponse = self
-            .ingress
-            .call_lash_object(
-                "EffectGroupIndex",
+    /// The §5 barrier at `rank`, as the index's `Drained` notice answers it
+    /// within `within`: `None` while some committed sibling below it still
+    /// owes its seat.
+    pub(super) async fn barrier(
+        &self,
+        rank: u64,
+        within: Duration,
+    ) -> Option<EffectGroupNotification> {
+        tokio::time::timeout(
+            within,
+            super::effect_group_conformance::await_group_wait(
+                &self.ingress,
                 &self.key,
-                "drain_blockers",
-                &EffectGroupDrainBlockersRequest { rank },
-            )
-            .await
-            .expect("the law reads the barrier");
-        match answer {
-            EffectGroupDrainBlockersResponse::Admitted => Vec::new(),
-            EffectGroupDrainBlockersResponse::Blocked { positions, .. } => positions,
-        }
+                EffectGroupNotice::Drained { rank },
+            ),
+        )
+        .await
+        .ok()
     }
 
-    async fn close_cancel(&self) {
+    pub(super) async fn close_cancel(&self) {
         let closed: EffectGroupCloseResponse = self
             .ingress
             .call_lash_object(
@@ -190,7 +228,7 @@ impl Group {
         assert_eq!(closed, EffectGroupCloseResponse::Closed);
     }
 
-    async fn adopt(&self, dispatcher: &str) -> EffectGroupProbeAdoptResponse {
+    pub(super) async fn adopt(&self, dispatcher: &str) -> EffectGroupProbeAdoptResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -204,7 +242,7 @@ impl Group {
             .expect("the law's dispatcher adopts")
     }
 
-    async fn register(
+    pub(super) async fn register(
         &self,
         addresses: BTreeMap<usize, String>,
     ) -> EffectGroupRegisterDispatchResponse {
@@ -219,7 +257,11 @@ impl Group {
             .expect("the law's dispatch registers")
     }
 
-    async fn admit(&self, position: usize, invocation_id: &str) -> EffectGroupAdmissionResponse {
+    pub(super) async fn admit(
+        &self,
+        position: usize,
+        invocation_id: &str,
+    ) -> EffectGroupAdmissionResponse {
         self.ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -237,7 +279,7 @@ impl Group {
     /// A real, finished invocation that stands in for a dispatcher or a
     /// dispatched child: the index records its id, and a close or retirement
     /// may cancel it harmlessly.
-    async fn stand_in(&self, label: &str) -> String {
+    pub(super) async fn stand_in(&self, label: &str) -> String {
         self.ingress
             .send_lash_workflow(
                 "EffectGroupDispatch",
@@ -251,7 +293,7 @@ impl Group {
             .to_owned()
     }
 
-    async fn stand_in_ids(&self) -> BTreeMap<usize, String> {
+    pub(super) async fn stand_in_ids(&self) -> BTreeMap<usize, String> {
         let mut ids = BTreeMap::new();
         for position in 0..self.children.len() {
             ids.insert(position, self.stand_in(&position.to_string()).await);
@@ -259,7 +301,7 @@ impl Group {
         ids
     }
 
-    async fn adopt_stand_in(&self) {
+    pub(super) async fn adopt_stand_in(&self) {
         let dispatcher = self.stand_in("dispatcher").await;
         assert!(
             matches!(
@@ -272,7 +314,7 @@ impl Group {
 
     /// Adopts and registers stand-in children: a ready group whose recorded
     /// ids no real child invocation carries.
-    async fn make_ready(&self) -> BTreeMap<usize, String> {
+    pub(super) async fn make_ready(&self) -> BTreeMap<usize, String> {
         self.adopt_stand_in().await;
         let ids = self.stand_in_ids().await;
         assert_eq!(
@@ -282,7 +324,7 @@ impl Group {
         ids
     }
 
-    async fn retire(&self) {
+    pub(super) async fn retire(&self) {
         self.ingress
             .call_lash_workflow::<_, ()>("EffectGroupDispatch", &self.key, "retire", &self.key)
             .await
@@ -290,7 +332,7 @@ impl Group {
     }
 }
 
-fn rank_of(response: &EffectGroupCommitChildResponse) -> u64 {
+pub(super) fn rank_of(response: &EffectGroupCommitChildResponse) -> u64 {
     match response {
         EffectGroupCommitChildResponse::Committed { rank }
         | EffectGroupCommitChildResponse::AlreadyCommitted { rank, .. } => *rank,
@@ -300,6 +342,64 @@ fn rank_of(response: &EffectGroupCommitChildResponse) -> u64 {
 
 async fn harness() -> LiveConformanceHarness {
     LiveConformanceHarness::start_on(HarnessServer::in_process()).await
+}
+
+/// A workflow that waits at one child's §5 barrier through the in-handler
+/// controller, as a tool child's drain does, and ends when the barrier lifts.
+/// Its input is the group key and the rank the child's commit reserved.
+#[restate_sdk::workflow]
+pub(super) trait DrainBarrierProbe {
+    async fn run(barrier: Json<(String, u64)>) -> HandlerResult<Json<()>>;
+}
+
+pub(super) struct DrainBarrierProbeImpl;
+
+impl DrainBarrierProbe for DrainBarrierProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json((group_key, rank)): Json<(String, u64)>,
+    ) -> HandlerResult<Json<()>> {
+        let controller = crate::RestateRuntimeEffectController::with_options_for_test(
+            ctx,
+            crate::RestateEffectControllerOptions::default(),
+        );
+        lash_core::RuntimeEffectController::await_group_child_drain_admission(
+            &controller,
+            &group_key,
+            rank,
+        )
+        .await
+        .map_err(TerminalError::from_error)?;
+        Ok(Json(()))
+    }
+}
+
+/// Waits until nothing on the double moves: every invocation has completed,
+/// suspended or blocked on the server, and no journal grew since the last
+/// look. Whatever a seat set in motion has then reached its waiters.
+async fn quiescent(server: &lash_restate_test::RestateTestServer) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let mut last = None;
+    loop {
+        let views = server.invocations();
+        let settled = views
+            .iter()
+            .all(|view| view.status != "running" || view.blocked_on_server == Some(true));
+        let snapshot = views
+            .into_iter()
+            .map(|view| (view.id, view.status, view.journal_len))
+            .collect::<Vec<_>>();
+        if settled && last.as_ref() == Some(&snapshot) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server double never went quiet"
+        );
+        last = Some(snapshot);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// A reserved rank that has not seated is a hole: no read of it or past it is
@@ -526,100 +626,280 @@ async fn completed(server: &lash_restate_test::RestateTestServer, invocation: &s
     }
 }
 
-/// The A/B/C counterexample, through the actual child handler. A (rank 1) and
-/// B (rank 2) committed with intents; C (rank 3) committed. B's invocation is
-/// gone and its successor is an expired attach: it takes the fallback seat,
-/// whose commit answer is `AlreadyCommitted`, so it waits at the §5 barrier
-/// for A before it publishes — main's behaviour, kept. C's barrier names A
-/// and B both, the closing barrier names every unseated child, and B's
-/// refusal lands at its reserved rank.
+/// The settlement the successor at `position` seated, once it completed.
+async fn seated_failure(
+    group: &Group,
+    rank: u64,
+    position: usize,
+) -> lash_core::RuntimeEffectControllerError {
+    let EffectGroupReadRankResponse::Settled { settlement, .. } =
+        group.read(rank, false, false).await
+    else {
+        panic!("rank {rank} is served");
+    };
+    assert_eq!(settlement.position, position);
+    match settlement.terminal {
+        EffectGroupSettlementTerminal::Failed { error } => error,
+        other => panic!("child {position} seated a failure, got {other:?}"),
+    }
+}
+
+/// The A/B/C counterexample, through the actual child handler. A (rank 1), B
+/// (rank 2) and C (rank 3) committed; B's final is one only its committing
+/// invocation held. That invocation is gone, and B's successor is an expired
+/// attach: its commit finds B's final holding the point, so the committed
+/// final wins and the successor reports it lost by name, not with its own
+/// attach-expired refusal. It drains nothing, so it seats without waiting for
+/// A, and no read is served past A's hole until A seats. C's barrier holds for
+/// A throughout.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_fallback_seat_over_an_earlier_commit_waits_for_every_lower_sibling() {
+async fn an_expired_attach_over_a_committed_final_reports_it_lost_not_its_refusal() {
     let harness = harness().await;
     let server = harness
         .server_double()
         .expect("the law watches the child on the server double");
-    let group = Group::open(harness.ingress(), "fallback-barrier", 3).await;
+    let group = Group::open(harness.ingress(), "successor-lost", 3).await;
     group.make_ready().await;
     for position in 0..3 {
         assert_eq!(rank_of(&group.commit(position).await), position as u64 + 1);
     }
-    assert_eq!(
-        group.blockers(3).await,
-        vec![0, 1],
-        "C's barrier names every unseated lower commit, A and B"
-    );
-    assert_eq!(
-        group.blockers(4).await,
-        vec![0, 1, 2],
-        "the closing barrier names every unseated commit"
-    );
     let successor = send_attach_expired_child(&group, 1).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    quiescent(&server).await;
     assert!(
-        server.outcome(&successor).is_none(),
-        "B's fallback seat waits for A, whose rank is below its reserved one"
+        matches!(server.outcome(&successor), Some(Ok(_))),
+        "B's successor seats at once: it drains nothing, so it waits on no sibling: {:?}",
+        server.outcome(&successor)
     );
     assert!(
         matches!(
             group.read(2, false, false).await,
             EffectGroupReadRankResponse::NotSettled
         ),
-        "B has not published"
+        "no read is served past A's unseated rank"
+    );
+    assert_eq!(
+        group.barrier(3, Duration::from_millis(300)).await,
+        None,
+        "C's barrier holds while A owes its seat"
     );
     assert!(matches!(
         group.seat(0).await,
         EffectGroupRecordSettlementResponse::Recorded { rank: 1 }
     ));
-    completed(&server, &successor).await;
-    let EffectGroupReadRankResponse::Settled { settlement, .. } = group.read(2, false, false).await
-    else {
-        panic!("B's fallback seat published rank 2");
-    };
-    assert_eq!(settlement.position, 1);
-    match &settlement.terminal {
-        EffectGroupSettlementTerminal::Failed { error } => assert_eq!(
-            error.code,
-            lash_core::RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired,
-            "B's committed final is replaced by its typed refusal: main's behaviour, kept"
-        ),
-        other => panic!("B's fallback seat is its refusal, got {other:?}"),
-    }
+    let error = seated_failure(&group, 2, 1).await;
     assert_eq!(
-        group.blockers(4).await,
-        vec![2],
-        "only C still owes its seat"
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCommittedFinalLost,
+        "B's committed final is reported lost, not replaced by the attach-expired refusal: {error}"
+    );
+    assert_eq!(
+        group.barrier(3, Duration::from_secs(30)).await,
+        Some(EffectGroupNotification::Drained),
+        "A and B seated, so C's barrier lifted"
+    );
+    assert!(matches!(
+        group.seat(2).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 3 }
+    ));
+    assert_eq!(
+        group.barrier(4, Duration::from_secs(30)).await,
+        Some(EffectGroupNotification::Drained),
+        "the closing barrier lifts once every commit seated"
     );
     group.retire().await;
     harness.finish().await;
 }
 
-/// A fallback seat parked at the §5 barrier is released by retirement, not by
-/// a seat, and publishes nothing into the retired group.
+/// A refusal an earlier invocation committed is the child's final: B's first
+/// successor committed its session-generation refusal and ended before its
+/// seat, and B's next successor, an expired attach, seats that committed
+/// refusal as recorded rather than its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn retirement_releases_a_fallback_seat_parked_at_the_barrier() {
+async fn an_expired_attach_over_a_committed_refusal_seats_that_refusal() {
     let harness = harness().await;
     let server = harness
         .server_double()
         .expect("the law watches the child on the server double");
-    let group = Group::open(harness.ingress(), "fallback-retired", 2).await;
+    let group = Group::open(harness.ingress(), "successor-refusal", 2).await;
     group.make_ready().await;
-    for position in 0..2 {
-        rank_of(&group.commit(position).await);
-    }
+    assert_eq!(rank_of(&group.commit(0).await), 1);
+    let committed_refusal = lash_core::RuntimeEffectControllerError::new(
+        lash_core::RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
+        "the law's committed refusal",
+    );
+    assert_eq!(
+        rank_of(
+            &group
+                .commit_final(
+                    1,
+                    EffectGroupCommittedFinal::Refusal {
+                        error: committed_refusal,
+                    },
+                )
+                .await
+        ),
+        2
+    );
+    assert!(matches!(
+        group.seat(0).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 1 }
+    ));
     let successor = send_attach_expired_child(&group, 1).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        server.outcome(&successor).is_none(),
-        "the fallback seat waits for the unseated lower commit"
+    completed(&server, &successor).await;
+    let error = seated_failure(&group, 2, 1).await;
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
+        "the committed refusal seats as recorded: {error}"
+    );
+    assert_eq!(error.message, "the law's committed refusal");
+    group.retire().await;
+    harness.finish().await;
+}
+
+/// A successor over a child no final holds commits its own refusal and seats
+/// it: the attach-expired refusal is the child's final only where nothing
+/// else is committed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_expired_attach_over_an_uncommitted_child_seats_its_refusal() {
+    let harness = harness().await;
+    let server = harness
+        .server_double()
+        .expect("the law watches the child on the server double");
+    let group = Group::open(harness.ingress(), "successor-uncommitted", 2).await;
+    group.make_ready().await;
+    assert_eq!(rank_of(&group.commit(0).await), 1);
+    let successor = send_attach_expired_child(&group, 1).await;
+    completed(&server, &successor).await;
+    assert!(matches!(
+        group.seat(0).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 1 }
+    ));
+    let error = seated_failure(&group, 2, 1).await;
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired,
+        "{error}"
     );
     group.retire().await;
-    completed(&server, &successor).await;
+    harness.finish().await;
+}
+
+/// The point retains the final a commit won with, answers it to every later
+/// commit of the child whatever that commit offers, and retirement clears it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_commit_retains_its_final_until_retirement() {
+    let harness = harness().await;
+    let server = harness
+        .server_double()
+        .expect("the law reads the index state on the server double");
+    let group = Group::open(harness.ingress(), "retained-final", 2).await;
+    group.make_ready().await;
+    let sealed = EffectGroupCommittedFinal::Tool {
+        drain_input: "the law's sealed drain input".to_owned(),
+    };
+    assert_eq!(rank_of(&group.commit_final(0, sealed).await), 1);
+    assert_eq!(rank_of(&group.commit(1).await), 2);
+    for offered in [
+        EffectGroupCommittedFinal::Held,
+        EffectGroupCommittedFinal::Refusal {
+            error: lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RuntimeEffectGroupChildAttachExpired,
+                "a later offer",
+            ),
+        },
+    ] {
+        match group.commit_final(0, offered).await {
+            EffectGroupCommitChildResponse::AlreadyCommitted {
+                rank: 1,
+                committed: EffectGroupCommittedFinal::Tool { drain_input },
+            } => assert_eq!(drain_input, "the law's sealed drain input"),
+            other => panic!("the retained tool final answers a later commit: {other:?}"),
+        }
+    }
+    assert!(matches!(
+        group.commit(1).await,
+        EffectGroupCommitChildResponse::AlreadyCommitted {
+            rank: 2,
+            committed: EffectGroupCommittedFinal::Held,
+        }
+    ));
+    let retained = |server: &lash_restate_test::RestateTestServer| {
+        server
+            .object_state("EffectGroupIndex", &group.key)
+            .into_keys()
+            .filter(|key| key.starts_with("effect-group/v1/committed-final/"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(retained(&server).len(), 2, "each commit retains its final");
+    group.retire().await;
     assert!(
-        matches!(server.outcome(&successor), Some(Ok(_))),
-        "the released fallback seat meets the retired group and ends cleanly: {:?}",
-        server.outcome(&successor)
+        retained(&server).is_empty(),
+        "retirement clears every retained final: {:?}",
+        retained(&server)
     );
+    harness.finish().await;
+}
+
+/// A drain held by two blockers lifts when the higher-ranked one seats first
+/// (FIG-4431). The drain parks in its handler; B seats and everything that
+/// seat set in motion settles; only then does A seat, and the drain must end.
+/// A barrier that awaited one call per blocker and polled them together lost
+/// B's wake here: the call waiting for A read B's completion off the input,
+/// and B's call, already blocked on the input, read the input again instead
+/// of its own completion, parking the drain until the stream's inactivity
+/// timeout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drain_lifts_when_its_blockers_seat_in_reverse_rank_order() {
+    let harness = harness().await;
+    let server = harness
+        .server_double()
+        .expect("the law watches the drain on the server double");
+    let group = Group::open(harness.ingress(), "reverse-seats", 3).await;
+    group.make_ready().await;
+    for position in 0..3 {
+        assert_eq!(rank_of(&group.commit(position).await), position as u64 + 1);
+    }
+    let drain = harness
+        .ingress()
+        .send_workflow_json("DrainBarrierProbe", &group.key, "run", &(&group.key, 3_u64))
+        .await
+        .expect("the drain is accepted")
+        .as_str()
+        .to_owned();
+    quiescent(&server).await;
+    assert!(
+        server.outcome(&drain).is_none(),
+        "the drain waits for A and B"
+    );
+    assert!(matches!(
+        group.seat(1).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 2 }
+    ));
+    quiescent(&server).await;
+    assert!(
+        server.outcome(&drain).is_none(),
+        "the drain still waits for A, the lower blocker"
+    );
+    assert!(matches!(
+        group.seat(0).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 1 }
+    ));
+    // Well inside the 60-second inactivity timeout that ended a lost wake.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while server.outcome(&drain).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the drain never lifted after both of its blockers seated"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        matches!(server.outcome(&drain), Some(Ok(_))),
+        "both seats lift the barrier: {:?}",
+        server.outcome(&drain)
+    );
+    group.retire().await;
     harness.finish().await;
 }
 

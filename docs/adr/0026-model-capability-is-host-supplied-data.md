@@ -10,7 +10,7 @@ Model capabilities are host-supplied data attached to `ModelSpec`, passed into t
 
 `ModelCapability::reasoning_intent` supplies one shared classifier, returning no explicit control or `Effort`, `Budget` or `Off`. Validation and wire mapping use that result. Failures retain typed categories: `unsupported_effort`, `effort_not_configurable`, `effort_required` and `malformed_capability`. An encoding that omits an advertised budget is malformed. Each provider maps the intent into its wire and refuses combinations it cannot represent under ADR 0121.
 
-Attachment acceptance follows the same rule. `AttachmentCapabilitySnapshot` carries revisioned transport rules for inline bytes, stored bytes, URLs and scoped provider files. An empty snapshot accepts no attachments. The session stores the snapshot in its creation model. Reopen reads it without replacement. A model patch retains it; only `SessionConfigPatch::attachment_acceptance` changes it explicitly. Remote workers receive the retained rule data.
+Attachment acceptance follows the same rule. `AttachmentCapabilitySnapshot` carries revisioned transport rules for inline bytes, stored bytes, URLs and scoped provider files. An empty snapshot accepts no attachments. The session stores the snapshot in its creation model. Reopen reads it without replacement. A `SetModel` command retains it; only `SetAttachmentAcceptance` changes it explicitly. Remote workers receive the retained rule data.
 
 ## Why and alternatives
 

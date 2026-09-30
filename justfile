@@ -118,6 +118,10 @@ agent-service-restate-e2e:
   ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
   run_token="$(date +%s)-$$"
 
+  cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing
+  worker="${CARGO_TARGET_DIR:-{{repo}}/target}/debug/lash-vm-worker"
+  export LASH_VM_WORKER="$(cd "$(dirname "$worker")" && pwd)/lash-vm-worker"
+
   cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
     lash_gate_cleanup
@@ -189,6 +193,7 @@ workbench-continue-as-budget-gate:
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
+  : "${LASH_POSTGRES_DATABASE_URL:?run scripts/ci/with-service.sh pg16 -- just effect-group-conformance-e2e}"
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire_locks effect-group-conformance-e2e
 
@@ -205,6 +210,14 @@ effect-group-conformance-e2e:
     --artifacts "$artifacts"
 
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
+    --artifacts "$artifacts"
+
+  # The admission-fence law is its own named suite (FIG-4395): same recipe,
+  # same legs.
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg live \
+    --artifacts "$artifacts"
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg replay \
     --artifacts "$artifacts"
 
 # The server double's deployment laws against a live restate-server (FIG-3795

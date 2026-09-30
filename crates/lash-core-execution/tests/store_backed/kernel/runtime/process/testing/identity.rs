@@ -58,7 +58,7 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
             native_mid_conversation_system: true,
             ..Default::default()
         });
-    let spec = ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let spec = ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
     ))

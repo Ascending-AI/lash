@@ -876,6 +876,31 @@ export_file(
             + repr(sorted(empty_feature_ui_harnesses))
         )
     empty_feature_ui_harness = next(iter(empty_feature_ui_harnesses))
+    rlm_ui_harnesses = {
+        unit["label"]
+        for unit in payload["feature_lane_units"]
+        if unit["package"] == "lash-runtime"
+        and unit["kind"] == "test"
+        and unit["features"] == ["rlm"]
+        and ":ui__test__fv_" in unit["label"]
+    }
+    if len(rlm_ui_harnesses) != 1:
+        raise ValueError(
+            "expected exactly one rlm-only lash-runtime UI harness, got "
+            + repr(sorted(rlm_ui_harnesses))
+        )
+    rlm_ui_harness = next(iter(rlm_ui_harnesses))
+    store_seam = generate_model.PACKAGE_POLICY["ui_fixtures"]["lash-runtime"]["store_seam"]
+    outputs[lash_buck] += f'''
+ui_fixtures_test(
+    name = "ui_store_seam",
+    harness = "{rlm_ui_harness}",
+    package = "crates/lash",
+    fixtures = {generate_model.string_list([f"tests/ui/{name}.rs" for name in store_seam])},
+    expected = {generate_model.string_list([f"tests/ui/{name}.stderr" for name in store_seam])},
+    tags = ["manual"],
+)
+'''
     outputs[ROOT / "crates/lash/tests/builder_contract/BUCK"] = GENERATED_HEADER + f'''load("//tools/buck2:ui_fixtures.bzl", "ui_fixtures_test")
 
 ui_fixtures_test(

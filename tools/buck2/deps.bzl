@@ -949,11 +949,11 @@ PACKAGE_DEPS = {
         }
     },
     "lash-internal-vm-client": {
-        "build": {
-            "sha2": "//third-party/rust:p0341",
-            "toml": "//third-party/rust:p0402"
+        "build": {},
+        "dev": {
+            "quote": "//third-party/rust:p0267",
+            "syn": "//third-party/rust:p0378"
         },
-        "dev": {},
         "normal": {
             "async_trait": "//third-party/rust:p0015",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
@@ -986,16 +986,11 @@ PACKAGE_DEPS = {
         }
     },
     "lash-internal-vm-worker": {
-        "build": {
-            "sha2": "//third-party/rust:p0341",
-            "toml": "//third-party/rust:p0402"
-        },
+        "build": {},
         "dev": {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "lashlang": "//crates/lashlang:lashlang",
-            "sha2": "//third-party/rust:p0341",
-            "tempfile": "//third-party/rust:p0383",
-            "toml": "//third-party/rust:p0402"
+            "tempfile": "//third-party/rust:p0383"
         },
         "normal": {
             "blake3": "//third-party/rust:p0031",

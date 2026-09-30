@@ -159,14 +159,16 @@ impl TurnInputStateKind {
     pub fn is_open(self) -> bool {
         matches!(self, Self::PendingActive | Self::DeferredNextTurn)
     }
-
-    pub fn is_next_turn_pending(self) -> bool {
-        matches!(self, Self::DeferredNextTurn)
-    }
 }
 
 /// A pending input's durable lifecycle state, carrying the admission scope
 /// each variant is pinned to.
+///
+/// The scope is the submitted delivery, written once (ADR 0101 §5.1): an
+/// open input is `pending_active` when it addresses a turn and
+/// `deferred_next_turn` when it does not, for its whole life. Whether an
+/// addressed input is next-turn input is a rule over the running turn
+/// ([`Self::is_next_turn_input`]), never a rewrite.
 ///
 /// The scope lives inside the state so a value cannot disagree with the
 /// persisted `ingress_json`/`state` column pair: `pending_active` and
@@ -281,10 +283,18 @@ impl TurnInputState {
         }
     }
 
-    /// Lets store, effect-host, and protocol implementors test whether this `TurnInputState` is
-    /// next turn pending while materializing, executing, or persisting a session turn.
-    pub fn is_next_turn_pending(&self) -> bool {
-        self.kind().is_next_turn_pending()
+    /// Whether this open input is next-turn input while `running` is its
+    /// session's running turn (`None` when no turn runs), by rule over its
+    /// submitted delivery, which is never rewritten (ADR 0101 §5.1): an
+    /// unaddressed input is, and so is one addressed to any turn but the
+    /// running one. An addressed turn was running or ended when the input
+    /// was admitted, so any other turn has ended.
+    pub fn is_next_turn_input(&self, running: Option<&TurnId>) -> bool {
+        match self {
+            Self::DeferredNextTurn => true,
+            Self::PendingActive(scope) => running != Some(&scope.turn_id),
+            Self::Accepted(_) | Self::Cancelled(_) | Self::Completed(_) => false,
+        }
     }
 
     /// Returns whether this state is settled and eligible for tombstone vacuum.
@@ -561,6 +571,10 @@ pub struct PendingTurnInput {
     /// (FIG-3838). An admission never mixes inputs whose specs differ.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<crate::run_spec::RunSpecHash>,
+    /// When the input's tombstone was written: set exactly when its state is
+    /// terminal (ADR 0101 §8). The state is the tombstone's cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_at_ms: Option<u64>,
 }
 
 /// Host-facing projection of one undelivered pending turn-input record.
@@ -657,6 +671,22 @@ impl PendingTurnInput {
     /// it, so the persisted `ingress_json`/`state` pair cannot disagree.
     pub fn ingress(&self) -> TurnInputIngress {
         self.state.ingress()
+    }
+
+    /// The input's terminal tombstone (ADR 0101 §8): `completed` is a
+    /// delivered input and `cancelled` a withdrawn or dropped one, at the
+    /// instant its terminal write recorded. `None` while it is open or
+    /// accepted.
+    pub fn terminal(&self) -> Option<crate::store::IngressTerminal> {
+        let cause = match self.state.kind() {
+            TurnInputStateKind::Completed => crate::store::IngressTerminalCause::Delivered,
+            TurnInputStateKind::Cancelled => crate::store::IngressTerminalCause::Cancelled,
+            TurnInputStateKind::PendingActive
+            | TurnInputStateKind::DeferredNextTurn
+            | TurnInputStateKind::Accepted => return None,
+        };
+        self.terminal_at_ms
+            .map(|at_ms| crate::store::IngressTerminal { cause, at_ms })
     }
 
     /// Exposes accepted input to store and durable-substrate implementors while admitting and

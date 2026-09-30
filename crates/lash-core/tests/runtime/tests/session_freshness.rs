@@ -10,7 +10,7 @@ async fn freshness_runtime(
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(double).await;
     let runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
+        vec![Arc::new(DialectOwner)],
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         test_host_config(&backend),
@@ -18,6 +18,125 @@ async fn freshness_runtime(
     )
     .await;
     (runtime, store)
+}
+
+/// A plugin that owns the `dialect_owner` config namespace and admits any
+/// dialect through its one command (FIG-4379).
+struct DialectOwner;
+
+impl lash_core::plugin::PluginFactory for DialectOwner {
+    fn id(&self) -> &'static str {
+        "dialect_owner"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(DialectOwnerPlugin))
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> Result<(), lash_core::ConfigRegistrationError> {
+        registrar.owner(DialectConfigOwner)?;
+        registrar.command::<SetDialect>(|_, command| {
+            Ok(lash_core::OwnerChange {
+                recorded: DialectConfig {
+                    dialect: Some(command.dialect),
+                },
+                output: (),
+            })
+        })
+    }
+}
+
+/// The `dialect_owner` namespace.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct DialectConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dialect: Option<String>,
+}
+
+/// The `dialect_owner` owner refuses nothing.
+#[derive(serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+enum DialectRefusal {}
+
+impl std::fmt::Display for DialectRefusal {
+    fn fmt(&self, _formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+struct DialectConfigOwner;
+
+impl lash_core::ConfigOwner for DialectConfigOwner {
+    type Create = DialectConfig;
+    type Recorded = DialectConfig;
+    type Refusal = DialectRefusal;
+
+    fn implementation(&self) -> &str {
+        "dialect-owner:1"
+    }
+
+    fn create(
+        &self,
+        input: Option<DialectConfig>,
+        _facts: lash_core::CreationFacts<'_, DialectConfig>,
+    ) -> Result<Option<DialectConfig>, DialectRefusal> {
+        Ok(Some(input.unwrap_or_default()))
+    }
+
+    fn validate(
+        &self,
+        _value: &DialectConfig,
+        _base: Option<&DialectConfig>,
+        _facts: &lash_core::CandidateFacts<'_>,
+    ) -> Result<(), DialectRefusal> {
+        Ok(())
+    }
+}
+
+/// Replace the session's dialect.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct SetDialect {
+    dialect: String,
+}
+
+impl lash_core::ConfigCommand for SetDialect {
+    type Owner = DialectConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_dialect";
+}
+
+struct DialectOwnerPlugin;
+
+impl lash_core::plugin::SessionPlugin for DialectOwnerPlugin {
+    fn id(&self) -> &'static str {
+        "dialect_owner"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
 }
 
 async fn append_history(
@@ -90,23 +209,19 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         .context_window_tokens(123_456)
         .build()
         .expect("changed model");
-    let command = runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(changed_model.clone()),
-            ..Default::default()
-        })
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: changed_model.clone(),
+        }),
         "changed-frame-model",
     )
     .await;
     assert_eq!(runtime.state().effective_policy().model, changed_model);
 
     let resident_policy_before_refusal = runtime.state().effective_policy().clone();
-    let resident_protocol_options_before_refusal = runtime.state().protocol_turn_options.clone();
+    let resident_plugin_config_before_refusal = runtime.state().authority.plugin_config.clone();
     let resident_frame_before_refusal = runtime.state().current_frame_node_id.clone();
     let durable_head_before_refusal = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -128,8 +243,8 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         &resident_policy_before_refusal
     );
     assert_eq!(
-        runtime.state().protocol_turn_options,
-        resident_protocol_options_before_refusal
+        runtime.state().authority.plugin_config,
+        resident_plugin_config_before_refusal
     );
     assert_eq!(
         runtime.state().current_frame_node_id,
@@ -248,16 +363,15 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let command = runtime
-        .add_prompt_contribution(lash_core::PromptContribution::guidance(
-            "Settled host change",
-            "COMMITTED THROUGH THE COMMANDED WRITE",
-        ))
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
+            contribution: lash_core::PromptContribution::guidance(
+                "Settled host change",
+                "COMMITTED THROUGH THE COMMANDED WRITE",
+            ),
+        }),
         "settled-prompt",
     )
     .await;
@@ -296,16 +410,15 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
     .await;
     runtime.invalidate_resident_session_state();
 
-    let command = runtime
-        .add_prompt_contribution(lash_core::PromptContribution::guidance(
-            "Live edit",
-            "KEEP THE LIVE EDIT",
-        ))
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
+            contribution: lash_core::PromptContribution::guidance(
+                "Live edit",
+                "KEEP THE LIVE EDIT",
+            ),
+        }),
         "live-prompt-edit",
     )
     .await;
@@ -336,16 +449,12 @@ async fn resident_refresh_adopts_the_durable_head_model() {
         .context_window_tokens(123_456)
         .build()
         .expect("settled model");
-    let command = runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(settled_model.clone()),
-            ..Default::default()
-        })
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: settled_model.clone(),
+        }),
         "settled-model",
     )
     .await;
@@ -430,16 +539,12 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
         .build()
         .into_handle();
     serve_runtime_providers(&mut runtime, [settled_provider.clone()]);
-    let command = runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider_id: Some(settled_provider.kind().to_string()),
-            ..Default::default()
-        })
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
+            provider_id: settled_provider.kind().to_string(),
+        }),
         "settled-provider",
     )
     .await;
@@ -550,61 +655,62 @@ async fn freshness_skips_hydration_when_nothing_changed() {
     );
 }
 
-fn commanded_turn_options(dialect: &str) -> lash_core::ProtocolTurnOptions {
-    lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({ "dialect": dialect }))
+fn commanded_dialect(dialect: &str) -> lash_core::ConfigTransaction {
+    lash_core::ConfigTransaction::of(SetDialect {
+        dialect: dialect.to_string(),
+    })
 }
 
-/// FIG-2479: the protocol-turn-options setter settles through the commanded
-/// durable write — the session head accepts the value before resident state
-/// publishes it.
+/// FIG-2479, FIG-4379: a plugin's config command settles through the
+/// commanded durable write — the session head accepts the owner's namespace
+/// before resident state publishes it.
 #[tokio::test(flavor = "multi_thread")]
-async fn protocol_turn_options_settle_through_the_commanded_write() {
+async fn a_plugin_config_command_settles_through_the_commanded_write() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    let options = commanded_turn_options("commanded-durable");
+    let revision_before = runtime.state().config_revision;
 
-    let command = runtime.set_protocol_turn_options(options.clone()).await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
-        "protocol-options",
+        commanded_dialect("commanded-durable"),
+        "plugin-config",
     )
     .await;
 
+    let expected = serde_json::json!({ "dialect": "commanded-durable" });
     assert_eq!(
-        runtime.protocol_turn_options(),
-        &options,
+        runtime.state().authority.plugin_config.get("dialect_owner"),
+        Some(&expected),
         "resident state must publish the settled value"
     );
+    assert!(runtime.state().config_revision > revision_before);
     let head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read durable head")
         .expect("session head exists");
     assert_eq!(
-        head.config.protocol_turn_options,
-        Some(options),
+        head.config.plugin_config.get("dialect_owner"),
+        Some(&expected),
         "the durable head must have accepted the value at settlement time"
     );
 }
 
-/// FIG-2479 regression: options set before an invalidation reload survive it
-/// via the head — the reload restores the commanded head value, not stale
-/// resident or checkpoint state.
+/// FIG-2479 regression: plugin config a command changed before an
+/// invalidation reload survives it via the head — the reload restores the
+/// commanded head value, not stale resident or checkpoint state.
 #[tokio::test(flavor = "multi_thread")]
-async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_head() {
+async fn a_plugin_config_command_before_an_invalidation_reload_survives_via_the_head() {
     let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let options = commanded_turn_options("survives-invalidation-reload");
 
-    let command = runtime.set_protocol_turn_options(options.clone()).await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
-        "reload-protocol-options",
+        commanded_dialect("survives-invalidation-reload"),
+        "reload-plugin-config",
     )
     .await;
     runtime.invalidate_resident_session_state();
@@ -613,10 +719,11 @@ async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_he
         .await
         .expect("reload invalidated resident session state");
 
+    let expected = serde_json::json!({ "dialect": "survives-invalidation-reload" });
     assert_eq!(
-        runtime.protocol_turn_options(),
-        &options,
-        "an invalidation reload must restore the settled options from the head"
+        runtime.state().authority.plugin_config.get("dialect_owner"),
+        Some(&expected),
+        "an invalidation reload must restore the settled config from the head"
     );
     let head = session_view(store.clone(), "root")
         .load_session_head_meta()
@@ -624,37 +731,10 @@ async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_he
         .expect("read durable head")
         .expect("session head exists");
     assert_eq!(
-        head.config.protocol_turn_options,
-        Some(options),
+        head.config.plugin_config.get("dialect_owner"),
+        Some(&expected),
         "the reload source is the durable head row"
     );
-}
-
-/// The all-frames setter shares the commanded settlement path.
-#[tokio::test(flavor = "multi_thread")]
-async fn protocol_turn_options_all_frames_setter_settles_durably() {
-    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    let options = commanded_turn_options("all-frames-commanded");
-
-    let command = runtime
-        .set_protocol_turn_options_all_frames(options.clone())
-        .await;
-    crate::runtime_support::settle_pending_session_command(
-        &mut runtime,
-        &double,
-        command,
-        "all-frames-options",
-    )
-    .await;
-
-    assert_eq!(runtime.protocol_turn_options(), &options);
-    let head = session_view(store.clone(), "root")
-        .load_session_head_meta()
-        .await
-        .expect("read durable head")
-        .expect("session head exists");
-    assert_eq!(head.config.protocol_turn_options, Some(options));
 }
 
 /// FIG-1875 pin (a): a live policy override followed by an invalidation
@@ -671,29 +751,24 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         .context_window_tokens(123_456)
         .build()
         .expect("override model");
-    let command = runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(overridden_model),
-            ..Default::default()
-        })
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: overridden_model,
+        }),
         "model-override",
     )
     .await;
-    let command = runtime
-        .add_prompt_contribution(lash_core::PromptContribution::guidance(
-            "Live override",
-            "SETTLED THROUGH THE COMMANDED WRITE",
-        ))
-        .await;
-    crate::runtime_support::settle_pending_session_command(
+    crate::runtime_support::configure(
         &mut runtime,
         &double,
-        command,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
+            contribution: lash_core::PromptContribution::guidance(
+                "Live override",
+                "SETTLED THROUGH THE COMMANDED WRITE",
+            ),
+        }),
         "prompt-override",
     )
     .await;

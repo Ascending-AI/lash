@@ -393,6 +393,10 @@ pub trait ProcessEventLog: ProcessQuery {
     /// This unfenced path is reserved for host signal/cancel coordination.
     /// Process engines receive only [`ProcessEngineProcessContext`](super::engine::ProcessEngineProcessContext);
     /// execution-owned events must use its authority-bound emitter.
+    /// Signal events must be constructed by [`super::events::ProcessSignal::append_request`].
+    /// Raw `signal.*` requests return [`PluginError::ReservedProcessEvent`],
+    /// even if they carry a replay key. This rule also applies to batches
+    /// and lifecycle preludes.
     async fn append_event(
         &self,
         process_id: &ProcessId,

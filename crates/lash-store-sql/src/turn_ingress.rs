@@ -35,6 +35,27 @@ crate::statements! {
     /// Statements over more than one of the family's tables, which both
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
+        /// Whether turn `?2` of session `?1`, a physical turn of root `?3`,
+        /// has ended: its final commit is recorded, or its root has terminal
+        /// evidence. Read in the admitting transaction of input addressed to
+        /// it (ADR 0101 §5.1).
+        turn_address_ended = "SELECT EXISTS(
+                SELECT 1 FROM runtime_turn_commits
+                WHERE session_id = ?1 AND turn_id = ?2
+             ) OR EXISTS(
+                SELECT 1 FROM session_roots
+                WHERE session_id = ?1 AND root = ?3 AND terminal_kind IS NOT NULL
+             )";
+
+        /// Whether root `?2` of session `?1` has terminal evidence. A
+        /// teardown of one of its turns then finds no input to dispose of:
+        /// the root's terminal write already applied its disposition, and
+        /// what it left open is next-turn input (ADR 0101 §5.1).
+        root_ended = "SELECT EXISTS(
+                SELECT 1 FROM session_roots
+                WHERE session_id = ?1 AND root = ?2 AND terminal_kind IS NOT NULL
+             )";
+
         /// Clear session `?1`'s park once its turn holds no work: no
         /// unsettled input bound to the parked root, and the parked root
         /// holds no admission without terminal evidence (only its own
@@ -100,8 +121,9 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Whether session `?1` has work a runner could pick up: an unfinished
-        /// root, an open queued batch, or an open input deferred to the next
-        /// turn.
+        /// root, an open queued batch, or an open input. With no unfinished
+        /// root every open input is next-turn input, whatever turn its
+        /// submitted delivery addresses (ADR 0101 §5.1).
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
@@ -116,27 +138,30 @@ crate::statements! {
                 FROM queued_work_batches qwb
                 WHERE qwb.session_id = ?1
                   AND qwb.admitted_root IS NULL
+                  AND qwb.terminal_cause IS NULL
              ) OR EXISTS(
                 SELECT 1
                 FROM pending_turn_inputs pti
                 WHERE pti.session_id = ?1
                   AND {{undelivered_turn_input_state(pti.state)}}
                   AND pti.admitted_root IS NULL
-                  AND {{deferred_next_turn_turn_input_state(pti.state)}}
              )";
 
-        /// The earliest open session command and deferred turn input of
-        /// session `?1`, with `?2` naming the control work kind.
+        /// The earliest open session command and open turn input of session
+        /// `?1`, with `?2` naming the control work kind.
         ///
         /// Both lanes are projected from one snapshot, so the command-first
         /// decision and the input position describe the same boundary. A
         /// session command is never admitted, and an input a root admitted is
         /// that root's: the unfinished root is admitted before either lane.
+        /// At a boundary every open input is next-turn input, whatever turn
+        /// its submitted delivery addresses (ADR 0101 §5.1).
         pending_session_work_ordering = "WITH earliest_command AS (
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM queued_work_batches AS queued
                 WHERE session_id = ?1
                   AND work_kind = ?2
+                  AND terminal_cause IS NULL
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
              ), earliest_input AS (
@@ -145,7 +170,6 @@ crate::statements! {
                 WHERE session_id = ?1
                   AND {{undelivered_turn_input_state(input.state)}}
                   AND input.admitted_root IS NULL
-                  AND {{deferred_next_turn_turn_input_state(input.state)}}
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
              )

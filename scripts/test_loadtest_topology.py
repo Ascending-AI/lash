@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 import yaml
@@ -89,6 +90,29 @@ class ClusterEvidenceTests(unittest.TestCase):
             with self.subTest(status=changed), self.assertRaises(ValueError):
                 proof.recovery(self.nodes, changed, 'node-2')
 
+    def peer_views(self, changes=None):
+        """Each Restate node's own failure-detector view after node-2 restarted."""
+        self.recovery_fixture()
+        view = [{'plain_node_id': f'N{index}', 'gen_node_id': f'N{index}:{2 if index == 2 else 1}',
+                 'name': f'node-{index}', 'state': 'alive'} for index in range(3)]
+        views = [[dict(row) for row in view] for _ in range(3)]
+        for (viewer, name), update in (changes or {}).items():
+            views[viewer][int(name[-1])].update(update)
+        return views
+
+    def test_recovery_waits_until_every_peer_sees_the_restarted_node_alive(self):
+        self.assertEqual(proof.peers(self.nodes, self.peer_views(), 'node-2'),
+                         'peer_views=3 alive=3 restarted_node=node-2 generation=2')
+        # The first census query ran through a node its peers still suspected.
+        for views in [self.peer_views({(0, 'node-2'): {'state': 'suspect'}}),
+                      self.peer_views({(1, 'node-2'): {'gen_node_id': 'N2:1'}}),
+                      self.peer_views({(2, 'node-0'): {'gen_node_id': 'N0:2'}}),
+                      self.peer_views({(0, 'node-1'): {'plain_node_id': 'N7'}}),
+                      self.peer_views()[:2],
+                      [view[:2] for view in self.peer_views()]]:
+            with self.subTest(views=views), self.assertRaises(ValueError):
+                proof.peers(self.nodes, views, 'node-2')
+
     def availability_fixture(self):
         self.recovery_fixture()
         return 'N0:1 node-0 1m Member 12 12 24 12 worker\nN1:1 node-1 1m Member 12 12 24 12 worker\nN2 node-2 offline worker\n'
@@ -115,6 +139,107 @@ class ClusterEvidenceTests(unittest.TestCase):
         document['data']['activeTargets'][0]['health'] = 'down'
         with self.assertRaises(ValueError):
             proof.metrics(document)
+
+
+class WorkerHelperTests(unittest.TestCase):
+    """Each image generation ships the VM helper its worker handshakes with."""
+
+    CLIENT = '''lash_rust_library(name = "lash-vm-client", crate_features = ["testing"])
+lash_rust_feature_library(name = "lash-vm-client__fv_plain", crate_features = [])
+'''
+    HELPER = '''lash_rust_library(name = "lash-vm-worker", crate_features = ["testing"])
+lash_rust_binary(name = "lash-vm-worker__bin", crate_name = "lash_vm_worker", crate_root = "src/main.rs",
+    crate_features = ["testing"], library = ":lash-vm-worker")
+lash_rust_feature_library(name = "lash-vm-worker__fv_plain", crate_features = [])
+lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_plain", crate_name = "lash_vm_worker",
+    crate_root = "src/main.rs", crate_features = [], library = "//crates/lash-vm-worker:lash-vm-worker__fv_plain")
+lash_rust_feature_library(name = "lash-vm-worker__fv_next", crate_features = ["synthetic-next", "testing"])
+lash_rust_binary(name = "lash-vm-worker-fixture__bin", crate_name = "lash_vm_worker_fixture",
+    crate_root = "src/bin/fixture.rs", crate_features = ["testing"], library = ":lash-vm-worker")
+'''
+    NEXT_HELPER = '''lash_rust_feature_library(name = "lash-vm-worker__fv_alone", crate_features = ["synthetic-next", "testing"])
+lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_alone", crate_name = "lash_vm_worker",
+    crate_root = "src/main.rs", crate_features = ["synthetic-next"], library = "//crates/lash-vm-worker:lash-vm-worker__fv_alone")
+'''
+    WORKER = '''lash_rust_binary(name = "worker__bin", crate_features = [], library = ":lib")
+lash_rust_feature_binary(name = "worker__bin__fv_plain", crate_features = [],
+    variant_deps = {"//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain",
+                    "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_plain"})
+lash_rust_feature_binary(name = "worker__bin__fv_next", crate_features = ["synthetic-next"],
+    variant_deps = {"//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_next"})
+lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
+    variant_deps = {"//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain"})
+'''
+
+    def workspace(self, client=CLIENT, helper=HELPER):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        for package, text in [('crates/lash-vm-client', client), ('crates/lash-vm-worker', helper),
+                              ('runbooks/e2e', self.WORKER)]:
+            (root / package).mkdir(parents=True)
+            (root / package / 'BUCK').write_text(text)
+        return root
+
+    def test_the_repository_worker_generations_pair_their_helper_features(self):
+        self.assertEqual(proof.vm_helper(ROOT, '//runbooks/restate-postgres-workers:lash-e2e-worker__bin'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
+        rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUCK')
+        (next_worker,) = [name for name, rule in rules.items() if name.startswith('lash-e2e-worker__bin__fv_')
+                          and 'synthetic-next' in rule.get('crate_features', [])]
+        library = proof.resolve(ROOT, rules[next_worker]['variant_deps']['//crates/lash-vm-worker:lash-vm-worker'])
+        self.assertIn('synthetic-next', library['crate_features'])
+        helper, testing = proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{next_worker}')
+        self.assertTrue(testing)
+        self.assertEqual(sorted(proof.resolve(ROOT, proof.resolve(ROOT, helper)['library'])['crate_features']),
+                         sorted(library['crate_features']))
+
+    def test_a_worker_runs_the_helper_built_with_its_helper_features(self):
+        root = self.workspace()
+        self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
+        self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin__fv_plain'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin__fv_plain', False))
+        paired = self.workspace(helper=self.HELPER + self.NEXT_HELPER)
+        self.assertEqual(proof.vm_helper(paired, '//runbooks/e2e:worker__bin__fv_next'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin__fv_alone', True))
+
+    def test_a_helper_without_the_workers_features_does_not_pair(self):
+        # The synthetic N+1's helper differs in protocol, not in build
+        # identity: the base helper passes its handshake and then writes
+        # artifacts the N+1 worker refuses.
+        with self.assertRaisesRegex(ValueError, r"no lash-vm-worker helper binary with features \['synthetic-next', 'testing'\]"):
+            proof.vm_helper(self.workspace(), '//runbooks/e2e:worker__bin__fv_next')
+
+    def test_a_helper_library_whose_features_disagree_with_the_client_fails(self):
+        with self.assertRaisesRegex(ValueError, 'do not pair on testing'):
+            proof.vm_helper(self.workspace(), '//runbooks/e2e:worker__bin__fv_split')
+
+    def test_an_ambiguous_helper_fails(self):
+        ambiguous = self.workspace(helper=self.HELPER + '''lash_rust_binary(name = "lash-vm-worker__bin__twin",
+    crate_name = "lash_vm_worker", crate_root = "src/main.rs", crate_features = ["testing"], library = ":lash-vm-worker")
+''')
+        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper binary'):
+            proof.vm_helper(ambiguous, '//runbooks/e2e:worker__bin')
+
+    def image(self, info):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        bin_dir = Path(directory.name)
+        (bin_dir / 'lash-e2e-worker').write_text('')
+        if info is not None:
+            helper = bin_dir / 'lash-vm-worker'
+            helper.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo \'{json.dumps(info)}\'\n')
+            helper.chmod(0o755)
+        return bin_dir
+
+    def test_an_image_without_its_paired_helper_fails(self):
+        with self.assertRaisesRegex(ValueError, 'no executable lash-vm-worker'):
+            proof.image_helper(self.image(None), True)
+        with self.assertRaisesRegex(ValueError, 'does not pair'):
+            proof.image_helper(self.image({'protocol_version': 1, 'testing': False}), True)
+        self.assertEqual(proof.image_helper(self.image({'protocol_version': 1, 'testing': True}), True),
+                         {'protocol_version': 1, 'testing': True})
 
 
 class ChartTests(unittest.TestCase):

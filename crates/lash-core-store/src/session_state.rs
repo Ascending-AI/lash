@@ -611,6 +611,11 @@ pub struct RuntimeSessionAuthority {
     pub tool_access: crate::SessionToolAccess,
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
+    /// The session's recorded plugin configuration (FIG-4379), as the
+    /// installed config view states it: the head's, or a running root's
+    /// admitted view. Every plugin session built for this state reads it.
+    #[serde(default, skip_serializing_if = "crate::PluginConfig::is_empty")]
+    pub plugin_config: crate::PluginConfig,
     /// Sticky head config while a root uses a different recorded execution view.
     /// Commits read this value; turn preparation reads the resident policy.
     /// Boxed under `authority` so carrying it costs resident state nothing.
@@ -655,8 +660,6 @@ pub struct RuntimeSessionState {
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt_usage: Option<TokenUsage>,
-    #[serde(default)]
-    pub protocol_turn_options: crate::ProtocolTurnOptions,
     /// Durable authority used to rebuild the session's Tool Catalog policy.
     #[serde(flatten)]
     pub authority: Box<RuntimeSessionAuthority>,
@@ -670,9 +673,9 @@ pub struct RuntimeSessionState {
     #[serde(skip)]
     pub head_revision: u64,
     /// The resident mirror of the head config's `config_revision` (ADR 0101
-    /// §12): what a submitter reads to fill `ApplyConfigPatch::base_config_revision`,
-    /// and what the apply-time compare-and-set checks. `0` at creation, `+1`
-    /// per applied config patch, and restored head-authoritatively with the
+    /// §12): what a submitter reads to fill a config transaction's
+    /// `expected_revision`, and what its resolution checks. `0` at creation,
+    /// `+1` per applied config transaction, and restored head-authoritatively with the
     /// rest of the config by [`adopt_durable_head`]. Skipped on serialize —
     /// the durable copy lives in the session head's `PersistedSessionConfig`.
     #[serde(skip)]
@@ -702,7 +705,6 @@ impl RuntimeSessionState {
             turn_index: 0,
             token_usage: TokenUsage::default(),
             last_prompt_usage: None,
-            protocol_turn_options: crate::ProtocolTurnOptions::default(),
             authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
             checkpoint_ref: None,
@@ -743,7 +745,6 @@ impl RuntimeSessionState {
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage,
             last_prompt_usage: snapshot.last_prompt_usage,
-            protocol_turn_options: snapshot.protocol_turn_options,
             authority: Box::default(),
             checkpoint_components,
             checkpoint_ref: snapshot.checkpoint_ref,
@@ -768,7 +769,7 @@ impl RuntimeSessionState {
             turn_index: self.turn_index,
             token_usage: self.token_usage.clone(),
             last_prompt_usage: self.last_prompt_usage.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
+            plugin_config: self.authority.plugin_config.clone(),
             tool_state_ref: self.tool_state_ref().cloned(),
             tool_state_generation: self.tool_state_generation(),
             plugin_state_ref: self.plugin_state_ref().cloned(),
@@ -796,7 +797,6 @@ impl RuntimeSessionState {
         self.turn_index = snapshot.turn_index;
         self.token_usage = snapshot.token_usage;
         self.last_prompt_usage = snapshot.last_prompt_usage;
-        self.protocol_turn_options = snapshot.protocol_turn_options;
         self.checkpoint_ref = snapshot.checkpoint_ref;
     }
 
@@ -1118,10 +1118,22 @@ impl RuntimeSessionState {
         &self.policy
     }
 
-    /// This is a raw field read with no layering and is the single source of truth for live
-    /// protocol turn options.
-    pub fn effective_protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
-        &self.protocol_turn_options
+    /// The plugin configuration the installed config view runs under, at the
+    /// revision it was admitted under (FIG-4379): inside a root, the root's
+    /// recorded admission; otherwise the head's.
+    pub fn admitted_plugin_config(&self) -> crate::AdmittedPluginConfig {
+        let revision = self
+            .authority
+            .root_snapshot
+            .as_ref()
+            .map_or(self.config_revision, |snapshot| snapshot.config_revision);
+        crate::AdmittedPluginConfig::new(self.authority.plugin_config.clone(), revision)
+    }
+
+    /// The protocol turn options the installed config view runs under: a
+    /// view of the protocol plugin's recorded namespace (FIG-4379).
+    pub fn effective_protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
+        self.authority.plugin_config.protocol_turn_options()
     }
 
     /// Ensures protocol implementors restoring legacy state have a canonical initial agent frame
@@ -1159,7 +1171,10 @@ impl RuntimeSessionState {
             self.agent_frames.clear();
             return;
         }
-        let assignment = crate::AgentFrameAssignment::from_policy(self.policy.clone());
+        let assignment = crate::AgentFrameAssignment::new(
+            self.policy.clone(),
+            self.authority.plugin_config.clone(),
+        );
         let frame_key = crate::FrameKey::from_caller_material("initial-frame")
             .expect("the initial frame material is non-empty");
         let frame_node_id =
@@ -1169,56 +1184,9 @@ impl RuntimeSessionState {
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
-            self.protocol_turn_options.clone(),
             clock.timestamp_rfc3339(),
         );
         self.current_frame_node_id = Some(frame_node_id);
-        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-    }
-
-    /// Open a still-unpersisted initial frame under the session's settled
-    /// protocol turn options.
-    ///
-    /// A fresh session opens its initial frame when its state is built, before
-    /// protocol materialization settles the options. That frame is not durable
-    /// until the first commit carries it, while the settled options are
-    /// published at materialization. A reopen of that durable head therefore
-    /// opens the frame under the settled options, and the first commit must
-    /// carry the same frame on every execution (FIG-3684). A persisted frame
-    /// is an immutable historical snapshot and is never rewritten.
-    #[expect(
-        clippy::expect_used,
-        reason = "the initial frame material is a non-empty literal"
-    )]
-    pub fn open_unpersisted_initial_frame_under_settled_protocol_options(&mut self) {
-        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
-            .expect("the initial frame material is non-empty");
-        let frame_node_id = crate::NodeId::new(
-            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()).into_inner(),
-        );
-        if self.persisted_node_ids.contains(&frame_node_id) {
-            return;
-        }
-        let settled = &self.protocol_turn_options;
-        let Some(position) = self.session_graph.nodes.iter().position(|node| {
-            node.node_id == frame_node_id
-                && matches!(
-                    &node.payload,
-                    crate::SessionNodePayload::FrameOpen { protocol_turn_options, .. }
-                        if protocol_turn_options != settled
-                )
-        }) else {
-            return;
-        };
-        let settled = settled.clone();
-        let record = self.session_graph.data_mut().node_mut(position);
-        if let crate::SessionNodePayload::FrameOpen {
-            protocol_turn_options,
-            ..
-        } = &mut record.payload
-        {
-            *protocol_turn_options = settled;
-        }
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
@@ -1248,30 +1216,22 @@ impl RuntimeSessionState {
             return;
         }
         let policy = self.policy.clone();
-        let settled = self.protocol_turn_options.clone();
+        let plugin_config = self.authority.plugin_config.clone();
         let Some(position) = self.session_graph.nodes.iter().position(|node| {
             node.node_id == frame_node_id
                 && matches!(
                     &node.payload,
-                    crate::SessionNodePayload::FrameOpen {
-                        assignment,
-                        protocol_turn_options,
-                        ..
-                    } if assignment.policy != policy
-                        || *protocol_turn_options != settled
+                    crate::SessionNodePayload::FrameOpen { assignment, .. }
+                        if assignment.policy != policy
+                            || assignment.plugin_config != plugin_config
                 )
         }) else {
             return;
         };
         let record = self.session_graph.data_mut().node_mut(position);
-        if let crate::SessionNodePayload::FrameOpen {
-            assignment,
-            protocol_turn_options,
-            ..
-        } = &mut record.payload
-        {
+        if let crate::SessionNodePayload::FrameOpen { assignment, .. } = &mut record.payload {
             assignment.policy = policy;
-            *protocol_turn_options = settled;
+            assignment.plugin_config = plugin_config;
         }
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
@@ -1288,11 +1248,10 @@ impl RuntimeSessionState {
     pub fn reset_initial_agent_frame_with_clock(
         &mut self,
         assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
         clock: &dyn crate::Clock,
     ) {
         self.policy = assignment.policy.clone();
-        self.protocol_turn_options = protocol_turn_options.clone();
+        self.authority.plugin_config = assignment.plugin_config.clone();
         let frame_key = crate::FrameKey::from_caller_material("initial-frame")
             .expect("the initial frame material is non-empty");
         let frame_node_id =
@@ -1302,7 +1261,6 @@ impl RuntimeSessionState {
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
-            protocol_turn_options,
             clock.timestamp_rfc3339(),
         );
         self.current_frame_node_id = Some(frame_node_id);
@@ -1338,7 +1296,6 @@ pub mod facade_ops {
                 turn_index: self.turn_index,
                 token_usage: self.token_usage.clone(),
                 last_prompt_usage: self.last_prompt_usage.clone(),
-                protocol_turn_options: self.protocol_turn_options.clone(),
             }
         }
 
@@ -1354,20 +1311,15 @@ pub mod facade_ops {
             &self,
             fallback_policy: &SessionPolicy,
         ) -> crate::ProcessExecutionEnvSpec {
-            let mut spec = self
-                .current_agent_frame()
-                .map(|frame| {
-                    crate::ProcessExecutionEnvSpec::new(
-                        frame.assignment.plugin_options.clone(),
-                        self.policy.clone(),
-                    )
-                })
-                .unwrap_or_else(|| {
-                    crate::ProcessExecutionEnvSpec::new(
-                        crate::PluginOptions::default(),
-                        fallback_policy.clone(),
-                    )
-                });
+            let policy = if self.current_agent_frame().is_some() {
+                self.policy.clone()
+            } else {
+                fallback_policy.clone()
+            };
+            // The process captures the configuration its creator runs under:
+            // a running root's admitted view, or the head's (FIG-4379).
+            let mut spec =
+                crate::ProcessExecutionEnvSpec::new(self.admitted_plugin_config(), policy);
             spec.render = self.authority.resolved_render.clone();
             spec
         }
@@ -1389,10 +1341,8 @@ pub fn adopt_session_config(
 ) {
     state.authority.tool_access = config.tool_access.clone();
     state.authority.subagent = config.subagent.clone();
+    state.authority.plugin_config = config.plugin_config.clone();
     apply_persisted_session_config(state, config);
-    if let Some(options) = config.protocol_turn_options.as_ref() {
-        state.protocol_turn_options = options.clone();
-    }
 }
 
 /// Install a recorded root view without changing the config that a commit
@@ -1495,7 +1445,6 @@ pub(crate) fn apply_session_checkpoint(
     state.turn_index = checkpoint.turn_state.turn_index;
     state.token_usage = checkpoint.turn_state.token_usage.clone();
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage.clone();
-    state.protocol_turn_options = checkpoint.turn_state.protocol_turn_options.clone();
     state.checkpoint_components =
         RuntimeCheckpointComponents::from_hydrated(&checkpoint, fleet_format)?;
     state.ensure_agent_frame_initialized();
@@ -1581,15 +1530,9 @@ pub fn adopt_durable_head(
     state.authority.resolved_render = None;
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
-    // The config adopted the commanded head value before the checkpoint
-    // restore (so a checkpointless graph's initial frame captures it); adopt
-    // it again after (the head row is authoritative over the checkpoint's
-    // turn-state copy; `None` is a pre-v6-content head, which keeps the
-    // checkpoint fallback). FIG-2479.
+    // The config is adopted before the checkpoint restore, so a
+    // checkpointless graph's initial frame captures it.
     apply_session_checkpoint(state, checkpoint, fleet_format)?;
-    if let Some(options) = config.protocol_turn_options.as_ref() {
-        state.protocol_turn_options = options.clone();
-    }
     Ok(())
 }
 
@@ -1707,13 +1650,10 @@ pub fn open_agent_frame_in_state_with_clock(
     clock: &dyn crate::Clock,
 ) -> Result<crate::OpenAgentFrameOutcome, crate::RuntimeError> {
     state.ensure_agent_frame_initialized_with_clock(clock);
-    let previous = state.current_agent_frame().cloned();
-    let mut assignment = previous
-        .as_ref()
-        .map(|frame| frame.assignment.clone())
-        .unwrap_or_else(|| crate::AgentFrameAssignment::from_policy(state.policy.clone()));
-    assignment.policy = state.policy.clone();
-    let protocol_turn_options = state.protocol_turn_options.clone();
+    let assignment = crate::AgentFrameAssignment::new(
+        state.policy.clone(),
+        state.authority.plugin_config.clone(),
+    );
     let frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, request.frame_key.as_str());
     let opened = state.session_graph.append_frame_open_with_id_at(
@@ -1721,7 +1661,6 @@ pub fn open_agent_frame_in_state_with_clock(
         request.frame_key.clone(),
         request.reason,
         assignment,
-        protocol_turn_options,
         clock.timestamp_rfc3339(),
     );
     if !opened {
@@ -1746,14 +1685,12 @@ pub fn open_agent_frame_in_state_with_clock(
     // first provider response, so no pressure hook reacts to it (FIG-4110).
     state.last_prompt_usage = None;
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-    if let Some((policy, protocol_turn_options)) = state.current_agent_frame().map(|frame| {
-        (
-            frame.assignment.policy.clone(),
-            frame.protocol_turn_options.clone(),
-        )
-    }) {
-        state.policy = policy;
-        state.protocol_turn_options = protocol_turn_options;
+    if let Some(assignment) = state
+        .current_agent_frame()
+        .map(|frame| frame.assignment.clone())
+    {
+        state.policy = assignment.policy;
+        state.authority.plugin_config = assignment.plugin_config;
     }
 
     let initial_node_ids = append_session_nodes_to_state_with_clock(

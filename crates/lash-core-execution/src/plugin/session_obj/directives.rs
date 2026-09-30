@@ -128,6 +128,7 @@ impl PluginSession {
             .before_turn_with_phase_probe(
                 TurnHookContext {
                     session_id,
+                    plugin_config: self.admitted_plugin_config(),
                     state,
                     sessions,
                     turn_context,
@@ -184,6 +185,7 @@ impl PluginSession {
             self.after_turn_with_phase_probe(
                 TurnResultHookContext {
                     session_id: session_id.clone(),
+                    plugin_config: self.admitted_plugin_config(),
                     turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
                     sessions,
                 },

@@ -118,17 +118,23 @@ lash_store_sql::statements! {
         /// The next ordinal is computed inside the insert rather than read
         /// first: the caller already holds the cancel-request row's lock, and
         /// deriving it in one statement is what keeps the ordinal allocation
-        /// and the append in a single round trip.
+        /// and the append in a single round trip. An item already recorded
+        /// is not recorded again: an input the interrupted turn's commit
+        /// recorded is still addressed to that turn, its delivery unchanged,
+        /// when the root's terminal write sweeps the turns it ends.
         append_at_next_ordinal = "INSERT INTO turn_cancel_affected_inputs (
                  session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind,
                  batch_id
              )
-             VALUES (
+             SELECT
                  ?1, ?2,
                  (SELECT COALESCE(MAX(ordinal) + 1, 0)
                     FROM turn_cancel_affected_inputs
                    WHERE session_id = ?1 AND turn_id = ?2),
                  ?3, ?4, ?5, ?6, ?7
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM turn_cancel_affected_inputs
+                  WHERE session_id = ?1 AND turn_id = ?2 AND item_kind = ?6 AND input_id = ?3
              )";
     }
 }

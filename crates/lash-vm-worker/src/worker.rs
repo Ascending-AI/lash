@@ -19,8 +19,10 @@ pub(crate) struct Server<'frontend> {
     instance: VmInstance,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
-    pending: Option<(EffectRequestId, EffectKind)>,
+    pending: Option<EffectRequest>,
+    reissue: Option<RecordedRequest>,
     projection_namespace: String,
+    capture_state_view: bool,
     cpu_ceiling: Option<libc::rlim_t>,
 }
 
@@ -30,12 +32,35 @@ pub(crate) struct Fences {
     pub next_effect: u64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ParkedRun {
+    pub vm: EncodedPayload,
+    pub request: Option<RecordedRequest>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordedRequest {
+    kind: EffectKind,
+    payload: EncodedPayload,
+}
+
+impl ParkedRun {
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, PoolError> {
+        rmp_serde::from_slice(bytes).map_err(PoolError::protocol)
+    }
+
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, PoolError> {
+        rmp_serde::to_vec_named(self).map_err(PoolError::protocol)
+    }
+}
+
 impl<'frontend> Server<'frontend> {
     pub(crate) fn new(
         pipe: UnixStream,
         codec: FrameCodec,
         bootstrap: Bootstrap,
-        build: BuildIdentity,
         frontend: &'frontend dyn crate::Frontend,
     ) -> Result<Self, PoolError> {
         let mut server = Self {
@@ -51,10 +76,15 @@ impl<'frontend> Server<'frontend> {
             })),
             owner: None,
             pending: None,
+            reissue: None,
             projection_namespace: String::new(),
+            capture_state_view: false,
             cpu_ceiling: None,
         };
-        server.send(WorkerMessage::Ready { build })?;
+        server.send(WorkerMessage::Ready {
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+        })?;
         Ok(server)
     }
 
@@ -185,15 +215,15 @@ impl<'frontend> Server<'frontend> {
                     self.respond(WorkerMessage::Prepared { response })?;
                 }
                 ParentMessage::EffectResponse(result) => {
-                    let (id, kind) = self
+                    let request = self
                         .pending
                         .take()
                         .ok_or_else(|| PoolError::protocol("no pending effect"))?;
-                    if result.id != id {
+                    if result.id != request.id {
                         return Err(PoolError::protocol("effect result has wrong request id"));
                     }
                     self.progress(WorkerPhase::Computing)?;
-                    let resume = match (kind, result.outcome) {
+                    let resume = match (request.kind, result.outcome) {
                         (EffectKind::CancelCheckpoint, EffectOutcome::Checkpoint { cancelled }) => {
                             VmResume::CancelCheckpoint { cancelled }
                         }
@@ -238,7 +268,11 @@ impl<'frontend> Server<'frontend> {
                 ParentMessage::Park => {
                     // A process boundary, or an effect the run can issue again
                     // once its continuation is resumed (FIG-4159).
-                    if !self.pending.take().is_some_and(|(_, kind)| kind.parkable()) {
+                    if !self
+                        .pending
+                        .as_ref()
+                        .is_some_and(|request| request.kind.parkable())
+                    {
                         return Err(PoolError::protocol("park answers no parkable request"));
                     }
                     self.progress(WorkerPhase::Computing)?;
@@ -252,12 +286,15 @@ impl<'frontend> Server<'frontend> {
                     // Physical cancellation never decides the journaled winner.
                     self.instance.reset();
                     self.pending = None;
+                    self.reissue = None;
                     self.send(WorkerMessage::Cancelled)?;
                 }
                 ParentMessage::Reset => {
                     self.cpu_ceiling = None;
+                    self.capture_state_view = false;
                     self.instance.reset();
                     self.pending = None;
+                    self.reissue = None;
                     self.owner = None;
                     self.fences
                         .lock()
@@ -295,6 +332,7 @@ impl<'frontend> Server<'frontend> {
             context = rmp_serde::from_slice(&description.body.0).map_err(PoolError::protocol)?;
         }
         self.projection_namespace = context.projection_namespace;
+        self.capture_state_view = context.capture_state_view;
         let execution_start = match start.state {
             StartState::Fresh => VmExecutionStart::Session,
             StartState::Snapshot(state) => {
@@ -308,9 +346,14 @@ impl<'frontend> Server<'frontend> {
             }
             StartState::Continuation(state) => {
                 self.check(&state, VmStateKind::Continuation)?;
+                let parked = ParkedRun::decode(state.bytes())?;
+                if let Some(request) = &parked.request {
+                    self.codec.check_payload(&request.payload.0)?;
+                }
+                self.reissue = parked.request;
                 VmExecutionStart::Continuation(Box::new(
                     self.instance
-                        .open_continuation(state.bytes())
+                        .open_continuation(&parked.vm.0)
                         .map_err(PoolError::protocol)?,
                 ))
             }
@@ -538,10 +581,22 @@ impl<'frontend> Server<'frontend> {
                             AbilityOp::Sleep(_) => EffectKind::Sleep,
                             AbilityOp::WaitSignal { .. } => EffectKind::WaitSignal,
                         };
-                        (
-                            kind,
-                            rmp_serde::to_vec_named(&op).map_err(PoolError::protocol)?,
-                        )
+                        // The VM wire restores projections by identity. The
+                        // request already issued includes their scalar values,
+                        // so resume reads that request rather than rebuilding it
+                        // from the continuation's unavailable placeholders.
+                        match self.reissue.take() {
+                            Some(recorded) if recorded.kind == kind => {
+                                (recorded.kind, recorded.payload.0)
+                            }
+                            Some(_) => {
+                                return Err(PoolError::protocol("parked request kind changed"));
+                            }
+                            None => (
+                                kind,
+                                rmp_serde::to_vec_named(&op).map_err(PoolError::protocol)?,
+                            ),
+                        }
                     }
                     VmRequest::CancelCheckpoint(n) => (
                         EffectKind::CancelCheckpoint,
@@ -569,30 +624,59 @@ impl<'frontend> Server<'frontend> {
                     fences.next_effect += 1;
                     id
                 };
-                self.pending = Some((id, kind));
-                WorkerMessage::EffectRequest(EffectRequest {
+                let request = EffectRequest {
                     id,
                     kind,
                     payload: EncodedPayload(payload),
-                })
+                };
+                self.pending = Some(request.clone());
+                WorkerMessage::EffectRequest(request)
             }
-            VmStep::Parked(parked) => WorkerMessage::Suspended {
-                state: self
-                    .seal(
-                        VmStateKind::Continuation,
+            VmStep::Parked(parked) => {
+                let bytes = ParkedRun {
+                    vm: EncodedPayload(
                         parked
                             .continuation
                             .to_bytes()
                             .map_err(PoolError::protocol)?,
-                    )?
-                    .with_definition_ids(parked.continuation.referenced_definition_ids()),
-            },
-            VmStep::Complete(complete) => WorkerMessage::Complete {
-                state: self.snapshot()?,
-                value: EncodedPayload(
-                    rmp_serde::to_vec_named(&complete.outcome).map_err(PoolError::protocol)?,
-                ),
-            },
+                    ),
+                    request: self
+                        .pending
+                        .take()
+                        .filter(|request| request.kind != EffectKind::ProcessBoundary)
+                        .map(|request| RecordedRequest {
+                            kind: request.kind,
+                            payload: request.payload,
+                        }),
+                }
+                .encode()?;
+                WorkerMessage::Suspended {
+                    state: self
+                        .seal(VmStateKind::Continuation, bytes)?
+                        .with_definition_ids(parked.continuation.referenced_definition_ids()),
+                }
+            }
+            VmStep::Complete(complete) => {
+                let state = self.snapshot()?;
+                let value = if self.capture_state_view {
+                    rmp_serde::to_vec_named(&lash_vm_client::service::CellCompletion {
+                        outcome: complete.outcome,
+                        state: EncodedPayload(
+                            rmp_serde::to_vec_named(&crate::service::state_metadata(
+                                &self.instance,
+                            ))
+                            .map_err(PoolError::protocol)?,
+                        ),
+                    })
+                } else {
+                    rmp_serde::to_vec_named(&complete.outcome)
+                }
+                .map_err(PoolError::protocol)?;
+                WorkerMessage::Complete {
+                    state,
+                    value: EncodedPayload(value),
+                }
+            }
             VmStep::GuestError(error) => {
                 let limit = match error.failure.error {
                     RuntimeError::InstructionBudgetExceeded { .. }
@@ -653,9 +737,10 @@ fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, 
         return Err(PoolError::protocol("terminal value exceeds depth bound"));
     }
     Ok(match value {
-        Value::Projected(value) => {
-            materialize(value.materialize().map_err(PoolError::protocol)?, depth + 1)?
-        }
+        Value::Projected(value) => Value::Projected(lashlang::ProjectedValue::scalar(
+            value.name().to_owned(),
+            materialize(value.materialize().map_err(PoolError::protocol)?, depth + 1)?,
+        )),
         Value::List(values) => Value::List(
             values
                 .iter()

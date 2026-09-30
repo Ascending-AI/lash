@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER = ROOT / 'tools/buck2/ui_fixtures_runner.py'
@@ -99,6 +100,23 @@ class CompilerFixtureTests(unittest.TestCase):
         self.assertIn('test hidden ... ok', outcome.stdout)
         self.assertTrue(self.result()['passed'])
         self.assertEqual((self.root / 'receipts/ui-fixtures/hidden/stderr.actual').read_text(), PIN)
+
+    def test_real_launcher_preserves_ui_case_xml_without_libtest_rediscovery(self):
+        for fixture, expected_code in [('fn main() { surface::Surface::hidden(); }\n', 0), ('fn main() {}\n', 1)]:
+            with self.subTest(expected_code=expected_code):
+                (self.fixtures / 'hidden.rs').write_text(fixture)
+                outputs = self.root / f'launch-{expected_code}'
+                xml = outputs / 'test.xml'
+                environment = dict(os.environ, UI_JOBS='1', TEST_TARGET='//fixture:ui', TEST_BINARY='//fixture:ui', LASH_TEST_TIMEOUT_SECONDS='30', XML_OUTPUT_FILE=str(xml), TEST_UNDECLARED_OUTPUTS_DIR=str(outputs / 'undeclared'))
+                outcome = subprocess.run(['/usr/bin/bash', str(ROOT / 'tools/buck2/test_launcher.sh'), sys.executable, str(RUNNER), '--manifest', str(self.manifest)], cwd=self.root, env=environment, capture_output=True, text=True)
+                self.assertEqual(outcome.returncode, expected_code, outcome.stdout + outcome.stderr)
+                report = ET.parse(xml).getroot()
+                self.assertEqual([case.attrib['name'] for case in report.iter('testcase')], ['hidden'])
+                self.assertEqual(len(list(report.iter('failure'))), expected_code)
+                self.assertIn('1 passed' if expected_code == 0 else '1 failed', report.find('.//system-out').text)
+                receipt = json.loads((outputs / 'undeclared/_lash_runner/execution.json').read_text())
+                self.assertEqual(receipt['exit_code'], expected_code)
+                self.assertTrue(receipt['cleanup_complete'])
 
     def test_declared_proc_macro_loads_with_the_pinned_compiler_sysroot(self):
         macro = self.root / 'macro.rs'

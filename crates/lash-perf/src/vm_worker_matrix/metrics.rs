@@ -16,7 +16,7 @@ pub fn memory(pid: u32) -> Result<(u64, u64)> {
     Ok((value("VmRSS:")?, value("VmHWM:")?))
 }
 #[derive(Serialize)]
-pub struct Summary {
+pub struct MetricDistribution {
     pub metric: String,
     pub count: usize,
     pub unit: String,
@@ -27,7 +27,7 @@ pub struct Summary {
 }
 pub struct Samples {
     pub raw: std::io::BufWriter<std::fs::File>,
-    pub summaries: Vec<Summary>,
+    pub summaries: Vec<MetricDistribution>,
 }
 impl Samples {
     pub fn new(path: &Path) -> Result<Self> {
@@ -49,7 +49,7 @@ impl Samples {
         let mut sorted = values.to_vec();
         sorted.sort_unstable();
         let sum: i128 = values.iter().map(|v| i128::from(*v)).sum();
-        let summary = Summary {
+        let summary = MetricDistribution {
             metric: name.into(),
             count: sorted.len(),
             unit: unit.into(),

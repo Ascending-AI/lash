@@ -45,15 +45,19 @@ The bound turn owns the session head, so park and close never commit a
 whole-session snapshot beside the drive. A session whose runtime holds nothing
 unpersisted parks and closes without writing. A dirty one (plugin state, graph
 nodes, or pending usage no commit carried yet) adopts the durable head and then
-flushes. While a root is bound, a follow-on is owed, or a session command is
-open, the store refuses that flush in its own transaction as
+flushes. Adopting a head that moved replaces the resident state with that
+head's, as a cold rebuild from it would: plugin writes and graph nodes the
+runtime accepted on the older head are dropped, and pending usage, held apart
+from the head, rides the flush. While a root is bound, a follow-on is owed, or a
+session command is open, the store refuses that flush in its own transaction as
 `StoreError::SessionHeadOwned`, naming the owner. The refusal is typed and
-recoverable: `LashSession::park` and `close` answer `SessionParkRefused` and
-the runtime's `park` answers `ParkRefused`. Each names the busy owner and hands
-the session back with its runtime, resident state, and pending usage intact.
-The host keeps using the session, or parks it again once the owner's boundary
-passes. A park refused because another handle still shares the runtime
-(`SessionStillInUse`) leaves that handle in place.
+recoverable: `LashSession::park` and `close` answer `SessionParkRefused` and the
+runtime's `park` answers `ParkRefused`. Each names the busy owner and hands the
+session back with its runtime, resident state, and pending usage intact. The
+host keeps using the session, or parks it again once the owner's boundary
+passes; that park adopts whatever the boundary committed and lands. A park
+refused because another handle still shares the runtime (`SessionStillInUse`)
+leaves that handle in place.
 
 ### Administration
 

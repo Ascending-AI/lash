@@ -294,6 +294,7 @@ async fn across_wait(
     );
     let runs = engine.completed_process_invocations(&id).await;
     let segments = runs.iter().filter(|i| i.target.ends_with("/run")).count();
+    segment_journals_end_where_their_bodies_ran(&engine, &runs).await;
     terminal_fact_is_settled(&engine, &id).await;
     engine.finish().await;
     lash_conformance::SegmentBudgetObservation {
@@ -301,6 +302,67 @@ async fn across_wait(
         segments,
         continuation_bytes_at_wait: continuation_bytes,
     }
+}
+
+/// The recorded command order across a segment-budget continuation
+/// (FIG-4422): only the last segment stores the terminal, and it stores it
+/// after its body ran, followed by the parent-end application and the
+/// publication settle. Every earlier segment ends at its handover. A
+/// segment whose execution was refused by its live worker accounting
+/// recorded `lash.process.complete` straight after its admission, where
+/// every later execution of the same segment ran the body: a journal the
+/// handler could never replay.
+async fn segment_journals_end_where_their_bodies_ran(engine: &Engine, runs: &[Invocation]) {
+    const COMPLETE: &str = "lash.process.complete";
+    let ordinal = |target: &str| {
+        target
+            .strip_suffix("/run")
+            .and_then(|key| key.rsplit_once('#'))
+            .map_or(0, |(_, ordinal)| {
+                ordinal.parse::<u64>().expect("segment ordinal")
+            })
+    };
+    let mut segments: Vec<_> = runs
+        .iter()
+        .filter(|invocation| invocation.target.ends_with("/run"))
+        .collect();
+    segments.sort_by_key(|invocation| ordinal(&invocation.target));
+    let Some((last, handed_over)) = segments.split_last() else {
+        panic!("the process ran no segment")
+    };
+    for segment in handed_over {
+        let Some(names) = engine.run_names(&segment.id).await else {
+            return;
+        };
+        assert!(
+            !names.iter().any(|name| name == COMPLETE)
+                && names.iter().any(|name| name == "lash.segment.handover"),
+            "segment {} ends at its handover: {names:#?}",
+            segment.target
+        );
+    }
+    let Some(names) = engine.run_names(&last.id).await else {
+        return;
+    };
+    let complete = names
+        .iter()
+        .position(|name| name == COMPLETE)
+        .unwrap_or_else(|| panic!("the last segment stores the terminal: {names:#?}"));
+    let admitted = names
+        .iter()
+        .rposition(|name| name == "lash.segment.start" || name == "lash.segment.resume")
+        .unwrap_or_else(|| panic!("the last segment was admitted: {names:#?}"));
+    assert!(
+        names[admitted + 1..complete]
+            .iter()
+            .any(|name| name.starts_with("lash:")),
+        "the terminal follows the body's own commands: {names:#?}"
+    );
+    assert_eq!(
+        names[complete + 1..],
+        ["lash.process.parent-end", "lash.process.terminal.published"],
+        "the terminal's suffix: {names:#?}"
+    );
 }
 
 struct SegmentationTier {

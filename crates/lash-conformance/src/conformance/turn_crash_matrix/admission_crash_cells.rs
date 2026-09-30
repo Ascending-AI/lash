@@ -39,6 +39,7 @@ pub(super) async fn crash_then_redrive(
     scenario: &str,
     point: TurnCrashPoint,
     before_redrive: Option<PendingTurnInputDraft>,
+    steer: &[PendingTurnInputDraft],
     fail_post_commit_delivery: bool,
 ) -> (
     reference_turn::DrainReport,
@@ -57,7 +58,8 @@ pub(super) async fn crash_then_redrive(
         control.clone(),
         &executions,
         crashed_turn_timings(),
-    );
+    )
+    .steering(steer.iter().cloned());
     if fail_post_commit_delivery {
         crashing = crashing.fail_post_commit_delivery();
     }
@@ -87,7 +89,8 @@ pub(super) async fn crash_then_redrive(
         successor_control.clone(),
         &executions,
         nominal_recovery_timings(),
-    );
+    )
+    .steering(steer.iter().cloned());
     if fail_post_commit_delivery {
         successor = successor.fail_post_commit_delivery();
     }
@@ -169,13 +172,14 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     let scenario = "final-commit-reply-lost";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario);
-    seed_reference_ingress_for_drive(&reader, &identity, scenario).await;
+    seed_reference_ingress_for_drive(&reader, &identity).await;
     let seeded = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
         .expect("list the seeded inputs")
         .into_iter()
         .map(|read| read.input.input_id)
+        .chain([reference_steer_input_id(&identity)])
         .collect::<Vec<_>>();
     let before = reader
         .load_session_head_meta(&identity.session_id)
@@ -192,6 +196,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
             placement: CrashPlacement::InsideCall,
         },
         None,
+        &[],
         false,
     ))
     .await;
@@ -286,7 +291,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
     let scenario = "checkpoint-admission-crash";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario);
-    seed_reference_ingress_for_drive(&reader, &identity, scenario).await;
+    seed_reference_ingress_for_drive(&reader, &identity).await;
     let newcomer = PendingTurnInputDraft::new(
         &identity.session_id,
         crate::TurnInputIngress::active_turn(
@@ -307,6 +312,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
             placement: CrashPlacement::InsideCall,
         },
         Some(newcomer),
+        &[],
         false,
     ))
     .await;

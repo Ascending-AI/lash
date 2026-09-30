@@ -177,7 +177,7 @@ controller, so Restate journals the observation before any turn effect. A
 pre-registered cancellation is therefore still observed before execution, and
 handler replay reuses the original observation instead of branching on a later
 out-of-band ingress result. After that, cancellation reaches a turn only as
-journaled facts (ADR 0105 §3): durable waits and effect-group rank waits race
+journaled facts (ADR 0105 §3): durable waits and effect-group notices race
 the turn's gate in the journal, the turn peeks the gate at its step
 boundaries, and a model call's `ctx.run` body watches the gate itself and
 records whether it was stopped. That watch, and a host-local stop forwarded to

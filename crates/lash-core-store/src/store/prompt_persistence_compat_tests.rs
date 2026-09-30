@@ -17,8 +17,8 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         generation: crate::GenerationOptions::default(),
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
-        protocol_turn_options: None,
         config_revision: 0,
+        plugin_config: crate::PluginConfig::default(),
     };
     let mut old_writer_value = serde_json::to_value(config).expect("serialize current config");
     let old_writer_object = old_writer_value
@@ -44,7 +44,8 @@ fn legacy_config_keeps_prompt_absence_distinct() {
             "turn_budget": "unbounded",
             "tool_access": { "mode": "ambient" },
             "subagent": null,
-            "config_revision": 0
+            "config_revision": 0,
+            "plugin_config": {}
         }),
         "prompt/generation absence stays independently testable while access remains explicit"
     );
@@ -59,6 +60,34 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         restored.generation,
         crate::GenerationOptions::default(),
         "a head written before generation persistence must restore neutral intent"
+    );
+}
+
+/// FIG-4379: the recorded plugin configuration is required on the wire. A
+/// head that carries none is refused at decode rather than read as a session
+/// whose owners recorded nothing (version freeze: the shape changed in place).
+#[test]
+fn persisted_config_without_plugin_config_is_refused() {
+    let unrecorded = serde_json::json!({
+        "provider_id": "provider",
+        "model": {
+            "id": "model",
+            "variant": "provider_default",
+            "limits": { "context_window_tokens": 4096 }
+        },
+        "turn_budget": "unbounded",
+        "prompt": {},
+        "generation": {},
+        "tool_access": { "mode": "ambient" },
+        "subagent": null,
+        "config_revision": 0
+    });
+
+    let error = serde_json::from_value::<crate::PersistedSessionConfig>(unrecorded)
+        .expect_err("a config without its plugin configuration must refuse");
+    assert!(
+        error.to_string().contains("missing field `plugin_config`"),
+        "{error}"
     );
 }
 
@@ -78,7 +107,8 @@ fn persisted_config_without_config_revision_is_refused() {
         "prompt": {},
         "generation": {},
         "tool_access": { "mode": "ambient" },
-        "subagent": null
+        "subagent": null,
+        "plugin_config": {}
     });
 
     let error = serde_json::from_value::<crate::PersistedSessionConfig>(pre_contract)
@@ -90,25 +120,24 @@ fn persisted_config_without_config_revision_is_refused() {
     );
 }
 
-/// The same clean cutover covers the command side: a patch written before the
-/// contract carried no `base_config_revision` and does not decode.
+/// The same clean cutover covers the command side: a config transaction
+/// names the revision it was written against, and one without it does not
+/// decode.
 #[test]
-fn persisted_config_patch_without_base_revision_is_refused() {
-    let pre_contract = serde_json::json!({
-        "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
-        "model": {
-            "id": "model",
-            "variant": "provider_default",
-            "limits": { "context_window_tokens": 4096 }
-        }
+fn config_transaction_without_expected_revision_is_refused() {
+    let unstated = serde_json::json!({
+        "id": "transaction",
+        "entries": [{ "owner": "core", "command": "set_turn_budget", "args": {} }],
+        "implementations": { "core": "lash-core-config:1" }
     });
 
-    let error = serde_json::from_value::<crate::ApplyConfigPatch>(pre_contract)
-        .expect_err("a pre-contract patch carries no base_config_revision and must refuse");
+    let error =
+        serde_json::from_value::<crate::config_transaction::ConfigTransactionRecord>(unstated)
+            .expect_err("a transaction without its expected revision must refuse");
     assert!(
         error
             .to_string()
-            .contains("missing field `base_config_revision`")
+            .contains("missing field `expected_revision`")
     );
 }
 
@@ -142,8 +171,8 @@ fn current_config_serializes_default_authority_explicitly() {
         generation: crate::GenerationOptions::default(),
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
-        protocol_turn_options: None,
         config_revision: 0,
+        plugin_config: crate::PluginConfig::default(),
     })
     .expect("serialize current config");
 
@@ -164,8 +193,8 @@ fn explicit_empty_prompt_is_serialized_as_present() {
         generation: crate::GenerationOptions::default(),
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
-        protocol_turn_options: None,
         config_revision: 0,
+        plugin_config: crate::PluginConfig::default(),
     })
     .expect("serialize explicit empty prompt");
 
@@ -190,8 +219,8 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
-            protocol_turn_options: None,
             config_revision: 0,
+            plugin_config: crate::PluginConfig::default(),
         },
         current_frame_node_id: None,
         published_by_drive: false,
@@ -227,8 +256,8 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             generation: expected_generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
-            protocol_turn_options: None,
             config_revision: 0,
+            plugin_config: crate::PluginConfig::default(),
         },
         current_frame_node_id: None,
         published_by_drive: false,
@@ -284,8 +313,7 @@ fn persisted_head_and_frame_open_reject_legacy_slot_fields() {
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key: crate::FrameKey::from_caller_material("slot-body-frame").unwrap(),
             reason: crate::AgentFrameReason::initial(),
-            assignment: crate::AgentFrameAssignment::from_policy(policy),
-            protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            assignment: crate::AgentFrameAssignment::unconfigured(policy),
         },
     };
     let current = node

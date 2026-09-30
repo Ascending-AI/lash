@@ -4,8 +4,9 @@
 
 Accepted and implemented. Restate is the only effect engine
 ([ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
-the group authority this ADR names is the Restate `EffectGroupIndex` object and
-its durable waits, and the SQL stores hold storage only. A process opener is
+the group authority this ADR names is the Restate `EffectGroupIndex` object,
+which also answers the group's own notifications (§2), and the SQL stores hold
+storage only. A process opener is
 its minted `ProcessId`
 ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
 Queued-work admission and recovery are
@@ -74,7 +75,7 @@ is recorded, and retirement has completed.
 Two latencies, and they are separate numbers: **winner latency** (when `race`
 resumes — at the first settlement) and **finalization latency** (when the opener
 reports success — after closing drains its protected obligations). No successful
-turn latency bound follows from the cancel grace.
+turn latency bound exists: every protected committed obligation must finish.
 
 **Background work that must survive `finish` is a process the program named.**
 
@@ -205,12 +206,38 @@ covers tracked `call` children, and it is never the sole close protocol (§4).
 
 **The dispatch registers its children in one index step.** It issues every child
 call, then records the full position-to-invocation map and moves the group to
-ready in one exclusive index handler, which resolves every ADMIT wake and READY
-together; nothing is awaited before that step. ADMIT is notification only: a
-child is admitted by a fresh read that finds its own recorded id. The adopted
-dispatcher's id is kept, so a retirement before registration cancels the
-dispatch and the child calls it tracks, and a retired group is never made
-ready.
+ready in one exclusive index handler, which answers every READY subscriber —
+the opener's and each waiting child's — together; nothing is awaited before
+that step. READY is notification only for a child: a child is admitted by a
+fresh read that finds its own recorded id. The adopted dispatcher's id is kept,
+so a retirement before registration cancels the dispatch and the child calls it
+tracks, and a retired group is never made ready.
+
+**The group index answers the group's own notices.** READY (the group left
+preparing, or was refused), RANK (a rank is inside the seated prefix, §5), the
+§5 barrier (`Drained`: every committed sibling ranked below a rank has seated)
+and a child's cancel fact (its cancel was decided, or it seated) are facts of
+the index record, so the index owns their delivery; none of them goes through
+the generic durable-wait services. A waiter creates an awakeable in its own
+journal and subscribes it under its notice with the index's exclusive
+`subscribe`. The index answers from its record at once when the notice already
+holds, and otherwise records the subscriber before any later transition can
+run. Every handler whose state change can make a notice true — the
+registration, a refusal, a seat, a close, a retirement — stores its record,
+then the subscribers it keeps, then completes the rest from its own journal: a
+completion is a command of that invocation, never a call to another service,
+so a seat invokes nothing. A crash between the stored record and the
+completions replays the same stored list and completes the same subscribers.
+Every answer is monotonic under the index's transitions, and retirement answers
+every outstanding subscriber `Retired` and every later one from the tombstone.
+A subscription is idempotent by awakeable; a waiter whose other race arm won —
+the turn-cancel gate or the process cancel promise — withdraws it with a
+one-way `unsubscribe`, and a group holds a bounded number of subscribers, past
+which it refuses a subscription typed. A notification is a hint to re-read the
+authority, never a permission of its own. A child's step-boundary cancel read
+is the index's shared `child_cancel` read; the turn's cancel gate and the
+waits the group does not own — a tool's completion key, a wait child's event —
+stay on the durable-wait services.
 
 ---
 
@@ -381,7 +408,7 @@ phase are three separate facts; nothing below waits on opener close.
 |---|---|---|---|---|---|
 | **accepted, unclaimed** | → **cancel-decided** | n/a | n/a | n/a | → *accepted* (recovered while the opener lives, §1) |
 | **executing, uncommitted** | → **cancel-decided**; body signalled, grace armed | → **committed** | n/a | n/a | → *executing* (resumed from the retained request) |
-| **committed** (final recorded, intents not drained) | **refused** — the point is already taken | n/a | → **drained** | not armed | → **committed**; recovery finishes the drain |
+| **committed** (final recorded, intents not drained) | **refused** — the point is already taken | n/a | → **drained** | not armed | → **committed**; recovery finishes the drain from the retained final (§5) |
 | **drained** (intents recorded, projection durable) | refused | n/a | n/a | n/a | → **drained** |
 | **rankable** → **settled** | refused | n/a | n/a | n/a | → unchanged |
 | **cancel-decided** | no-op (idempotent) | **refused**, typed, no journal write | discharges any already-admitted protected obligation | → **logically cancelled** | → *cancel-decided* (resumed from the record) |
@@ -463,12 +490,13 @@ have seated, or retirement releases the wait; a child never waits on a sibling
 that has not committed. That is the order in which the group's children may emit
 nested semantic commands, and therefore the order a replay must reproduce. The
 barrier names every unseated committed sibling ranked below the child, and the
-waits on their drained wakes are issued together, one round trip whatever the
-barrier's size; the `drain_barrier_is_transitive` law pins it. A child that
-declared no intent and won its own commit neither reads the barrier nor waits at
-its seat. A child whose commit answer is `AlreadyCommitted` — the point was won by
-an earlier invocation, whose declarations this one cannot know — waits at the
-barrier before its drain or its seat. Retirement is a release, not proof of
+child waits at it with one `Drained` subscription at the index, whatever the
+barrier's size, which the seat that lifts the barrier answers (§2); the
+`drain_barrier_is_transitive` law pins it. A child whose final declared no
+intent neither reads the barrier nor waits at its seat. The point retains the
+final it committed, so a commit answered `AlreadyCommitted` carries the final an
+earlier invocation committed: its declarations are known, and it waits at the
+barrier only if they drain intents. Retirement is a release, not proof of
 seating: the semantic-admission fence (§4) still refuses any intent under a
 retired group. The closing wait (§7) reads the barrier past the last rank.
 
@@ -526,12 +554,28 @@ no remaining admission, take their place in rank order and release it at their
 seat. An unseated one still holds the barrier of a later child that drains
 intents.
 
-**A fallback seat over an already-committed child waits at the barrier and seats
-its refusal.** A generation refusal or an expired attach (§8) that reaches a
-child whose final an earlier invocation committed finds the point taken, waits
-until all lower committed siblings have seated or retirement releases it, and
-then seats its typed refusal at the reserved rank. The committed final's
-undrained intents are not realized.
+**The committed final wins.** The §4 point retains the final a winning commit
+offered: a tool child's sealed drain input — its record, its declared intents
+and the attempt facts its settlement carries — a refusal, or the mark of an
+outcome only the committing invocation holds (an atomic body's or a wait's).
+Every later commit of the child is answered that final, and the invocation that
+receives it seats it, never its own. A fallback's typed refusal — a
+session-generation refusal or an expired attach (§8) — therefore seats only where
+no final is committed. An invocation that cannot run the child and finds a final
+committed by one that ended before its seat:
+
+- drains a committed tool final from the retained drain input, at the barrier of
+  the rank that commit reserved, and seats it: its declared intents are realized
+  (W7) and the tool's attempts never run again (W15);
+- seats a committed refusal as it was recorded;
+- otherwise reports the committed final lost with the typed
+  `RuntimeEffectGroupChildCommittedFinalLost` terminal, which names why: an
+  outcome only the dead invocation held, or a tool final that a
+  generation-refused invocation cannot drain under its session's state
+  generation. A committed final's obligations are realized or reported by name,
+  never replaced.
+
+A seat that drains nothing waits on no sibling.
 
 **What is refused is an undefined barrier**, in particular any rule of the form
 "drain every already-settled sibling", which is either circular or adds a barrier
@@ -549,7 +593,13 @@ scheduler.**
 A deferred child's §4 point is its completion resolution; it releases its place
 at discharge, after projection. The index reserves the rank in `commit_child`
 (`reserve_rank`) and serves reads through `seated_prefix`
-(`crates/lash-restate/src/effect_group/state_record.rs`).
+(`crates/lash-restate/src/effect_group/state_record.rs`). `commit_child` retains
+the committed final beside the index record, one key per position, and the
+dispatch's `settle_unrun_child` seats it
+(`crates/lash-restate/src/effect_group/dispatch.rs`); the tool driver's
+`drain_committed` drains a retained tool final. The
+`a_successor_drains_the_final_its_expired_predecessor_committed` law pins W7
+across an expired attach.
 
 ---
 
@@ -630,17 +680,11 @@ resumes the first incomplete step:
 3. record parent end (ADR 0094);
 4. complete retirement.
 
-**A close deadline is an attempt-local drain budget**, `EffectGroupDrainBudget`
-(30 s by default), supplied as controller construction-time input beside the
-segment effect budget in `crates/lash-restate/src/controller/mod.rs`. It
-**starts when that
-attempt's cancel decision commits**, not when closing began and not when the
-group opened, so a slow sibling cannot consume another child's budget. On expiry
-the attempt is logically cancelled and **closing stays recorded and discoverable
-by the existing work driver**; finalization does not commit an ordinary terminal
-that would fence out the remaining obligations. **Changing the budget never
-changes committed obligations**: a redrive under a different budget still owes
-every declaration the first attempt recorded.
+**Close seats cancel-decided children immediately without joining their attempt
+bodies.** The drain barrier waits only for committed children that still owe
+declarations or projection. Every protected committed obligation must finish
+before finalization commits the opener's outcome and accounting, including
+across recovery. Cancellation does not impose a deadline on those obligations.
 
 The drain's queue is the group authority's own record of unsettled children,
 not a second table: nothing is enqueued, and no synthetic queued-work item
@@ -723,7 +767,9 @@ cursor still needs, not merely the count.
 
 **Retaining the exact child invocation identity across handover is part of the
 child record**, because Restate attach is by invocation id. **Expired attachment
-is a typed recovery failure, never permission to rerun a side effect.** The Rust
+is a typed recovery failure, never permission to rerun a side effect**, and it
+never replaces a final the expired invocation committed: the successor seats that
+final (§5). The Rust
 SDK constructs only `AttachInvocationTarget::InvocationId`, so idempotency-key
 attach is reachable from Rust only through the ingress client. Retention defaults
 of 24 hours exist in the server configuration; a default is **not** an admitted
@@ -949,8 +995,8 @@ into its group identity: two timer aggregates at two sites are two groups. The c
 **`processes.await(h)` is a resumable child on the existing Durable Wait protocol.**
 A group child is an independently durable unit that need not settle inside one
 resource operation, so the wait is a child of this kind — resumable, retained
-across segments, not subject to the cancel grace a running attempt is, because
-there is no attempt body to interrupt.
+across segments. Its attempt parks on the Durable Wait, and opener close
+cancels and releases the wait without joining an attempt body.
 
 **Selection never cancels the wait.** A winning timer in
 `race([processes.await(job), sleep(10_000)])` leaves the losing wait **admitted
@@ -977,7 +1023,7 @@ what `await handle`".
 
 `processes.await` is admitted as a group
 tool child whose attempt parks on the Durable Wait at once, so there is no
-attempt body for a cancel grace to interrupt; selection leaves it admitted, and
+attempt body to join at close; selection leaves it admitted, and
 the opener's close cancels and releases the wait without cancelling the
 process.
 
@@ -1049,15 +1095,15 @@ both.
 | W4 | after a child settled and ranked, before the opener consumed it | The rank is durable; replay serves rank `consumed + 1` and yields the same settlement. |
 | W5 | after the opener consumed the winner and checkpointed past the aggregate, losers in flight | Losers are recovered under the live opener. This is the window Endpoint B-prime would have abandoned. |
 | W6 | after a loser's final attempt record committed, before its in-memory commit notification was published | The record is **protected** (§4). Recovery finishes the drain; the missing notification is not evidence of a lost commit. |
-| W7 | after the final record committed, before its intents drained | Recovery finishes the drain and realizes the declared intents. |
+| W7 | after the final record committed, before its intents drained | Recovery finishes the drain and realizes the declared intents — the child's own redrive, or, once its invocation is gone, a successor draining the final the point retained (§5). |
 | W8 | after intents realized, before the opener incorporated them | Recovery reconstructs the recorded child outcomes and follows §6's observation protocol. Realization alone does not advance the prefix; no later settlement is added retroactively. |
 | W9 | **closing recorded, before any cancel was issued** | Recovery resumes closing. No child is retried as though the opener were live, and the recorded terminal disposition is reused rather than re-decided. |
 | W10 | **all drains complete, before the terminal/accounting commit** | Recovery resumes at finalization step 2 (§7). Obligations are not re-run and usage is not double-counted. |
 | W11 | **terminal/accounting committed, before parent-end recording and retirement** | Recovery resumes at step 3, then step 4. Both are idempotent; ADR 0094's own commit-to-ledger window is the same shape. |
-| W12 | close deadline expires with an attempt still draining | The attempt is logically cancelled; **closing stays recorded** and the work driver rediscovers it. No ordinary terminal is committed that would fence out remaining obligations. |
+| W12 | closing recorded with a committed child still draining | Recovery finishes every protected committed obligation; **closing stays recorded** until they finish. Finalization waits at the drain barrier before committing the opener's outcome and accounting. |
 | W13 | segment handover: continuation committed, successor not started | ADR 0025's three handover requirements apply unchanged, and outstanding children are reattached by the successor (§8). Handover does not enter closing. |
 | W14 | child handler death with the opener alive | The child invocation is retried or reattached by invocation id. Abandonment is never inferred from a dead handler. |
-| W15 | attach retention expired before the successor attached | A typed recovery failure. Never a re-execution of an opaque tool body, never a synthesized terminal. |
+| W15 | attach retention expired before the successor attached | Where no final is committed, the typed recovery failure. A committed final wins: the successor drains and seats a committed tool final from its retained drain input, and reports any other it cannot realize lost by name (§5). Never a re-execution of an opaque tool body, never a synthesized success. |
 | W16 | session delete requested while the group is accepted or closing | Refused until settled (§7). |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
 | W18 | OS process death | No host holds group state only in memory (§14), so process death is worker loss: recovery reads the journal. |

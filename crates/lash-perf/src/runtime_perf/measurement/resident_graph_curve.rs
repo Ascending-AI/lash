@@ -382,7 +382,7 @@ mod commit_scaling_tests {
             state,
             state.policy.clone(),
             turn,
-            state.protocol_turn_options.clone(),
+            state.effective_protocol_turn_options(),
             base_graph.clone(),
             messages,
         );

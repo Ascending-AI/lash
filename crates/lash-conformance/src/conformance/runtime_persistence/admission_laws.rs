@@ -257,22 +257,24 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
     }
 }
 
-/// FIG-3946, the terminal-write invariant extended to addressed input: no
-/// open row is bound to, or addressed to a turn of, a root with terminal
-/// evidence. The turns a root ends are its own physical turns and the turn
-/// each member of its admission was accepted under (the member's source
-/// key): a member composed into this root never runs as a root of its own.
-/// Its terminal write applies the root's disposition to open active-turn
-/// input addressed to any of them. `Defer`, with no cancellation recorded,
-/// re-opens the row as next-turn input at its own position, and the next
-/// root admits it; a recorded `Drop` withdraws the addressed host input and
-/// records it on the request's outcome. Input addressed to a turn the root
-/// never composed is left alone.
+/// FIG-3946, the terminal-write invariant extended to addressed input: every
+/// open row addressed to a turn of a root with terminal evidence is
+/// next-turn input. The turns a root ends are its own physical turns and the
+/// turn each member of its admission was accepted under (the member's source
+/// key): a member composed into this root never runs as a root of its own,
+/// so input addressed to it is accepted while the root runs. Its terminal
+/// write applies the root's disposition to that input. `Defer`, with no
+/// cancellation recorded, writes nothing: the row keeps its submitted
+/// delivery and is next-turn input by rule at its own position (ADR 0101
+/// §5.1), and the next root admits it; a recorded `Drop` withdraws the
+/// addressed host input and records it on the request's outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn RuntimeStore>) {
+pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
+    store: Arc<dyn RuntimeStore>,
+) {
     let session = SessionId::from("addressed-to-ended-root");
     for (case, disposition) in [
         ("defer", crate::TurnCancelUndeliveredInputPolicy::Defer),
@@ -298,6 +300,21 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
             pending_next_turn_input_draft(&session, "member").with_source_key(member_turn.as_str()),
         )
         .await;
+        let fence = seal_drive_fence_for_test(&store, &session, &root).await;
+        let admission = admitted_root(
+            &store,
+            &fence,
+            &root,
+            AdmittedHead::Input(head.input_id.clone()),
+        )
+        .await;
+        assert_eq!(
+            admission.input_ids(),
+            vec![head.input_id.clone(), member.input_id.clone()],
+            "{case}: the root composes the member's acceptance"
+        );
+
+        // While the root runs, input may address any turn it runs.
         let addressed = enqueue(pending_active_turn_input_draft(
             &session,
             &member_turn,
@@ -319,31 +336,9 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
             "addressed to the root's own turn",
         ))
         .await;
-        let elsewhere_turn = TurnId::from(format!("{case}-uncomposed-turn"));
-        let elsewhere = enqueue(pending_active_turn_input_draft(
-            &session,
-            &elsewhere_turn,
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "addressed to a turn no root composed",
-        ))
-        .await;
-        let swept = [&addressed, &follow_on, &own]
-            .map(|input| input.input_id.clone())
-            .to_vec();
+        let addressed_rows = [&addressed, &follow_on, &own];
+        let swept = addressed_rows.map(|input| input.input_id.clone()).to_vec();
 
-        let fence = seal_drive_fence_for_test(&store, &session, &root).await;
-        let admission = admitted_root(
-            &store,
-            &fence,
-            &root,
-            AdmittedHead::Input(head.input_id.clone()),
-        )
-        .await;
-        assert_eq!(
-            admission.input_ids(),
-            vec![head.input_id.clone(), member.input_id.clone()],
-            "{case}: the root composes the member's acceptance, and no addressed input"
-        );
         let address = crate::TurnAddress::new(session.clone(), TurnId::from(root.as_str()));
         if disposition == crate::TurnCancelUndeliveredInputPolicy::Drop {
             store
@@ -360,50 +355,28 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
             .list_pending_turn_inputs(&session)
             .await
             .expect("list inputs");
-        let ended = [
-            TurnId::from(root.as_str()),
-            TurnId::from(format!("{case}-head-turn")),
-            member_turn.clone(),
-        ];
         for read in &pending {
-            if let crate::TurnInputState::PendingActive(ingress) = &read.input.state {
-                assert!(
-                    !ended.contains(
-                        &lash_core::store::PhysicalTurn::split_turn_id(&ingress.turn_id).0
-                    ),
-                    "{case}: {} is still addressed to {}, a turn of an ended root",
-                    read.input.input_id,
-                    ingress.turn_id
-                );
-            }
+            assert!(
+                read.input.state.is_next_turn_input(None),
+                "{case}: {} is open and addressed to a turn of an ended root, so it is \
+                 next-turn input: {:?}",
+                read.input.input_id,
+                read.input.state
+            );
         }
-        let still_elsewhere = pending
-            .iter()
-            .find(|read| read.input.input_id == elsewhere.input_id)
-            .expect("input addressed elsewhere is still pending");
-        assert!(
-            matches!(
-                &still_elsewhere.input.state,
-                crate::TurnInputState::PendingActive(ingress) if ingress.turn_id == elsewhere_turn
-            ) && matches!(
-                still_elsewhere.status,
-                crate::PendingTurnInputReadStatus::Open
-            ),
-            "{case}: input addressed to a turn no ended root composed is untouched: {:?}",
-            still_elsewhere.input.state
-        );
 
         match disposition {
             crate::TurnCancelUndeliveredInputPolicy::Defer => {
-                for input in &swept {
+                for input in addressed_rows {
                     let read = pending
                         .iter()
-                        .find(|read| read.input.input_id == *input)
+                        .find(|read| read.input.input_id == input.input_id)
                         .expect("a deferred input is still pending");
                     assert!(
-                        read.input.state.kind() == crate::TurnInputStateKind::DeferredNextTurn
+                        read.input.state == input.state
                             && matches!(read.status, crate::PendingTurnInputReadStatus::Open),
-                        "defer: {input} is open next-turn input again: {:?}",
+                        "defer: {} is open with its submitted delivery: {:?}",
+                        input.input_id,
                         read.input.state
                     );
                 }
@@ -417,7 +390,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn 
                 assert_eq!(
                     next.input_ids(),
                     swept,
-                    "defer: the next root admits the re-opened input at its own positions"
+                    "defer: the next root admits the deferred input at its own positions"
                 );
                 end_root(
                     &store,

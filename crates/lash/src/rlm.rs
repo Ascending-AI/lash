@@ -1,4 +1,4 @@
-use crate::support::{EmbedError, ProtocolTurnOptions, Result, SessionError};
+use crate::support::{ProtocolTurnOptions, Result};
 use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
@@ -61,9 +61,9 @@ fn with_rlm_termination(
 /// configuration, or it labels the wrong value precisely in the case the label
 /// exists to disambiguate.
 ///
-/// The write half of the pair is the session config patch: state the facts
-/// with [`rlm_session_config_patch`] and apply it with
-/// [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update).
+/// The facts are recorded when the session is created, from the creator's
+/// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and no config command
+/// changes them (FIG-4379).
 ///
 /// The read is strict (FIG-1979): a bag that does not decode is an error, not
 /// an empty config. A swallowed decode failure reads as "this session recorded
@@ -89,20 +89,17 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 /// The durable RLM facts of an opened session, read as recorded (ADR 0066).
 ///
 /// A session's RLM facts are baked in when it is created, from the creator's
-/// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and a reopen never
-/// changes them (FIG-4099). Every later change is the one durable config
-/// command: [`rlm_session_config_patch`] states the facts, and
-/// [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update) applies
-/// them as a guarded set-if-unset — a fact is written only where the session
-/// recorded nothing, restating a recorded fact is a no-op, and a *different*
-/// value is refused with the typed [`RlmSessionConfigConflict`]
-/// ([`rlm_session_config_conflict`] reads it off the error). A host that
-/// wants a fact *asserted* compares [`RlmSessionExt::rlm_config`] against
-/// what it requires and refuses loudly.
+/// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and neither a reopen
+/// nor a config command changes them (FIG-4099, FIG-4379): a turn restates
+/// them through its run's protocol turn options. The one RLM setting a
+/// session changes is its render preferences, through the config command
+/// [`SetRlmRender`]. A host that wants a fact *asserted* compares
+/// [`RlmSessionExt::rlm_config`] against what it requires and refuses
+/// loudly.
 ///
 /// The session's dialect is not among these facts: the host selects it where
 /// it constructs the RLM protocol, the session records its language id when
-/// it materializes, and a host that selects another dialect is refused when it
+/// it is created, and a host that selects another dialect is refused when it
 /// reopens the session (ADR 0096).
 #[cfg(feature = "rlm")]
 pub trait RlmSessionExt {
@@ -118,39 +115,6 @@ impl RlmSessionExt for crate::LashSession {
         &self,
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError> {
         self.read_view().rlm_config()
-    }
-}
-
-/// A session config patch that states `config`'s RLM facts, and nothing else
-/// (FIG-4099).
-///
-/// Apply it with [`SessionConfigAdmin::update`](crate::admin::SessionConfigAdmin::update);
-/// a stated fact that conflicts with the recorded one is refused typed, and
-/// [`rlm_session_config_conflict`] reads the conflict off the error.
-#[cfg(feature = "rlm")]
-pub fn rlm_session_config_patch(
-    config: &lash_rlm_types::RlmSessionConfig,
-) -> Result<crate::SessionConfigPatch> {
-    let plugin_options = lash_core::PluginOptions::typed(
-        RLM_PROTOCOL_PLUGIN_ID,
-        lash_rlm_types::RlmCreateExtras::from(config),
-    )
-    .map_err(EmbedError::ProtocolTurnOptions)?;
-    Ok(crate::SessionConfigPatch {
-        plugin_options: Some(plugin_options),
-        ..crate::SessionConfigPatch::default()
-    })
-}
-
-/// The RLM fact conflict an [`update`](crate::admin::SessionConfigAdmin::update) was
-/// refused with, if that is why it was refused.
-#[cfg(feature = "rlm")]
-pub fn rlm_session_config_conflict(
-    error: &EmbedError,
-) -> Option<&lash_rlm_types::RlmSessionConfigConflict> {
-    match error {
-        EmbedError::Session(SessionError::SessionConfigRefused(refusal)) => refusal.downcast_ref(),
-        _ => None,
     }
 }
 
@@ -182,14 +146,18 @@ pub use lash_protocol_rlm::{
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
+/// The RLM protocol's config owner and its one command (FIG-4379).
+pub use lash_protocol_rlm::{
+    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, SetRlmRender,
+};
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local
 /// runtime configuration; durable session seeds use [`RlmSeed`].
 pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig,
-    RlmSessionConfigConflict, RlmTermination, RlmTurnOptions,
+    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig, RlmTermination,
+    RlmTurnOptions,
 };
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
 pub use lashlang::LinkedModule;
@@ -233,20 +201,17 @@ fn rlm_termination_options(
 /// One shared pool for RLM cells, process bodies, and pure language work.
 ///
 /// SDK releases attach `lash-sdk-worker-VERSION-TARGET.tar.gz` and its SHA256.
-/// The archive includes `bin/lash-vm-worker`, `manifest.json` with its compiled
-/// build identity, and the exact SDK source tree under `sdk/`. Build the host
-/// against that tree with the pinned compiler, release profile and target,
-/// without the `testing` feature. Copy the helper beside the host executable,
-/// or select its absolute path with [`WorkerEntry::helper`]. A mismatched helper
-/// fails its handshake; there is no fallback. Standalone registry consumption
-/// of the build identity is tracked by FIG-4408.
+/// Pass the extracted `bin/lash-vm-worker` path to [`WorkerService::subprocess`]
+/// or [`WorkerEntry::helper`]. Hosts may build the SDK from registry packages.
+/// The manifest records protocol and crate diagnostics; crate versions never
+/// decide compatibility. Pool admission refuses an unsupported wire version.
+/// [`WorkerService::default`] explicitly defaults to the helper beside the host
+/// executable and does not search PATH or a repository.
 ///
 /// A single-binary host calls [`worker_entry_with_frontend`] as its first action,
 /// before runtime creation, credentials, stores or providers, and returns from
-/// main when that call returns `true`. It then selects [`WorkerEntry::reexec`]
-/// using the same immutable compiled identity. `examples/worker_host.rs` proves
-/// this bootstrap with the facade's TypeScript frontend. Host-owned frontends
-/// should include their own compiled source identity in the identity they pass.
+/// main when that call returns `true`. It selects [`WorkerEntry::reexec`].
+/// `examples/worker_host.rs` proves this bootstrap with the TypeScript frontend.
 /// The child starts with an empty environment and closes inherited descriptors.
 /// The language bounds guest authority; the process contains native crashes.
 /// A native escape still has the worker user's OS access.
@@ -259,5 +224,5 @@ pub use lash_vm_client::{
 /// A source frontend lives in the worker entry the dialect selects.
 pub use lash_vm_worker::{
     Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal,
-    build_identity as worker_build_identity, worker_entry_with_frontend,
+    worker_entry_with_frontend,
 };

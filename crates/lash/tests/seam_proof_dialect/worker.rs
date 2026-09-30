@@ -4,11 +4,8 @@
 )]
 
 fn main() {
-    lash_vm_worker::worker_entry_with_frontend(
-        lash_vm_worker::build_identity(),
-        &SeamProofFrontend,
-    )
-    .expect("seam proof worker entry");
+    lash_vm_worker::worker_entry_with_frontend(&SeamProofFrontend)
+        .expect("seam proof worker entry");
 }
 
 use lash_vm_worker::{Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal};

@@ -75,6 +75,8 @@ mod superseded_root;
 pub use superseded_root::*;
 mod host_commands;
 pub use host_commands::*;
+mod command_budget;
+pub use command_budget::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -1751,9 +1753,13 @@ macro_rules! frame_open_redrive_tests {
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,
             a_refused_frame_commit_leaves_nothing_visible,
+            a_lane_less_append_names_the_bound_head_owner,
             terminal_callback_append_does_not_deadlock,
             dirty_park_while_busy_is_recoverable_and_loses_nothing,
-            command_cancellation_before_admission_withdraws_it);
+            plugin_state_dirty_park_reparks_from_the_recorded_head,
+            command_cancellation_before_admission_withdraws_it,
+            a_lowered_budget_refuses_a_stranded_command_once_per_drive,
+            raising_the_budget_settles_a_stranded_command);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,
                 host_append_waits_for_the_bound_turn, None),
@@ -1778,7 +1784,15 @@ macro_rules! frame_open_redrive_tests {
             (host_frame_open_crashed_before_its_commit_opens_once,
                 host_frame_open_applies_at_the_boundary, Some(BeforeCommit)),
             (host_frame_open_crashed_after_its_commit_opens_once,
-                host_frame_open_applies_at_the_boundary, Some(AfterCommit)));
+                host_frame_open_applies_at_the_boundary, Some(AfterCommit)),
+            (host_cancel_settles_an_admitted_plugin_task_cancelled,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, None),
+            (host_cancelled_plugin_task_crashed_after_its_lane_read_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(AfterLaneRead)),
+            (host_cancelled_plugin_task_crashed_before_its_commit_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(BeforeCommit)),
+            (host_cancelled_plugin_task_crashed_after_its_commit_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(AfterCommit)));
     };
     (@commanded [$($attrs:tt)*] $fixture:block; ($name:ident, $law:ident, None) $(, $rest:tt)*) => {
         $($attrs)*

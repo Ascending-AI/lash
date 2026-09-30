@@ -578,9 +578,9 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessExecutionContext::with_execution_write_authority;
     // W0196: lash::process::ProcessExecutionEnvSpec::from_store_bytes [function]
     let _ = lash::process::ProcessExecutionEnvSpec::from_store_bytes;
-    // W0197: lash::process::ProcessExecutionEnvSpec::plugin_options [field]
+    // W0197: lash::process::ProcessExecutionEnvSpec::plugin_config [field]
     field_witness(|value: &lash::process::ProcessExecutionEnvSpec| {
-        let _ = &value.plugin_options;
+        let _ = &value.plugin_config;
     });
     // W0198: lash::process::ProcessExecutionEnvSpec::policy [field]
     field_witness(|value: &lash::process::ProcessExecutionEnvSpec| {

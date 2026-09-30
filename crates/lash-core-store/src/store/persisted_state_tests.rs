@@ -13,8 +13,8 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
-            protocol_turn_options: None,
             config_revision: 0,
+            plugin_config: crate::PluginConfig::default(),
         },
         None,
     )
@@ -170,64 +170,6 @@ fn session_meta_rejects_removed_observer_inheritance() {
             .contains("unknown field `observer_inheritance`"),
         "removed selector must be named: {error}"
     );
-}
-
-fn options(payload: serde_json::Value) -> crate::ProtocolTurnOptions {
-    crate::ProtocolTurnOptions::from_payload(payload)
-}
-
-fn head_config_with_protocol_turn_options(
-    config_options: Option<crate::ProtocolTurnOptions>,
-) -> crate::PersistedSessionConfig {
-    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
-    config.protocol_turn_options = config_options;
-    config
-}
-
-fn checkpoint_with_protocol_turn_options(
-    options: crate::ProtocolTurnOptions,
-) -> HydratedSessionCheckpoint {
-    let mut state =
-        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    state.checkpoint_components =
-        crate::runtime::state::RuntimeCheckpointComponents::complete_empty();
-    state.protocol_turn_options = options;
-    build_checkpoint_from_persisted_state(&state, crate::store::FleetFormat::current())
-        .expect("build fixture checkpoint")
-}
-
-/// FIG-2479: the commanded head value (SESSION_HEAD_META v6) is authoritative
-/// over the checkpoint's persisted-turn-state copy on cold load.
-#[test]
-fn head_protocol_turn_options_override_the_checkpoint_copy_on_load() {
-    let head_options = options(serde_json::json!({"dialect": "head-settled"}));
-    let checkpoint = checkpoint_with_protocol_turn_options(options(
-        serde_json::json!({"dialect": "stale-checkpoint-copy"}),
-    ));
-    let state = persisted_session_state_from_head(
-        SessionId::from("stored"),
-        3,
-        head_config_with_protocol_turn_options(Some(head_options.clone())),
-        Some(checkpoint),
-    )
-    .expect("valid persisted state");
-    assert_eq!(state.protocol_turn_options, head_options);
-}
-
-/// A pre-v6-content head (`protocol_turn_options: None`) keeps the legacy
-/// checkpoint fallback.
-#[test]
-fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
-    let checkpoint_options = options(serde_json::json!({"dialect": "checkpoint-copy"}));
-    let checkpoint = checkpoint_with_protocol_turn_options(checkpoint_options.clone());
-    let state = persisted_session_state_from_head(
-        SessionId::from("stored"),
-        3,
-        head_config_with_protocol_turn_options(None),
-        Some(checkpoint),
-    )
-    .expect("valid persisted state");
-    assert_eq!(state.protocol_turn_options, checkpoint_options);
 }
 
 /// Refusal witness (FIG-1123): the immediate predecessor head is refused by

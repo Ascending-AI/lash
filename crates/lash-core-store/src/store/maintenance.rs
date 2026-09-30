@@ -48,11 +48,14 @@ pub struct GcReport {
 /// `removed_node_count` counts the tombstoned graph-node rows that were
 /// physically deleted from the store. `removed_pending_turn_input_tombstone_count`
 /// counts terminal pending-input evidence rows pruned by host-scheduled
-/// retention. Returned so hosts can emit metrics.
+/// retention. `removed_queued_work_tombstone_count` counts the terminal
+/// queued-work batches (ADR 0101 §8) it removed with their items. Returned so
+/// hosts can emit metrics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VacuumReport {
     pub removed_node_count: usize,
     pub removed_pending_turn_input_tombstone_count: usize,
+    pub removed_queued_work_tombstone_count: usize,
 }
 
 /// Blob outcomes from one session-owner delete cascade.
@@ -132,7 +135,9 @@ impl MaintenanceReport for GcReport {
 
 impl MaintenanceReport for VacuumReport {
     fn reclaimed_count(&self) -> usize {
-        self.removed_node_count + self.removed_pending_turn_input_tombstone_count
+        self.removed_node_count
+            + self.removed_pending_turn_input_tombstone_count
+            + self.removed_queued_work_tombstone_count
     }
 }
 

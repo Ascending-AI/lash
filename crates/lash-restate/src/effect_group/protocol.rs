@@ -78,6 +78,15 @@ pub(super) async fn load_membership(
         })
 }
 
+/// The final a child's winning commit retained (ADR 0099 §5), read only by a
+/// later commit of the same child that finds the point taken.
+pub(super) async fn load_committed_final(
+    ctx: &ObjectContext<'_>,
+    key: &str,
+) -> Result<Option<EffectGroupCommittedFinal>, TerminalError> {
+    object_state::get_stamped(ctx, key, &EFFECT_GROUP_STATE_FORMATS).await
+}
+
 pub(super) async fn load_index_shared(
     ctx: &SharedObjectContext<'_>,
 ) -> Result<Option<EffectGroupStateRecord>, TerminalError> {
@@ -110,7 +119,6 @@ mod tests {
                         wake: lash_core::GroupWakePolicy::All,
                         loser_disposition: LoserPolicy::RunToCompletion,
                         replay_keys: vec!["child-0".to_owned()],
-                        wait_scope: ExecutionScope::runtime_operation("group"),
                         opener: lash_core::AdmittedScope::turn("session", "turn"),
                     },
                     next_rank: 0,

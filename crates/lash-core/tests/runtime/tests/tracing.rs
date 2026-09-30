@@ -110,26 +110,27 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         serializations_after_first,
         "an identical composition must not serialize schemas or allocate a fresh schema Vec"
     );
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(
-                lash_core::ModelSpec::builder("different-route")
-                    .context_window_tokens(150_000)
-                    .build()
-                    .expect("route-noise model"),
-            ),
-            ..Default::default()
-        })
-        .await
-        .expect("apply route-noise model");
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelSpec::builder("different-route")
+                .context_window_tokens(150_000)
+                .build()
+                .expect("route-noise model"),
+        }),
+    )
+    .await;
     run_composition_probe_turn(&double, &mut runtime, &TurnId::from("route-capacity-noise")).await;
-    runtime
-        .add_prompt_contribution(lash_core::PromptContribution::guidance(
-            "Changed policy",
-            "This text proves the rendered prompt changed.",
-        ))
-        .await
-        .expect("change session prompt layer");
+    crate::runtime_support::configure_storeless(
+        &mut runtime,
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
+            contribution: lash_core::PromptContribution::guidance(
+                "Changed policy",
+                "This text proves the rendered prompt changed.",
+            ),
+        }),
+    )
+    .await;
     run_composition_probe_turn(&double, &mut runtime, &TurnId::from("changed-prompt")).await;
 
     let entries = composition_change_entries(&trace_path);

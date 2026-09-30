@@ -6,7 +6,7 @@
 //! disagreement is refused terminally rather than indexed into a panic inside
 //! a handler.
 
-use lash_core::{ExecutionScope, GroupWakePolicy, LoserPolicy};
+use lash_core::{GroupWakePolicy, LoserPolicy};
 
 use crate::effect_group::{EffectGroupMembership, EffectGroupShape};
 
@@ -15,7 +15,6 @@ fn shape(replay_keys: &[&str]) -> EffectGroupShape {
         wake: GroupWakePolicy::All,
         loser_disposition: LoserPolicy::RunToCompletion,
         replay_keys: replay_keys.iter().map(|key| (*key).to_owned()).collect(),
-        wait_scope: ExecutionScope::runtime_operation("group-key"),
         opener: lash_core::AdmittedScope::turn("session", "turn"),
     }
 }

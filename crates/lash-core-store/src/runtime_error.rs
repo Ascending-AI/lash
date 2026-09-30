@@ -230,6 +230,10 @@ pub enum RuntimeErrorCode {
     /// An input addressed to a running turn carried an explicit run spec
     /// that differs from the turn's (FIG-3838): refused before acceptance.
     RunSpecMismatch,
+    /// An input addressed a turn that is neither its session's running turn
+    /// nor one with its final commit recorded (ADR 0101 §5.1): refused before
+    /// acceptance, with no row and no sequence number.
+    TurnAddressUnknown,
     Plugin,
     QueuedWork,
     /// One queued row alone renders larger than the whole model context window,
@@ -383,6 +387,12 @@ pub enum RuntimeErrorCode {
     /// original's retention expired; the retained invocation is gone and the
     /// child is never re-run under a fresh identity (ADR 0099 §8).
     RuntimeEffectGroupChildAttachExpired,
+    /// A child's final was committed at the group's durable linearization
+    /// point by an invocation that ended before its seat, and the invocation
+    /// seating it cannot realize that final: the committed outcome and any
+    /// intents it declared are reported lost rather than replaced by the
+    /// seating invocation's own refusal (ADR 0099 §5).
+    RuntimeEffectGroupChildCommittedFinalLost,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -491,6 +501,7 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }) => {
@@ -498,6 +509,9 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
         }
         err @ crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. } => {
             RuntimeError::new(RuntimeErrorCode::RunSpecMismatch, err.to_string())
+        }
+        err @ crate::store::StoreError::IngressTurnAddressUnknown { .. } => {
+            RuntimeError::new(RuntimeErrorCode::TurnAddressUnknown, err.to_string())
         }
         err @ (crate::store::StoreError::SessionClosing { .. }
         | crate::store::StoreError::SessionDeleted { .. }) => runtime_error_from_store_commit(err),
@@ -512,10 +526,12 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }
-        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }) => {
+        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }
+        | crate::store::StoreError::IngressTurnAddressUnknown { .. }) => {
             runtime_error_from_turn_input_admission(err)
         }
         crate::store::StoreError::Contended => RuntimeError::new(
@@ -676,6 +692,7 @@ impl RuntimeErrorCode {
             Self::OutputRetentionFailed => "output_retention_failed",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
+            Self::TurnAddressUnknown => "turn_address_unknown",
             Self::Plugin => "plugin",
             Self::QueuedWork => "queued_work",
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
@@ -753,6 +770,9 @@ impl RuntimeErrorCode {
             }
             Self::RuntimeEffectGroupChildAttachExpired => {
                 "runtime_effect_group_child_attach_expired"
+            }
+            Self::RuntimeEffectGroupChildCommittedFinalLost => {
+                "runtime_effect_group_child_committed_final_lost"
             }
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
@@ -931,6 +951,7 @@ impl RuntimeErrorCode {
         Self::OutputRetentionFailed,
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
+        Self::TurnAddressUnknown,
         Self::Plugin,
         Self::QueuedWork,
         Self::QueuedWorkRowExceedsContextWindow,
@@ -992,6 +1013,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupChildCancelDecided,
         Self::RuntimeEffectGroupChildAttachExpired,
+        Self::RuntimeEffectGroupChildCommittedFinalLost,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::AggregateAwaitUnsettled,
@@ -1130,6 +1152,7 @@ impl RuntimeErrorCode {
             "output_retention_failed" => Self::OutputRetentionFailed,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
+            "turn_address_unknown" => Self::TurnAddressUnknown,
             "plugin" => Self::Plugin,
             "queued_work" => Self::QueuedWork,
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
@@ -1206,6 +1229,9 @@ impl RuntimeErrorCode {
             }
             "runtime_effect_group_child_attach_expired" => {
                 Self::RuntimeEffectGroupChildAttachExpired
+            }
+            "runtime_effect_group_child_committed_final_lost" => {
+                Self::RuntimeEffectGroupChildCommittedFinalLost
             }
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
@@ -1498,6 +1524,31 @@ impl RuntimeError {
         )
     }
 
+    /// The typed refusal of a config transaction whose resolution a build
+    /// would run with other reducers than it was admitted under (FIG-4379):
+    /// an owner's reducer implementation is part of the executable identity
+    /// an unresolved transaction binds. Its command root parks before any
+    /// reducer runs, for a build that runs the admitted reducers.
+    pub fn retired_config_reducer(owner: &str, recorded: &str, current: Option<&str>) -> Self {
+        let current_spelling = current.unwrap_or("none");
+        Self::refused_generation(
+            ExecutableGenerationRefusal {
+                found: Some(ExecutableGeneration::new(format!(
+                    "config-owner:{owner}:{recorded}"
+                ))),
+                current: current.map(|current| {
+                    ExecutableGeneration::new(format!("config-owner:{owner}:{current}"))
+                }),
+            },
+            format!(
+                "the config transaction was admitted under config owner `{owner}`'s reducer \
+                 implementation {recorded}, and this build runs {current_spelling}: its \
+                 resolution was refused before any reducer ran; resolve it under a build that \
+                 runs {recorded}, or cancel it"
+            ),
+        )
+    }
+
     fn refused_generation(refusal: ExecutableGenerationRefusal, message: String) -> Self {
         let mut error = Self::new(RuntimeErrorCode::RetiredGeneration, message);
         error.executable_generation_refusal = Some(Box::new(refusal));
@@ -1753,7 +1804,9 @@ impl RuntimeEffectControllerError {
     /// whose recorded renderer is unavailable, and a presentation or language
     /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
-    /// definition lookup, FIG-3838), a root's scope close and a session's close,
+    /// definition lookup, FIG-3838), a config transaction's resolution under
+    /// reducers other than it was admitted with (FIG-4379), a root's scope
+    /// close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
     /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
     /// recovery root's decision (FIG-4361), and a process command
@@ -1777,6 +1830,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
+                | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::AdmitTriggerDelivery

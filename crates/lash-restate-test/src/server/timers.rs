@@ -1,7 +1,7 @@
 //! Virtual time: timers, their firing, and the inactivity timeout.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Shared;
 use super::model::{InvKey, Status, TimerAction};
@@ -9,6 +9,41 @@ use crate::protocol::MessageType;
 use crate::protocol::generated::{self as pb, notification_template};
 
 use super::processor::*;
+
+/// Corresponding virtual and wall times at the last virtual-time move.
+pub struct TimeAnchor {
+    virtual_ms: u64,
+    wall_us: u128,
+    instant: Instant,
+}
+
+impl TimeAnchor {
+    pub fn new(virtual_ms: u64) -> Self {
+        let wall_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_micros())
+            .unwrap_or(0);
+        Self {
+            virtual_ms,
+            wall_us,
+            instant: Instant::now(),
+        }
+    }
+
+    pub fn wall_flowed_ms(&self) -> u64 {
+        let elapsed = u64::try_from(self.instant.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.virtual_ms.saturating_add(elapsed)
+    }
+
+    /// Translate the SDK's absolute wall deadline without discarding time
+    /// spent issuing or delivering its frame. Round up to the next virtual
+    /// millisecond so the timer cannot fire before the stamped deadline.
+    pub fn deadline_ms(&self, wall_epoch_ms: u64) -> u64 {
+        let remaining_us = (u128::from(wall_epoch_ms) * 1000).saturating_sub(self.wall_us);
+        let remaining_ms = u64::try_from(remaining_us.div_ceil(1000)).unwrap_or(u64::MAX);
+        self.virtual_ms.saturating_add(remaining_ms)
+    }
+}
 
 impl State {
     // ---------------------------------------------------------------------
@@ -80,6 +115,9 @@ impl State {
             };
             let from = self.now_ms;
             self.now_ms = self.now_ms.max(fire_at);
+            if self.now_ms != from {
+                self.anchor = TimeAnchor::new(self.now_ms);
+            }
             sh.time_moved(self.now_ms);
             self.expire_inactive(sh, from);
             self.fire(sh, action);
@@ -87,7 +125,9 @@ impl State {
         }
         let from = self.now_ms;
         self.now_ms = self.now_ms.max(target_ms);
-        self.anchor = (self.now_ms, std::time::Instant::now());
+        if self.now_ms != from {
+            self.anchor = TimeAnchor::new(self.now_ms);
+        }
         sh.time_moved(self.now_ms);
         self.expire_inactive(sh, from);
         self.stats.timers_fired += fired as u64;
@@ -172,59 +212,61 @@ pub fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// The SDK stamps sleeps and delayed sends with wall-clock epoch
-/// milliseconds (`SystemTime::now() + duration`, truncated). The server
-/// keeps virtual time, so it recovers the duration the handler asked for by
-/// measuring the stamp against the wall clock at `received_us` — when the
-/// attempt task read the frame, before it waited for the server lock — and
-/// re-anchors it on the virtual clock.
-///
-/// Truncation and the frame's transit make the measured value read short of
-/// the requested duration. The server picks the roundest candidate the
-/// reading may fall short of (a whole second within 50 ms, then a multiple
-/// of 100 ms within 5 ms, of 10 ms within 2 ms, else the millisecond), so
-/// the durations handlers use recover exactly and one seed fires timers in
-/// one order.
-pub fn wall_delay_ms(wall_epoch_ms: u64, received_us: u128) -> u64 {
-    let target_us = u128::from(wall_epoch_ms) * 1000;
-    snap_duration_ms(target_us.saturating_sub(received_us))
-}
-
-/// How far short of the requested duration a measured one may read, by the
-/// granularity it snaps to: a descheduled attempt task reads a frame late,
-/// and the rounder the duration, the later it may read and still be taken
-/// for what the handler asked.
-const DURATION_SNAP_WINDOWS_US: [(u128, u128); 4] = [
-    (1_000_000, 50_000),
-    (100_000, 5_000),
-    (10_000, 2_000),
-    (1_000, 1_000),
-];
-
-fn snap_duration_ms(measured_us: u128) -> u64 {
-    for (granularity_us, window_us) in DURATION_SNAP_WINDOWS_US {
-        let candidate = measured_us.div_ceil(granularity_us) * granularity_us;
-        if candidate <= measured_us + window_us {
-            return u64::try_from(candidate / 1000).unwrap_or(u64::MAX);
-        }
-    }
-    u64::try_from(measured_us.div_ceil(1000)).unwrap_or(u64::MAX)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::snap_duration_ms;
+    use super::TimeAnchor;
+    use std::time::Instant;
 
     #[test]
-    fn measured_durations_snap_to_what_the_handler_asked_for() {
-        assert_eq!(snap_duration_ms(59_999_050), 60_000);
-        assert_eq!(snap_duration_ms(59_998_200), 60_000);
-        assert_eq!(snap_duration_ms(24_100), 25);
-        assert_eq!(snap_duration_ms(99_300), 100);
-        assert_eq!(snap_duration_ms(1_234_000), 1_234);
-        assert_eq!(snap_duration_ms(0), 0);
-        assert_eq!(snap_duration_ms(59_993_000), 60_000);
-        assert_eq!(snap_duration_ms(94_500), 95);
-        assert_eq!(snap_duration_ms(949_000), 950);
+    fn sdk_deadlines_keep_the_wall_and_virtual_clock_offset() {
+        let anchor = TimeAnchor {
+            virtual_ms: 1_000,
+            wall_us: 10_000_750,
+            instant: Instant::now(),
+        };
+        for (stamp_ms, expected_ms) in [(10_400, 1_400), (10_025, 1_025), (11_234, 2_234)] {
+            assert_eq!(anchor.deadline_ms(stamp_ms), expected_ms);
+        }
+    }
+
+    #[test]
+    fn sdk_deadlines_round_up_only_to_the_next_millisecond() {
+        for (wall_us, expected_ms) in [
+            (10_000_000, 1_400),
+            (10_000_001, 1_400),
+            (10_000_999, 1_400),
+            (10_001_000, 1_399),
+        ] {
+            let anchor = TimeAnchor {
+                virtual_ms: 1_000,
+                wall_us,
+                instant: Instant::now(),
+            };
+            assert_eq!(anchor.deadline_ms(10_400), expected_ms);
+        }
+    }
+
+    #[test]
+    fn sdk_deadlines_before_the_anchor_are_already_due() {
+        let anchor = TimeAnchor {
+            virtual_ms: 1_000,
+            wall_us: 10_000_000,
+            instant: Instant::now(),
+        };
+        assert_eq!(anchor.deadline_ms(10_000), 1_000);
+        assert_eq!(anchor.deadline_ms(9_999), 1_000);
+        assert_eq!(anchor.deadline_ms(0), 1_000);
+    }
+
+    #[test]
+    fn sdk_deadlines_saturate_at_the_virtual_clock_limit() {
+        let anchor = TimeAnchor {
+            virtual_ms: u64::MAX - 1,
+            wall_us: 0,
+            instant: Instant::now(),
+        };
+        assert_eq!(anchor.deadline_ms(0), u64::MAX - 1);
+        assert_eq!(anchor.deadline_ms(1), u64::MAX);
+        assert_eq!(anchor.deadline_ms(u64::MAX), u64::MAX);
     }
 }

@@ -221,8 +221,10 @@ pub(super) async fn restate_controller_lists_and_transfers_observers_through_pro
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-list-s1"),
                 RuntimeEffectCommand::process(ProcessCommand::List {
-                    session_scope: s1.clone(),
-                    mode: lash_core::ProcessListMode::Live,
+                    selection: lash_core::ProcessListSelection::Observed {
+                        session_scope: s1.clone(),
+                        mode: lash_core::ProcessListMode::Live,
+                    },
                 }),
             ),
             registry_local_executor(registry.clone()),

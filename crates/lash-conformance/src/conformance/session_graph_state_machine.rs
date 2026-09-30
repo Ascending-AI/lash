@@ -706,6 +706,7 @@ impl SessionGraphScenario {
                 node_id: node_id.clone(),
                 relation,
                 policy: request.config.session_policy(),
+                plugin_config: Default::default(),
             })
             .await;
         if !retained {
@@ -800,6 +801,7 @@ impl SessionGraphScenario {
                 node_id: node_id.clone(),
                 relation,
                 policy: request.config.session_policy(),
+                plugin_config: Default::default(),
             })
             .await
             .map_err(|error| error.to_string())?;
@@ -1413,6 +1415,7 @@ impl SessionGraphScenario {
                 node_id: pinned_node_id.to_string().into(),
                 relation: request.relation.clone(),
                 policy: request.config.session_policy(),
+            plugin_config: Default::default(),
             })
             .await
             .map_err(|error| {
@@ -1499,7 +1502,10 @@ async fn property_runtime(
         Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
-            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            crate::plugin::SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         )),
         None => host.build_session(PluginSessionRequest::creation(
             request.session_id.clone(),
@@ -1593,8 +1599,7 @@ fn malformed_graph_append(
                 payload: crate::SessionNodePayload::FrameOpen {
                     frame_key: frame_key.clone(),
                     reason: crate::AgentFrameReason::initial(),
-                    assignment: crate::AgentFrameAssignment::from_policy(state.policy.clone()),
-                    protocol_turn_options: crate::ProtocolTurnOptions::default(),
+                    assignment: crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
                 },
             };
             crate::GraphAppend::Extend {
@@ -1627,8 +1632,7 @@ fn malformed_graph_append(
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key: resident_frame_key,
                         reason: crate::AgentFrameReason::initial(),
-                        assignment: crate::AgentFrameAssignment::from_policy(state.policy.clone()),
-                        protocol_turn_options: crate::ProtocolTurnOptions::default(),
+                        assignment: crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
                     },
                 }],
             }
@@ -1648,8 +1652,7 @@ fn malformed_graph_append(
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key,
                         reason: crate::AgentFrameReason::initial(),
-                        assignment: crate::AgentFrameAssignment::from_policy(state.policy.clone()),
-                        protocol_turn_options: crate::ProtocolTurnOptions::default(),
+                        assignment: crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
                     },
                 }],
             }

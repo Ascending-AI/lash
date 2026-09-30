@@ -26,7 +26,6 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
-            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
@@ -71,7 +70,6 @@ impl LashRuntime {
             };
         Box::pin(self.stream_turn_inner(TurnPrepareContext {
             input: input.clone(),
-            protocol_turn_options,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop: local_stop.clone(),
@@ -123,7 +121,7 @@ impl LashRuntime {
         else {
             let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
             return Box::pin(self.drive_logical_turn(
-                LogicalTurnStart::Input(input, None),
+                LogicalTurnStart::Input(input),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),
@@ -342,10 +340,17 @@ impl LashRuntime {
         if !matches!(own.status, crate::PendingTurnInputReadStatus::Open) {
             return Ok(None);
         }
+        // The owed follow-on is the turn that runs next; input addressed to
+        // it waits for its checkpoints, not for a next turn.
+        let running = self
+            .state
+            .pending_follow_on
+            .as_ref()
+            .map(|owed| &owed.follow_on_turn_id);
         let ahead = open
             .iter()
             .filter(|earlier| {
-                earlier.input.state == crate::TurnInputState::DeferredNextTurn
+                earlier.input.state.is_next_turn_input(running)
                     && earlier.input.enqueue_seq < own.input.enqueue_seq
             })
             .count();

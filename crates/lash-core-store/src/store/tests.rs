@@ -311,8 +311,7 @@ fn commit_frame_derivation_uses_last_frame_boundary_inside_append() {
         appended_frame_node_id.clone(),
         frame_key,
         crate::AgentFrameReason::continue_as(),
-        crate::AgentFrameAssignment::from_policy(state.policy.clone()),
-        state.protocol_turn_options.clone(),
+        crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
         "2026-09-12T00:00:00Z".to_string(),
     ));
     state
@@ -412,7 +411,7 @@ fn intent_hash_golden_vector() {
     // FIG-4236: the usage deltas left the intent (ADR 0125).
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5"
+        "c5bfad582497d7db6bf97fb64385f5af1ab621ee0ef8dc519944bac0288032a6"
     );
 }
 
@@ -421,7 +420,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5",
+        "c5bfad582497d7db6bf97fb64385f5af1ab621ee0ef8dc519944bac0288032a6",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -455,7 +454,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5"
+        "c5bfad582497d7db6bf97fb64385f5af1ab621ee0ef8dc519944bac0288032a6"
     );
 
     let mut with_evidence = baseline;
@@ -783,10 +782,9 @@ fn node_derivation_guard_rejects_frame_open_rogue_id() {
     nodes[0].payload = crate::SessionNodePayload::FrameOpen {
         frame_key,
         reason: crate::AgentFrameReason::initial(),
-        assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+        assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
         )),
-        protocol_turn_options: crate::ProtocolTurnOptions::default(),
     };
 
     assert!(matches!(
@@ -845,10 +843,9 @@ fn frame_node_identity_is_stable_across_operation_realization() {
             payload: crate::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 )),
-                protocol_turn_options: crate::ProtocolTurnOptions::default(),
             },
         }],
     };

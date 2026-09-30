@@ -469,6 +469,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
                     relation: crate::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                     policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                    plugin_config: Default::default(),
                 })
                 .await
                 .expect("fork the session while its frame opens");

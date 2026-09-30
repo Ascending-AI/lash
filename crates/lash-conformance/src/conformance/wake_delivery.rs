@@ -552,10 +552,17 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .queued
         .as_ref()
         .expect("first authority wake is admitted");
+    // Authority is per-item data for the drain policy, not a composition
+    // gate (ADR 0101 §5.2): the fixture's drain-all policy takes both wakes,
+    // each keeping its own authority.
     assert_eq!(
         authority_claim.batches.len(),
-        1,
-        "production wakes that differ only in elevation must not batch"
+        2,
+        "production wakes that differ only in elevation compose as one prefix"
+    );
+    assert_ne!(
+        authority_claim.batches[0].authority, authority_claim.batches[1].authority,
+        "each composed wake keeps its own authority"
     );
     assert_eq!(
         authority_claim.batches[0].authority.elevation.as_deref(),
@@ -1680,34 +1687,47 @@ async fn mixed_era_floor_and_ordering(
         );
     }
     settle_queued_batch(&target, target_session_id, &dense_batches[2].batch_id).await;
-    let settled_redelivery = target
-        .enqueue_queued_work(crate::process_wake_batch_draft(
-            crate::ProcessWakeDelivery {
-                version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-                )),
-                wake_id: "wake:mixed-era:3".to_string(),
-                target_session_id: SessionId::from(target_session_id.to_string()),
-                process_id: process_id.clone(),
-                sequence: 3,
-                event_type: "producer.wake".to_string(),
-                event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::process(process_id.clone()),
-                        "wake:mixed-era:3",
-                    )
-                    .expect("valid process wake test address"),
-                    crate::RuntimeAttribution::none(),
-                    "wake:mixed-era:3",
-                ),
-                process_caused_by: None,
-                authority: crate::QueuedWorkAuthority::default(),
-                input: "old dense wake 3".to_string(),
-                created_at_ms: 3,
-            },
-        ))
+    let settled_wake = crate::process_wake_batch_draft(crate::ProcessWakeDelivery {
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
+        wake_id: "wake:mixed-era:3".to_string(),
+        target_session_id: SessionId::from(target_session_id.to_string()),
+        process_id: process_id.clone(),
+        sequence: 3,
+        event_type: "producer.wake".to_string(),
+        event_invocation: crate::RuntimeInvocation::effect(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::process(process_id.clone()),
+                "wake:mixed-era:3",
+            )
+            .expect("valid process wake test address"),
+            crate::RuntimeAttribution::none(),
+            "wake:mixed-era:3",
+        ),
+        process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
+        input: "old dense wake 3".to_string(),
+        created_at_ms: 3,
+    });
+    // Until vacuum the settled wake's tombstone answers its redelivery.
+    let answered = target
+        .enqueue_queued_work(settled_wake.clone())
         .await
-        .expect_err("settled no-live-row wake must trip the receiver floor");
+        .expect("a settled wake's redelivery answers its tombstone");
+    assert_eq!(answered.batch_id, dense_batches[2].batch_id);
+    assert!(
+        answered.terminal.is_some(),
+        "the redelivery is the settled wake's tombstone: {answered:?}"
+    );
+    target
+        .vacuum(target_session_id)
+        .await
+        .expect("vacuum the settled wake's tombstone");
+    let settled_redelivery = target
+        .enqueue_queued_work(settled_wake)
+        .await
+        .expect_err("a vacuumed wake's redelivery must trip the receiver floor");
     assert!(
         matches!(
             settled_redelivery,

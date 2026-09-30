@@ -135,7 +135,6 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
                 .iter()
                 .map(|c| c.invocation.effect_replay_key().to_owned())
                 .collect(),
-            wait_scope: scope,
             opener: lash_core::AdmittedScope::runtime_operation(&key),
         },
         membership: EffectGroupMembership(
@@ -193,7 +192,10 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[0].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[0].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     let second: serde_json::Value = object(
@@ -201,7 +203,10 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[1].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[1].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     assert_eq!(first["type"], "committed");
@@ -280,17 +285,21 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
     )
     .await;
     assert_eq!(duplicate, EffectGroupPayloadPutResponse::Duplicate);
-    let blocker: serde_json::Value = object(
+    // A waiter at the second commit's §5 barrier: the group index answers
+    // it only once every lower commit has seated.
+    let barrier = object::<_, serde_json::Value>(
         engine,
         "EffectGroupIndex",
         &key,
-        "drain_blockers",
-        json!({"rank": second_commit}),
-    )
-    .await;
+        "await_notice",
+        json!({"type": "drained", "rank": second_commit}),
+    );
+    tokio::pin!(barrier);
     assert!(
-        blocker["type"] == "blocked" && blocker["positions"] == json!([0]),
-        "an unseated lower commit still blocks the drain after reconstruction"
+        tokio::time::timeout(std::time::Duration::from_millis(500), &mut barrier)
+            .await
+            .is_err(),
+        "an unseated lower commit still holds the barrier after reconstruction"
     );
     for position in 0..2 {
         if position == 1 {
@@ -337,15 +346,11 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
             EffectGroupRecordSettlementResponse::Duplicate { rank }
         );
     }
-    let clear: serde_json::Value = object(
-        engine,
-        "EffectGroupIndex",
-        &key,
-        "drain_blockers",
-        json!({"rank": second_commit}),
-    )
-    .await;
-    assert_eq!(clear, json!({"type": "admitted"}));
+    assert_eq!(
+        barrier.await,
+        json!({"type": "drained"}),
+        "the lower commit's seat lifts the barrier and answers its waiter"
+    );
     let ranks: EffectGroupReadRankResponse = object(
         engine,
         "EffectGroupIndex",
@@ -411,7 +416,10 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         "EffectGroupIndex",
         &key,
         "commit_child",
-        json!({"replay_key": request.shape.replay_keys[2].clone()}),
+        json!({
+            "replay_key": request.shape.replay_keys[2].clone(),
+            "committed": {"type": "held"},
+        }),
     )
     .await;
     assert_eq!(late_commit["type"], "cancel_decided");

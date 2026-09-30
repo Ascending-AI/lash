@@ -203,8 +203,8 @@ pub enum ProcessStartOutcome {
     AlreadyApplied(ProcessRecord),
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "completion", rename_all = "snake_case")]
 pub enum ProcessCompletionOutcome {
     Committed(ProcessRecord),
     AlreadyApplied { stored: ProcessRecord },

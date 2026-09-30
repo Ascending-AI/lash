@@ -206,6 +206,8 @@ impl RuntimeErrorCode {
             Self::RunShapeRefused => Terminal,
             // the same spec differs from the same running turn's again.
             Self::RunSpecMismatch => Terminal,
+            // the same address names the same unknown turn again.
+            Self::TurnAddressUnknown => Terminal,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
             // the selected queued work cannot be admitted; the same selection is refused again.
@@ -330,6 +332,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildCancelDecided => Terminal,
             // the retained invocation expired and is never re-run.
             Self::RuntimeEffectGroupChildAttachExpired => Terminal,
+            // the committed final's invocation is gone and nothing can realize it.
+            Self::RuntimeEffectGroupChildCommittedFinalLost => Terminal,
             // this host still works the group; a later drain succeeds.
             Self::RuntimeEffectGroupDrainDeferred => Retryable,
             // the group was assembled inconsistently.

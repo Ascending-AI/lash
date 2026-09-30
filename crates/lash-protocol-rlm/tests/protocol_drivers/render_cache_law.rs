@@ -11,7 +11,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
     SingleProviderResolver,
 };
-use lash_core::plugin::{PluginFactory, RecordedSessionConfig};
+use lash_core::plugin::{PluginFactory, SessionAuthorityContext};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, ModelSpec, QueuedWorkBatchingConfig,
@@ -141,13 +141,19 @@ async fn open_runtime(
         host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
             snapshot,
-            RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("rematerialize RLM plugin")
     } else {
         host.build_session(PluginSessionRequest::creation(
             &state.session_id,
-            Default::default(),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("build RLM plugin")
     };
@@ -165,7 +171,7 @@ async fn open_runtime(
         Arc::clone(&runtime_host.core.durability.attachment_store),
         Arc::clone(&runtime_host.core.durability.process_env_store),
     );
-    let mut runtime = LashRuntime::from_persistent_embedded_state(
+    LashRuntime::from_persistent_embedded_state(
         policy(),
         runtime_host,
         services,
@@ -173,11 +179,7 @@ async fn open_runtime(
         lash_core::testing::runtime_lease_owner(),
     )
     .await
-    .expect("open runtime");
-    runtime
-        .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
-        .expect("materialize protocol");
-    runtime
+    .expect("open runtime")
 }
 
 async fn drive(
@@ -366,10 +368,19 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 &backend,
                 base.clone(),
                 Arc::clone(&script),
-                RuntimeSessionState {
-                    session_id: session_id.clone(),
-                    protocol_turn_options: created_options,
-                    ..RuntimeSessionState::new(policy())
+                {
+                    let mut state = RuntimeSessionState {
+                        session_id: session_id.clone(),
+                        ..RuntimeSessionState::new(policy())
+                    };
+                    state.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
+                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                    ));
+                    state.authority.plugin_config.insert(
+                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                        created_options.payload,
+                    );
+                    state
                 },
                 renderer.clone(),
                 9,
@@ -393,53 +404,52 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 );
                 (prefix, prefix_bytes)
             };
-            let mut replacement =
-                lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-                        render: Some(lash_rlm_types::RlmRenderPatch {
-                            print: lash_render::RenderParamsPatch {
-                                max_chars: Some(3),
-                                ..Default::default()
-                            },
+            let revision = runtime.config_revision();
+            let receipt = runtime
+                .submit_config_transaction(
+                    "render-options-command",
+                    revision,
+                    &lash_core::ConfigTransaction::of(lash_protocol_rlm::SetRlmRender {
+                        print: lash_render::RenderParamsPatch {
+                            max_chars: Some(3),
                             ..Default::default()
-                        }),
-                        ..Default::default()
-                    })
-                .expect("replacement render options");
-            replacement.payload["channel"] = serde_json::json!("cell");
-            replacement.payload["dialect"] = serde_json::json!("typescript");
-            let command = runtime.set_protocol_turn_options(replacement).await;
-            let receipt = match command {
-                Ok(()) => None,
-                Err(lash_core::SessionError::SessionCommandPending(receipt)) => Some(receipt),
-                Err(error) => panic!("replace protocol options command: {error}"),
-            };
-            if let Some(receipt) = receipt {
-                let handler = double
-                    .open_handler(lash_core::AdmittedScope::queue_drain(
-                        &session_id,
-                        "render-options-command",
-                    ))
-                    .await
-                    .expect("open command drive handler");
+                        },
+                        preview: lash_render::RenderParamsPatch::default(),
+                    }),
+                )
+                .await
+                .expect("replace protocol options command");
+            let handler = double
+                .open_handler(lash_core::AdmittedScope::queue_drain(
+                    &session_id,
+                    "render-options-command",
+                ))
+                .await
+                .expect("open command drive handler");
+            runtime
+                .drive_next_root(
+                    "render-options-command",
+                    lash_core::facade_support::TurnOptions::new(
+                        tokio_util::sync::CancellationToken::new(),
+                        handler.scoped(),
+                    ),
+                )
+                .await
+                .expect("drive render options command");
+            handler.close().await.expect("close command drive handler");
+            assert!(matches!(
                 runtime
-                    .drive_next_root(
-                        "render-options-command",
-                        lash_core::facade_support::TurnOptions::new(
-                            tokio_util::sync::CancellationToken::new(),
-                            handler.scoped(),
-                        ),
-                    )
+                    .settle_session_command(receipt)
                     .await
-                    .expect("drive render options command");
-                handler.close().await.expect("close command drive handler");
-                assert!(matches!(
-                    runtime
-                        .settle_session_command(receipt)
-                        .await
-                        .expect("read settled render options command"),
-                    lash_core::runtime::SessionCommandSettlement::Durable(_)
-                ));
-            }
+                    .expect("read settled render options command"),
+                lash_core::runtime::SessionCommandSettlement::Applied {
+                    outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction {
+                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. },
+                    },
+                    ..
+                }
+            ));
+
             renderer.mode.store(1, Ordering::SeqCst);
             drive(&mut runtime, &double, &session_id, "second").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);

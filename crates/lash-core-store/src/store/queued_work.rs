@@ -3,7 +3,7 @@
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
 //! `enqueue_seq` and pre-filtered to open batches no root admitted, then
 //! apply the same pure state machine: a delivery-policy boundary gate and
-//! compatibility/merge-key prefix grouping. That state machine lives here so
+//! a delivery-policy prefix. That state machine lives here so
 //! the backends own only their SQL reads and writes while the composition
 //! rule has a single implementation, exercised against every backend by the
 //! shared `runtime_persistence` conformance suite.
@@ -154,7 +154,6 @@ pub struct TurnLaneCandidate {
     /// Durable batch identity, used to name a row in admission diagnostics.
     pub batch_id: crate::BatchId,
     pub enqueue_seq: u64,
-    pub config_patch_command: bool,
     pub delivery_policy: DeliveryPolicy,
     pub kind: QueuedWorkKind,
     pub authority: QueuedWorkAuthority,
@@ -166,13 +165,6 @@ pub struct TurnLaneCandidate {
 impl TurnLaneCandidate {
     pub fn from_batch(batch: &QueuedWorkBatch) -> Self {
         let mut turn_causes = Vec::new();
-        let config_patch_command = matches!(
-            batch.items.as_slice(),
-            [crate::QueuedWorkItem {
-                payload: QueuedWorkPayload::SessionCommand { command },
-                ..
-            }] if matches!(command.as_ref(), crate::SessionCommand::ApplyConfigPatch { .. })
-        );
         for item in &batch.items {
             match &item.payload {
                 QueuedWorkPayload::ProcessWake { wake } => {
@@ -184,7 +176,6 @@ impl TurnLaneCandidate {
         Self {
             batch_id: batch.batch_id.clone(),
             enqueue_seq: batch.enqueue_seq,
-            config_patch_command,
             delivery_policy: batch.delivery_policy,
             kind: batch.kind,
             authority: batch.authority.clone(),
@@ -205,31 +196,19 @@ pub fn admission_scan_limit(max_batches: usize) -> i64 {
         + 32
 }
 
-/// A longer FIFO prefix remains queued and drains through later commits; bounding this run
-/// also bounds every SQL candidate scan that feeds it.
-pub const MAX_SESSION_COMMAND_BATCHES_PER_RUN: usize = 64;
+/// How many open batches a session-command run takes: every session command
+/// applies alone, in the commit that settles it (FIG-4202, FIG-4379).
+pub const SESSION_COMMAND_BATCHES_PER_RUN: usize = 1;
 
-/// Non-config commands remain exclusive. A leading `ApplyConfigPatch` extends
-/// through the complete adjacent config-patch prefix so one drain can apply N
-/// ordered patches in one head commit while completing all N batches.
+/// The leading session-command run of the open candidates: the head batch
+/// when it is a session command, nothing otherwise.
 pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize {
-    let Some(first) = candidates.first() else {
-        return 0;
-    };
-    if first.kind.work_class() != QueuedWorkClass::SessionCommand {
-        return 0;
+    match candidates.first() {
+        Some(first) if first.kind.work_class() == QueuedWorkClass::SessionCommand => {
+            SESSION_COMMAND_BATCHES_PER_RUN
+        }
+        _ => 0,
     }
-    if !first.config_patch_command {
-        return 1;
-    }
-    candidates
-        .iter()
-        .take(MAX_SESSION_COMMAND_BATCHES_PER_RUN)
-        .take_while(|candidate| {
-            candidate.kind.work_class() == QueuedWorkClass::SessionCommand
-                && candidate.config_patch_command
-        })
-        .count()
 }
 
 /// An admission takes a leading prefix of the open candidates.
@@ -239,11 +218,16 @@ pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize
 /// * An [`AdmissionBoundary::ActiveTurnCheckpoint`] boundary only
 ///   admits work whose head batch is
 ///   [`DeliveryPolicy::EarliestSafeBoundary`].
-/// * An absent merge key, or a control/cancel kind, admits exactly one batch.
-/// * A batchable head extends through immediately following rows with the same
-///   delivery policy, merge key, and authority/elevation, within the host's row
-///   and age bounds. How much of that eligible prefix actually drains is the
-///   host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
+/// * A control kind admits exactly one batch.
+/// * A batchable head extends through immediately following batchable turn
+///   work with the same delivery policy, within the host's row and age
+///   bounds (ADR 0101 §5.2). How much of that eligible prefix actually drains
+///   is the host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
+///
+/// Each row's `authority` and `merge_key` are its own data, offered to the
+/// drain policy and to traces. Neither is an equality gate here: Lash applies
+/// no authorization policy, so a host that keeps principals or labels apart
+/// does so in its drain policy.
 pub fn select_turn_work_indices(
     candidates: &[TurnLaneCandidate],
     boundary: AdmissionBoundary,
@@ -306,7 +290,7 @@ pub fn select_turn_work_indices(
             max_context_tokens: policy.max_context_tokens,
         });
     }
-    if !first.kind.is_batchable() || first.merge_key.is_none() {
+    if !first.kind.is_batchable() {
         record_turn_admission_decision(
             candidates,
             boundary,
@@ -337,8 +321,6 @@ pub fn select_turn_work_indices(
             || candidate.kind.work_class() != QueuedWorkClass::TurnWork
             || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
-            || candidate.merge_key != first.merge_key
-            || candidate.authority != first.authority
         {
             break;
         }

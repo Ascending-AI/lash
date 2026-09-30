@@ -105,18 +105,16 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         &SessionId::from(session_id),
     )
     .await;
-    enqueue_config_patch_command(
+    enqueue_config_transaction(
         store.as_ref(),
-        &SessionId::from(session_id),
-        lash_core::runtime::ApplyConfigPatch {
-            model: Some(
-                lash_core::ModelSpec::builder("engine-command-model")
-                    .context_window_tokens(32_000)
-                    .build()
-                    .unwrap(),
-            ),
-            ..lash_core::runtime::ApplyConfigPatch::default()
-        },
+        &runtime,
+        "engine-command",
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelSpec::builder("engine-command-model")
+                .context_window_tokens(32_000)
+                .build()
+                .unwrap(),
+        }),
     )
     .await;
     let lease = lash_core::testing::RuntimeStoreTestDriveExt::seal_drive_epoch_for_test(

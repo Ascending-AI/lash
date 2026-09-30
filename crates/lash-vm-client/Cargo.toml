@@ -15,15 +15,11 @@ name = "lash_vm_client"
 doctest = false
 
 [features]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-broker/synthetic-next", "lashlang/synthetic-next"]
 testing = []
 
 [lints]
 workspace = true
-
-# build.rs imports ../lash-vm-worker/build/fingerprint.rs by #[path].
-# That module uses sha2 and toml, which cargo-shear cannot follow.
-[package.metadata.cargo-shear]
-ignored = ["sha2", "toml"]
 
 [package.metadata.lash]
 role = "language-neutral"
@@ -43,6 +39,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 libc = { workspace = true }
 
-[build-dependencies]
-sha2 = { workspace = true }
-toml = "1.1.2"
+
+[dev-dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"

@@ -146,7 +146,7 @@ pub use effect_group::{
     EffectGroupRegisterDispatchRequest, EffectGroupRegisterDispatchResponse,
     EffectGroupRegisterRefusalResponse, EffectGroupRetireResponse,
     EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
-    EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
+    EffectGroupSettlementTerminal, EffectGroupShape,
 };
 pub use effect_host::RestateEffectHost;
 pub use engine::{RestateConfig, RestateEngine, RestateRegistrationError, deployment_path};

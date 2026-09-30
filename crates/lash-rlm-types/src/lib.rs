@@ -905,8 +905,9 @@ impl RlmTurnOptions {
 /// resolves to. A host that cannot tell those apart has to peek at raw payload
 /// keys to label a fresh session honestly — the hack this type replaces.
 ///
-/// This is the read half of the ADR 0066 pair; the write half is a guarded
-/// set-if-unset that refuses with [`RlmSessionConfigConflict`].
+/// The facts are recorded once, when the session is created (FIG-4379): no
+/// config command changes them, and a turn restates them through its run's
+/// protocol turn options.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
@@ -952,57 +953,6 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
         }
     }
 }
-
-/// A guarded write refused because the session already recorded a different
-/// value for that fact.
-///
-/// This is the one typed refusal for the durable RLM bag. Hosts match the
-/// variant and its `recorded` / `requested` values; the message below is the
-/// single place any prose for it is produced, so no caller ever has to match on
-/// a string to tell a pin conflict from an unrelated failure.
-#[derive(Clone, Debug, PartialEq)]
-pub enum RlmSessionConfigConflict {
-    FinalAnswerFormat {
-        recorded: RlmFinalAnswerFormat,
-        requested: RlmFinalAnswerFormat,
-    },
-    Termination {
-        recorded: Box<RlmTermination>,
-        requested: Box<RlmTermination>,
-    },
-}
-
-impl RlmSessionConfigConflict {
-    /// The durable fact that was already pinned.
-    pub fn field(&self) -> &'static str {
-        match self {
-            Self::FinalAnswerFormat { .. } => "final_answer_format",
-            Self::Termination { .. } => "termination",
-        }
-    }
-}
-
-impl std::fmt::Display for RlmSessionConfigConflict {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (recorded, requested) = match self {
-            Self::FinalAnswerFormat {
-                recorded,
-                requested,
-            } => (format!("{recorded:?}"), format!("{requested:?}")),
-            Self::Termination {
-                recorded,
-                requested,
-            } => (format!("{recorded:?}"), format!("{requested:?}")),
-        };
-        write!(
-            f,
-            "RLM session {} is durably pinned to `{recorded}` and cannot be set to `{requested}`",
-            self.field()
-        )
-    }
-}
-
-impl std::error::Error for RlmSessionConfigConflict {}
 
 /// One durable projected seed binding.
 ///

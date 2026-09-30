@@ -1,0 +1,120 @@
+# 0126: Session config changes are typed owner commands
+
+## Status
+
+Accepted.
+
+## Context
+
+A session records its config with its head: the core route, prompt,
+generation, attachment acceptance, tool access and turn budget, and one
+namespace per installed plugin, the protocol's included (FIG-4379,
+[ADR 0013](0013-protocol-capabilities-enter-through-the-plugin-contract.md)).
+Changing that record through an open patch bag had two flaws. The bag named
+fields rather than allowed changes, so every owner had to decide from a raw
+JSON value which of its facts could move. And the patch was checked when it
+was admitted, while the drain applied it later under whatever code was then
+running.
+
+## Decision
+
+Every change to recorded session config is a typed command that the owner of
+the namespace registered.
+
+**Owners.** A plugin factory registers config through
+`PluginFactory::register_config` before any session exists. It registers one
+`ConfigOwner` for the namespace keyed by its plugin id, and the
+`ConfigCommand`s that change that namespace. The owner:
+
+- creates the namespace at session creation from the creator's typed input,
+  its defaults and, for a child, its parent's recorded value;
+- validates a final candidate, including a run override against the
+  namespace it was derived from;
+- names an implementation identity for its reducers.
+
+A reducer is a pure function from the recorded namespace and the command to
+the next namespace and the command's output. It sees immutable facts only. A
+setting with no command cannot change after creation. Core config is owned
+by the reserved `core` owner, whose commands include `SetProvider`,
+`SetModel`, `SetAttachmentAcceptance`, the prompt commands, `SetGeneration`,
+`SetToolAccess` and `SetTurnBudget`. The RLM and standard protocols register
+one render command each (`SetRlmRender`, `SetStandardRender`).
+
+**Transactions.** A `ConfigTransaction` is an ordered list of
+`{owner, command, args}` entries and applies all or none. A host submits it
+under a `ConfigWrite { id, expected_revision }`:
+
+- the id is stable, and a resubmission reuses it;
+- the expected revision is the config revision the host read.
+
+**Ingress** decodes every entry against the installed registrations. An
+unknown owner or command, or arguments that do not decode, is refused as a
+typed `ConfigSubmitError` and nothing is enqueued. An accepted transaction
+records the implementation identity of each named owner and a digest of its
+request, and rides `SessionCommand::ApplyConfigTransaction`. A resubmission
+under the same id with other content is refused as `ChangedContent`.
+
+**Resolution.** The drain applies each session command alone. It resolves
+the transaction in one journaled `ResolveConfigTransaction` effect:
+
+1. If an owner's installed implementation differs from the recorded one, the
+   effect records nothing and the command root parks as `RetiredGeneration`
+   until a build that runs the recorded reducers drives it.
+2. If the config revision moved past the expected revision, the transaction
+   resolves `Stale` without running a reducer.
+3. Otherwise the entries reduce in order over a private candidate. Every
+   owner with a recorded namespace then validates the final candidate; core
+   validates its route only when core changed.
+4. The result is `Applied`, with the replacement namespaces and the outputs,
+   or `Refused`, with the refusing entry, the owner and the owner's typed
+   refusal.
+
+A redrive replays the recorded resolution and never re-runs a reducer under
+new code.
+
+**Publication.** One fenced host-command commit publishes an applied
+resolution's replacements, advances `config_revision` by exactly one, and
+records the outcome as the command's settlement. A restatement advances the
+revision too. A stale or refused transaction publishes no config, and its
+outcome is still durable.
+
+**Pending while a root owns the head.** A transaction submitted while a root
+owns the session's head stays pending. It applies after that root releases
+the head and is first visible to the next root. A running root never sees
+config change under it.
+
+**Discovery and transport.** `SessionConfigAdmin::commands` returns a catalog
+generated from the registrations: each command's owner, name and
+input/output/refusal schemas, and the config revision it describes. The
+remote envelope (`RemoteConfigTransactionRequest`, `RemoteConfigTransactionOutcome`,
+`RemoteConfigCommandCatalog`) carries the same commands and outcomes, never a
+recorded namespace or a caller-minted replacement.
+
+## Why and alternatives
+
+- **An open patch bag with owner merge functions.** Rejected. It leaves every
+  owner parsing an untyped value and cannot publish what may change.
+- **Validation at submission only.** Rejected. The drain runs later, possibly
+  under other code, against a config that may have moved.
+- **Re-running reducers on redrive.** Rejected. A resolution is a recorded
+  fact, and a new build must not rewrite it.
+- **Coalescing adjacent config commands into one admission.** Rejected. Each
+  transaction is its own run, so its revision check, resolution and receipt
+  stay its own.
+
+## Consequences
+
+- `SessionConfigPatch`, `ApplyConfigPatch`, `SessionConfigAdmin::update`, the
+  prompt and tool-access setters, the raw protocol-options setters and
+  `PluginFactory::{resolve_session_config, patch_session_config}` are gone.
+- Route validation for a changed core route happens at resolution and
+  settles as a `Refused` outcome, not as a send-time error.
+- A config command added later, such as a new core execution control,
+  registers on its owner and joins the same resolver, catalog and envelope.
+
+Sources: `crates/lash-core-execution/src/plugin/config/mod.rs`,
+`crates/lash-core-execution/src/plugin/config/core.rs`,
+`crates/lash-core-store/src/config_transaction.rs`,
+`crates/lash-core/src/runtime/config_transaction.rs`,
+`crates/lash/src/admin/config_transactions.rs` and
+`crates/lash-remote-protocol/src/config.rs`.

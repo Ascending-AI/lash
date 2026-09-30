@@ -65,9 +65,8 @@ pub use lash_core::store::{
 };
 pub use lash_core::{
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, SCOPE_STORAGE_PAYLOAD_VERSION,
-    SESSION_NODE_BODY_SCHEMA_VERSION, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION,
-    TOOL_PRESENTATION_VERSION, TOOL_SETTLEMENT_VERSION,
+    SCOPE_STORAGE_PAYLOAD_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION, TOOL_ATTEMPT_CAPTURE_VERSION,
+    TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION, TOOL_SETTLEMENT_VERSION,
 };
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
@@ -113,8 +112,6 @@ pub enum DurableFormat {
     /// The session-state generation marker admission compares before any
     /// mutable session payload is read (ADR 0077).
     SessionStateGeneration,
-    /// The persisted protocol-specific turn-options envelope.
-    ProtocolTurnOptions,
     /// The versioned typed parent scope persisted beside a ledger row's index
     /// projection.
     ScopeStoragePayload,
@@ -206,7 +203,6 @@ impl DurableFormat {
             DurableFormat::ProcessWakeDelivery => "process wake delivery",
             DurableFormat::SessionNodeBody => "session node body",
             DurableFormat::SessionStateGeneration => "session state generation",
-            DurableFormat::ProtocolTurnOptions => "protocol turn options",
             DurableFormat::ScopeStoragePayload => "scope storage payload",
             DurableFormat::ProcessEffectReport => "process effect summary",
             DurableFormat::AppendRequestIdentity => "append request identity",
@@ -249,7 +245,6 @@ impl DurableFormat {
             DurableFormat::ProcessWakeDelivery => UpgradePolicy::Migrate,
             DurableFormat::SessionNodeBody => UpgradePolicy::Migrate,
             DurableFormat::SessionStateGeneration => UpgradePolicy::Migrate,
-            DurableFormat::ProtocolTurnOptions => UpgradePolicy::Migrate,
             DurableFormat::ScopeStoragePayload => UpgradePolicy::Migrate,
             DurableFormat::ProcessEffectReport => UpgradePolicy::Migrate,
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
@@ -386,13 +381,6 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             version: FormatVersion::Counter(CURRENT_SESSION_STATE_VERSION),
             owning_crate: "lash-core",
             constant: "CURRENT_SESSION_STATE_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        DurableFormatEntry {
-            format: DurableFormat::ProtocolTurnOptions,
-            version: FormatVersion::Counter(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION),
-            owning_crate: "lash-core",
-            constant: "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {

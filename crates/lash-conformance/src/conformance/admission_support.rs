@@ -30,6 +30,77 @@ pub(crate) async fn admitted_root(
         .expect("the root's admission reaches its head")
 }
 
+/// Start `root` running under `fence`: enqueue a next-turn head input filed
+/// under the root's own id and admit the root with it. Input may address a
+/// turn only while that turn runs or once it has ended (ADR 0101 §5.1), so a
+/// law that addresses `root`'s turns starts it first, before it enqueues the
+/// rows it composes, and the root takes only its own head.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the head and its admission are established by the setup"
+)]
+pub(crate) async fn running_root(
+    store: &Arc<dyn crate::RuntimeStore>,
+    fence: &DriveFence,
+    root: &crate::TurnId,
+) -> RootAdmission {
+    let head = store
+        .enqueue_pending_turn_input(
+            crate::PendingTurnInputDraft::new(
+                fence.session(),
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text(format!("{root} head")),
+            )
+            .with_source_key(root.as_str()),
+        )
+        .await
+        .expect("enqueue the running root's head");
+    admitted_root(
+        store,
+        fence,
+        root.as_str(),
+        AdmittedHead::Input(head.input_id),
+    )
+    .await
+}
+
+/// [`running_root`] headed by a process wake instead of an input, for a law
+/// whose assertions read the session's pending inputs: the root's own head
+/// is then no pending input.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the head and its admission are established by the setup"
+)]
+pub(crate) async fn running_root_on_wake(
+    store: &Arc<dyn crate::RuntimeStore>,
+    session_id: &crate::SessionId,
+    root: &crate::TurnId,
+) -> RootAdmission {
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        store,
+        session_id,
+        root.as_str(),
+    )
+    .await;
+    let head = store
+        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
+            session_id,
+            &format!("{root}-starter"),
+            1,
+            "start the root",
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue the running root's head");
+    admitted_root(
+        store,
+        &fence,
+        root.as_str(),
+        AdmittedHead::Batch(head.batch_id),
+    )
+    .await
+}
+
 /// Admit `root` headed by `head` under `fence`, composing its prefix with
 /// `policy`.
 #[expect(

@@ -517,6 +517,7 @@ impl RuntimeTurnDriver<'_> {
         let applied = plugins
             .apply_checkpoint(CheckpointHookContext {
                 session_id: self.session_id.clone(),
+                plugin_config: plugins.admitted_plugin_config(),
                 checkpoint,
                 state: self.checkpoint_state_view(messages, protocol_iteration),
                 sessions: self.session_services.state_service(),
@@ -680,6 +681,8 @@ mod checkpoint_admission_determinism_tests {
                 merge_key: None,
                 enqueued_at_ms: 0,
                 items: Vec::new(),
+                submission_digest: String::new(),
+                terminal: None,
             }],
         }
     }

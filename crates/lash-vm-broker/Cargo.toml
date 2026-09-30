@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [features]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lashlang/synthetic-next"]
 # The in-process fake worker the broker's laws run behind the protocol types.
 testing = []
 

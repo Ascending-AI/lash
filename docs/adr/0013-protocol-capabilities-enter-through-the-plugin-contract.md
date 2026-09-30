@@ -8,11 +8,11 @@ accepted
 
 Protocols acquire runtime capabilities through the uniform plugin contract. After building the plugin host, core asks factories for `process_engine_contributions`, passing extensions, trace context and process-lifecycle availability. Registrations pair an execution engine with a store-free recorded-input admission descriptor. The engine registry enforces unique kinds and stores execution and admission separately. Deployment durability claims belong to the host that composes the engine and storage.
 
-Session Plugin Options are creation configuration. The protocol plugin resolves options and defaults when it creates the session's initial config. RLM defaults root final answers to Markdown and child answers to RawFinalValue. Materialization preserves recorded protocol options; it fills defaults only when none are recorded.
+Session Plugin Options are creation configuration. At creation every installed plugin factory, the protocol's included, creates its own namespace and defaults through the `ConfigOwner` it registered with `PluginFactory::register_config`. The session records the results as its `PluginConfig`, keyed by plugin id, with its initial config head (FIG-4379). RLM defaults root final answers to Markdown and child answers to RawFinalValue. The protocol turn options are a view of the protocol's recorded namespace. Every open supplies the recorded values unchanged and resolves nothing again.
 
 Host-facing creation carries `SessionCreationHead::Config`, so the catalog row and initial config head commit together. A core creator carrying its own runtime state uses `CommittedByCreator` and writes the head with its first commit. Admission of an existing id does not write creation config. Reopening reads recorded state and ignores newly stated builder configuration; live binding and budgets remain open-time host policy. An incompatible provider pin is refused as `ProviderMismatch` without a config write.
 
-Later changes use `update(SessionConfigPatch)`. Plugin options reach `ProtocolSessionPlugin::apply_session_config_patch`; refused changes return `SessionConfigRefused`, and unread plugin keys return `PluginOptionsUnaccepted`.
+Later changes are typed config commands the namespace's owner registered, applied in one revision-checked transaction ([ADR 0126](0126-session-config-changes-are-typed-owner-commands.md)). A creation namespace no installed plugin owns is refused with `UnknownPluginConfigOwner`; a command no installed plugin registers is refused at submission.
 
 ## Why and alternatives
 

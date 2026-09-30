@@ -476,7 +476,7 @@ mod tests {
             .expect("valid child model spec");
         child_policy.provider_id = "child-recorded-provider".to_string();
         let child_env = crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             child_policy.clone(),
         );
 

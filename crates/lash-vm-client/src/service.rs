@@ -92,17 +92,32 @@ pub enum StateAction {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StateView {
+pub struct StateMetadata {
     pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
-    #[serde(with = "serde_bytes")]
-    pub snapshot: Vec<u8>,
     #[serde(with = "lashlang::effect_value::record")]
     pub globals: Record,
     pub names: BTreeSet<String>,
     pub expired: BTreeSet<String>,
     pub opaque: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateView {
+    #[serde(with = "serde_bytes")]
+    pub snapshot: Vec<u8>,
+    pub metadata: StateMetadata,
+}
+
+/// A resident cell's result and metadata, emitted with its opaque snapshot.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellCompletion {
+    pub outcome: lashlang::ExecutionOutcome,
+    /// Independently bounded, as the separate state-view response was.
+    pub state: EncodedPayload,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -204,6 +219,16 @@ pub struct Service {
     claim: Option<Arc<lash_core_execution::store::worker_recovery::WorkerRecoveryClaim>>,
 }
 impl Service {
+    /// Select the helper executable explicitly, using the RLM/process bounds.
+    pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
+        let mut config = PoolConfig::standard(WorkerEntry::helper(executable));
+        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
+        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
+        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
+        config.max_queue_bytes = 128 * 1024 * 1024;
+        Self::new(config)
+    }
+
     pub fn new(config: PoolConfig) -> Self {
         Self {
             #[cfg(feature = "testing")]
@@ -271,7 +296,22 @@ impl Service {
         &self,
         scope: &str,
     ) -> Result<crate::RecoveryExecution, PoolError> {
-        use lash_core_execution::store::worker_recovery::WorkerRecoveryLimits;
+        self.begin_execution_from(scope, Default::default()).await
+    }
+    /// Reserve `scope` for an execution that continues work earlier scopes
+    /// already consumed `carried` of (ADR 0123): a process body reserves a
+    /// scope per segment boundary and carries the totals its boundary
+    /// recorded. The reservation starts from no less than `carried`, and the
+    /// row is seeded with it before any worker launches, so a redrive of
+    /// this scope counts on from the carried totals too.
+    pub async fn begin_execution_from(
+        &self,
+        scope: &str,
+        carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
+    ) -> Result<crate::RecoveryExecution, PoolError> {
+        use lash_core_execution::store::worker_recovery::{
+            WorkerRecoveryError, WorkerRecoveryLimits,
+        };
         let store = self
             .recovery
             .as_ref()
@@ -289,10 +329,23 @@ impl Service {
                 .try_into()
                 .map_err(|_| PoolError::InvalidConfiguration)?,
         };
-        let claim = store
+        let mut claim = store
             .reserve(scope, limits)
             .await
             .map_err(crate::recovery::recovery_error)?;
+        let seeded = crate::recovery::at_least(claim.baseline, carried);
+        if seeded != claim.baseline {
+            if seeded.cpu_nanos >= limits.max_cpu_nanos {
+                return Err(crate::recovery::recovery_error(
+                    WorkerRecoveryError::CpuExhausted,
+                ));
+            }
+            store
+                .settle(&claim, seeded)
+                .await
+                .map_err(crate::recovery::recovery_error)?;
+            claim.baseline = seeded;
+        }
         let budget = ExecutionBudget::from_recovery(claim.baseline);
         let mut service = self.clone();
         service.budget = Some(budget.clone());
@@ -415,11 +468,8 @@ impl Service {
             &worker,
         )?;
         let response = worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
-        lash_vm_protocol::FrameCodec::new(
-            self.config.entry.build.clone(),
-            self.config.protocol.decode,
-        )
-        .check_payload(&response.0)?;
+        lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
+            .check_payload(&response.0)?;
         let response = rmp_serde::from_slice(&response.0).map_err(PoolError::protocol)?;
         worker.release()?;
         Ok(response)
@@ -436,15 +486,10 @@ impl Default for Service {
         let executable = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("lash-vm-worker")))
-            .unwrap_or_else(|| "lash-vm-worker".into());
+            .unwrap_or_default();
         #[cfg(any(test, feature = "testing"))]
         let executable = crate::testing::worker_executable(executable);
-        let mut config = PoolConfig::standard(WorkerEntry::helper(executable));
-        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
-        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
-        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
-        config.max_queue_bytes = 128 * 1024 * 1024;
-        let service = Self::new(config);
+        let service = Self::subprocess(executable);
         #[cfg(any(test, feature = "testing"))]
         let service =
             service.with_recovery_store(Arc::new(crate::recovery::RecoveryDouble::default()));

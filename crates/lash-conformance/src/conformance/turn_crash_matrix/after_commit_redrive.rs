@@ -67,7 +67,7 @@ async fn drive_trace(law: &MatrixLaw<'_>) -> Vec<TurnSeamOperation> {
     let scenario = "after-commit-redrive-trace";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = (law.make)(scenario);
-    seed_reference_ingress_for_drive(&raw, &identity, scenario).await;
+    seed_reference_ingress_for_drive(&raw, &identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (attempt, reports) = ReferenceTurn::new(
@@ -129,7 +129,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
     let identity = ReferenceIdentity::for_scenario(scenario);
     let admitted = reference_admitted_scope(&identity);
     let raw = make(scenario);
-    seed_reference_ingress_for_drive(&raw, &identity, scenario).await;
+    seed_reference_ingress_for_drive(&raw, &identity).await;
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let control = SeamControl::default();
     let crash = crash_at_armed_point(&control);

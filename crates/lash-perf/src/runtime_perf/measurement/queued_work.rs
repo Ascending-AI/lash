@@ -463,6 +463,28 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
 
+                // The turn runs as its own root before input addresses it
+                // (ADR 0101 §5.1); its own input heads the root.
+                let turn_head = store
+                    .enqueue_pending_turn_input(
+                        lash_core::PendingTurnInputDraft::new(
+                            &session_id,
+                            lash_core::TurnInputIngress::NextTurn,
+                            TurnInput::text(format!("turn {turn_index} input")),
+                        )
+                        .with_source_key(turn_id.as_str()),
+                    )
+                    .await?;
+                let turn_root = admit_perf_root(
+                    store.as_ref(),
+                    &fence,
+                    &turn_id,
+                    AdmittedHead::Input(turn_head.input_id),
+                    1,
+                )
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("expected the turn's root admission"))?;
+
                 let (_, phase) =
                     measure_runtime_perf_async_phase("turn_input_ingress.enqueue_active", async {
                         for input_index in 0..TURN_INPUT_INGRESS_ACTIVE_PER_TURN {
@@ -586,14 +608,19 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
 
                 // The deferral's completion gate is settled through the
                 // effect host that owns the turn-control promises; the phase
-                // measures the store's complete-and-defer commit.
-                let mut completing = RuntimeCommit::persisted_state_for_test(&commit_state)
-                    .deferring_interrupted_turn_inputs(turn_id.clone(), None);
-                let mut settlement = lash_core::store::IngressSettlement::new(turn_id.clone());
-                settlement
-                    .completed_inputs
-                    .push(active_admission.completion());
-                completing.ingress = Some(settlement);
+                // measures the store's complete-and-defer commit, which ends
+                // the turn's root.
+                let mut completing = finishing_perf_root(
+                    RuntimeCommit::persisted_state_for_test(&commit_state),
+                    &turn_id,
+                    &turn_root,
+                )
+                .deferring_interrupted_turn_inputs(turn_id.clone(), None);
+                if let Some(settlement) = completing.ingress.as_mut() {
+                    settlement
+                        .completed_inputs
+                        .push(active_admission.completion());
+                }
                 let deferral =
                     lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                         store.as_ref(),
@@ -621,8 +648,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     .await?
                     .into_iter()
                     .find(|read| {
+                        // With the turn's root ended, every open input is
+                        // next-turn input, the deferred ones at their own
+                        // positions (ADR 0101 §5.1).
                         matches!(read.status, lash_core::PendingTurnInputReadStatus::Open)
-                            && matches!(read.input.ingress(), lash_core::TurnInputIngress::NextTurn)
+                            && read.input.state.is_next_turn_input(None)
                     })
                     .map(|read| read.input.input_id)
                     .ok_or_else(|| anyhow::anyhow!("expected an open next-turn input"))?;

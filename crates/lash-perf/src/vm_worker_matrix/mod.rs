@@ -19,7 +19,7 @@ pub fn nanos(start: Instant) -> u64 {
 }
 
 fn config() -> Result<PoolConfig> {
-    let mut config = PoolConfig::standard(WorkerEntry::reexec(lash_vm_worker::build_identity())?);
+    let mut config = PoolConfig::standard(WorkerEntry::reexec()?);
     // Fix concurrency at one for the paired service-time population.
     config.max_workers = 1;
     Ok(config)

@@ -39,7 +39,7 @@ impl crate::ToolProvider for NoopTools {
 
 pub(super) fn spec(turns: usize) -> ProcessExecutionEnvSpec {
     ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
+        crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::bounded(turns)),
     )
 }

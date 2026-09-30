@@ -657,9 +657,10 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         // Snapshot v23 (FIG-3605) carries each binding as a durable fragment of
         // the heap — its root value and the objects it carries — instead of a
         // one-binding snapshot of its host view, and the root gains the heap
-        // header: a large list costs fewer wrapper bytes per binding.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_222);
-        assert_eq!(changed_budget.checkpoint_bytes, 13_652);
+        // header: a large list costs fewer wrapper bytes per binding. FIG-4379
+        // drops the 48 bytes of the turn state's protocol turn options.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_174);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_604);
     });
 }
 
@@ -895,9 +896,10 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         // flat state, which carries no root, is unchanged. Snapshot v23
         // (FIG-3605) writes the changed binding as a durable heap fragment
         // rather than a one-binding host-view snapshot, which sheds wrapper
-        // bytes, and adds the heap header to the root.
-        assert_eq!(minimum, 19_819);
-        assert_eq!(maximum, 19_821);
+        // bytes, and adds the heap header to the root. FIG-4379 drops the 48
+        // bytes of the turn state's protocol turn options.
+        assert_eq!(minimum, 19_771);
+        assert_eq!(maximum, 19_773);
     });
 }
 
@@ -971,9 +973,10 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         // FIG-3394: same +278 as the single-binding case — the two
         // deferred-resolution link identities ride in the root once, not per
         // binding. Snapshot v23 (FIG-3605) adds the heap header to the root and
-        // writes each binding as a durable heap fragment.
-        assert_eq!(minimum, 94_754);
-        assert_eq!(maximum, 94_756);
+        // writes each binding as a durable heap fragment. FIG-4379 drops the 48
+        // bytes of the turn state's protocol turn options.
+        assert_eq!(minimum, 94_706);
+        assert_eq!(maximum, 94_708);
     });
 }
 

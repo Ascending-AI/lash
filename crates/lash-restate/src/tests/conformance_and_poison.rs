@@ -765,6 +765,44 @@ async fn live_restate_effect_group_design_witnesses() {
     harness.finish().await;
 }
 
+/// The group index answers its own notices on live Restate (FIG-4344):
+/// every transition answers its subscribers before and after it, a refusal
+/// answers READY, and a subscription is idempotent, bounded and withdrawable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_group_index_answers_its_own_notices() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(Duration::from_secs(240), async {
+        super::effect_group_notification_index::every_transition_answers_its_subscribers(&harness)
+            .await;
+        super::effect_group_notification_index::a_refusal_answers_its_ready_subscribers(&harness)
+            .await;
+        super::effect_group_notification_index::a_subscription_is_idempotent_bounded_and_withdrawable(
+            &harness,
+        )
+        .await;
+    })
+    .await
+    .expect("the group-notice laws exceeded 240 seconds");
+    harness.finish().await;
+}
+
+/// The width-4 gated batch on live Restate with its notices owned by the
+/// group index (FIG-4344): every member answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_a_batch_with_index_owned_notices_answers_every_member() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+    let label = format!("restate-notice-batch-{}", harness.run_nonce());
+    tokio::time::timeout(
+        Duration::from_secs(180),
+        super::effect_group_seat_chain::run_batch_over(&harness, &label, harness.law_stores()),
+    )
+    .await
+    .expect("the notice batch exceeded 180 seconds");
+    harness.finish().await;
+}
+
 /// The rounds each tier runs of the §5 barrier's transitivity law.
 const DRAIN_TRANSITIVITY_ROUNDS: usize = 12;
 
@@ -894,6 +932,16 @@ mod on_the_server_double {
             LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
         let fixture = harness.tool_child_law_fixture();
         (harness, "restate", fixture)
+    });
+
+    // A child's invocation dies before its seat and outlives its retention:
+    // the double's operator kills and purges it, and dispatches its successor.
+    lash_conformance::tool_child_successor_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let fixture = harness.tool_child_law_fixture();
+        let expire = harness.child_invocation_expiry();
+        (harness, "restate", fixture, expire)
     });
 
     lash_conformance::turn_runner_tests!({

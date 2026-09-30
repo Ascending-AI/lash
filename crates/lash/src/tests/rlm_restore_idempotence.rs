@@ -36,8 +36,8 @@ use lash_core::facade_support::{
     PluginSpec, RuntimeHostConfig, SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
-    PluginFactory, PromptHookContext, RecordedSessionConfig, RuntimeServices, SessionStateService,
-    StaticPluginFactory,
+    PluginFactory, PromptHookContext, RuntimeServices, SessionAuthorityContext,
+    SessionStateService, StaticPluginFactory,
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
@@ -334,7 +334,7 @@ async fn open_with_plugins(
     backend: &lash_core::Backend,
     store: Arc<FaultStore>,
     script: Arc<Script>,
-    state: RuntimeSessionState,
+    mut state: RuntimeSessionState,
     extra_plugins: &[Arc<dyn PluginFactory>],
 ) -> (LashRuntime, Arc<PluginSession>) {
     let host = plugin_host_with_plugins(extra_plugins, script.native).await;
@@ -342,13 +342,24 @@ async fn open_with_plugins(
         host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
             snapshot,
-            RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("rematerialize plugins")
     } else {
+        lash_core::testing::runtime_helpers::record_creation_plugin_config(
+            &host,
+            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+            &mut state,
+        );
         host.build_session(PluginSessionRequest::creation(
             &state.session_id,
-            Default::default(),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("build plugins")
     };
@@ -368,7 +379,7 @@ async fn open_with_plugins(
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
-    let mut runtime = LashRuntime::from_persistent_embedded_state(
+    let runtime = LashRuntime::from_persistent_embedded_state(
         policy(),
         runtime_host,
         runtime_services,
@@ -377,11 +388,6 @@ async fn open_with_plugins(
     )
     .await
     .expect("runtime");
-    // The facade fires protocol materialization on every root open (and
-    // resume): the RLM plugin pins its channel into the recorded options.
-    runtime
-        .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
-        .expect("materialize protocol");
     (runtime, plugins)
 }
 
@@ -395,6 +401,7 @@ async fn projected_prompt(runtime: &LashRuntime, plugins: &PluginSession) -> Str
             state: runtime.read_view(),
             protocol_turn_options: ProtocolTurnOptions::default(),
             turn_context: Default::default(),
+            plugin_config: Default::default(),
         })
         .await
         .expect("prompt contributions");
@@ -587,14 +594,14 @@ impl Backend {
             .await
             .expect("create store");
         let store = FaultStore::over(base.clone());
-        let initial = RuntimeSessionState {
-            session_id: session_id.clone(),
-            protocol_turn_options: ProtocolTurnOptions::typed(
-                lash_rlm_types::RlmCreateExtras::default(),
-            )
-            .expect("rlm options"),
-            ..RuntimeSessionState::new(policy())
-        };
+        let initial = under_rlm_options(
+            RuntimeSessionState {
+                session_id: session_id.clone(),
+                ..RuntimeSessionState::new(policy())
+            },
+            ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras::default())
+                .expect("rlm options"),
+        );
         let (mut runtime, plugins) = open_with_plugins(
             &self.backend,
             Arc::clone(&store),
@@ -1021,17 +1028,17 @@ async fn storeless_runtime(
         .await
         .expect("detached store"),
     );
-    let state = RuntimeSessionState {
-        session_id: SessionId::from(format!(
-            "fig2521-storeless-{}",
-            uuid::Uuid::new_v4().simple()
-        )),
-        protocol_turn_options: ProtocolTurnOptions::typed(
-            lash_rlm_types::RlmCreateExtras::default(),
-        )
-        .expect("rlm options"),
-        ..RuntimeSessionState::new(policy())
-    };
+    let mut state = under_rlm_options(
+        RuntimeSessionState {
+            session_id: SessionId::from(format!(
+                "fig2521-storeless-{}",
+                uuid::Uuid::new_v4().simple()
+            )),
+            ..RuntimeSessionState::new(policy())
+        },
+        ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras::default())
+            .expect("rlm options"),
+    );
     register_session_engine(&state.session_id, &double);
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
@@ -1046,10 +1053,19 @@ async fn storeless_runtime(
         .with_process_lifecycle(false),
     )];
     factories.extend(extra_plugins);
-    let plugins = PluginHost::new(factories)
+    let host = PluginHost::new(factories);
+    lash_core::testing::runtime_helpers::record_creation_plugin_config(
+        &host,
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+        &mut state,
+    );
+    let plugins = host
         .build_session(PluginSessionRequest::creation(
             &state.session_id,
-            Default::default(),
+            SessionAuthorityContext {
+                plugin_config: state.admitted_plugin_config(),
+                ..Default::default()
+            },
         ))
         .expect("build plugins");
     let mut config = RuntimeHostConfig::new(
@@ -1074,9 +1090,6 @@ async fn storeless_runtime(
     )
     .await
     .expect("storeless runtime");
-    runtime
-        .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
-        .expect("materialize protocol");
     Box::pin(
         runtime.append_storeless_session_nodes(AppendSessionNodesRequest {
             operation_id: "fig2521-storeless-seed".to_string(),
@@ -1592,4 +1605,20 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
             assert!(!accounted.to_string().contains(&"x".repeat(80_000)));
         }
     }
+}
+
+/// `state` with the RLM protocol's recorded namespace set to `options`
+/// (FIG-4379).
+fn under_rlm_options(
+    mut state: RuntimeSessionState,
+    options: ProtocolTurnOptions,
+) -> RuntimeSessionState {
+    state.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+    ));
+    state
+        .authority
+        .plugin_config
+        .insert(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID, options.payload);
+    state
 }

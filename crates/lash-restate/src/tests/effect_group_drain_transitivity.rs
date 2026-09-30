@@ -6,8 +6,8 @@
 //! without reading it, so a seat no longer certifies anything about the
 //! siblings below it. The index therefore names a drain every unseated
 //! committed sibling ranked below it, not only the last one. This law drives
-//! the index's own protocol — `commit_child`, `drain_blockers`, the drained
-//! wakes, `record_settlement` and retirement — under seeded random
+//! the index's own protocol — `commit_child`, the barrier's `Drained` notice
+//! (FIG-4344), `record_settlement` and retirement — under seeded random
 //! interleavings and fails when a drain is released while a lower-ranked
 //! sibling, of either kind, has not begun to seat, or when a seat publishes
 //! any rank but the one its commit reserved.
@@ -21,7 +21,7 @@
 //! - retire the group with members unseated: every parked drain must be
 //!   released, by the retirement;
 //! - crash a drain while it is parked and redrive it: the redrive commits again
-//!   (`AlreadyCommitted`) and reads the barrier afresh;
+//!   (`AlreadyCommitted`) and awaits the barrier afresh;
 //! - redrive a seat: the repeated `record_settlement` answers `Duplicate`.
 //!
 //! The seed is printed; `LASH_DRAIN_LAW_SEED` replays one.
@@ -32,10 +32,10 @@ use std::time::Duration;
 
 use crate::RestateIngressClient;
 use crate::effect_group::{
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupDrainBlockersRequest,
-    EffectGroupDrainBlockersResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupNotice,
+    EffectGroupNotification, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupRecordSettlementRequest, EffectGroupRecordSettlementResponse,
-    EffectGroupSettlementTerminal, EffectGroupWaitResolution, drained_wait_request,
+    EffectGroupSettlementTerminal,
 };
 
 use super::effect_group_conformance::{
@@ -316,6 +316,7 @@ async fn commit(
             "commit_child",
             &EffectGroupCommitChildRequest {
                 replay_key: shape.replay_keys[position].clone(),
+                committed: crate::effect_group::EffectGroupCommittedFinal::Held,
             },
         )
         .await
@@ -347,9 +348,9 @@ async fn seat(
         .expect("a child of the law seats")
 }
 
-/// One child's drain, as the host's drain admission runs it: read the
-/// barrier, park on its named sibling's drained wake, then go. It may crash
-/// once while parked and redrive: commit again and read the barrier afresh.
+/// One child's drain, as the host's drain admission runs it: await the
+/// group index's barrier notice for its rank, then go. It may crash once
+/// while parked and redrive: commit again and await the barrier afresh.
 async fn drain(
     ingress: RestateIngressClient,
     group_key: String,
@@ -359,66 +360,33 @@ async fn drain(
     mut rng: Rng,
     observed: Arc<Mutex<Observed>>,
 ) {
-    let mut crash = rng.chance(30);
-    loop {
-        let blockers: EffectGroupDrainBlockersResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "drain_blockers",
-                &EffectGroupDrainBlockersRequest { rank: seq },
-            )
-            .await
-            .expect("a drain of the law reads its barrier");
-        let (wait_scope, positions) = match blockers {
-            EffectGroupDrainBlockersResponse::Admitted => {
-                let retired = observed.lock().expect("the law's observations").retiring;
-                // An admitted drain is released by the index's own reading:
-                // after a retirement the index holds no live barrier.
-                observed
-                    .lock()
-                    .expect("the law's observations")
-                    .release(position, retired);
-                return;
-            }
-            EffectGroupDrainBlockersResponse::Blocked {
-                wait_scope,
-                positions,
-            } => (wait_scope, positions),
+    let barrier = EffectGroupNotice::Drained { rank: seq };
+    if rng.chance(30) {
+        // The crash drops the parked await after a moment, whether or not
+        // it was answered; the redrive commits again and awaits afresh.
+        let _ = tokio::time::timeout(
+            rng.pause(30),
+            await_group_wait(&ingress, &group_key, barrier.clone()),
+        )
+        .await;
+        // A redrive that finds the group retired is released by the
+        // retirement, as every parked drain is.
+        let Some(redriven) = commit(&ingress, &group_key, &shape, position).await else {
+            observed
+                .lock()
+                .expect("the law's observations")
+                .release(position, true);
+            return;
         };
-        if crash {
-            crash = false;
-            let first = drained_wait_request(&wait_scope, &group_key, positions[0])
-                .expect("the law's drained wake");
-            // The crash drops the parked await after a moment, whether or not
-            // it resolved; the redrive commits again and re-reads.
-            let _ = tokio::time::timeout(rng.pause(30), await_group_wait(&ingress, first)).await;
-            // A redrive that finds the group retired is released by the
-            // retirement, as every parked drain is.
-            let Some(redriven) = commit(&ingress, &group_key, &shape, position).await else {
-                observed
-                    .lock()
-                    .expect("the law's observations")
-                    .release(position, true);
-                return;
-            };
-            assert_eq!(redriven, seq, "a redriven commit keeps its commit sequence");
-            continue;
-        }
-        let mut by_retirement = false;
-        for blocker in positions {
-            let request = drained_wait_request(&wait_scope, &group_key, blocker)
-                .expect("the law's drained wake");
-            match await_group_wait(&ingress, request).await {
-                EffectGroupWaitResolution::Drained => {}
-                EffectGroupWaitResolution::Retired => by_retirement = true,
-                other => panic!("child {blocker}'s drained wake resolved as {other:?}"),
-            }
-        }
-        observed
-            .lock()
-            .expect("the law's observations")
-            .release(position, by_retirement);
-        return;
+        assert_eq!(redriven, seq, "a redriven commit keeps its reserved rank");
     }
+    let by_retirement = match await_group_wait(&ingress, &group_key, barrier).await {
+        EffectGroupNotification::Drained => false,
+        EffectGroupNotification::Retired => true,
+        other => panic!("child {position}'s barrier answered {other:?}"),
+    };
+    observed
+        .lock()
+        .expect("the law's observations")
+        .release(position, by_retirement);
 }

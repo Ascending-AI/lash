@@ -412,10 +412,9 @@ impl NodeSpec {
                 SessionNodePayload::FrameOpen {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
-                    assignment: lash_core::AgentFrameAssignment::from_policy(
+                    assignment: lash_core::AgentFrameAssignment::unconfigured(
                         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     ),
-                    protocol_turn_options: Default::default(),
                 }
             } else {
                 SessionNodePayload::Event {
@@ -1361,7 +1360,6 @@ impl BackendRunner {
                             .clone()
                             .expect("a pending follow-on owes the head's current frame"),
                         task: "fig-2841 follow-on task".to_string(),
-                        options: None,
                         resolved_run: None,
                         chain_depth: 1,
                         attempts: 0,
@@ -1401,6 +1399,7 @@ impl BackendRunner {
                             source_node_id: node_id.into(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        plugin_config: Default::default(),
                     })
                     .await?;
                 Ok(None)
@@ -2177,24 +2176,17 @@ async fn runners_for_case_with_clock(
     );
     let sqlite_lifecycle: lash::Backend =
         held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
-    // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
-    // store set, and the session delete it drives needs some effect-host
-    // authority to retire scopes against — a recording host is enough; the
-    // differential certifies the rows, not the journal.
-    let postgres_effects: Arc<dyn lash_core::EffectHost> =
-        Arc::new(lash_conformance::RecordingEffectHost::default());
     let postgres_lifecycle: lash::Backend =
-        held_work_lifecycle_backend(lash_conformance::backend_over(
-            Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+        held_work_lifecycle_backend(lash_conformance::recording_backend_over(Arc::new(
+            lash_postgres_store::PostgresStoreSet::with_clock(
                 postgres,
                 Arc::new(lash::persistence::FileAttachmentStore::new(
                     sqlite_case_root.join("postgres-attachments"),
                 )),
                 lash_core::WakeDeliveryConfig::default(),
                 Arc::clone(&clock),
-            )),
-            postgres_effects,
-        ));
+            ),
+        )));
 
     vec![
         BackendRunner {

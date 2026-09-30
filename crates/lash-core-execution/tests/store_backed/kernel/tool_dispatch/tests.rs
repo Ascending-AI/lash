@@ -771,7 +771,7 @@ async fn strict_mcp_dispatch_context<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -823,7 +823,7 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -883,7 +883,7 @@ async fn projection_policy_dispatch_context<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -1056,7 +1056,7 @@ async fn pinned_contract_dispatch_context<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -1091,11 +1091,8 @@ async fn authority_hidden_dispatch_context<'h>(
     ))])
     .build_session(PluginSessionRequest::creation(
         "root",
-        crate::plugin::SessionCreationConfig {
-            authority: crate::plugin::SessionAuthorityContext {
-                tool_access,
-                ..Default::default()
-            },
+        crate::plugin::SessionAuthorityContext {
+            tool_access,
             ..Default::default()
         },
     ))
@@ -1129,7 +1126,7 @@ async fn authority_hidden_dispatch_context<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -1179,7 +1176,7 @@ async fn exact_dispatch_context_with_plugins<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
@@ -1313,7 +1310,7 @@ async fn pending_dispatch_context<'h>(
         parent_invocation: None,
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         owner: crate::ExecutionOwner::SessionFrame {

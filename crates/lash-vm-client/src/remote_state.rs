@@ -4,7 +4,9 @@ use lash_core_execution::FleetFormat;
 use lashlang::{Record, Value};
 use std::collections::BTreeSet;
 
-use crate::service::{Capture, Request, Response, Service, StateAction, StateView};
+use crate::service::{
+    Capture, CellCompletion, Request, Response, Service, StateAction, StateMetadata, StateView,
+};
 
 #[derive(Clone)]
 pub struct RemoteState {
@@ -16,12 +18,8 @@ impl RemoteState {
         Self {
             service,
             view: StateView {
-                definition_ids: BTreeSet::new(),
                 snapshot: Vec::new(),
-                globals: Record::new(),
-                names: BTreeSet::new(),
-                expired: BTreeSet::new(),
-                opaque: Vec::new(),
+                metadata: Default::default(),
             },
         }
     }
@@ -35,19 +33,47 @@ impl RemoteState {
         (!self.view.snapshot.is_empty()).then_some(&self.view.snapshot)
     }
     pub fn globals(&self) -> &Record {
-        &self.view.globals
+        &self.view.metadata.globals
     }
     pub fn binding_names(&self) -> impl Iterator<Item = &str> {
-        self.view.names.iter().map(String::as_str)
+        self.view.metadata.names.iter().map(String::as_str)
     }
     pub fn expired_functions(&self) -> &BTreeSet<String> {
-        &self.view.expired
+        &self.view.metadata.expired
     }
     pub fn opaque_bindings(&self) -> Vec<(String, String)> {
-        self.view.opaque.clone()
+        self.view.metadata.opaque.clone()
     }
     pub fn referenced_definition_ids(&self) -> BTreeSet<lash_core_execution::ProcessDefinitionId> {
-        self.view.definition_ids.clone()
+        self.view.metadata.definition_ids.clone()
+    }
+    /// Adopt a broker-checked completion without reopening its VM snapshot.
+    pub fn install_completion(
+        &mut self,
+        snapshot: &lash_vm_protocol::OpaqueVmState,
+        value: &lash_vm_protocol::EncodedPayload,
+    ) -> Result<lashlang::ExecutionOutcome, crate::PoolError> {
+        let codec = lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode);
+        codec.check_payload(&value.0)?;
+        let completion: CellCompletion =
+            rmp_serde::from_slice(&value.0).map_err(crate::PoolError::protocol)?;
+        codec.check_payload(&completion.state.0)?;
+        let metadata: StateMetadata =
+            rmp_serde::from_slice(&completion.state.0).map_err(crate::PoolError::protocol)?;
+        if !metadata
+            .definition_ids
+            .iter()
+            .eq(snapshot.definition_ids().iter())
+        {
+            return Err(crate::PoolError::protocol(
+                "completion metadata names different definitions than its snapshot",
+            ));
+        }
+        self.view = StateView {
+            snapshot: snapshot.bytes().to_vec(),
+            metadata,
+        };
+        Ok(completion.outcome)
     }
     pub fn install_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         match self
@@ -72,7 +98,7 @@ impl RemoteState {
         })
     }
     pub fn remove_global(&mut self, name: &str) -> Result<bool, String> {
-        if !self.view.names.contains(name) {
+        if !self.view.metadata.names.contains(name) {
             return Ok(false);
         }
         self.mutate(StateAction::Remove {
@@ -191,4 +217,51 @@ pub enum RemoteRestoreError {
     Snapshot(lashlang::SnapshotDecodeError),
     #[error(transparent)]
     Worker(crate::PoolError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service::StateMetadata;
+    use lash_vm_protocol::{
+        EncodedPayload, InfrastructureOutcome, OpaqueVmState, VmOwner, VmStateKind,
+    };
+
+    #[test]
+    fn rejected_completion_preserves_the_previous_state() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let service = Service::default().with_worker_receipts();
+        let mut state = RemoteState::pristine(service.clone());
+        state.view.snapshot = vec![1, 2, 3];
+        state.view.metadata.names.insert("previous".into());
+        let snapshot = OpaqueVmState::seal(
+            VmStateKind::Snapshot,
+            VmOwner::new("completed-cell"),
+            lashlang::vm_contract_versions(),
+            lashlang::LASHLANG_SNAPSHOT_VERSION,
+            vec![4, 5, 6],
+        );
+        let mismatched = CellCompletion {
+            outcome: lashlang::ExecutionOutcome::Finished(Value::Number(42.0)),
+            state: EncodedPayload(rmp_serde::to_vec_named(&StateMetadata {
+                definition_ids: [
+                    lash_core_execution::ProcessDefinitionId::from_sha256_digest([7; 32]),
+                ]
+                .into(),
+                ..Default::default()
+            })?),
+        };
+        for bytes in [vec![0xc1], rmp_serde::to_vec_named(&mismatched)?] {
+            assert!(matches!(
+                state.install_completion(&snapshot, &EncodedPayload(bytes)),
+                Err(crate::PoolError::Infrastructure(
+                    InfrastructureOutcome::ProtocolViolation { .. }
+                ))
+            ));
+            assert_eq!(state.bytes(), Some([1, 2, 3].as_slice()));
+            assert_eq!(state.binding_names().collect::<Vec<_>>(), ["previous"]);
+        }
+        assert!(service.worker_receipts().is_empty());
+        Ok(())
+    }
 }

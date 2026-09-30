@@ -121,16 +121,10 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::ProcessCommand| {
         matches!(value, lash::runtime::ProcessCommand::List { .. })
     });
-    // W0369: lash::runtime::ProcessCommand::List::mode [field]
+    // W0369: lash::runtime::ProcessCommand::List::selection [field]
     field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::List { mode, .. } = value {
-            let _ = mode;
-        }
-    });
-    // W0370: lash::runtime::ProcessCommand::List::session_scope [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::List { session_scope, .. } = value {
-            let _ = session_scope;
+        if let lash::runtime::ProcessCommand::List { selection } = value {
+            let _ = selection;
         }
     });
     // W0371: lash::runtime::ProcessCommand::Signal [variant]

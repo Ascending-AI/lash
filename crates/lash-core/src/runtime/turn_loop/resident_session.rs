@@ -86,7 +86,6 @@ pub(in crate::runtime) enum ResidentReloadStage {
     SessionAvailability,
     ToolStateRestore,
     ToolCatalogRefresh,
-    PluginStateRestore,
     ProtocolSessionRestore,
     SessionRestoredHook,
 }
@@ -99,7 +98,6 @@ impl ResidentReloadStage {
             Self::SessionAvailability => "session_availability",
             Self::ToolStateRestore => "tool_state_restore",
             Self::ToolCatalogRefresh => "tool_catalog_refresh",
-            Self::PluginStateRestore => "plugin_state_restore",
             Self::ProtocolSessionRestore => "protocol_session_restore",
             Self::SessionRestoredHook => "session_restored_hook",
         }
@@ -425,15 +423,7 @@ impl LashRuntime {
             })?;
         }
         if let Some(snapshot) = durable_state.plugin_state() {
-            session.plugins().hydrate_state(snapshot).map_err(|err| {
-                (
-                    ResidentReloadStage::PluginStateRestore,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
-                )
-            })?;
+            session.plugins().hydrate_state(snapshot);
         }
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();

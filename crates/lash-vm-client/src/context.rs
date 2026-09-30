@@ -11,6 +11,8 @@ pub struct RunContext {
     pub projected: Vec<ProjectionDescription>,
     #[serde(default)]
     pub observe_execution: bool,
+    /// Return a `CellCompletion` with the snapshot's metadata for resident cells.
+    pub capture_state_view: bool,
     #[serde(default)]
     pub projection_namespace: String,
 }

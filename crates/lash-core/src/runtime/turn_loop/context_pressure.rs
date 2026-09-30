@@ -186,6 +186,7 @@ impl LashRuntime {
         };
         let ctx = crate::plugin::ContextPressureContext {
             session_id: self.state.session_id.clone(),
+            plugin_config: self.state.admitted_plugin_config(),
             state: read_view,
             prompt_usage: previous_prompt_usage,
             max_context_tokens: Some(LashRuntime::max_context_tokens(self)),

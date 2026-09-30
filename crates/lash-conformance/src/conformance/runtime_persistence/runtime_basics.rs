@@ -31,7 +31,6 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         second_frame_key,
         custom_reason.clone(),
         assignment,
-        ProtocolTurnOptions::default(),
         "2026-07-27T00:00:00Z".to_string(),
     ));
     state.current_frame_node_id = Some(second_frame_node_id.clone());

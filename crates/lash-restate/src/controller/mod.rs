@@ -12,6 +12,7 @@ pub(crate) mod effect_journal;
 mod group_child_cancel;
 mod group_commit;
 use group_child_cancel::group_child_cancelled;
+pub(crate) use group_commit::committed_final_is_not_a_tool_terminal;
 mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
@@ -56,9 +57,8 @@ use crate::durable_wait::{
 };
 use crate::effect_group::{
     EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupProbeResponse, EffectGroupShape, EffectGroupWaitResolution, decode_wait_resolution,
-    group_shape_error, ready_wait_request,
+    EffectGroupDispatchRequest, EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest,
+    EffectGroupOpenResponse, EffectGroupProbeResponse, EffectGroupShape, group_shape_error,
 };
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
@@ -79,13 +79,6 @@ pub struct RestateEffectControllerOptions {
     run_retry_policy: Option<RunRetryPolicy>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
-    /// The §7 drain budget: on the SQL tiers it bounds how long group
-    /// finalization waits on a cancel-decided child's attempt body after its
-    /// decision commits. On Restate there is no such wait — the engine's own
-    /// cancellation already abandons a cancelled child's drive, so the bound
-    /// is vacuous here — but the option is held so the three tiers carry one
-    /// construction-level vocabulary (FIG-3410).
-    drain_budget: Duration,
     /// Whether this controller drives a process segment, whose waits that
     /// observe no turn race the segment's durable cancel promise and whose
     /// cancel peeks read it (FIG-3673).
@@ -109,7 +102,6 @@ impl Default for RestateEffectControllerOptions {
             run_retry_policy: None,
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
-            drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
             process_cancel: context::ProcessCancelRace::NotRaced,
             segment_generation: None,
             group_child_cancel: None,
@@ -170,19 +162,6 @@ impl RestateEffectControllerOptions {
         self
     }
 
-    /// Set the group drain budget (ADR 0099 §7): the bound a group's
-    /// finalization waits on a cancel-decided child's attempt body after its
-    /// decision commits.
-    ///
-    /// On this tier the bound is **vacuous** and is held for cross-tier parity
-    /// only: engine cancellation abandons the cancelled child's drive itself,
-    /// so no host-side wait exists for it to bound. The value is journaled
-    /// nowhere and changing it never changes a committed obligation.
-    pub fn drain_budget(mut self, budget: lash_core::EffectGroupDrainBudget) -> Self {
-        self.drain_budget = budget.duration();
-        self
-    }
-
     /// Mark the controller as a process segment's drive (FIG-3673): a wait
     /// it issues that observes no turn races the segment's durable cancel
     /// promise, and [`observe_process_cancel`](RuntimeEffectController::observe_process_cancel)
@@ -215,7 +194,6 @@ impl fmt::Debug for RestateEffectControllerOptions {
                 "journaled_effect_byte_budget",
                 &self.journaled_effect_byte_budget,
             )
-            .field("drain_budget", &self.drain_budget)
             .field("process_cancel", &self.process_cancel)
             .field("segment_generation", &self.segment_generation)
             .field("group_child_cancel", &self.group_child_cancel)
@@ -860,24 +838,21 @@ where
                     )
                     .await
                     .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
-                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
-                let resolution = match self
+                // The group index's own readiness notice (FIG-4344).
+                let notification = match self
                     .context
-                    .await_effect_group_wait(
+                    .await_effect_group_notice(
                         &self.namespace,
-                        request,
                         group_key.clone(),
+                        EffectGroupNotice::Ready,
                         None,
                         context::ProcessCancelRace::NotRaced,
                     )
                     .await
                     .map_err(|error| {
-                        effect_group_engine_error(
-                            "LashDurableWaitWorkflow/await_resolution(READY)",
-                            error,
-                        )
+                        effect_group_engine_error("EffectGroupIndex/subscribe(Ready)", error)
                     })? {
-                    RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+                    RestateTurnCancelRaceOutcome::Completed(notification) => notification,
                     RestateTurnCancelRaceOutcome::TurnCancelled
                     | RestateTurnCancelRaceOutcome::ProcessCancelled
                     | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
@@ -886,12 +861,12 @@ where
                         )));
                     }
                 };
-                match decode_wait_resolution(resolution)? {
-                    EffectGroupWaitResolution::Ready => Ok(handle),
-                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
-                        format!("effect group {group_key} routing was refused: {reason:?}"),
-                    )),
-                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                match notification {
+                    EffectGroupNotification::Ready => Ok(handle),
+                    EffectGroupNotification::Refused { reason } => Err(group_shape_error(format!(
+                        "effect group {group_key} routing was refused: {reason:?}"
+                    ))),
+                    EffectGroupNotification::Retired => Err(group_shape_error(format!(
                         "effect group {group_key} was retired before it became ready"
                     ))),
                     other => Err(group_shape_error(format!(
@@ -1003,9 +978,8 @@ where
     /// that group's index takes the commit. The serialized object handler —
     /// not any state this controller holds — is the linearization point, so
     /// a cancel decision racing the commit is fenced inside the index. The
-    /// Restate index does not retain `drain_input`: the durable publication
-    /// obligation is the committed-but-unseated child plus the dispatch
-    /// workflow's own redrive, so `AlreadyCommitted` reports it `None`.
+    /// index retains `drain_input` as the child's committed final, and
+    /// `AlreadyCommitted` answers the one the winner sealed (ADR 0099 §5).
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::GroupChildFinalCommit,

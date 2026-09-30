@@ -1015,7 +1015,21 @@ impl AgentDurableInputSuspensionScenario {
                 .await
         });
 
-        let key = self.await_suspension_key(key_rx, events.as_ref()).await;
+        let key = self
+            .await_suspension_key(key_rx, &mut turn, events.as_ref())
+            .await;
+        assert_eq!(
+            runtime
+                .core
+                .env
+                .core
+                .control
+                .effect_host
+                .peek_await_event(&key)
+                .await?,
+            None,
+            "the durable input key is unresolved before external resolution"
+        );
         self.assert_turn_suspended_before_resolution(&mut turn, events.as_ref())
             .await;
         self.resolve_key(&runtime, key).await?;
@@ -1051,12 +1065,13 @@ finish(result.answer);"#,
     async fn await_suspension_key(
         &self,
         key_rx: oneshot::Receiver<std::result::Result<lash_core::AwaitEventKey, String>>,
+        turn: &mut tokio::task::JoinHandle<Result<TurnReport>>,
         events: &RecordingEvents,
     ) -> lash_core::AwaitEventKey {
-        let key_result = tokio::time::timeout(std::time::Duration::from_secs(1), key_rx)
-            .await
-            .expect("durable input tool should publish await key")
-            .expect("durable input key sender should stay alive");
+        let key_result = tokio::select! {
+            key = key_rx => key.expect("durable input key sender should stay alive"),
+            result = turn => panic!("turn completed before issuing its durable input key: {result:?}"),
+        };
         let key = match key_result {
             Ok(key) => key,
             Err(err) => {
@@ -1082,9 +1097,10 @@ finish(result.answer);"#,
         turn: &mut tokio::task::JoinHandle<Result<TurnReport>>,
         events: &RecordingEvents,
     ) {
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        if let Ok(joined) = tokio::time::timeout(std::time::Duration::from_millis(20), turn).await {
-            let result = joined.expect("turn task completed before durable input resolution");
+        if turn.is_finished() {
+            let result = turn
+                .await
+                .expect("turn task completed before durable input resolution");
             panic!(
                 "turn completed before the durable input request was resolved: {result:#?}; events: {:#?}",
                 events.snapshot().await

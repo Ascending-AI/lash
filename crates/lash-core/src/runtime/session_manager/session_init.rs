@@ -35,7 +35,7 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
     parent_session_id: Option<SessionId>,
     policy: SessionPolicy,
     initial_runtime_state: RuntimeSessionState,
-    plugin_config: crate::plugin::SessionCreationConfig,
+    plugin_config: crate::plugin::SessionAuthorityContext,
     plugin_source: crate::SessionPluginSource,
     protocol_request: SessionCreateRequest,
     /// The `SessionTurn` process whose start creates this session, recorded
@@ -111,21 +111,40 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
     let policy = resolve_session_policy(current, &request, &session_id)
         .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     request.policy = Some(policy.clone());
+    // Every installed owner resolves its namespace from the request, the
+    // creating session's recorded namespace standing as the parent's for a
+    // child (FIG-4379). The creation head records the result.
+    let recorded_plugin_config = current
+        .plugins
+        .host()
+        .resolve_creation_plugin_config(
+            Some(current.plugins.protocol_plugin_id()),
+            &request.plugin_options,
+            parent_session_id
+                .is_some()
+                .then(|| current.plugins.admitted_plugin_config())
+                .as_ref()
+                .map(|parent| parent.config.as_ref()),
+            parent_session_id.is_none(),
+        )
+        .map_err(|refusal| {
+            crate::PluginError::Session(format!(
+                "session `{session_id}` config refused at creation: {refusal}"
+            ))
+        })?;
     let initial_runtime_state = build_runtime_state(
         session_id.clone(),
         &request,
         start_state,
         &policy,
+        recorded_plugin_config,
         current.host.core.clock.as_ref(),
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let plugin_config = crate::plugin::SessionCreationConfig {
-        authority: crate::plugin::SessionAuthorityContext {
-            tool_access: request.tool_access.clone(),
-            subagent: request.subagent.clone(),
-            plugin_options: request.plugin_options.clone(),
-        },
-        protocol_turn_options: initial_runtime_state.protocol_turn_options.clone(),
+    let plugin_config = crate::plugin::SessionAuthorityContext {
+        tool_access: request.tool_access.clone(),
+        subagent: request.subagent.clone(),
+        plugin_config: initial_runtime_state.admitted_plugin_config(),
     };
 
     let mut seen_observed_processes = std::collections::HashSet::new();
@@ -184,6 +203,7 @@ fn build_runtime_state(
     request: &SessionCreateRequest,
     mut base: RuntimeSessionState,
     policy: &SessionPolicy,
+    plugin_config: crate::PluginConfig,
     clock: &dyn crate::Clock,
 ) -> Result<RuntimeSessionState, crate::StoreError> {
     base.session_id = session_id;
@@ -199,11 +219,7 @@ fn build_runtime_state(
     base.current_frame_node_id = None;
     base.persisted_node_ids.clear();
     base.reset_initial_agent_frame_with_clock(
-        crate::AgentFrameAssignment::from_session_request_facts(
-            request.plugin_options.clone(),
-            policy.clone(),
-        ),
-        base.protocol_turn_options.clone(),
+        crate::AgentFrameAssignment::new(policy.clone(), plugin_config),
         clock,
     );
     let draft_namespace = format!("create-session:{}", base.session_id);
@@ -234,7 +250,7 @@ async fn materialize_session_init(
     // Session creation routes through the same assembler as live open and
     // worker-rebuild paths. A freshly created session has a single path, so it
     // materializes under KeepAll (residency trimming is an open-time concern).
-    let mut runtime = LashRuntime::assemble_runtime(
+    let runtime = LashRuntime::assemble_runtime(
         plan.policy.clone(),
         embedded_host(current),
         plugins,
@@ -247,11 +263,6 @@ async fn materialize_session_init(
     )
     .await
     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-
-    runtime.configure_protocol_on_materialize(
-        &plan.protocol_request.plugin_options,
-        plan.protocol_request.relation.parent_session_id().is_none(),
-    )?;
 
     Ok(MaterializedSession {
         runtime,
@@ -306,13 +317,15 @@ async fn bind_session_store(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<crate::store::SessionStore, crate::PluginError> {
+    let mut config = crate::PersistedSessionConfig::from(&plan.policy);
+    config.plugin_config = plan.initial_runtime_state.authority.plugin_config.clone();
     let store = crate::runtime::admit_session_view(
         &current.host.core.session_store_factory(),
         &SessionStoreCreateRequest {
             session_id: plan.session_id.clone(),
             relation: plan.relation.clone(),
             pending_observer_intents: plan.pending_observer_intents.clone(),
-            config: plan.policy.clone().into(),
+            config,
             head: crate::SessionCreationHead::CommittedByCreator,
             owning_process_id: plan.owning_process_id.clone(),
         },
@@ -410,7 +423,6 @@ async fn commit_initialized_session(
     persisted_state.apply_persisted_commit_result(result);
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
     materialized.runtime.install_resident_state(persisted_state);
-    materialized.runtime.materialized_protocol_config_dirty = false;
     let observed_processes =
         settle_session_observer_intents(current, &plan.session_id, &materialized.store_binding)
             .await?;
@@ -596,10 +608,12 @@ async fn reopen_committed_session(
     store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,
 ) -> Result<InitializedSession, crate::PluginError> {
+    // The reopened session runs the configuration it recorded, never the
+    // redelivered request's (FIG-4379).
     let authority = crate::plugin::SessionAuthorityContext {
         tool_access: state.authority.tool_access.clone(),
         subagent: state.authority.subagent.clone(),
-        plugin_options: plan.protocol_request.plugin_options.clone(),
+        plugin_config: state.admitted_plugin_config(),
     };
     let plugin_host = current.plugins.host();
     let plugins = match state.plugin_state() {
@@ -608,25 +622,16 @@ async fn reopen_committed_session(
             ..PluginSessionRequest::rematerialization(
                 state.session_id.as_str(),
                 snapshot,
-                crate::plugin::RecordedSessionConfig {
-                    authority,
-                    protocol_turn_options: state.protocol_turn_options.clone(),
-                },
+                authority,
             )
         }),
         None => plugin_host.build_session(PluginSessionRequest {
             parent_session_id: plan.parent_session_id.clone(),
-            ..PluginSessionRequest::creation(
-                state.session_id.as_str(),
-                crate::plugin::SessionCreationConfig {
-                    authority,
-                    protocol_turn_options: state.protocol_turn_options.clone(),
-                },
-            )
+            ..PluginSessionRequest::creation(state.session_id.as_str(), authority)
         }),
     }?;
     let policy = state.effective_policy().clone();
-    let mut runtime = LashRuntime::assemble_runtime(
+    let runtime = LashRuntime::assemble_runtime(
         policy,
         embedded_host(current),
         plugins,
@@ -640,12 +645,6 @@ async fn reopen_committed_session(
     )
     .await
     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-    runtime
-        .configure_protocol_on_materialize(
-            &plan.protocol_request.plugin_options,
-            plan.parent_session_id.is_none(),
-        )
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     // Finish any observer intents a crashed create attempt left pending; the
     // settle is durable and idempotent, so completing it here is the same
     // work the create path performs.

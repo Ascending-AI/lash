@@ -71,13 +71,43 @@ mod process_lifecycle;
 mod process_observation;
 mod prompt_layer;
 pub mod recoverable_chat;
+/// A session's config and the typed commands that change it (FIG-4379).
+///
+/// Every installed owner records its namespace when a session is created,
+/// beside the core owner's share (provider, model, prompt, generation, turn
+/// budget and tool access). After that the config changes only through a
+/// [`ConfigTransaction`]: an ordered list of typed commands of any owners,
+/// written against the config revision the caller read under a stable
+/// [`ConfigWrite::id`], applied with
+/// [`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply). It
+/// applies all or nothing, with one revision step, and settles as a
+/// [`ConfigTransactionOutcome`]: applied, stale, or refused by an owner.
+/// [`SessionConfigAdmin::commands`](crate::admin::SessionConfigAdmin::commands)
+/// lists every command the installed owners register.
+///
+/// The core owner's commands are here; a protocol's are in its module
+/// ([`render::SetStandardRender`], and `rlm::SetRlmRender`).
+pub mod config {
+    pub use crate::admin::SessionConfigAdmin;
+    pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
+    pub use lash_core::plugin::config::core::{
+        AddPromptContribution, ClearPromptSlot, ClearPromptTemplate, ReplacePromptSlot,
+        SetAttachmentAcceptance, SetGeneration, SetModel, SetPrompt, SetPromptTemplate,
+        SetProvider, SetToolAccess, SetTurnBudget,
+    };
+    pub use lash_core::{
+        CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
+        ConfigRefusal, ConfigSubmitError, ConfigTransaction, ConfigTransactionOutcome, CoreConfig,
+        CoreConfigRefusal,
+    };
+}
 pub mod render {
-    pub use lash_protocol_standard::StandardTurnOptions;
     pub use lash_protocol_standard::render::{
         AuthoredViewPolicy, BuiltinToolOutputRenderer, ResolvedStandardRenderConfig,
         StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot, ToolRenderParams,
         ToolRenderPatch, resolve,
     };
+    pub use lash_protocol_standard::{SetStandardRender, StandardTurnOptions};
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
 }
@@ -172,13 +202,13 @@ pub use lash_core::{
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
     TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
     facade_support::SessionCommand, facade_support::SessionCommandReceipt,
-    facade_support::SessionConfigPatch, facade_support::SessionSpec,
-    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
-    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
-    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
-    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
-    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+    facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
+    facade_support::TurnAttach, facade_support::TurnCancelOutcome,
+    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
+    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
+    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
+    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver,
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
@@ -217,9 +247,9 @@ pub mod prelude {
         ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
         ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
-        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionCreation, SessionDeleteReport, SessionDeletion,
-        SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
+        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionCreateRequest,
+        SessionCreation, SessionDeleteReport, SessionDeletion, SessionListFilter,
+        SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
         SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
         TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
         TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
@@ -566,9 +596,16 @@ pub mod plugins {
     pub use lash_core::PluginOptions;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
+    /// The schema crate config wire types derive with, so an owner's
+    /// namespace, commands and refusals generate the schemas the config
+    /// command catalog publishes: derive
+    /// `#[derive(lash::plugins::JsonSchema)]` with
+    /// `#[schemars(crate = "lash::plugins::schemars")]`.
+    pub use lash_core::facade_support::JsonSchema;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]; runtime-implemented.
     pub use lash_core::facade_support::SessionLifecycleService;
+    pub use lash_core::facade_support::schemars;
     pub use lash_core::facade_support::{
         AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
         BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
@@ -597,10 +634,8 @@ pub mod plugins {
         ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
         PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
         PluginSessionRequest, PluginState, PrepareTurnRequest, ProtocolBeforeLlmCallContext,
-        ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolRuntimeContext,
-        ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
-        ProtocolSessionRestoreView, RecordedSessionConfig, SessionAuthorityContext,
-        SessionCreationConfig, TurnFinalization, TurnPreparation,
+        ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+        ProtocolSessionRestoreView, SessionAuthorityContext, TurnFinalization, TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
@@ -641,6 +676,15 @@ pub mod plugins {
     pub use lash_core::runtime::{
         ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
         ProcessEngineRuntimeContext,
+    };
+    /// A session's recorded plugin configuration and the owner contract that
+    /// creates and changes it (FIG-4379): each installed plugin registers the
+    /// owner of its namespace and the typed config commands that change it,
+    /// and reads the recorded value on every open and in every scoped hook.
+    pub use lash_core::{
+        AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,
+        ConfigRegistrationError, ConfigWire, CreationFacts, OwnerChange, PluginConfig,
+        SessionConfigRefusal, UnknownPluginConfigOwner,
     };
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
@@ -817,7 +861,7 @@ pub mod remote {
             RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
             RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
             RemoteProcessModelSpec, RemoteProcessObserverBy, RemoteProcessOriginator,
-            RemoteProcessOriginatorFilter, RemoteProcessPark, RemoteProcessPluginOptions,
+            RemoteProcessOriginatorFilter, RemoteProcessPark, RemoteProcessPluginConfig,
             RemoteProcessProvenance, RemoteProcessRecord, RemoteProcessResumeRefusal,
             RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessSignalWaitBinding,
             RemoteProcessSignature, RemoteProcessStartOutcome, RemoteProcessStartReceipt,
@@ -1056,13 +1100,13 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
-        AdmittedScope, ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents,
-        AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
-        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
-        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
-        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord,
-        LoserPolicy, NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantStreamHookState,
+        AwaitEventResolver, CheckpointAdmittedSet, CompletionKeyPreparation,
+        DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
+        GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy, NoSessionWork,
+        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        ProcessListSelection, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
         RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,

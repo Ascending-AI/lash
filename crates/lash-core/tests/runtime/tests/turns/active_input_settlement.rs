@@ -22,7 +22,8 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
         "lash-active-input-settled-trace-{}.jsonl",
         uuid::Uuid::new_v4()
     ));
-    let transport = mock_provider(vec![
+    let steer = SteerWhileRunning::default();
+    let transport = steer.provider(vec![
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
@@ -59,14 +60,13 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
     )
     .await;
     let turn_id = TurnId::from("active-input-settled-turn");
-    let admitted = enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &turn_id,
         Some("host:active-input-settled".to_string()),
         TurnInput::text("mid-turn input"),
-    )
-    .await;
+    );
 
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -83,6 +83,7 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
         .await
         .expect("turn");
     handler.close().await.expect("close the turn's handler");
+    let admitted = steer.sent().remove(0);
 
     // The tool step is not terminal, so the in-flight turn itself absorbs
     // the input rather than a follow-on turn.

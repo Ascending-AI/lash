@@ -31,6 +31,9 @@ pub(super) struct ReferenceTurn {
     pub(super) lease_timings: crate::LeaseTimings,
     pub(super) fail_post_commit_delivery: bool,
     pub(super) before_drive: BeforeDrive,
+    /// The active-turn inputs the seam store steers into the root once it is
+    /// admitted: the reference input, then any the scenario adds.
+    pub(super) steer: Vec<PendingTurnInputDraft>,
     /// Where an execution that ends reports its drain. A crashing turn has
     /// none: it must never end.
     pub(super) reports: Option<tokio::sync::mpsc::UnboundedSender<DrainReport>>,
@@ -64,6 +67,7 @@ impl ReferenceTurn {
             lease_timings,
             fail_post_commit_delivery: false,
             before_drive: Arc::new(|_| {}),
+            steer: vec![reference_steer(identity)],
             reports: None,
         }
     }
@@ -73,6 +77,15 @@ impl ReferenceTurn {
         before_drive: impl Fn(&SeamControl) + Send + Sync + 'static,
     ) -> Self {
         self.before_drive = Arc::new(before_drive);
+        self
+    }
+
+    /// Steer `steer` into the root as well, after the reference input.
+    pub(super) fn steering(
+        mut self,
+        steer: impl IntoIterator<Item = PendingTurnInputDraft>,
+    ) -> Self {
+        self.steer.extend(steer);
         self
     }
 
@@ -103,7 +116,11 @@ impl ReferenceTurn {
         Arc::new(move |scoped| {
             let turn = Arc::clone(&turn);
             Box::pin(async move {
-                let store = SeamStore::wrap(Arc::clone(&turn.store), turn.seam.control.clone());
+                let store = SeamStore::steering(
+                    Arc::clone(&turn.store),
+                    turn.seam.control.clone(),
+                    turn.steer.clone(),
+                );
                 turn.host.route_to(&turn.seam);
                 let mut runtime = Box::pin(try_build_runtime_over_host_with_delivery_failure(
                     Arc::clone(&turn.stores),

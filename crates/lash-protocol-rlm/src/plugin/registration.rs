@@ -27,7 +27,6 @@ pub(super) fn register_rlm_protocol_plugin(
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
         config.clone(),
-        dialect.language_id(),
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;

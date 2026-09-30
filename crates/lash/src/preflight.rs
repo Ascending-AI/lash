@@ -228,9 +228,6 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::SessionStateGeneration => SurfaceRelation::Unwalkable(
             "no bounded surface: one marker per session, refused at admission rather than at rest",
         ),
-        DurableFormat::ProtocolTurnOptions => SurfaceRelation::Unwalkable(
-            "no bounded surface: carried on each session head, refused at open rather than at rest",
-        ),
         DurableFormat::ScopeStoragePayload => SurfaceRelation::Unwalkable(
             "no bounded surface: one payload per scope-close row, refused at decode \
              rather than at rest",

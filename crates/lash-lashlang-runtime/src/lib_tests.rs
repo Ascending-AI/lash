@@ -246,7 +246,7 @@ pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
         backend.process_env_store().as_ref(),
         &crate::lib_tests::host_claim(),
         &lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
+            lash_core::AdmittedPluginConfig::default(),
             harness_session_policy(),
         ),
     )

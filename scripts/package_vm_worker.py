@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bundle the worker and the exact source tree its SDK client must build from."""
+"""Bundle an explicitly selected worker and optional SDK sources for inspection."""
 from __future__ import annotations
 
 import argparse
@@ -20,13 +20,10 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
     worker = worker.resolve()
     if not worker.is_file():
         raise ValueError(f"missing worker executable: {worker}")
-    identity = subprocess.check_output([str(worker), "--build-identity"], text=True).strip()
-    if not identity.startswith("lash-worker/") or "/debug-false/testing-false" not in identity:
-        raise ValueError(f"worker must be an optimized SDK build without testing: {identity}")
-    parts = identity.split("/")
-    if len(parts) != 6:
-        raise ValueError(f"malformed worker identity: {identity}")
-    compiled_target = f"{parts[3]}-{parts[2]}"
+    info = json.loads(subprocess.check_output([str(worker), "--version"], text=True))
+    if info["debug"] or info["testing"]:
+        raise ValueError("worker must be an optimized SDK build without testing")
+    compiled_target = f"{info['os']}-{info['arch']}"
     if target is not None and target != compiled_target:
         raise ValueError(f"target {target} differs from compiled target {compiled_target}")
     target = compiled_target
@@ -34,9 +31,6 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
         ["git", "ls-files", "-z", "--cached"], cwd=source
     ).decode().split("\0")
     paths = sorted(set(path for path in paths if path))
-    required = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/lash-vm-client/build.rs", "crates/lash-vm-worker/build/fingerprint.rs"}
-    if not required.issubset(paths):
-        raise ValueError("SDK source tree lacks worker identity inputs")
     for name in paths:
         path = source / name
         if path.is_symlink() or not path.is_file():
@@ -45,7 +39,8 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
         "version": version,
         "target": target,
         "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip(),
-        "build_identity": identity,
+        "worker": info,
+        "worker_binary": "bin/lash-vm-worker",
         "worker_sha256": digest(worker),
         "source_sha256": {name: digest(source / name) for name in paths},
         "build": "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker",

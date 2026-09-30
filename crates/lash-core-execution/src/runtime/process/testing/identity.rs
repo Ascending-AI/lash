@@ -10,10 +10,9 @@ use super::super::model::{
 
 #[test]
 fn process_execution_env_identity_golden_corpus() {
-    let mut plugin_options = crate::PluginOptions::default();
-    plugin_options
-        .plugins
-        .insert("a:b".to_string(), serde_json::json!({"enabled": true}));
+    let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    plugin_config.insert("a:b", serde_json::json!({"enabled": true}));
+    let plugin_config = crate::AdmittedPluginConfig::new(plugin_config, 3);
     let policy = crate::SessionPolicy {
         charge_safety: Default::default(),
         model: crate::ModelSpec::builder("model:rich")
@@ -58,10 +57,10 @@ fn process_execution_env_identity_golden_corpus() {
     };
     let specs = [
         ProcessExecutionEnvSpec::new(
-            crate::PluginOptions::default(),
+            crate::AdmittedPluginConfig::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        ProcessExecutionEnvSpec::new(plugin_options, policy),
+        ProcessExecutionEnvSpec::new(plugin_config, policy),
     ];
     let actual = specs.map(|spec| {
         let bytes = spec.to_store_bytes().expect("encode golden env");
@@ -76,12 +75,12 @@ fn process_execution_env_identity_golden_corpus() {
         actual,
         [
             (
-                "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738".to_string(),
+                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
+                "process-env:v6:blake3:103b23b28fe9d918bc3f5f2e34fa8996cb4cc49772552d35040d132cd55724e0".to_string(),
             ),
             (
-                r#"{"plugin_options":{"plugins":{"a:b":{"enabled":true}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:291b0b6b8ae9f2571ce7629ee5287b6b352e8ef4105dbd2fe5c7ff563cbd771c".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:b7dd02a275a640b803e6ced78e5f555a91aba0fb958240c4c0cf7fcacb3ad1c9".to_string(),
             ),
         ]
     );

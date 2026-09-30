@@ -233,10 +233,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             effects: &effects,
             checkpoints: &captures,
             slots: &slots,
-            codec: FrameCodec::new(
-                self.service.config().entry.build.clone(),
-                self.service.config().protocol.decode,
-            ),
+            codec: FrameCodec::new(self.service.config().protocol.decode),
             contract: lashlang::vm_contract_reads(),
             bounds: BrokerBounds {
                 protocol: self.service.config().protocol,

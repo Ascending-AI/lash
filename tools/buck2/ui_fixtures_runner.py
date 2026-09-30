@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
+import xml.etree.ElementTree as ET
 
 
 def filter_diagnostics(text, fixture, package):
@@ -134,6 +136,7 @@ def overlay_sources(stage, destination, source):
 
 
 def run_fixture(fixture, manifest, root, stage, output):
+    started = time.monotonic()
     name = fixture['name']
     source = root / fixture['source']
     expected_path = root / fixture['expected']
@@ -156,10 +159,31 @@ def run_fixture(fixture, manifest, root, stage, output):
     (case / 'stderr.diff').write_text(difference)
     passed = process.returncode > 0 and actual == expected
     reason = 'rustc succeeded unexpectedly' if process.returncode == 0 else 'rustc terminated by signal' if process.returncode < 0 else 'diagnostic drift'
-    return {'name': name, 'passed': passed, 'rustc_exit_code': process.returncode, 'reason': None if passed else reason, 'diff': difference}
+    return {'name': name, 'passed': passed, 'rustc_exit_code': process.returncode, 'reason': None if passed else reason, 'diff': difference, 'duration_seconds': time.monotonic() - started}
+
+
+def write_junit(path, results, elapsed, log):
+    suite_name = os.environ.get('TEST_TARGET', 'ui_fixtures')
+    suites = ET.Element('testsuites')
+    suite = ET.SubElement(
+        suites, 'testsuite', name=suite_name, tests=str(len(results)),
+        failures=str(sum(not result['passed'] for result in results)),
+        errors='0', skipped='0', time=f'{elapsed:.6f}',
+    )
+    for result in results:
+        case = ET.SubElement(
+            suite, 'testcase', name=result['name'], classname=suite_name,
+            time=f"{result['duration_seconds']:.6f}",
+        )
+        if not result['passed']:
+            ET.SubElement(case, 'failure', message=result['reason']).text = result['diff'] or result['reason']
+    ET.SubElement(suite, 'system-out').text = log
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(suites).write(path, encoding='utf-8', xml_declaration=True)
 
 
 def main():
+    started = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', required=True, type=Path)
     args = parser.parse_args()
@@ -184,22 +208,24 @@ def main():
         with ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = [pool.submit(run_fixture, fixture, manifest, root, stage, output) for fixture in manifest['fixtures']]
             results = [future.result() for future in futures]
-    print(f'running {len(results)} tests')
+    lines = [f'running {len(results)} tests']
     for result in results:
-        print('test ' + result['name'] + (' ... ok' if result['passed'] else ' ... FAILED'))
+        lines.append('test ' + result['name'] + (' ... ok' if result['passed'] else ' ... FAILED'))
     failed = [result for result in results if not result['passed']]
     if failed:
-        print('\nfailures:\n')
+        lines.append('\nfailures:\n')
         for result in failed:
-            print('---- ' + result['name'] + ' stdout ----')
-            print(result['reason'])
-            print(result['diff'])
-        print('failures:')
+            lines.extend(['---- ' + result['name'] + ' stdout ----', result['reason'], result['diff']])
+        lines.append('failures:')
         for result in failed:
-            print('    ' + result['name'])
+            lines.append('    ' + result['name'])
     (output / 'results.json').write_text(json.dumps({'schema': 1, 'results': results}, indent=2) + '\n')
     failures = len(failed)
-    print(f'test result: {"FAILED" if failures else "ok"}. {len(results) - failures} passed; {failures} failed; 0 ignored')
+    lines.append(f'test result: {"FAILED" if failures else "ok"}. {len(results) - failures} passed; {failures} failed; 0 ignored')
+    log = '\n'.join(lines) + '\n'
+    print(log, end='')
+    if xml_path := os.environ.get('XML_OUTPUT_FILE'):
+        write_junit(Path(xml_path), results, time.monotonic() - started, log)
     return 1 if failures else 0
 
 

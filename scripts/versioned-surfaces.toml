@@ -377,13 +377,6 @@ description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 manifest = "SessionNodeBody"
 
 [[surface]]
-constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
-constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
-upgrade = "migrate"
-description = "persisted protocol-specific turn options envelope"
-manifest = "ProtocolTurnOptions"
-
-[[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
 upgrade = "migrate"
@@ -727,3 +720,15 @@ reason = "versions a generated test artifact"
 constant = "SOURCE_CACHE_VERSION"
 constant_path = "crates/lashlang/src/runtime/cache.rs"
 reason = "identifies a process-local cache rather than a serialized shape"
+
+[[surface]]
+constant = "WORKER_PROTOCOL_VERSION"
+constant_path = "crates/lash-vm-protocol/src/version.rs"
+upgrade = "coexist"
+description = "live parent-worker wire messages and compiler/state service requests and responses"
+outside_manifest = "live worker admission; not a parked VM format"
+
+[[unregistered]]
+constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
+constant_path = "crates/lash-vm-protocol/src/version.rs"
+reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written format"

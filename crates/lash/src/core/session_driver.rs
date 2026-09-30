@@ -190,27 +190,7 @@ impl CoreSessionDriver {
                 OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let recorded_parent_session_id =
-            match crate::session::recorded_parent_session_id(&store).await {
-                Ok(parent) => parent,
-                Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
-                    return Err(OpenFailure::Contended);
-                }
-                Err(crate::EmbedError::Store(
-                    error @ (lash_core::StoreError::SessionDeleted { .. }
-                    | lash_core::StoreError::SessionClosing { .. }),
-                )) => {
-                    return Err(OpenFailure::SessionRetired(session_retired_error(
-                        session_id, error,
-                    )));
-                }
-                Err(error) => {
-                    return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
-                        error.to_string(),
-                    )));
-                }
-            };
-        let mut runtime = LashRuntime::from_environment(
+        let runtime = LashRuntime::from_environment(
             &env,
             policy,
             state,
@@ -224,16 +204,9 @@ impl CoreSessionDriver {
                 error => lash_core::PluginError::Session(error.to_string()),
             })
         })?;
-        // The session runs with the config it recorded at creation (FIG-4099,
-        // FIG-4112). The protocol fills its defaults only for a session that
-        // recorded no protocol options; a recorded session keeps what it
-        // recorded.
-        runtime
-            .configure_protocol_on_materialize(
-                &lash_core::PluginOptions::default(),
-                recorded_parent_session_id.is_none(),
-            )
-            .map_err(OpenFailure::Terminal)?;
+        // The session runs with the config it recorded at creation, its
+        // plugin configuration included, unchanged (FIG-4099, FIG-4112,
+        // FIG-4379).
         Ok(RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),
@@ -461,26 +434,5 @@ impl lash_core::SessionDriver for CoreSessionDriver {
     ) -> std::result::Result<(), lash_core::engine::DriveAbort> {
         lash_core::drive::close_admitted_root(&self.config.env.core, &controller, session, root)
             .await
-    }
-
-    /// Nudges every cleanup that awaits the root's journal: the frames its
-    /// commits ended (ADR 0113 §3.1), its own execution referrer, and any
-    /// guard it created, which a relay pass during the run deferred.
-    async fn root_run_ended(
-        &self,
-        session: &SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        let journal = lash_core::ExecutionScope::turn(session.clone(), root.clone())
-            .journal_identity()
-            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
-        self.config
-            .env
-            .core
-            .backend()
-            .artifact_cleanup()
-            .nudge_awaiting_journal(&journal, self.config.env.core.clock.timestamp_ms())
-            .await
-            .map(|_| ())
     }
 }

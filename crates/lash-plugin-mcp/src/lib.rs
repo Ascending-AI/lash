@@ -10,6 +10,9 @@
 //!   It is also how SSE-capable servers are reached: the current MCP HTTP
 //!   transport negotiates SSE responses itself.
 //!
+//! Stdio receives retain partial lines across cancellation by the SDK service
+//! loop. Framing and message compatibility use the SDK codec.
+//!
 //! Implementation note: the wire-level client is provided by the official
 //! [`rmcp`] SDK. The plugin owns a single connection pool (`McpConnectionPool`)
 //! that is shared across every session built from the same `LashCore`, so
@@ -31,6 +34,7 @@ pub mod naming;
 pub mod plugin;
 pub mod pool;
 mod service_lifecycle;
+mod stdio_transport;
 
 pub use config::{
     McpCallPolicy, McpServerConfig, McpShutdownPolicy, McpStdioTransport,

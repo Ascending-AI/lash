@@ -913,7 +913,7 @@ mod tests {
         use lash_core_execution::ProcessExecutionEnvStore;
         let (_dir, store) = store().await;
         let spec = lash_core_execution::ProcessExecutionEnvSpec::new(
-            lash_core_execution::PluginOptions::default(),
+            lash_core_execution::AdmittedPluginConfig::default(),
             lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         );
         let bytes = spec.to_store_bytes().expect("encode environment");
