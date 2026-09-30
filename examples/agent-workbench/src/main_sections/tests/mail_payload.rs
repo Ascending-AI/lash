@@ -34,15 +34,10 @@ fn wrong_field_mail_payload_is_rejected_as_unprocessable_entity() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inject_message_scopes_emission_to_requested_session() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(
-            &crate::tests::sessions_root(data_dir.path()).join("triggers.db"),
-        )
-        .await
-        .expect("open trigger store"),
-    );
     let double = crate::tests::test_double_backend(0).await;
+    // The registry checks delivery reservations in its store set's trigger
+    // database, so registration and emission must use that same store.
+    let trigger_store = double.stores().trigger_store();
     let mut state = recoverable_chat_test_state_with_trigger_store(
         &double,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -115,6 +110,36 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .expect("add mock account");
     let slug = account_summary.slug;
 
+    let draft = lash::triggers::TriggerSubscriptionDraft::for_process(
+        "mail-listener".to_string(),
+        process_env_ref,
+        MAIL_RECEIVED_SOURCE_TYPE,
+        lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).expect("source key"),
+        process_input
+            .into_process_input()
+            .expect("encode mail-listener process input"),
+        process_identity,
+    )
+    .with_payload_schema(mail_received_payload_schema());
+    let other_session_id = state.current_session_id();
+    let other_outcome = trigger_store
+        .execute_command(
+            "other-mail-register-operation",
+            lash::triggers::TriggerCommand::Register {
+                owner_scope: lash::triggers::TriggerOwnerScope::session(&other_session_id),
+                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
+                    &other_session_id,
+                )),
+                draft: draft.clone(),
+            },
+        )
+        .await
+        .expect("execute other session's register command")
+        .expect("register other session's mail trigger");
+    let other_subscription_id = match other_outcome {
+        lash::triggers::TriggerCommandOutcome::Mutation { receipt } => receipt.subscription_id,
+        _ => panic!("expected mutation outcome"),
+    };
     let outcome = lash::triggers::TriggerStore::execute_command(
         trigger_store.as_ref(),
         "mail-register-operation",
@@ -123,18 +148,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
             actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
                 scoped_session_id,
             )),
-            draft: lash::triggers::TriggerSubscriptionDraft::for_process(
-                "mail-listener".to_string(),
-                process_env_ref,
-                MAIL_RECEIVED_SOURCE_TYPE,
-                lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE)
-                    .expect("source key"),
-                process_input
-                    .into_process_input()
-                    .expect("encode mail-listener process input"),
-                process_identity,
-            )
-            .with_payload_schema(mail_received_payload_schema()),
+            draft,
         },
     )
     .await
@@ -219,12 +233,25 @@ async fn inject_message_scopes_emission_to_requested_session() {
     assert_eq!(
         report.started_process_ids().len(),
         1,
-        "trigger occurrence should match the scoped session's subscription"
+        "trigger occurrence should match the scoped session's subscription: {report:?}"
     );
     assert_eq!(
         deliveries.len(),
         1,
         "inject_message on a scoped session must deliver to that session's subscription (got {})",
         deliveries.len()
+    );
+    assert_eq!(
+        deliveries[0].process_id.as_ref(),
+        report.started_process_ids().first(),
+        "the scoped reservation must bind the process reported as started"
+    );
+    assert!(
+        trigger_store
+            .list_deliveries_by_subscription_id(&other_subscription_id)
+            .await
+            .expect("list deliveries for the other session")
+            .is_empty(),
+        "inject_message must not deliver to another session's matching subscription"
     );
 }
