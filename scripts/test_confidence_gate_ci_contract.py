@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -2730,11 +2731,22 @@ derive_mutation_jobs() {{
                 self.assertTrue(labels, f"lane {lane} compiles nothing")
 
         worker_labels = set(lanes["loadtest-worker-synthetic-next"])
-        self.assertTrue(
-            {
-                "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_c3ba64b6",
-                "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_fa541d90",
-            }.issubset(worker_labels),
+        worker_build = ROOT / "runbooks/restate-postgres-workers/BUILD.bazel"
+        worker_features = set()
+        for statement in ast.parse(worker_build.read_text(encoding="utf-8")).body:
+            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                continue
+            call = statement.value
+            if not isinstance(call.func, ast.Name) or call.func.id != "lash_rust_feature_binary":
+                continue
+            fields = {keyword.arg: keyword.value for keyword in call.keywords}
+            name = ast.literal_eval(fields["name"])
+            label = f"//runbooks/restate-postgres-workers:{name}"
+            if label in worker_labels and ast.literal_eval(fields["crate_root"]) == "src/bin/worker.rs":
+                worker_features.add(frozenset(ast.literal_eval(fields["crate_features"])))
+        self.assertEqual(
+            {frozenset(), frozenset({"synthetic-next"})},
+            worker_features,
             "the rolling-deploy lane must compile the predecessor and successor workers",
         )
 
@@ -2744,6 +2756,24 @@ derive_mutation_jobs() {{
         self.assertIn(
             "python3 scripts/ci/check_feature_lane_test_floors.py", job
         )
+
+    def test_rolling_deploy_contract_rejects_either_missing_worker(self) -> None:
+        lanes = feature_lane_table()
+        worker_labels = [
+            label for label in lanes["loadtest-worker-synthetic-next"]
+            if ":lash-e2e-worker__bin__fv_" in label
+        ]
+        self.assertEqual(2, len(worker_labels))
+        for removed in worker_labels:
+            with self.subTest(removed=removed):
+                incomplete = dict(lanes)
+                incomplete["loadtest-worker-synthetic-next"] = [
+                    label for label in lanes["loadtest-worker-synthetic-next"]
+                    if label != removed
+                ]
+                with mock.patch(__name__ + ".feature_lane_table", return_value=incomplete):
+                    with self.assertRaisesRegex(AssertionError, "predecessor and successor"):
+                        self.test_every_declared_lane_reaches_the_pool_graph()
 
     def test_lash_runtime_default_build_still_runs_and_counts_its_tests(self) -> None:
         """The `default-off-tests` leg survived the move onto the pool.
