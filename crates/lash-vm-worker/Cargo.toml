@@ -1,0 +1,51 @@
+[package]
+name = "lash-internal-vm-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Credential-free VM worker entry and bounded resettable process pool."
+
+[lib]
+name = "lash_vm_worker"
+doctest = false
+
+[[bin]]
+name = "lash-vm-worker"
+path = "src/main.rs"
+test = false
+
+[features]
+testing = []
+
+[[bin]]
+name = "lash-vm-worker-fixture"
+path = "src/bin/fixture.rs"
+required-features = ["testing"]
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-vm-protocol = { workspace = true }
+lashlang = { workspace = true }
+lash-typescript = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
+lashlang = { workspace = true, features = ["testing"] }
+
+[[test]]
+name = "pool_laws"
+path = "tests/pool_laws.rs"

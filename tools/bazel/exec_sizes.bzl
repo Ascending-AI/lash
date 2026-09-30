@@ -420,6 +420,8 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-upgrade-harness:rolling__test__fv_e1b73df8": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-vm-protocol:codec_bounds__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-vm-worker:lash-vm-worker__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-vm-worker:pool_laws__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash:artifact_referrers_evidence__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash:artifact_referrers_evidence__test__fv_0cdea0cc": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash:artifact_referrers_evidence__test__fv_1a2fbbbc": {"cpu_count": 2, "memory_kb": 1048576},

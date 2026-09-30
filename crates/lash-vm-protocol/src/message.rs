@@ -230,6 +230,9 @@ pub enum EffectKind {
     /// The run reached a cancel checkpoint; the parent answers with its
     /// journaled observation of cancellation.
     CancelCheckpoint,
+    /// Process-mode parking seam after an effect has completed.
+    ProcessBoundary,
+    ParkDeclined,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,12 +278,27 @@ pub enum ParentMessage {
     /// Drop the VM instance and install a pristine one. Sent only after a
     /// clean completion or release; any failure discards the worker instead.
     Reset,
+    /// Park at the owned process boundary. No effect is re-executed locally.
+    Park,
     Shutdown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerMessage {
+    /// A bounded phase, with cumulative process CPU usage. It does not grant
+    /// extra time when repeated: the parent owns the absolute phase deadline.
+    Progress {
+        phase: WorkerPhase,
+        cpu_nanos: u64,
+    },
+    PayloadTooLarge {
+        limit: u64,
+        size: u64,
+    },
+    LimitExceeded {
+        limit: crate::WorkerLimit,
+    },
     /// The handshake: the worker's exact build, which must equal the
     /// parent's.
     Ready {
@@ -319,4 +337,13 @@ pub struct ParentFrame {
 pub struct WorkerFrame {
     pub header: MessageHeader,
     pub message: WorkerMessage,
+}
+
+/// Computation and serialization have deadlines separate from IPC silence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerPhase {
+    Computing,
+    Serializing,
+    Responding,
 }

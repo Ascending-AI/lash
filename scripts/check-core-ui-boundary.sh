@@ -77,6 +77,16 @@ while IFS= read -r hit; do
   hit_path="${hit%%:*}"
   hit_rest="${hit#*:}"
   hit_line="${hit_rest%%:*}"
+  # The worker bootstrap must inspect argv and verify an empty environment
+  # before credential initialization (FIG-4160). Only these exact expressions
+  # are admitted; VM serving code and other reads stay in the scan.
+  if [[ "$hit_path" == crates/lash-vm-worker/src/entry.rs ]]; then
+    hit_code="${hit_rest#*:}"
+    if [[ "$hit_code" == '    let args = std::env::args().collect::<Vec<_>>();' ||
+          "$hit_code" == '    if std::env::vars_os().next().is_some() {' ]]; then
+      continue
+    fi
+  fi
   case "$hit_path:$hit_line" in
     crates/lash-rlm-types/src/lib.rs:440)
       continue

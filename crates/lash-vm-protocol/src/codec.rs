@@ -10,7 +10,7 @@
 //! the payload:
 //!
 //! - a frame of another build (its digest is not this build's);
-//! - a declared payload over [`DecodeLimits::max_frame_bytes`];
+//! - a declared frame over [`DecodeLimits::max_frame_bytes`];
 //! - a frame shorter than its header or declared length (truncated);
 //! - a payload whose MessagePack structure nests deeper than
 //!   [`DecodeLimits::max_depth`], holds more than [`DecodeLimits::max_nodes`]
@@ -80,7 +80,7 @@ pub enum CodecRefusal {
     BadMagic,
     #[error("frame was written by build {found}, expected {expected}")]
     WrongBuild { expected: String, found: String },
-    #[error("frame declares a {declared}-byte payload, over the {limit}-byte bound")]
+    #[error("frame declares {declared} bytes, over the {limit}-byte bound")]
     FrameTooLarge { limit: u64, declared: u64 },
     #[error("payload nests deeper than {limit}")]
     DepthExceeded { limit: u32 },
@@ -139,16 +139,33 @@ impl FrameCodec {
     }
 
     fn encode<T: Serialize>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
-        let payload = rmp_serde::to_vec_named(frame).map_err(|error| CodecRefusal::Malformed {
-            reason: format!("frame does not encode: {error}"),
-        })?;
-        let declared = payload.len() as u64;
-        if declared > u64::from(self.limits.max_frame_bytes) {
+        let limit = u64::from(self.limits.max_frame_bytes);
+        let mut writer = CappedWriter {
+            bytes: Vec::new(),
+            limit: self
+                .limits
+                .max_frame_bytes
+                .saturating_sub(FRAME_HEADER_BYTES as u32) as usize,
+            refused: None,
+        };
+        let result =
+            frame.serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
+        if let Some(declared) = writer.refused {
             return Err(CodecRefusal::FrameTooLarge {
-                limit: u64::from(self.limits.max_frame_bytes),
-                declared,
+                limit,
+                declared: declared + FRAME_HEADER_BYTES as u64,
             });
         }
+        result.map_err(|error| CodecRefusal::Malformed {
+            reason: format!("frame does not encode: {error}"),
+        })?;
+        if limit < FRAME_HEADER_BYTES as u64 {
+            return Err(CodecRefusal::FrameTooLarge {
+                limit,
+                declared: FRAME_HEADER_BYTES as u64,
+            });
+        }
+        let payload = writer.bytes;
         let mut bytes = Vec::with_capacity(FRAME_HEADER_BYTES + payload.len());
         bytes.extend_from_slice(&FRAME_MAGIC);
         bytes.extend_from_slice(&self.digest);
@@ -177,10 +194,11 @@ impl FrameCodec {
             });
         }
         let declared = u32::from_be_bytes([bytes[36], bytes[37], bytes[38], bytes[39]]);
-        if declared > self.limits.max_frame_bytes {
+        if u64::from(declared) + FRAME_HEADER_BYTES as u64 > u64::from(self.limits.max_frame_bytes)
+        {
             return Err(CodecRefusal::FrameTooLarge {
                 limit: u64::from(self.limits.max_frame_bytes),
-                declared: u64::from(declared),
+                declared: u64::from(declared) + FRAME_HEADER_BYTES as u64,
             });
         }
         Ok(Some(FRAME_HEADER_BYTES + declared as usize))
@@ -209,6 +227,36 @@ impl FrameCodec {
         rmp_serde::from_slice(payload).map_err(|error| CodecRefusal::Malformed {
             reason: error.to_string(),
         })
+    }
+}
+
+// Stops serialization before extending the allocation beyond the frame cap.
+struct CappedWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+    refused: Option<u64>,
+}
+impl std::io::Write for CappedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+            self.refused = Some((self.bytes.len() as u64).saturating_add(bytes.len() as u64));
+            return Err(std::io::Error::other("frame exceeds its configured bound"));
+        }
+        let needed = self.bytes.len() + bytes.len();
+        if needed > self.bytes.capacity() {
+            let capacity = self
+                .bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(needed)
+                .min(self.limit);
+            self.bytes.reserve_exact(capacity - self.bytes.len());
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

@@ -14,17 +14,17 @@ use std::future::Future;
 use std::sync::Mutex;
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AbilityOp {
     /// Boxed: a resource operation carries a receiver value, its arguments and
     /// a call site, and it is several times the size of every other ability.
     /// Inlining it would make every `AbilityOp` that large.
     ResourceOperation(Box<ResourceOperation>),
     ResourceOperationBatch(ResourceOperationBatch),
-    Await(Value),
-    Print(Value),
-    Finish(Value),
-    Fail(Value),
+    Await(#[serde(with = "super::effect_value")] Value),
+    Print(#[serde(with = "super::effect_value")] Value),
+    Finish(#[serde(with = "super::effect_value")] Value),
+    Fail(#[serde(with = "super::effect_value")] Value),
     ProcessEvent(ProcessEvent),
     Sleep(Sleep),
     WaitSignal {
@@ -33,9 +33,9 @@ pub enum AbilityOp {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AbilityOutcome {
-    Value(Value),
+    Value(#[serde(with = "super::effect_value")] Value),
     ResourceOperationBatch(ResourceOperationBatchOutcome),
     Unit,
     /// The host handed a process's pending `wait_signal` to a successor
@@ -84,15 +84,17 @@ pub struct ProcessStart {
     pub args: Record,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResourceOperation {
+    #[serde(with = "super::effect_value")]
     pub receiver: Value,
     pub operation: String,
+    #[serde(with = "super::effect_value::list")]
     pub args: Vec<Value>,
     pub call_site: Option<crate::LashlangExecutionCallSite>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResourceOperationBatch {
     /// One entry per **unique** pending operation, numbered in the order each
     /// first appears in the operand. A handle written at two positions is one
@@ -180,7 +182,7 @@ impl ResourceOperationBatch {
 }
 
 /// One unique pending operation of an aggregate.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ResourceOperationBatchLeaf {
     /// A resource (tool) operation.
     Operation(ResourceOperation),
@@ -206,7 +208,7 @@ impl ResourceOperationBatchLeaf {
 ///
 /// Four modes over three journaled wake policies: `all` and `allSettled` ask
 /// the host for the same thing and differ only in how far the caller consumes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AggregateConsumer {
     /// Every leaf's result, in leaf order. `Promise.allSettled`, and every
     /// Lashlang-native aggregate: those wait for all results and report the
@@ -239,7 +241,7 @@ impl AggregateConsumer {
 /// The host's answer to an aggregate — the total response algebra of ADR 0099
 /// §10 L2. Infrastructure failure and host cancellation are not in it: they
 /// travel as the ability's `Err` (L3) and never become a leaf rejection.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ResourceOperationBatchOutcome {
     /// One result per leaf, in leaf order: `allSettled`, a successful `all`,
     /// and every Lashlang-native aggregate.
@@ -260,9 +262,9 @@ pub enum ResourceOperationBatchOutcome {
     ExhaustedRejections(Vec<ExecutionHostError>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ResourceOperationOutcome {
-    Value(Value),
+    Value(#[serde(with = "super::effect_value")] Value),
     Error(ExecutionHostError),
 }
 
@@ -275,27 +277,29 @@ impl ResourceOperationOutcome {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProcessEventKind {
     Yield,
     Wake,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ProcessEvent {
     pub kind: ProcessEventKind,
+    #[serde(with = "super::effect_value")]
     pub value: Value,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SleepKind {
     For,
     Until,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Sleep {
     pub kind: SleepKind,
+    #[serde(with = "super::effect_value")]
     pub value: Value,
     pub call_site: Option<LashlangExecutionCallSite>,
 }

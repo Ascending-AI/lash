@@ -20,6 +20,7 @@ mod compiler;
 pub use compiler::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
+mod effect_value;
 mod entry_points;
 mod executable_identity;
 pub use executable_identity::ExecutableIdentity;
@@ -237,11 +238,11 @@ impl CompiledProgram {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ExecutionOutcome {
     Continued,
-    Finished(Value),
-    Failed(Value),
+    Finished(#[serde(with = "effect_value")] Value),
+    Failed(#[serde(with = "effect_value")] Value),
 }
 
 #[derive(Clone, Debug, Default)]

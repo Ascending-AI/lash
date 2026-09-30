@@ -120,7 +120,7 @@ pub struct LashlangExecutionSite {
     pub workflow_site: WorkflowExecutionSite,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangExecutionCallSite {
     pub site: LashlangExecutionSite,
     pub occurrence: u64,

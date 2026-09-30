@@ -76,6 +76,7 @@ fn every_message_round_trips() {
             id: EffectRequestId(4),
             outcome: EffectOutcome::Checkpoint { cancelled: true },
         }),
+        ParentMessage::Park,
         ParentMessage::Cancel,
         ParentMessage::Reset,
         ParentMessage::Shutdown,
@@ -102,6 +103,17 @@ fn every_message_round_trips() {
             build: BuildIdentity::new("lash test build 1"),
         },
         request_frame().message,
+        WorkerMessage::Progress {
+            phase: crate::WorkerPhase::Computing,
+            cpu_nanos: 10,
+        },
+        WorkerMessage::LimitExceeded {
+            limit: crate::WorkerLimit::Fuel,
+        },
+        WorkerMessage::PayloadTooLarge {
+            limit: 10,
+            size: 11,
+        },
         WorkerMessage::Suspended {
             state: state.clone(),
         },
@@ -166,7 +178,7 @@ fn an_oversized_declaration_is_refused_from_the_header_alone() {
         codec.decode_worker(&bytes),
         Err(CodecRefusal::FrameTooLarge {
             limit: u64::from(DecodeLimits::standard().max_frame_bytes),
-            declared: u64::from(u32::MAX),
+            declared: u64::from(u32::MAX) + FRAME_HEADER_BYTES as u64,
         })
     );
     let mut reader = FrameReader::new(codec.clone());
@@ -364,4 +376,54 @@ fn the_fence_admits_only_the_current_lease_epochs_and_next_sequence() {
         receiver.admit(&old_frame),
         Err(HeaderRefusal::StaleFrameEpoch { .. })
     ));
+}
+
+#[test]
+fn envelope_and_encoding_allocation_fit_the_frame_bound() {
+    let frame = request_frame();
+    let bytes = codec().encode_worker(&frame).unwrap();
+    let bounded = |limit| {
+        FrameCodec::new(
+            codec().build().clone(),
+            DecodeLimits {
+                max_frame_bytes: limit,
+                ..DecodeLimits::standard()
+            },
+        )
+    };
+    assert_eq!(
+        bounded(bytes.len() as u32).encode_worker(&frame).unwrap(),
+        bytes
+    );
+    assert!(matches!(
+        bounded(bytes.len() as u32 - 1).encode_worker(&frame),
+        Err(CodecRefusal::FrameTooLarge { .. })
+    ));
+    assert!(matches!(
+        bounded(bytes.len() as u32 - 1).frame_len(&bytes[..FRAME_HEADER_BYTES]),
+        Err(CodecRefusal::FrameTooLarge { .. })
+    ));
+    let mut writer = CappedWriter {
+        bytes: Vec::new(),
+        limit: 8,
+        refused: None,
+    };
+    assert!(std::io::Write::write_all(&mut writer, &[0; 1024]).is_err());
+    assert!(writer.bytes.is_empty());
+    assert_eq!(writer.refused, Some(1024));
+}
+
+#[test]
+fn bounded_encoder_capacity_does_not_double_past_the_cap() {
+    let mut writer = CappedWriter {
+        bytes: Vec::new(),
+        limit: 10,
+        refused: None,
+    };
+    std::io::Write::write_all(&mut writer, &[0; 7]).unwrap();
+    std::io::Write::write_all(&mut writer, &[0; 3]).unwrap();
+    assert_eq!(writer.bytes.len(), 10);
+    assert!(writer.bytes.capacity() <= 10);
+    assert!(std::io::Write::write_all(&mut writer, &[0]).is_err());
+    assert_eq!(writer.bytes.len(), 10);
 }

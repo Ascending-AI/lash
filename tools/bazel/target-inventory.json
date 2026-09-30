@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 52,
-  "cargo_target_count": 197,
+  "cargo_package_count": 53,
+  "cargo_target_count": 201,
   "feature_lane_units": [
     {
       "features": [],
@@ -19795,7 +19795,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 261,
+  "generated_label_count": 266,
   "packages": [
     {
       "declared_features": [
@@ -22447,6 +22447,62 @@
           "//crates/lash-vm-protocol:codec_bounds__test",
           "//crates/lash-vm-protocol:lash-vm-protocol__unit_test"
         ]
+      }
+    },
+    {
+      "declared_features": [
+        "testing"
+      ],
+      "dependencies": [
+        "lash-internal-lashlang",
+        "lash-internal-typescript",
+        "lash-internal-vm-protocol",
+        "lash-internal-vm-worker",
+        "libc",
+        "serde",
+        "serde_json",
+        "thiserror"
+      ],
+      "doc": "//crates/lash-vm-worker:lash-vm-worker__doc",
+      "manifest": "crates/lash-vm-worker/Cargo.toml",
+      "package": "lash-internal-vm-worker",
+      "resolved_features": [
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_vm_worker",
+          "kind": "lib",
+          "label": "//crates/lash-vm-worker:lash-vm-worker"
+        },
+        {
+          "cargo": "lash_vm_worker",
+          "kind": "unit-test",
+          "label": "//crates/lash-vm-worker:lash-vm-worker__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-vm-worker",
+          "kind": "bin",
+          "label": "//crates/lash-vm-worker:lash-vm-worker__bin",
+          "tags": []
+        },
+        {
+          "cargo": "lash-vm-worker-fixture",
+          "kind": "bin",
+          "label": "//crates/lash-vm-worker:lash-vm-worker-fixture__bin",
+          "tags": []
+        },
+        {
+          "cargo": "pool_laws",
+          "kind": "test",
+          "label": "//crates/lash-vm-worker:pool_laws__test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
       }
     },
     {

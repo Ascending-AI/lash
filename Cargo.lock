@@ -2810,6 +2810,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-vm-worker"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-lashlang",
+ "lash-internal-typescript",
+ "lash-internal-vm-protocol",
+ "lash-internal-vm-worker",
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-perf"
 version = "0.0.0-dev"
 dependencies = [
