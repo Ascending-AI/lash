@@ -608,6 +608,7 @@ def check_direct_buck_generator() -> None:
     assert 'test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"}' in protocol
     manifest_rule = (HERE / "buildscript_manifest.bzl").read_text(encoding="utf-8")
     assert "BuildscriptSourcesInfo" in manifest_rule
+    assert "DefaultInfo(default_output = tree, other_outputs = ctx.attrs.srcs)" in manifest_rule
     assert 'name = "buildscript_sources"' in worker
     assert 'paths.join(".lash-workspace", package, source.short_path)' in manifest_rule
     assert 'manifest_dir = ":" + manifest' in (
@@ -644,6 +645,16 @@ def check_direct_buck_generator() -> None:
     assert provider_stream["tags"] == ["cargo-service-gate", "manual"]
     inventory_text = json.dumps(inventory, sort_keys=True)
     assert not re.search(r":build_script_(?:\[|\")", inventory_text)
+
+    generated_graph = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in ROOT.rglob("BUCK")
+    )
+    assert "$(rootpath " not in generated_graph
+    assert (
+        '"CARGO_BIN_EXE_slack-clone-mcp-server": '
+        '"$(location :slack-clone-mcp-server__bin)"'
+    ) in generated_graph
 
 
 def main() -> int:

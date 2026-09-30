@@ -5,8 +5,17 @@ load("@prelude//:paths.bzl", "paths")
 BuildscriptSourcesInfo = provider(fields = {"package": str, "sources": list})
 
 def _buildscript_sources_impl(ctx):
+    entries = {source.short_path: source for source in ctx.attrs.srcs}
+    tree = ctx.actions.symlinked_dir(
+        "buildscript_sources",
+        entries,
+        has_content_based_path = True,
+    )
     return [
-        DefaultInfo(),
+        # Rust resources require one default output. Keep each original source
+        # as another output as well, so project-root tests see the declared
+        # Cargo source paths in their execution input root.
+        DefaultInfo(default_output = tree, other_outputs = ctx.attrs.srcs),
         BuildscriptSourcesInfo(package = ctx.label.package, sources = ctx.attrs.srcs),
     ]
 
