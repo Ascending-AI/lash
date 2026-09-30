@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use super::{
-    AttemptIdentity, DEFERRED, Execution, PROBE, ProbeArgs, SETTLEMENT_GRACE, ToolCallIdentityTier,
-    World, assert_finished, calls, outputs, raw_call, text,
+    AttemptIdentity, DEFERRED, Execution, PROBE, ProbeArgs, ToolCallIdentityTier, World,
+    assert_finished, calls, outputs, raw_call, text,
 };
 
 /// Panics when the effect loop ends: every tool call settled and the turn
@@ -349,7 +349,7 @@ pub(super) async fn crash_while_held_result(
     turn: &super::ScriptedTurn,
     held: &'static str,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
-    crash_when(world, turn, "the held probe starts", move |witness| {
+    crash_when(world, turn, "the held probe starts", &[], move |witness| {
         witness.started(held) >= 1
     })
     .await
@@ -373,6 +373,7 @@ pub(super) async fn crash_when(
     world: &World,
     turn: &super::ScriptedTurn,
     what: &'static str,
+    recorded_labels: &'static [&'static str],
     ready: impl Fn(&super::Witness) -> bool + Send + Sync + 'static,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
     let turn = turn.clone();
@@ -399,11 +400,26 @@ pub(super) async fn crash_when(
     };
     let fire = {
         let world = world.clone();
+        let turn = turn.clone();
         let crash = crash.clone();
         crate::task::spawn(async move {
             world.witness.until(what, ready).await;
-            // Whatever settled by now has had time to become durable.
-            tokio::time::sleep(SETTLEMENT_GRACE).await;
+            for execution in world
+                .witness
+                .executions()
+                .into_iter()
+                .filter(|execution| recorded_labels.contains(&execution.label.as_str()))
+            {
+                world
+                    .recorded
+                    .final_for(
+                        world.tier.effect_host.as_ref(),
+                        world.admitted(&turn),
+                        &execution.identity.call_id,
+                        super::PATIENCE,
+                    )
+                    .await;
+            }
             crash.fire();
             world.witness.open_gate();
         })
@@ -552,6 +568,7 @@ pub async fn refusals_and_parallel_completion_never_renumber_identity(tier: Tool
         &world,
         &turn,
         "the quick probe settles while the held one runs",
+        &["quick"],
         |witness| !witness.of("quick").is_empty() && witness.started("held") >= 1,
     )
     .await

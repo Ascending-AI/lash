@@ -80,6 +80,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.await_next_settlement(handle, cancel).await
     }
 
+    async fn read_group_settlement(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        inner.read_group_settlement(group_key, rank).await
+    }
+
     async fn close_effect_group(
         &self,
         inner: &dyn RuntimeEffectController,
@@ -715,9 +724,8 @@ impl RuntimeEffectController for LayeredController<'_> {
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        self.inner
-            .as_ref()
-            .read_group_settlement(group_key, rank)
+        self.layer
+            .read_group_settlement(self.inner.as_ref(), group_key, rank)
             .await
     }
 

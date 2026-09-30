@@ -2523,7 +2523,7 @@ fn assert_admission_enumerated(cleanup: &EffectGroupCleanupFacts, invocation_id:
 }
 
 /// Every invocation the server holds open, by id, with its target.
-async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, String> {
+pub(super) async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, String> {
     match admin {
         HarnessAdmin::Live { admin_url } => {
             #[derive(serde::Deserialize)]

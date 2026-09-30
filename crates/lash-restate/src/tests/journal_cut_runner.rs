@@ -46,6 +46,10 @@ impl JournalCutRunner {
 
 #[async_trait::async_trait]
 impl ConformanceTurnRunner for JournalCutRunner {
+    async fn await_group_quiescence(&self, group_keys: &[String]) {
+        self.inner.await_group_quiescence(group_keys).await;
+    }
+
     async fn run_turn(&self, admitted: lash_core::AdmittedScope, attempt: ConformanceTurnAttempt) {
         self.inner.run_turn(admitted, attempt).await;
     }

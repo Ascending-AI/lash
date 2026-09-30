@@ -120,6 +120,7 @@ pub use turn_commit_outcome::{
     failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
 };
 mod batch_sugar;
+mod recorded_batch;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;

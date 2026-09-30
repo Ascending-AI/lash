@@ -766,6 +766,23 @@ impl LiveTurnRunner {
 
 #[async_trait::async_trait]
 impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
+    async fn await_group_quiescence(&self, group_keys: &[String]) {
+        loop {
+            let open = super::effect_group_conformance::open_invocations(&self.admin)
+                .await
+                .into_values()
+                .any(|target| {
+                    group_keys.iter().any(|key| {
+                        target.contains(&format!("/{key}/")) || target.contains(&format!("/{key}:"))
+                    })
+                });
+            if !open {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     /// On the server double, the finished scenario's completed journals are
     /// dropped; a live server keeps its own retention.
     async fn scenario_finished(&self) {

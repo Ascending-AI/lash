@@ -1527,6 +1527,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
     }
 }
 
+mod batch_oracle;
 mod cancellation_and_effects;
 mod cancelled_turn_withheld_input_on_the_double;
 mod commit_retry_store;
