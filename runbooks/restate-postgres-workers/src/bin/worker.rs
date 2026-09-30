@@ -1378,6 +1378,12 @@ async fn async_main() -> Result<()> {
         .bind(E2eTurnWorkflowImpl::new(state, core).serve())
         .build();
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    lash::restate::serve_endpoint(listener, endpoint, tokio::signal::ctrl_c()).await;
+    lash::restate::serve_endpoint(
+        listener,
+        endpoint,
+        lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+        tokio::signal::ctrl_c(),
+    )
+    .await;
     Ok(())
 }

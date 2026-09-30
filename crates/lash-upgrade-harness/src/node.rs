@@ -652,9 +652,14 @@ impl Serving {
         let uri = format!("http://{}", listener.local_addr()?);
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let serving = tokio::spawn(async move {
-            lash::restate::serve_endpoint(listener, endpoint, async move {
-                let _ = stopped.await;
-            })
+            lash::restate::serve_endpoint(
+                listener,
+                endpoint,
+                lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+                async move {
+                    let _ = stopped.await;
+                },
+            )
             .await;
         });
         if register {

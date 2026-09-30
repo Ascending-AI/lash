@@ -102,9 +102,14 @@ mod restate_tests {
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
-            lash::restate::serve_endpoint(listener, endpoint, async {
-                let _ = shutdown_rx.await;
-            })
+            lash::restate::serve_endpoint(
+                listener,
+                endpoint,
+                lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
             .await;
         });
         let app_listener = tokio::net::TcpListener::bind("127.0.0.1:0")

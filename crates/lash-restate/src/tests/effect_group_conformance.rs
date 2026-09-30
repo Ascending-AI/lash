@@ -682,9 +682,14 @@ impl LiveConformanceHarness {
                     .expect("bind Restate effect-group endpoint");
                 let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
                 let server = tokio::spawn(async move {
-                    crate::serve_endpoint(listener, endpoint, async {
-                        let _ = shutdown_rx.await;
-                    })
+                    crate::serve_endpoint(
+                        listener,
+                        endpoint,
+                        crate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+                        async {
+                            let _ = shutdown_rx.await;
+                        },
+                    )
                     .await;
                 });
                 wait_for_endpoint(bind_addr).await;

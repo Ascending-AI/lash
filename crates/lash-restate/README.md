@@ -19,6 +19,26 @@ let outcome = handle
     .await?;
 ```
 
+Serve the built endpoint with host-selected incoming message limits:
+
+```rust,ignore
+let limits = lash_restate::RestateEndpointLimits::new(
+    32 * 1024 * 1024,
+    32 * 1024 * 1024 + 8,
+);
+lash_restate::serve_endpoint(listener, endpoint, limits, shutdown).await;
+```
+
+The first limit counts one service-protocol message's payload. The second
+counts its pending framed bytes, including the eight-byte header. The endpoint
+checks each declared length before forwarding payload bytes to the SDK and
+stops a refused input stream. It retains only a fixed header and counters beside
+the SDK's bounded incomplete-message buffer. HTTP/2 flow control also limits
+queued input. A replay may contain arbitrarily many legal messages; there is no
+aggregate request limit. These limits belong to the deployment, as ADR 0025
+requires, and do not impose a core-wide tool-result ceiling. The supplied hosts
+choose 32 MiB per payload and eight additional bytes for framing.
+
 Several deployments share one `restate-server` by namespace (ADR 0111):
 `RestateConfig::with_namespace` prefixes every service name the engine binds or
 calls (`alpha.LashSession`), and `RestateEngine::register_deployment` registers

@@ -413,9 +413,15 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_task = {
             let mut shutdown = host_shutdown.subscribe();
             tokio::spawn(async move {
-                lash::restate::serve_endpoint(restate_listener, endpoint, async move {
-                    while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-                })
+                lash::restate::serve_endpoint(
+                    restate_listener,
+                    endpoint,
+                    lash::restate::RestateEndpointLimits::new(
+                        32 * 1024 * 1024,
+                        32 * 1024 * 1024 + 8,
+                    ),
+                    async move { while !*shutdown.borrow() && shutdown.changed().await.is_ok() {} },
+                )
                 .await;
             })
         };

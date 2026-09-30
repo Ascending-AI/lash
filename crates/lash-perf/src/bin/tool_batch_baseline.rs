@@ -473,6 +473,7 @@ async fn run_restate(
     let server = tokio::spawn(lash::restate::serve_endpoint(
         listener,
         endpoint,
+        lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
         std::future::pending::<()>(),
     ));
     wait_for_endpoint(bind).await?;

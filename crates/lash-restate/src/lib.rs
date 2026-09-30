@@ -165,7 +165,7 @@ pub use process::{
     SegmentStarted, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
-pub use serve::serve_endpoint;
+pub use serve::{RestateEndpointLimits, serve_endpoint};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_driver::{
     LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRootCloseRequest,

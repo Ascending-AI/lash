@@ -12,10 +12,15 @@
 use std::future::Future;
 use std::time::Duration;
 
+use hyper::body::Incoming;
 use hyper::server::conn::http2;
+use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use restate_sdk::endpoint::Endpoint;
-use restate_sdk::hyper::HyperEndpoint;
+use restate_sdk::endpoint::{Endpoint, HandleOptions, ProtocolMode};
+
+mod message_limits;
+use message_limits::MessageBody;
+pub use message_limits::RestateEndpointLimits;
 use tokio::net::TcpListener;
 
 /// How long a shut-down server waits for its open connections to finish:
@@ -29,11 +34,22 @@ const ACCEPT_RETRY: Duration = Duration::from_millis(10);
 /// Serve `endpoint` over HTTP/2 on `listener` until `shutdown` resolves.
 ///
 /// Every accepted connection has `TCP_NODELAY` set, so a handler's journal
-/// frames reach the server as they are written (see the module docs). Once
-/// `shutdown` resolves the server stops accepting and waits up to ten
+/// frames reach the server as they are written (see the module docs).
+/// Incoming service-protocol headers are checked against the host's `limits`
+/// before their payload is forwarded to the SDK. Replay streams have no total
+/// byte limit. Once `shutdown` resolves the server stops accepting and waits up to ten
 /// seconds for the open connections to finish before it returns.
-pub async fn serve_endpoint(listener: TcpListener, endpoint: Endpoint, shutdown: impl Future) {
-    let endpoint = HyperEndpoint::new(endpoint);
+pub async fn serve_endpoint(
+    listener: TcpListener,
+    endpoint: Endpoint,
+    limits: RestateEndpointLimits,
+    shutdown: impl Future,
+) {
+    let endpoint = service_fn(move |request: hyper::Request<Incoming>| {
+        std::future::ready(Ok::<_, std::convert::Infallible>(handle_endpoint(
+            &endpoint, request, limits,
+        )))
+    });
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let mut shutdown = std::pin::pin!(shutdown);
     loop {
@@ -55,6 +71,10 @@ pub async fn serve_endpoint(listener: TcpListener, endpoint: Endpoint, shutdown:
                     );
                 }
                 let connection = http2::Builder::new(TokioExecutor::new())
+                    .initial_stream_window_size(
+                        u32::try_from(limits.max_pending_bytes().clamp(8, 65_535))
+                            .unwrap_or(65_535),
+                    )
                     .serve_connection(TokioIo::new(stream), endpoint.clone());
                 let connection = graceful.watch(connection);
                 tokio::spawn(async move {
@@ -73,3 +93,23 @@ pub async fn serve_endpoint(listener: TcpListener, endpoint: Endpoint, shutdown:
         }
     }
 }
+
+fn handle_endpoint<B>(
+    endpoint: &Endpoint,
+    request: hyper::Request<B>,
+    limits: RestateEndpointLimits,
+) -> hyper::Response<restate_sdk::endpoint::ResponseBody>
+where
+    B: hyper::body::Body<Data = bytes::Bytes> + Unpin + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+{
+    endpoint.handle_with_options(
+        request.map(|body| MessageBody::new(body, limits)),
+        HandleOptions {
+            protocol_mode: ProtocolMode::BidiStream,
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests;
