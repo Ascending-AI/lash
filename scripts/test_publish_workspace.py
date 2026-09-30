@@ -50,6 +50,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-tool-support": "lash-internal-tool-support",
     "lash-trace": "lash-internal-trace",
     "lash-vm-protocol": "lash-internal-vm-protocol",
+    "lash-vm-worker": "lash-internal-vm-worker",
     "lash-typescript": "lash-internal-typescript",
     "lashlang": "lash-internal-lashlang",
 }

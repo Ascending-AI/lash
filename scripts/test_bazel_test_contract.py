@@ -975,6 +975,10 @@ class BazelTestContractTests(unittest.TestCase):
                 "//crates/lash-protocol-rlm:build_script": (
                     "the run action has no CrateInfo; its build.rs compile is "
                     "linted as :build_script_"
+                ),
+                "//crates/lash-vm-worker:build_script": (
+                    "the run action has no CrateInfo; its build.rs compile is "
+                    "linted as :build_script_"
                 )
             },
             exempt,
