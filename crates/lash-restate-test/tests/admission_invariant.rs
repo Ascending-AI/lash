@@ -33,7 +33,11 @@ fn model_spec() -> lash_core::ModelSpec {
 /// An RLM core over `restate`. The process runs no model; the provider only
 /// has to exist.
 fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
-    let backend = restate.lash_backend();
+    // Registration arms ProcessStart. Keep recovery explicit so its relay
+    // cannot submit the segment while this test prepares and invokes it.
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(restate.lash_backend())
+        .with_session_work(restate.explicit_reconcile_session_work())
+        .into_backend();
     let provider = lash_core::testing::TestProvider::builder()
         .kind("admission-invariant")
         .complete(move |_request: LlmRequest| async move {
@@ -134,6 +138,16 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
             .expect("record segment 1's start marker");
     }
 
+    let workflow_target = format!("LashProcessWorkflow/{process_id}#1/run");
+    let invocations = restate.server().invocations();
+    assert!(
+        invocations.iter().all(|invocation| {
+            invocation.target != workflow_target
+                && invocation.target != format!("LashProcessWorkflow/{process_id}/run")
+        }),
+        "only the test submits the fixture's process: {invocations:#?}"
+    );
+
     let output = tokio::time::timeout(
         Duration::from_secs(20),
         restate
@@ -159,6 +173,13 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         output.to_string().contains(CODE),
         "the segment publishes the typed failure: {output}"
     );
+    let invocations = restate.server().invocations();
+    let runs = invocations
+        .iter()
+        .filter(|invocation| invocation.target.ends_with("/run"))
+        .collect::<Vec<_>>();
+    assert_eq!(runs.len(), 1, "only the fixture's segment runs: {runs:#?}");
+    assert_eq!(runs[0].target, workflow_target);
 
     let record = registry
         .get_process(&process_id)
