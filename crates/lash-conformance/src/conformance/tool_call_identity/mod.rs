@@ -470,7 +470,6 @@ enum Protocol {
 /// processes' segments with.
 #[derive(Clone)]
 struct WorldProcesses {
-    registry: Arc<dyn crate::ProcessRegistry>,
     wiring: crate::ProcessWorkWiring,
 }
 
@@ -554,7 +553,6 @@ impl World {
         )
         .expect("build the tool-call identity process worker");
         world.processes = Some(WorldProcesses {
-            registry: Arc::clone(watched.registry()),
             wiring: tier.runner.process_work(watched, worker),
         });
         world
@@ -680,9 +678,7 @@ impl World {
                 ))
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()));
         if let Some(processes) = &self.processes {
-            builder = builder
-                .with_process_registry(Arc::clone(&processes.registry))
-                .with_process_work(processes.wiring.clone());
+            builder = builder.with_process_work(processes.wiring.clone());
         }
         let mut runtime = Box::pin(builder.build())
             .await

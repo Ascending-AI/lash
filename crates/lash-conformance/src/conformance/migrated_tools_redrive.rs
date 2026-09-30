@@ -120,7 +120,6 @@ struct MigratedRuntimeParts {
     host: crate::RuntimeHostConfig,
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     store: Arc<dyn crate::RuntimeStore>,
-    registry: Arc<dyn crate::ProcessRegistry>,
     process_work: crate::ProcessWorkWiring,
 }
 
@@ -146,7 +145,6 @@ async fn build_migrated_runtime(parts: MigratedRuntimeParts) -> crate::LashRunti
                 &parts.store,
                 parts.session_id.clone(),
             ))
-            .with_process_registry(parts.registry)
             .with_process_work(parts.process_work)
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
@@ -258,7 +256,6 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         host,
         factories,
         store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
-        registry: Arc::clone(watched.registry()),
         process_work: runner.process_work(watched, worker),
     };
 

@@ -1,11 +1,12 @@
+use super::host::RuntimeWork;
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
 use crate::{
-    EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
-    RuntimeSessionState, SessionError, SessionPolicy,
+    EmbeddedRuntimeHost, LashRuntime, PluginStack, RuntimeHostConfig, RuntimeSessionState,
+    SessionError, SessionPolicy,
 };
 
 enum PluginSource {
@@ -23,37 +24,8 @@ pub struct EmbeddedRuntimeBuilder {
     core: RuntimeHostConfig,
     store: Option<crate::store::SessionStore>,
     attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
-    drivers: Box<EmbeddedRuntimeDriverBindings>,
-}
-
-/// How this builder will wire process work, as one owner rather than a
-/// registry field beside an optional wiring. `build` turns it into the
-/// matching [`RuntimeWork`] state with the configured queued-work port.
-#[derive(Default)]
-enum ProcessWorkBinding {
-    #[default]
-    None,
-    /// A watched registry with no resolved process port yet.
-    RegistryOnly(Arc<dyn ProcessRegistry>),
-    /// Full process work; the wiring carries its own registry.
-    Wired(crate::ProcessWorkWiring),
-}
-
-/// Cold builder-only bindings live off the async build frame. Keeping this
-/// optional host wiring together avoids growing every `build` caller's future
-/// as new work bindings are added.
-struct EmbeddedRuntimeDriverBindings {
-    process: ProcessWorkBinding,
-    queued: Arc<dyn crate::SessionWorkEngine>,
-}
-
-impl Default for EmbeddedRuntimeDriverBindings {
-    fn default() -> Self {
-        Self {
-            process: ProcessWorkBinding::None,
-            queued: Arc::new(crate::NoSessionWork::new()),
-        }
-    }
+    // Keep the work wiring off the async build frame.
+    work: Box<RuntimeWork>,
 }
 
 impl EmbeddedRuntimeBuilder {
@@ -71,7 +43,9 @@ impl EmbeddedRuntimeBuilder {
             core,
             store: None,
             attachment_manifest_store: None,
-            drivers: Box::default(),
+            work: Box::new(RuntimeWork::sessions_only(Arc::new(
+                crate::NoSessionWork::new(),
+            ))),
         }
     }
 
@@ -182,21 +156,13 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    /// Configure a watched registry with no process port yet. A later
-    /// [`Self::with_process_work`] replaces it, and vice versa: one owner,
-    /// last write wins.
-    pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.drivers.process = ProcessWorkBinding::RegistryOnly(process_registry);
-        self
-    }
-
     pub fn with_process_work(mut self, wiring: crate::ProcessWorkWiring) -> Self {
-        self.drivers.process = ProcessWorkBinding::Wired(wiring);
+        self.work = Box::new((*self.work).with_process_wiring(wiring));
         self
     }
 
     pub fn with_queued_work(mut self, queued: Arc<dyn crate::SessionWorkEngine>) -> Self {
-        self.drivers.queued = queued;
+        self.work = Box::new((*self.work).with_queued(queued));
         self
     }
 
@@ -338,22 +304,12 @@ impl EmbeddedRuntimeBuilder {
         let embedded_host = EmbeddedRuntimeHost::new(self.core);
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.
-        let queued = Arc::clone(&self.drivers.queued);
-        let work = match self.drivers.process {
-            ProcessWorkBinding::None => super::host::RuntimeWork::sessions_only(queued),
-            ProcessWorkBinding::RegistryOnly(registry) => {
-                super::host::RuntimeWork::registry_only(registry, queued)
-            }
-            ProcessWorkBinding::Wired(wiring) => {
-                super::host::RuntimeWork::processes(wiring, queued)
-            }
-        };
         LashRuntime::assemble_runtime(
             state.policy.clone(),
             embedded_host,
             plugins,
             persistence,
-            work,
+            *self.work,
             super::lifecycle::RuntimeSessionAssembly::new(state, self.runtime_lease_owner),
         )
         .await

@@ -441,7 +441,7 @@ impl SessionBuilder {
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let ports = self.core.substrate_slot.ports().await;
-        env = env.with_work_ports(Some(ports.process.clone()), ports.queued_port());
+        env = env.with_work_ports(ports.process.clone(), ports.queued_port());
         let binding = Arc::new(
             BoundSession::new(
                 session_id,

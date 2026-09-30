@@ -722,7 +722,6 @@ impl World {
                     &self.store,
                     self.session_id.clone(),
                 ))
-                .with_process_registry(Arc::clone(&self.registry))
                 .with_process_work(self.process_work.clone())
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),

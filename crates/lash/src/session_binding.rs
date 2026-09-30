@@ -173,6 +173,6 @@ impl BoundSession {
         env.core.control.effect_host = self.effect_host();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
-        env.with_work_ports(Some(self.process.clone()), self.queued())
+        env.with_work_ports(self.process.clone(), self.queued())
     }
 }

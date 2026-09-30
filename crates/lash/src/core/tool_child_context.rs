@@ -31,7 +31,7 @@ pub(crate) type CoreWorkPorts = Arc<
     dyn Fn() -> futures_util::future::BoxFuture<
             'static,
             (
-                Option<lash_core::ProcessWorkWiring>,
+                lash_core::ProcessWorkWiring,
                 Arc<dyn lash_core::SessionWorkEngine>,
             ),
         > + Send

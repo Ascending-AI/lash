@@ -38,7 +38,7 @@ use super::{
 /// Cloning is cheap — every field is either `Arc`-wrapped or small.
 /// Default values build an embedded runtime without process lifecycle
 /// support. Hosts that want long-running tools, async handles, subagents,
-/// or process admins must provide a process registry explicitly.
+/// or process admins must provide complete process work wiring.
 #[derive(Clone)]
 pub struct RuntimeEnvironment {
     // Shared plugin infrastructure. Created once; every session's
@@ -54,8 +54,7 @@ pub struct RuntimeEnvironment {
 }
 
 impl RuntimeEnvironment {
-    /// The host-configured process registry, whether this environment is in the
-    /// registry-only state or has full process work wired.
+    /// The registry carried by the host-configured process work wiring.
     ///
     /// `RuntimeWork` is the sole owner, so this and the runtime built from this
     /// environment cannot disagree.
@@ -118,17 +117,8 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// A later [`Self::with_process_work`] replaces it with the full wiring, and vice versa:
-    /// the work wiring is one owner, so setting both is last-write-wins rather than a panic.
-    pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.env.work = self.env.work.with_process_registry(process_registry);
-        self
-    }
-
-    /// Every `RuntimeHost` built from this environment carries it, so process starts can
-    /// directly drive pending work.
-    /// This replaces a registry-only state configured by [`Self::with_process_registry`]; the
-    /// wiring carries its own registry.
+    /// Every runtime built from this environment carries the wiring's registry
+    /// and process-work port, so process starts can drive pending work.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.env.work = self.env.work.with_process_wiring(wiring);
         self
@@ -235,10 +225,10 @@ impl RuntimeEnvironmentBuilder {
 impl RuntimeEnvironment {
     pub fn with_work_ports(
         mut self,
-        process: Option<ProcessWorkWiring>,
+        process: ProcessWorkWiring,
         queued: Arc<dyn SessionWorkEngine>,
     ) -> Self {
-        self.work = self.work.with_work_ports(process, queued);
+        self.work = RuntimeWork::processes(process, queued);
         self
     }
 }
@@ -318,65 +308,128 @@ mod tests {
         ));
     }
 
-    fn registry_only_environment(
-        backend: &crate::Backend,
-        registry: &Arc<dyn ProcessRegistry>,
-    ) -> RuntimeEnvironment {
-        RuntimeEnvironment::builder(core_over(backend))
-            .with_process_registry(Arc::clone(registry))
-            .build()
-    }
-
-    /// Rebinding work ports without a process wiring must not silently drop a
-    /// registry the host configured: the registry-only state is a state of the
-    /// work wiring, not a field that `with_work_ports` is free to clear.
     #[tokio::test]
-    async fn rebinding_work_ports_without_a_wiring_keeps_a_registry_only_registry() {
+    async fn sessions_only_environment_and_host_have_no_process_ports() {
         let backend = crate::testing::memory_store_backend().await;
-        let registry = backend.process_registry();
-        let env = registry_only_environment(&backend, &registry);
-        assert!(
-            env.process_registry().is_some(),
-            "a registry-only environment starts with its registry"
-        );
-
-        let rebound = env.with_work_ports(None, Arc::new(NoSessionWork::new()));
-
-        let kept = rebound
-            .process_registry()
-            .expect("rebinding work ports without a wiring keeps the registry");
-        assert!(
-            Arc::ptr_eq(kept, &registry),
-            "the kept registry is the one the host configured"
-        );
-        assert!(
-            rebound.process_work().is_none(),
-            "no process-work port is invented by keeping the registry"
-        );
-    }
-
-    /// A runtime built from a registry-only environment must report the same
-    /// registry the environment does. The host is assembled from `env.work`
-    /// alone (`LashRuntime::from_environment_for_executor`), so a registry that
-    /// does not live in `work` never reaches the runtime.
-    #[tokio::test]
-    async fn a_host_built_from_a_registry_only_environment_reports_that_registry() {
-        let backend = crate::testing::memory_store_backend().await;
-        let registry = backend.process_registry();
-        let env = registry_only_environment(&backend, &registry);
-
+        let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
+        let env = RuntimeEnvironment::builder(core_over(&backend))
+            .with_queued_work(Arc::clone(&queued))
+            .build();
         let host = super::super::host::RuntimeHost::from_embedded_with_work(
             super::super::host::EmbeddedRuntimeHost::new(env.core.clone()),
             env.work.clone(),
         );
 
-        let observed = host
-            .process_registry()
-            .expect("the runtime host carries the environment's registry");
-        assert!(
-            Arc::ptr_eq(observed, &registry),
-            "the environment and the runtime it builds answer the registry question the same way"
+        assert!(env.process_registry().is_none());
+        assert!(env.process_work().is_none());
+        assert!(host.process_registry().is_none());
+        assert!(host.process_work().is_none());
+        assert!(Arc::ptr_eq(&env.queued_work(), &queued));
+        assert!(Arc::ptr_eq(host.queued_work(), &queued));
+    }
+
+    #[tokio::test]
+    async fn rebinding_work_ports_replaces_the_registry_and_both_ports() {
+        let backend = crate::testing::memory_store_backend().await;
+        let env = RuntimeEnvironment::builder(core_over(&backend))
+            .with_process_work(backend.process_work())
+            .build();
+        let replacement = crate::testing::memory_store_backend().await;
+        let wiring = replacement.process_work();
+        let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
+        assert!(!Arc::ptr_eq(
+            env.process_registry().expect("initial registry"),
+            wiring.registry(),
+        ));
+
+        let rebound = env.with_work_ports(wiring.clone(), Arc::clone(&queued));
+
+        assert!(Arc::ptr_eq(
+            rebound.process_registry().expect("replacement registry"),
+            wiring.registry(),
+        ));
+        assert!(Arc::ptr_eq(
+            &rebound.process_work().expect("replacement process port"),
+            wiring.port(),
+        ));
+        assert!(Arc::ptr_eq(&rebound.queued_work(), &queued));
+    }
+
+    #[tokio::test]
+    async fn a_host_built_from_an_environment_carries_its_complete_process_wiring() {
+        let backend = crate::testing::memory_store_backend().await;
+        let wiring = backend.process_work();
+        let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
+        let env = RuntimeEnvironment::builder(core_over(&backend))
+            .with_process_work(wiring.clone())
+            .with_queued_work(Arc::clone(&queued))
+            .build();
+        let host = super::super::host::RuntimeHost::from_embedded_with_work(
+            super::super::host::EmbeddedRuntimeHost::new(env.core.clone()),
+            env.work.clone(),
         );
+
+        assert!(Arc::ptr_eq(
+            host.process_registry().expect("host registry"),
+            env.process_registry().expect("environment registry"),
+        ));
+        assert!(Arc::ptr_eq(
+            host.process_work().expect("host process port"),
+            wiring.port(),
+        ));
+        assert!(Arc::ptr_eq(host.queued_work(), &queued));
+    }
+
+    #[tokio::test]
+    async fn embedded_builder_keeps_queued_work_in_both_setter_orders() {
+        let backend = crate::testing::memory_store_backend().await;
+        let core = crate::testing::runtime_helpers::test_host_config(&backend).core;
+        let wiring = backend.process_work();
+        let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
+        for process_first in [false, true] {
+            let builder = crate::runtime::EmbeddedRuntimeBuilder::new(
+                core.clone(),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_policy(crate::testing::standard_test_policy());
+            let builder = if process_first {
+                builder
+                    .with_process_work(wiring.clone())
+                    .with_queued_work(Arc::clone(&queued))
+            } else {
+                builder
+                    .with_queued_work(Arc::clone(&queued))
+                    .with_process_work(wiring.clone())
+            };
+            let runtime = Box::pin(builder.build())
+                .await
+                .expect("build process runtime");
+            assert!(Arc::ptr_eq(
+                runtime.host.process_registry().expect("builder registry"),
+                wiring.registry(),
+            ));
+            assert!(Arc::ptr_eq(
+                runtime.host.process_work().expect("builder process port"),
+                wiring.port(),
+            ));
+            assert!(Arc::ptr_eq(runtime.host.queued_work(), &queued));
+        }
+        let runtime = Box::pin(
+            crate::runtime::EmbeddedRuntimeBuilder::new(
+                core.clone(),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_policy(crate::testing::standard_test_policy())
+            .with_queued_work(Arc::clone(&queued))
+            .build(),
+        )
+        .await
+        .expect("build sessions-only runtime");
+        assert!(runtime.host.process_registry().is_none());
+        assert!(runtime.host.process_work().is_none());
+        assert!(Arc::ptr_eq(runtime.host.queued_work(), &queued));
     }
 
     /// The trigger store is the backend's, stamping from the backend's clock.

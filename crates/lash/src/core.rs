@@ -109,7 +109,7 @@ impl AdministrationSource {
         let resolved_env = self
             .env
             .clone()
-            .with_work_ports(Some(ports.process.clone()), Arc::clone(&queued));
+            .with_work_ports(ports.process.clone(), Arc::clone(&queued));
         lash_core::SessionAdministration::new(
             Arc::clone(&self.store_factory),
             Arc::clone(&resolved_env.core.control.effect_host),
@@ -1124,7 +1124,7 @@ impl LashCoreBuilder {
                     let substrate_slot = Arc::clone(&substrate_slot);
                     Box::pin(async move {
                         let ports = substrate_slot.ports().await;
-                        (Some(ports.process.clone()), ports.queued_port())
+                        (ports.process.clone(), ports.queued_port())
                     }) as futures_util::future::BoxFuture<'static, _>
                 })
             },

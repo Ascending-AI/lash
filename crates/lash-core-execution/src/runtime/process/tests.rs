@@ -562,3 +562,18 @@ fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
         "missing bytes are not a fence"
     );
 }
+
+#[test]
+fn runtime_work_has_only_complete_wiring_states() {
+    use crate::runtime::host::RuntimeWork;
+
+    let queued: std::sync::Arc<dyn crate::SessionWorkEngine> =
+        std::sync::Arc::new(crate::NoSessionWork::new());
+    let work = RuntimeWork::sessions_only(std::sync::Arc::clone(&queued));
+    match work {
+        RuntimeWork::SessionsOnly { queued: actual } => {
+            assert!(std::sync::Arc::ptr_eq(&actual, &queued));
+        }
+        RuntimeWork::Processes { .. } => panic!("sessions-only fixture has process wiring"),
+    }
+}

@@ -466,21 +466,11 @@ impl ProcessRuntimeHost {
     }
 }
 
-/// A runtime's exhaustive work wiring, and the single owner of whether this
-/// runtime has a process registry.
-///
-/// `RegistryOnly` is the named state a host is in while it holds a watched
-/// registry but has not resolved its native process port yet (the facade's lazy
-/// native composition). It is a state of the wiring rather than a field beside
-/// it, so "does this runtime have a process registry" has exactly one answer no
-/// matter which layer asks.
+/// A runtime's exhaustive work wiring. Process wiring owns both the registry
+/// and the port that drives its work.
 #[derive(Clone)]
 pub enum RuntimeWork {
     SessionsOnly {
-        queued: Arc<dyn SessionWorkEngine>,
-    },
-    RegistryOnly {
-        registry: Arc<dyn ProcessRegistry>,
         queued: Arc<dyn SessionWorkEngine>,
     },
     Processes {
@@ -494,38 +484,23 @@ impl RuntimeWork {
         Self::SessionsOnly { queued }
     }
 
-    pub fn registry_only(
-        registry: Arc<dyn ProcessRegistry>,
-        queued: Arc<dyn SessionWorkEngine>,
-    ) -> Self {
-        Self::RegistryOnly { registry, queued }
-    }
-
     pub fn processes(wiring: ProcessWorkWiring, queued: Arc<dyn SessionWorkEngine>) -> Self {
         Self::Processes { wiring, queued }
     }
 
     pub fn queued_arc(&self) -> &Arc<dyn SessionWorkEngine> {
         match self {
-            Self::SessionsOnly { queued }
-            | Self::RegistryOnly { queued, .. }
-            | Self::Processes { queued, .. } => queued,
+            Self::SessionsOnly { queued } | Self::Processes { queued, .. } => queued,
         }
     }
 
-    /// The process registry this runtime carries, in either the registry-only
-    /// or the fully wired state.
     pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
-        match self {
-            Self::SessionsOnly { .. } => None,
-            Self::RegistryOnly { registry, .. } => Some(registry),
-            Self::Processes { wiring, .. } => Some(wiring.registry()),
-        }
+        self.process_wiring().map(ProcessWorkWiring::registry)
     }
 
     pub fn process_wiring(&self) -> Option<&ProcessWorkWiring> {
         match self {
-            Self::SessionsOnly { .. } | Self::RegistryOnly { .. } => None,
+            Self::SessionsOnly { .. } => None,
             Self::Processes { wiring, .. } => Some(wiring),
         }
     }
@@ -533,38 +508,14 @@ impl RuntimeWork {
     pub fn with_queued(self, queued: Arc<dyn SessionWorkEngine>) -> Self {
         match self {
             Self::SessionsOnly { .. } => Self::SessionsOnly { queued },
-            Self::RegistryOnly { registry, .. } => Self::RegistryOnly { registry, queued },
             Self::Processes { wiring, .. } => Self::Processes { wiring, queued },
         }
     }
 
-    /// Wire full process work, replacing whatever registry state was there.
-    /// Setting both is a last-write-wins transition, not an error: the wiring
-    /// carries its own registry.
+    /// Install process wiring while retaining the queued-work port.
     pub fn with_process_wiring(self, wiring: ProcessWorkWiring) -> Self {
         let queued = Arc::clone(self.queued_arc());
         Self::Processes { wiring, queued }
-    }
-
-    pub fn with_process_registry(self, registry: Arc<dyn ProcessRegistry>) -> Self {
-        let queued = Arc::clone(self.queued_arc());
-        Self::RegistryOnly { registry, queued }
-    }
-
-    /// Rebind the work ports. Dropping a process wiring keeps the registry it
-    /// carried: losing the port is not losing the registry.
-    pub fn with_work_ports(
-        self,
-        process: Option<ProcessWorkWiring>,
-        queued: Arc<dyn SessionWorkEngine>,
-    ) -> Self {
-        match process {
-            Some(wiring) => Self::Processes { wiring, queued },
-            None => match self.process_registry().cloned() {
-                Some(registry) => Self::RegistryOnly { registry, queued },
-                None => Self::SessionsOnly { queued },
-            },
-        }
     }
 }
 
