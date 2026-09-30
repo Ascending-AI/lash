@@ -379,6 +379,41 @@ def check_clippy_receipt_inputs() -> None:
         assert not module.receipt_is_current(), "changed lint renderer reused stale receipt"
 
 
+def check_rust_edit_receipt_inputs() -> None:
+    spec = importlib.util.spec_from_file_location("buck2_sync_rust", HERE / "sync.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    with tempfile.TemporaryDirectory(prefix="lash-rust-edit-receipt-") as directory:
+        root = pathlib.Path(directory)
+        module.ROOT = root
+        module.RECEIPT = root / ".buck2/sync-receipt.json"
+        subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+        source = root / "src/lib.rs"
+        source.parent.mkdir()
+        source.write_text("pub fn value() -> u32 { 1 }\n")
+        output = root / "BUCK"
+        output.write_text("generated targets\n")
+        outputs = {output: output.read_text()}
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        module.write_receipt(outputs)
+        source.write_text("pub fn value() -> u32 { 2 }\n")
+        assert module.receipt_is_current(), "ordinary Rust edit forced graph regeneration"
+        source.write_text('const TOOL: &str = env!("CARGO_BIN_EXE_lash-tool");\n')
+        assert not module.receipt_is_current(), "new runtime binary dependency reused stale graph"
+        module.write_receipt(outputs)
+        source.write_text("pub fn value() -> u32 { 3 }\n")
+        assert not module.receipt_is_current(), "removed runtime binary dependency reused stale graph"
+        module.write_receipt(outputs)
+        new_target = root / "src/bin/new-tool.rs"
+        new_target.parent.mkdir()
+        new_target.write_text("fn main() {}\n")
+        assert not module.receipt_is_current(), "new Cargo target reused stale graph"
+        module.write_receipt(outputs)
+        new_target.unlink()
+        assert not module.receipt_is_current(), "removed Cargo target reused stale graph"
+
+
 def check_external_buildscripts() -> None:
     lock = tomllib.loads((ROOT / "third-party/Cargo.lock").read_text(encoding="utf-8"))
     expected = set()
@@ -593,6 +628,7 @@ def main() -> int:
         check_dependency_and_profile_projection,
         check_sync_receipt,
         check_clippy_receipt_inputs,
+        check_rust_edit_receipt_inputs,
         check_external_buildscripts,
         check_buildscript_metadata_bridge,
         check_direct_buck_generator,
