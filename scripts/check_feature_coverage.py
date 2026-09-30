@@ -980,7 +980,7 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
             ):
                 failures.append(f"lane {name!r} command may not set --message-format")
             if subcommand == "check" and not any(
-                target in command for target in ("--lib", "--all-targets", "--tests")
+                target in command for target in ("--lib", "--bins", "--all-targets", "--tests")
             ):
                 failures.append(f"lane {name!r} check command lacks an explicit target context")
         for token in lane.get("features", []):
@@ -1393,7 +1393,9 @@ def validate_selected_artifacts(
         )
     subcommand = cargo_subcommand(command)
     expected: list[CargoArtifact]
-    if "--test" in command:
+    if "--bins" in command:
+        expected = [artifact for artifact in artifacts if "bin" in artifact.target_kinds]
+    elif "--test" in command:
         target_names = {
             command[index + 1]
             for index, token in enumerate(command[:-1])

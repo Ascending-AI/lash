@@ -861,11 +861,25 @@ export_file(
     visibility = ["PUBLIC"],
 )
 '''
-    outputs[ROOT / "crates/lash/tests/builder_contract/BUCK"] = GENERATED_HEADER + '''load("//tools/buck2:ui_fixtures.bzl", "ui_fixtures_test")
+    empty_feature_ui_harnesses = {
+        unit["label"]
+        for unit in payload["feature_lane_units"]
+        if unit["package"] == "lash-runtime"
+        and unit["kind"] == "test"
+        and unit["features"] == []
+        and ":ui__test__fv_" in unit["label"]
+    }
+    if len(empty_feature_ui_harnesses) != 1:
+        raise ValueError(
+            "expected exactly one no-feature lash-runtime UI harness, got "
+            + repr(sorted(empty_feature_ui_harnesses))
+        )
+    empty_feature_ui_harness = next(iter(empty_feature_ui_harnesses))
+    outputs[ROOT / "crates/lash/tests/builder_contract/BUCK"] = GENERATED_HEADER + f'''load("//tools/buck2:ui_fixtures.bzl", "ui_fixtures_test")
 
 ui_fixtures_test(
     name = "builder_plugin_host_is_removed_without_testing",
-    harness = "//crates/lash:ui__test__fv_52def33c",
+    harness = "{empty_feature_ui_harness}",
     package = "crates/lash",
     fixtures = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.rs"],
     expected = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.stderr"],

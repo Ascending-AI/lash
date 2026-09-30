@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import os
@@ -783,11 +784,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
-        build_data = worker_identity_inputs() if package["name"] == "lash-internal-vm-worker" else []
+        build_data = worker_identity_inputs() if package["name"] in ("lash-internal-vm-worker", "lash-internal-vm-client") else []
         build_data_argument = (
             f"    extra_data = {string_list(build_data)},\n"
             '    build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": ".lash-workspace"},\n'
         ) if build_data else ""
+        if package["name"] == "lash-internal-vm-client":
+            build_data_argument += '    extra_srcs = ["//crates/lash-vm-worker:rust_sources"],\n'
         chunks.append(
             "lash_rust_build_script(\n"
             "    name = \"build_script\",\n"
@@ -1463,6 +1466,9 @@ def generated(
         outputs[ROOT / f"tools/buck2/{service}_test_labels.txt"] = (
             "".join(f"{label}\n" for label in labels)
         )
+    variant_failures = reconcile_vm_worker_variants(outputs)
+    if variant_failures:
+        raise ValueError("VM worker/client feature mismatch:\n  " + "\n  ".join(variant_failures))
     validate_test_run_sizes()
     return outputs, inventory
 
@@ -2011,6 +2017,7 @@ class FeatureLaneGraph:
                     candidate, library is None and len(binaries) == 1
                 )
                 for candidate in binaries
+                if set(candidate.get("required-features", [])) <= set(target_features)
             },
         )
         # A binary referenced through `CARGO_BIN_EXE_*` is a runtime input of
@@ -2329,7 +2336,7 @@ class FeatureLaneGraph:
             if (
                 kind == "bin"
                 and target.get("test", False)
-                and command.unit_tests
+                and (command.unit_tests or (command.subcommand == "test" and command.selector == "--bins"))
                 and command.selector != "--lib"
             ):
                 unit_label = self.emit_target(
@@ -2542,6 +2549,7 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
     """
     workspace = feature_variants.Workspace.from_metadata(metadata)
     manifests = workspace.packages
+    failures = []
     expected: set[tuple[str, str, tuple[str, ...]]] = set()
     for lane in feature_coverage_plan()["lane"]:
         for argv in lane["commands"]:
@@ -2553,6 +2561,14 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
                 requested=list(command.features),
                 with_dev=command.with_dev,
             ).sorted_features()
+            worker = "lash-internal-vm-worker"
+            client = "lash-internal-vm-client"
+            if worker in resolution and client in resolution:
+                error = feature_variants.vm_worker_pairing_error(
+                    resolution[worker], resolution[client]
+                )
+                if error:
+                    failures.append(f"{lane['name']}: {' '.join(argv)}: {error}")
             for name, features in resolution.items():
                 if any("lib" in t["kind"] for t in manifests[name]["targets"]):
                     expected.add((name, "lib", tuple(features)))
@@ -2577,14 +2593,13 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
                 if (
                     kind == "bin"
                     and target.get("test", False)
-                    and command.unit_tests
+                    and (command.unit_tests or (command.subcommand == "test" and command.selector == "--bins"))
                     and command.selector != "--lib"
                 ):
                     expected.add((root, "bin-unit-test", features))
     recorded = {
         (unit["package"], unit["kind"], tuple(unit["features"])) for unit in units
     }
-    failures = []
     for package, kind, features in sorted(expected - recorded):
         failures.append(
             f"no feature-lane target compiles the {kind} of {package} at "
@@ -2595,6 +2610,36 @@ def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
             f"feature-lane target compiles a {kind} of {package} at features "
             f"{list(features)} that no lane command selects"
         )
+    return failures
+
+
+def reconcile_vm_worker_variants(outputs: dict[pathlib.Path, str]) -> list[str]:
+    """Check each emitted worker target's actual paired client feature set."""
+    libraries = {}
+    for directory in ("crates/lash-vm-worker", "crates/lash-vm-client"):
+        for node in ast.parse(outputs[ROOT / directory / "BUCK"]).body:
+            if not (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id in {"lash_rust_library", "lash_rust_feature_library"}
+            ):
+                continue
+            args = {arg.arg: arg.value for arg in node.value.keywords}
+            name = ast.literal_eval(args["name"])
+            libraries[f"//{directory}:{name}"] = (
+                ast.literal_eval(args["crate_features"]),
+                ast.literal_eval(args["variant_deps"]) if "variant_deps" in args else {},
+            )
+    failures = []
+    default_client = "//crates/lash-vm-client:lash-vm-client"
+    for label, (features, dependencies) in sorted(libraries.items()):
+        if not label.startswith("//crates/lash-vm-worker:"):
+            continue
+        client = dependencies.get(default_client, default_client)
+        error = feature_variants.vm_worker_pairing_error(features, libraries[client][0])
+        if error:
+            failures.append(f"{label} -> {client}: {error}")
     return failures
 
 
