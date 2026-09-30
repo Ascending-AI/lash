@@ -241,7 +241,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_2e390a1d": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_38fbff4f": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
-    "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_915b2617": {"cpu_count": 1, "memory_kb": 1048576},
+    "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_a9c5397e": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-postgres-store:conformance__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-postgres-store:conformance__test__fv_2a722838": {"cpu_count": 2, "memory_kb": 1048576},

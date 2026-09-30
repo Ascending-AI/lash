@@ -32,6 +32,14 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.intent_identity(0);
     let _ = attempt.logical_root();
     let _ = attempt.tool_catalog();
+    assert_eq!(
+        attempt
+            .definition_engines()
+            .require("testing-fixture")
+            .expect("the attempt reads the dispatch's process engine registry")
+            .kind(),
+        "testing-fixture"
+    );
     let sessions = attempt.sessions();
     let _ = sessions.model().await;
     let _ = sessions.snapshot_current().await;

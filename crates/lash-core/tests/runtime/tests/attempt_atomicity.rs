@@ -444,7 +444,7 @@ fn tool_context_with_provider<'run>(
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
         process_definitions: None,
-        process_engines: Default::default(),
+        process_engines: lash_core::testing::process_engine_fixture(),
         effect_controller,
         direct_completions,
         parent_invocation: Some(attempt_parent.clone()),
