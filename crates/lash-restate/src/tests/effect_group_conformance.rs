@@ -24,6 +24,7 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
+use super::effect_group_rank_reservation::{DrainBarrierProbe as _, DrainBarrierProbeImpl};
 use super::live_turn_probe::ConformanceTurnProbe as _;
 use crate::RestateConnection;
 use crate::durable_wait::arm_wait_registration_witness;
@@ -684,6 +685,7 @@ impl LiveConformanceHarness {
         )
         .bind(ScopeLivenessProbeImpl.serve())
         .bind(GroupOpenBudgetProbeImpl.serve())
+        .bind(DrainBarrierProbeImpl.serve())
         // A turn handler: a parked attempt fails retryably and the
         // invocation pauses after its last attempt (FIG-3697).
         .bind(crate::turn_service(

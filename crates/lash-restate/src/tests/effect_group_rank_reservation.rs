@@ -11,11 +11,16 @@
 //!   every lower committed sibling before it publishes, and then seats its
 //!   refusal at the reserved rank. Retirement releases that wait.
 //! - The dispatch's one registration: its transitions and refusals.
+//! - A drain held by several blockers lifts whichever of them seats first
+//!   (FIG-4431), through the in-handler controller a tool child drains with.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use lash_core::RuntimeEffectEnvelope;
+use restate_sdk::context::WorkflowContext;
+use restate_sdk::errors::{HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
 
 use crate::RestateIngressClient;
 use crate::effect_group::{
@@ -326,6 +331,64 @@ async fn harness() -> LiveConformanceHarness {
     LiveConformanceHarness::start_on(HarnessServer::in_process()).await
 }
 
+/// A workflow that waits at one child's §5 barrier through the in-handler
+/// controller, as a tool child's drain does, and ends when the barrier lifts.
+/// Its input is the group key and the rank the child's commit reserved.
+#[restate_sdk::workflow]
+pub(super) trait DrainBarrierProbe {
+    async fn run(barrier: Json<(String, u64)>) -> HandlerResult<Json<()>>;
+}
+
+pub(super) struct DrainBarrierProbeImpl;
+
+impl DrainBarrierProbe for DrainBarrierProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json((group_key, rank)): Json<(String, u64)>,
+    ) -> HandlerResult<Json<()>> {
+        let controller = crate::RestateRuntimeEffectController::with_options_for_test(
+            ctx,
+            crate::RestateEffectControllerOptions::default(),
+        );
+        lash_core::RuntimeEffectController::await_group_child_drain_admission(
+            &controller,
+            &group_key,
+            rank,
+        )
+        .await
+        .map_err(TerminalError::from_error)?;
+        Ok(Json(()))
+    }
+}
+
+/// Waits until nothing on the double moves: every invocation has completed,
+/// suspended or blocked on the server, and no journal grew since the last
+/// look. Whatever a seat set in motion has then reached its waiters.
+async fn quiescent(server: &lash_restate_test::RestateTestServer) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let mut last = None;
+    loop {
+        let views = server.invocations();
+        let settled = views
+            .iter()
+            .all(|view| view.status != "running" || view.blocked_on_server == Some(true));
+        let snapshot = views
+            .into_iter()
+            .map(|view| (view.id, view.status, view.journal_len))
+            .collect::<Vec<_>>();
+        if settled && last.as_ref() == Some(&snapshot) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server double never went quiet"
+        );
+        last = Some(snapshot);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// A reserved rank that has not seated is a hole: no read of it or past it is
 /// served, a run stops at it, and once it seats the whole prefix is served.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -627,6 +690,68 @@ async fn a_fallback_seat_over_an_earlier_commit_waits_for_every_lower_sibling() 
         group.barrier(4, Duration::from_secs(30)).await,
         Some(EffectGroupNotification::Drained),
         "the closing barrier lifts once every commit seated"
+    );
+    group.retire().await;
+    harness.finish().await;
+}
+
+/// A drain held by two blockers lifts when the higher-ranked one seats first
+/// (FIG-4431). The drain parks in its handler; B seats and everything that
+/// seat set in motion settles; only then does A seat, and the drain must end.
+/// A barrier that awaited one call per blocker and polled them together lost
+/// B's wake here: the call waiting for A read B's completion off the input,
+/// and B's call, already blocked on the input, read the input again instead
+/// of its own completion, parking the drain until the stream's inactivity
+/// timeout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drain_lifts_when_its_blockers_seat_in_reverse_rank_order() {
+    let harness = harness().await;
+    let server = harness
+        .server_double()
+        .expect("the law watches the drain on the server double");
+    let group = Group::open(harness.ingress(), "reverse-seats", 3).await;
+    group.make_ready().await;
+    for position in 0..3 {
+        assert_eq!(rank_of(&group.commit(position).await), position as u64 + 1);
+    }
+    let drain = harness
+        .ingress()
+        .send_workflow_json("DrainBarrierProbe", &group.key, "run", &(&group.key, 3_u64))
+        .await
+        .expect("the drain is accepted")
+        .as_str()
+        .to_owned();
+    quiescent(&server).await;
+    assert!(
+        server.outcome(&drain).is_none(),
+        "the drain waits for A and B"
+    );
+    assert!(matches!(
+        group.seat(1).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 2 }
+    ));
+    quiescent(&server).await;
+    assert!(
+        server.outcome(&drain).is_none(),
+        "the drain still waits for A, the lower blocker"
+    );
+    assert!(matches!(
+        group.seat(0).await,
+        EffectGroupRecordSettlementResponse::Recorded { rank: 1 }
+    ));
+    // Well inside the 60-second inactivity timeout that ended a lost wake.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while server.outcome(&drain).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the drain never lifted after both of its blockers seated"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        matches!(server.outcome(&drain), Some(Ok(_))),
+        "both seats lift the barrier: {:?}",
+        server.outcome(&drain)
     );
     group.retire().await;
     harness.finish().await;

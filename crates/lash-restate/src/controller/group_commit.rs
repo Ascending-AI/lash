@@ -108,6 +108,12 @@ where
 /// lower committed siblings have seated, or retirement releases the wait — a
 /// release, not proof of seating: the semantic-admission fence still refuses
 /// any intent under a retired group.
+///
+/// The subscription is one call, awaited alone. Several SDK call futures must
+/// never be polled together here: one that has blocked on the invocation's
+/// input reads input again before it re-checks its own completion, so a
+/// sibling can take that completion off the input and leave the drain parked
+/// until the stream's inactivity timeout (FIG-4431).
 pub(super) async fn await_group_child_drain_admission<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,
