@@ -556,7 +556,11 @@ impl LashRuntime {
     /// of it durable: that admission's drive applies the command.
     ///
     /// A commit over the session's commit budget settles the command failed
-    /// with the budget refusal instead, over the durable head.
+    /// with the budget refusal instead, over the durable head. A head whose
+    /// bare settlement exceeds the budget is one a host lowered the budget
+    /// below (ADR 0058, FIG-4393): the settlement's typed refusal ends the
+    /// command root, the drive stops at it, and the command stays open until
+    /// the host raises the budget again.
     pub(super) async fn commit_host_command(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
@@ -594,8 +598,10 @@ impl LashRuntime {
         match settled {
             Ok(CommandCommit::Landed) => Ok(CommandCommit::OverBudget),
             Ok(committed) => Ok(committed),
-            // Even the settlement alone exceeds the budget.
-            Err(_) => Err(over_budget),
+            // Even the bare settlement exceeds the budget: the live head
+            // itself is over it (ADR 0058), and its refusal names the size
+            // the host must raise the budget to.
+            Err(bare_over_budget) => Err(bare_over_budget),
         }
     }
 

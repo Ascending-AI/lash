@@ -1508,8 +1508,9 @@ macro_rules! __session_config_settlement_register {
     };
 }
 
-/// Register the session-config settlement laws. The fixture hands back a guard
-/// and a maker of fresh backends; each law builds its runtime over one.
+/// Register the session-config settlement laws, and the creation-budget law
+/// (FIG-4393). The fixture hands back a guard and a maker of fresh backends;
+/// each law builds its runtime, or its creation, over one.
 #[macro_export]
 macro_rules! session_config_settlement_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -1517,6 +1518,7 @@ macro_rules! session_config_settlement_tests {
             (session_config_settlement_pending_returns_without_wait, "config-settlement-pending"),
             (cancelled_session_config_settlement_is_typed, "config-settlement-cancelled"),
             (superseded_config_settlement_adopts_the_newer_head, "config-settlement-superseded"),
+            (session_creation_refuses_a_head_no_commit_fits, "creation-budget"),
         ]);
     };
     (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

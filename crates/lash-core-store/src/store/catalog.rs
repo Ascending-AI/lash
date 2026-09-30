@@ -3,10 +3,14 @@
 //! One store object serves every session of its catalog. These operations
 //! create, find, enumerate, fork and delete sessions; each one either takes
 //! the session it acts on or spans the catalog, and says which.
-use super::{MaintenanceResult, SessionAdmission, SessionBlobReclaimReport, StoreError};
+use super::{
+    CommitBudget, FleetFormat, MaintenanceResult, RuntimeCommit, SessionAdmission,
+    SessionBlobReclaimReport, StoreError,
+};
 use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionLookup, SessionStoreCreateRequest,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionCreationHead, SessionLookup,
+    SessionStoreCreateRequest,
 };
 use crate::{NodeId, SessionId};
 
@@ -82,4 +86,39 @@ pub trait SessionCatalogStore: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> MaintenanceResult<SessionBlobReclaimReport>;
+}
+
+/// Create a session through `catalog` under the host's `commit_budget`
+/// (FIG-4393).
+///
+/// A request that bakes the creator's config into the head
+/// ([`SessionCreationHead::Config`]) writes that head in the catalog's own
+/// transaction, outside any runtime commit, so the budget is checked here
+/// first: a config whose created head no commit fits under the budget, not
+/// even a session command's bare settlement over it, is refused with the
+/// typed [`StoreError::CommitByteBudgetExceeded`] or
+/// [`StoreError::CommitNodeBudgetExceeded`] the first commit would meet, and
+/// nothing is written. A creator that commits the first head itself
+/// ([`SessionCreationHead::CommittedByCreator`]) meets the budget in that
+/// commit.
+///
+/// # Errors
+///
+/// The budget refusal, or whatever [`SessionCatalogStore::admit_session`]
+/// answers.
+pub async fn admit_created_session(
+    catalog: &(dyn SessionCatalogStore + '_),
+    request: &SessionStoreCreateRequest,
+    commit_budget: CommitBudget,
+    fleet_format: FleetFormat,
+) -> Result<SessionAdmission, StoreError> {
+    if request.head == SessionCreationHead::Config {
+        RuntimeCommit::validate_created_head_budget(
+            &request.session_id,
+            request.config.clone(),
+            commit_budget,
+            fleet_format,
+        )?;
+    }
+    catalog.admit_session(request).await
 }

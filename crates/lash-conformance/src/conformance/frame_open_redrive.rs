@@ -75,6 +75,8 @@ mod superseded_root;
 pub use superseded_root::*;
 mod host_commands;
 pub use host_commands::*;
+mod command_budget;
+pub use command_budget::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -1754,7 +1756,9 @@ macro_rules! frame_open_redrive_tests {
             terminal_callback_append_does_not_deadlock,
             dirty_park_while_busy_is_recoverable_and_loses_nothing,
             plugin_state_dirty_park_reparks_from_the_recorded_head,
-            command_cancellation_before_admission_withdraws_it);
+            command_cancellation_before_admission_withdraws_it,
+            a_lowered_budget_refuses_a_stranded_command_once_per_drive,
+            raising_the_budget_settles_a_stranded_command);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,
                 host_append_waits_for_the_bound_turn, None),

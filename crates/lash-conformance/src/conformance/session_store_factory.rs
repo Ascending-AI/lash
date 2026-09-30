@@ -24,11 +24,14 @@ pub use process_successor::a_same_start_key_successor_after_prune_has_independen
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+#[path = "session_store_factory_creation_budget.rs"]
+mod creation_budget;
 pub use config_commands::{
     cancelled_session_config_settlement_is_typed, ingress_follow_on_fork_and_command_run_matrix,
     session_config_settlement_pending_returns_without_wait,
     superseded_config_settlement_adopts_the_newer_head,
 };
+pub use creation_budget::session_creation_refuses_a_head_no_commit_fits;
 mod state_version;
 mod turn_cancel;
 

@@ -90,7 +90,7 @@ pub use attachment_referrers::{
     MAX_ATTACHMENT_DELETE_ATTEMPTS, SessionReferrerState, StoredAttachmentCondemnation,
     decode_attachment_condemnation_record,
 };
-pub use catalog::SessionCatalogStore;
+pub use catalog::{SessionCatalogStore, admit_created_session};
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,

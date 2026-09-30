@@ -243,6 +243,50 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    /// Refuse a session config whose created head no commit fits under
+    /// `commit_budget` (FIG-4393): the bare commit over the created head, a
+    /// session command's settlement, with the session's initial frame.
+    ///
+    /// Creation writes the config head in the catalog's own transaction,
+    /// outside any runtime commit (FIG-4099), so nothing else measures it,
+    /// and every later commit carries the head's config and checkpoint
+    /// manifest: a head whose bare commit exceeds the budget refuses every
+    /// write, a session command's settlement included.
+    pub(super) fn validate_created_head_budget(
+        session_id: &crate::SessionId,
+        config: crate::PersistedSessionConfig,
+        commit_budget: CommitBudget,
+        fleet_format: super::FleetFormat,
+    ) -> Result<(), StoreError> {
+        let read = super::SessionWindowRead::new(
+            session_id.clone(),
+            0,
+            config,
+            None,
+            crate::SessionGraph::default(),
+            None,
+            None,
+        )?;
+        let mut state = super::window_state(read, fleet_format)?.state;
+        state.ensure_agent_frame_initialized();
+        // A session command's settlement commits under its batch's queue
+        // drain; every batch id has the derived id's length.
+        let operation = super::OperationId::new(
+            crate::ExecutionScope::queue_drain(
+                session_id.clone(),
+                super::queued_work::derive_batch_id(session_id, None, 0, None),
+            ),
+            "session-command",
+        );
+        let (commit, _) = Self::persisted_state_with_operation_and_budget(
+            &mut state,
+            operation,
+            commit_budget,
+            fleet_format,
+        )?;
+        commit.validate_budget()
+    }
+
     pub fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
         let measure_json = |result: Result<Vec<u8>, serde_json::Error>| {
             result.map(|bytes| bytes.len()).map_err(|err| {

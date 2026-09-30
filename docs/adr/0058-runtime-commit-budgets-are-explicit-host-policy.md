@@ -43,6 +43,24 @@ Retrying identical payload and policy cannot admit it. The host must raise the
 bound or reduce the payload. The budget applies to turn settlement, append and
 park commits.
 
+### Live heads
+
+Every commit carries its head's session configuration and checkpoint
+manifest, so a head whose bare commit exceeds the budget refuses every write to
+its session, a session command's settlement included. Creation is the one head
+write outside a runtime commit, and it measures that commit:
+`admit_created_session` sizes the bare commit over the created head, a session
+command's settlement with the session's initial frame, and refuses a config
+that does not fit with the typed budget rejection, writing nothing. Every later
+head write is a budgeted commit.
+
+The budget is host policy, not durable state, so the host must not set it
+below its live heads. A host that does strands each such session's leading
+session command: the drive that meets it refuses the command root with the
+typed budget rejection and stops, without admitting the command again, and the
+command stays open and unsettled. Raising the budget recovers the session: its
+next drive applies the command and settles it.
+
 Attachment admission is separately configurable through
 `max_attachment_bytes: Option<u64>`. `None` leaves puts unbounded;
 `Some(max_bytes)` rejects an oversized in-memory attachment before manifest or
@@ -105,7 +123,10 @@ changes without changing what the commit means.
 ## Code evidence
 
 - [Required policy and row measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L24).
-- [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L252).
+- [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L290).
+- [Created-head measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L246).
+- [Measured creation](../../crates/lash-core-store/src/store/catalog.rs#L91).
+- [A stranded command stops its drive](../../crates/lash-core-execution/src/engine/drive.rs#L224).
 - [Verified realization](../../crates/lash-core-store/src/store/realization.rs#L8).
 - [Host attachment configuration](../../crates/lash/src/core.rs#L841).
 - [Physical-operation timing](../../crates/lash-perf/src/runtime_perf/store.rs#L1).

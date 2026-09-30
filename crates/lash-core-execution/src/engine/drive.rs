@@ -236,6 +236,12 @@ pub enum DriveStop {
 ///   driver holds the session, or the lane has nothing this drive can admit
 ///   now ([`DriveStop::Yielded`]). Both are read from recorded admissions,
 ///   so a redrive stops where its first execution stopped.
+/// - A command root whose execution the engine released after a refusal no
+///   retry changes stops the drive too ([`DriveStop::Yielded`]): the command
+///   it met is still the lane's leading command, and every admission after
+///   it would name that command under a new root and meet the same refusal
+///   (FIG-4393). The refusal is the root's typed end; the session's next ask
+///   to drive tries the command again.
 #[derive(Clone, Debug, Default)]
 pub struct DriveLoop {
     ran: BTreeSet<TurnId>,
@@ -283,7 +289,8 @@ impl DriveLoop {
             RootOutcome::Refused { root, .. } => Some(DriveStop::Yielded { root: root.clone() }),
             RootOutcome::Released { root } => {
                 self.released.insert(root.clone());
-                None
+                matches!(work, AdmittedWork::Commands { .. })
+                    .then(|| DriveStop::Yielded { root: root.clone() })
             }
         }
     }
@@ -364,5 +371,44 @@ pub mod admission_body {
             admitted_generation,
             work,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A command root the engine released after a refusal stops the drive:
+    /// the admission after it would name the same leading command under a
+    /// new root and meet the same refusal, without end (FIG-4393).
+    #[test]
+    fn a_released_command_root_stops_the_drive() {
+        let mut rules = DriveLoop::new();
+        let root = TurnId::from("drive-commands:admission-0");
+        assert_eq!(
+            rules.after(
+                &AdmittedWork::Commands { head: 7 },
+                &RootOutcome::Released { root: root.clone() },
+            ),
+            Some(DriveStop::Yielded { root }),
+        );
+    }
+
+    /// A released turn root is consumed and the drive goes on: admission
+    /// answers what the store decided about it.
+    #[test]
+    fn a_released_turn_root_lets_the_drive_go_on() {
+        let mut rules = DriveLoop::new();
+        assert_eq!(
+            rules.after(
+                &AdmittedWork::Queued {
+                    head: crate::BatchId::from("qwb:head"),
+                },
+                &RootOutcome::Released {
+                    root: TurnId::from("drive-run:admission-0"),
+                },
+            ),
+            None,
+        );
     }
 }

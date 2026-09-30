@@ -135,7 +135,10 @@ runtime events, plugin state, and queued turns ride the command's commit, and a
 task journals its effects under the command's own queue-drain scope. A frame
 open opens its frame and restarts the live interpreter from the seed. A command
 that cannot apply, including one whose commit exceeds the commit budget,
-settles with its typed refusal, so the lane never waits on it.
+settles with its typed refusal, so the lane never waits on it. The one command
+that cannot settle is one whose bare settlement exceeds the budget, on a head a
+host lowered the budget below (ADR 0058): its drive stops at the typed
+refusal, and the command settles once the host raises the budget.
 
 Every command settles as a typed `SessionCommandOutcome` carried by its
 commit's receipt, so a submitter on any runtime reads

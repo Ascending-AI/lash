@@ -255,6 +255,11 @@ impl SessionBuilder {
     /// A *deleted* id is refused with the store's typed
     /// [`SessionDeleted`](lash_core::StoreError::SessionDeleted); ids are
     /// single-use.
+    ///
+    /// A config whose created head no commit fits under the core's commit
+    /// budget is refused with the store's typed
+    /// [`CommitByteBudgetExceeded`](lash_core::StoreError::CommitByteBudgetExceeded),
+    /// and nothing is written.
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
         let SessionCreation {
             spec,
@@ -301,7 +306,16 @@ impl SessionBuilder {
         // row created the session. Every other answer about an existing id —
         // a rebind, or a rebind naming another relation — is the same
         // refusal, so a retry never adopts a session it did not create.
-        match catalog.admit_session(&request).await {
+        // The created head is written outside any runtime commit, so its
+        // creation is measured against the commit budget (FIG-4393).
+        match lash_core::store::admit_created_session(
+            catalog.as_ref(),
+            &request,
+            self.core.env.core.durability.commit_budget,
+            catalog.fleet_format(),
+        )
+        .await
+        {
             Ok(lash_core::store::SessionAdmission::Created) => {}
             Ok(lash_core::store::SessionAdmission::Rebound)
             | Err(lash_core::StoreError::SessionRelationMismatch { .. }) => {
