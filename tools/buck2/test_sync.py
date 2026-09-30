@@ -281,13 +281,15 @@ def check_dependency_and_profile_projection() -> None:
         ROOT / "crates/lash/tests/builder_contract/BUCK"
     ).read_text(encoding="utf-8")
     assert 'name = "builder_plugin_host_is_removed_without_testing"' in manual_ui
-    assert 'harness = "//crates/lash:ui__test__fv_52def33c"' in manual_ui
     assert 'fixtures = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.rs"]' in manual_ui
     assert 'expected = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.stderr"]' in manual_ui
     ui_rule = (HERE / "ui_fixtures.bzl").read_text(encoding="utf-8")
     assert "DefaultInfo(default_outputs = harness.harness_outputs)" in ui_rule
+    harness = re.search(r'harness = "(//crates/lash:ui__test__fv_[0-9a-f]+)"', manual_ui)
+    assert harness
+    variant_name = harness.group(1).split(":", 1)[1]
     variant = re.search(
-        r'lash_rust_feature_test\(\n\s*name = "ui__test__fv_52def33c",.*?\n\)',
+        rf'lash_rust_feature_test\(\n\s*name = "{variant_name}",.*?\n\)',
         lash_rules,
         re.S,
     )
@@ -377,6 +379,41 @@ def check_clippy_receipt_inputs() -> None:
         assert module.receipt_is_current()
         generator.write_text("changed lint renderer\n", encoding="utf-8")
         assert not module.receipt_is_current(), "changed lint renderer reused stale receipt"
+
+
+def check_rust_edit_receipt_inputs() -> None:
+    spec = importlib.util.spec_from_file_location("buck2_sync_rust", HERE / "sync.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    with tempfile.TemporaryDirectory(prefix="lash-rust-edit-receipt-") as directory:
+        root = pathlib.Path(directory)
+        module.ROOT = root
+        module.RECEIPT = root / ".buck2/sync-receipt.json"
+        subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+        source = root / "src/lib.rs"
+        source.parent.mkdir()
+        source.write_text("pub fn value() -> u32 { 1 }\n")
+        output = root / "BUCK"
+        output.write_text("generated targets\n")
+        outputs = {output: output.read_text()}
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        module.write_receipt(outputs)
+        source.write_text("pub fn value() -> u32 { 2 }\n")
+        assert module.receipt_is_current(), "ordinary Rust edit forced graph regeneration"
+        source.write_text('const TOOL: &str = env!("CARGO_BIN_EXE_lash-tool");\n')
+        assert not module.receipt_is_current(), "new runtime binary dependency reused stale graph"
+        module.write_receipt(outputs)
+        source.write_text("pub fn value() -> u32 { 3 }\n")
+        assert not module.receipt_is_current(), "removed runtime binary dependency reused stale graph"
+        module.write_receipt(outputs)
+        new_target = root / "src/bin/new-tool.rs"
+        new_target.parent.mkdir()
+        new_target.write_text("fn main() {}\n")
+        assert not module.receipt_is_current(), "new Cargo target reused stale graph"
+        module.write_receipt(outputs)
+        new_target.unlink()
+        assert not module.receipt_is_current(), "removed Cargo target reused stale graph"
 
 
 def check_external_buildscripts() -> None:
@@ -541,7 +578,8 @@ def check_direct_buck_generator() -> None:
     assert 'compile_data_patterns = [\n        "Cargo.toml",\n    ],' in integrator
 
     clippy = (HERE / "clippy_policy.bzl").read_text(encoding="utf-8")
-    assert "WORKSPACE_PACKAGE_COUNT = 54" in clippy
+    inventory = load_json("target-inventory.json")
+    assert f"WORKSPACE_PACKAGE_COUNT = {len(inventory['packages'])}" in clippy
     assert '"crates/lash-core": ("clippy_config_crates_lash_core",' in clippy
     assert 'load(":clippy_policy.bzl", "declare_clippy_configurations")' in (
         HERE / "BUCK"
@@ -554,11 +592,18 @@ def check_direct_buck_generator() -> None:
     assert 'name = "typescript_host_flow_cells"' in examples
 
     protocol = (ROOT / "crates/lash-protocol-rlm/BUCK").read_text(encoding="utf-8")
+    client = (ROOT / "crates/lash-vm-client/BUCK").read_text(encoding="utf-8")
     worker = (ROOT / "crates/lash-vm-worker/BUCK").read_text(encoding="utf-8")
-    for generated in (protocol, worker):
+    for generated in (protocol, client, worker):
         assert 'name = "Cargo.toml"' in generated
         assert 'visibility = ["PUBLIC"]' in generated
-    assert 'build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": ".lash-workspace"}' in worker
+    for generated in (client, worker):
+        assert 'build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": ".lash-workspace"}' in generated
+        assert '"//crates/lash-vm-client:buildscript_sources"' in generated
+        assert '"//crates/lash-vm-worker:buildscript_sources"' in generated
+    assert 'extra_srcs = ["//crates/lash-vm-worker:rust_sources"]' in client
+    assert '"//crates/lash-vm-worker:lash-vm-worker__bin"' in protocol
+    assert 'test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"}' in protocol
     manifest_rule = (HERE / "buildscript_manifest.bzl").read_text(encoding="utf-8")
     assert "BuildscriptSourcesInfo" in manifest_rule
     assert 'name = "buildscript_sources"' in worker
@@ -567,7 +612,6 @@ def check_direct_buck_generator() -> None:
         HERE / "lash_rust.bzl"
     ).read_text(encoding="utf-8")
 
-    inventory = load_json("target-inventory.json")
     build_scripts = {
         target["label"]
         for package in inventory["packages"]
@@ -576,8 +620,26 @@ def check_direct_buck_generator() -> None:
     }
     assert build_scripts == {
         "//crates/lash-protocol-rlm:build_script__build",
+        "//crates/lash-vm-client:build_script__build",
         "//crates/lash-vm-worker:build_script__build",
     }
+    bins_units = [
+        unit for unit in inventory["feature_lane_units"]
+        if unit["package"] == "lash-internal-vm-worker"
+        and unit["kind"] == "bin"
+        and unit["features"] == []
+    ]
+    assert {unit["label"].split(":", 1)[1].split("__fv_", 1)[0] for unit in bins_units} == {
+        "lash-vm-worker__bin"
+    }
+    provider_stream = next(
+        target
+        for package in inventory["packages"]
+        if package["package"] == "lash-restate-postgres-workers-e2e"
+        for target in package["targets"]
+        if target.get("cargo") == "provider_stream_bounds"
+    )
+    assert provider_stream["tags"] == ["cargo-service-gate", "manual"]
     inventory_text = json.dumps(inventory, sort_keys=True)
     assert not re.search(r":build_script_(?:\[|\")", inventory_text)
 
@@ -593,6 +655,7 @@ def main() -> int:
         check_dependency_and_profile_projection,
         check_sync_receipt,
         check_clippy_receipt_inputs,
+        check_rust_edit_receipt_inputs,
         check_external_buildscripts,
         check_buildscript_metadata_bridge,
         check_direct_buck_generator,

@@ -197,6 +197,30 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+filegroup(
+    name = "scripts/generate-contract-schema.py",
+    srcs = [
+        "scripts/generate-contract-schema.py",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "frontend/src/generated/error-response.schema.json",
+    srcs = [
+        "frontend/src/generated/error-response.schema.json",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "frontend/src/generated/workflow-document.schema.json",
+    srcs = [
+        "frontend/src/generated/workflow-document.schema.json",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(

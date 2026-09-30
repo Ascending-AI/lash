@@ -119,6 +119,7 @@ def lash_rust_build_script(
         version,
         data = [],
         extra_data = [],
+        extra_srcs = [],
         build_script_env = {}):
     binary = name + "__build"
     manifest = name + "__manifest"
@@ -138,7 +139,7 @@ def lash_rust_build_script(
         named_deps = _named_deps(package_name, build = True),
         rustc_flags = _rustc_flags(package_name, declared_features),
         incoming_transition = _HOST_TRANSITION,
-        srcs = _srcs("build.rs", ["build/**/*.rs"]) + data,
+        srcs = _srcs("build.rs", ["build/**/*.rs"]) + data + extra_srcs,
         visibility = ["PUBLIC"],
         **_resource_attrs({})
     )
