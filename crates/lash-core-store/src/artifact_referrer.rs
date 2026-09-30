@@ -2,7 +2,7 @@
 //! bytes alive.
 //!
 //! An artifact has one exact edge per (artifact, referrer) pair, and a
-//! referrer is a durable reader. There are eight kinds. Each referrer has one
+//! referrer is a durable reader. There are nine kinds. Each referrer has one
 //! canonical `referrer_id` text, which is what the edge, fence and cleanup
 //! tables store; [`ArtifactReferrer::decode`] refuses every stored pair whose
 //! text is not exactly that rendering, and a store classifies the refusal
@@ -47,6 +47,7 @@ pub enum ArtifactReferrerKind {
     ProcessRecord,
     SubscriptionRevision,
     Start,
+    StartInput,
     Execution,
     HostPin,
     Session,
@@ -55,11 +56,12 @@ pub enum ArtifactReferrerKind {
 
 impl ArtifactReferrerKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::FrameEnvironment,
         Self::ProcessRecord,
         Self::SubscriptionRevision,
         Self::Start,
+        Self::StartInput,
         Self::Execution,
         Self::HostPin,
         Self::Session,
@@ -67,7 +69,7 @@ impl ArtifactReferrerKind {
     ];
 
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `execution`, `host_pin`, `session`, `upload`.
+    /// `start`, `start_input`, `execution`, `host_pin`, `session`, `upload`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -75,6 +77,7 @@ impl ArtifactReferrerKind {
             Self::ProcessRecord => "process_record",
             Self::SubscriptionRevision => "subscription_revision",
             Self::Start => "start",
+            Self::StartInput => "start_input",
             Self::Execution => "execution",
             Self::HostPin => "host_pin",
             Self::Session => "session",
@@ -101,7 +104,11 @@ impl ArtifactReferrerKind {
     pub const fn is_guarded(self) -> bool {
         matches!(
             self,
-            Self::Execution | Self::Start | Self::SubscriptionRevision | Self::Upload
+            Self::Execution
+                | Self::Start
+                | Self::StartInput
+                | Self::SubscriptionRevision
+                | Self::Upload
         )
     }
     /// Whether this referrer may hold external attachment bytes.
@@ -109,7 +116,7 @@ impl ArtifactReferrerKind {
     pub const fn holds_attachments(self) -> bool {
         matches!(
             self,
-            Self::Session | Self::Upload | Self::Execution | Self::ProcessRecord
+            Self::Session | Self::Upload | Self::Execution | Self::StartInput | Self::ProcessRecord
         )
     }
 }
@@ -130,6 +137,11 @@ pub enum ArtifactReferrer {
     ProcessRecord(ProcessId),
     SubscriptionRevision(SubscriptionRevisionId),
     Start(StartKey),
+    /// One starter's input staging, independent of earlier uses of the key.
+    StartInput {
+        start_key: StartKey,
+        starter: EffectJournalIdentity,
+    },
     Execution(EffectJournalIdentity),
     HostPin(HostArtifactPin),
     Session(SessionId),
@@ -154,6 +166,7 @@ impl ArtifactReferrer {
             Self::ProcessRecord(_) => ArtifactReferrerKind::ProcessRecord,
             Self::SubscriptionRevision(_) => ArtifactReferrerKind::SubscriptionRevision,
             Self::Start(_) => ArtifactReferrerKind::Start,
+            Self::StartInput { .. } => ArtifactReferrerKind::StartInput,
             Self::Execution(_) => ArtifactReferrerKind::Execution,
             Self::HostPin(_) => ArtifactReferrerKind::HostPin,
             Self::Session(_) => ArtifactReferrerKind::Session,
@@ -176,6 +189,9 @@ impl ArtifactReferrer {
                 id.revision,
             )),
             Self::Start(key) => key.as_str().to_owned(),
+            Self::StartInput { start_key, starter } => {
+                json_text(&(start_key.as_str(), starter.key()))
+            }
             Self::Execution(journal) => journal.key().to_owned(),
             Self::HostPin(pin) => pin.as_str().to_owned(),
             Self::Session(id) => id.to_string(),
@@ -227,6 +243,15 @@ impl ArtifactReferrer {
             ArtifactReferrerKind::Start => Self::Start(
                 StartKey::parse_rendered(id).map_err(|error| malformed(kind, error.to_string()))?,
             ),
+            ArtifactReferrerKind::StartInput => {
+                let (start_key, starter): (String, String) = json_parse(kind, id)?;
+                Self::StartInput {
+                    start_key: StartKey::parse_rendered(&start_key)
+                        .map_err(|error| malformed(kind, error.to_string()))?,
+                    starter: decode_journal_identity(&starter)
+                        .map_err(|detail| malformed(kind, detail))?,
+                }
+            }
             ArtifactReferrerKind::Execution => {
                 Self::Execution(decode_journal_identity(id).map_err(|detail| {
                     ArtifactReferrerError::Malformed {
@@ -605,6 +630,7 @@ impl ReferrerClaim {
     }
 
     /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
+    /// `StartInput` with `AwaitStart` naming its own starter,
     /// `SubscriptionRevision` with `AwaitSubscriptionRevision`, `Upload` with
     /// `AwaitUploadExpiry`. Any other pairing,
     /// and every `Ended` plan, is refused.
@@ -616,25 +642,33 @@ impl ReferrerClaim {
         referrer: ArtifactReferrer,
         guard: ArtifactCleanupPlan,
     ) -> Result<Self, ArtifactReferrerError> {
-        let paired = matches!(
-            (&referrer, &guard),
-            (
-                ArtifactReferrer::FrameEnvironment(_),
-                ArtifactCleanupPlan::AwaitFrame { .. }
-            ) | (
-                ArtifactReferrer::Execution(_),
-                ArtifactCleanupPlan::AwaitJournal
-            ) | (
-                ArtifactReferrer::Start(_),
-                ArtifactCleanupPlan::AwaitStart { .. }
-            ) | (
-                ArtifactReferrer::SubscriptionRevision(_),
-                ArtifactCleanupPlan::AwaitSubscriptionRevision { .. }
-            ) | (
-                ArtifactReferrer::Upload(_),
-                ArtifactCleanupPlan::AwaitUploadExpiry { .. }
+        let paired = if let (
+            ArtifactReferrer::StartInput { starter, .. },
+            ArtifactCleanupPlan::AwaitStart { starter: authority },
+        ) = (&referrer, &guard)
+        {
+            starter == authority
+        } else {
+            matches!(
+                (&referrer, &guard),
+                (
+                    ArtifactReferrer::FrameEnvironment(_),
+                    ArtifactCleanupPlan::AwaitFrame { .. }
+                ) | (
+                    ArtifactReferrer::Execution(_),
+                    ArtifactCleanupPlan::AwaitJournal
+                ) | (
+                    ArtifactReferrer::Start(_),
+                    ArtifactCleanupPlan::AwaitStart { .. }
+                ) | (
+                    ArtifactReferrer::SubscriptionRevision(_),
+                    ArtifactCleanupPlan::AwaitSubscriptionRevision { .. }
+                ) | (
+                    ArtifactReferrer::Upload(_),
+                    ArtifactCleanupPlan::AwaitUploadExpiry { .. }
+                )
             )
-        );
+        };
         if !paired {
             return Err(malformed(
                 referrer.kind(),
@@ -998,6 +1032,10 @@ mod tests {
                     .expect("revision"),
             ),
             ArtifactReferrer::Start(start_key()),
+            ArtifactReferrer::StartInput {
+                start_key: start_key(),
+                starter: journal(),
+            },
             ArtifactReferrer::Execution(journal()),
             ArtifactReferrer::HostPin(HostArtifactPin::mint()),
             ArtifactReferrer::Session(SessionId::from("s-1")),
@@ -1028,6 +1066,39 @@ mod tests {
                 referrer
             );
         }
+    }
+
+    #[test]
+    fn start_input_claim_is_tied_to_its_start_key_and_starter() {
+        let first = ArtifactReferrer::StartInput {
+            start_key: start_key(),
+            starter: journal(),
+        };
+        let next_starter = ExecutionScope::turn("session", "next-turn")
+            .journal_identity()
+            .expect("next turn's journal");
+        let next = ArtifactReferrer::StartInput {
+            start_key: start_key(),
+            starter: next_starter.clone(),
+        };
+        assert_ne!(first.canonical_id(), next.canonical_id());
+        assert!(first.kind().holds_attachments());
+        assert!(!ArtifactReferrerKind::Start.holds_attachments());
+        ReferrerClaim::guarded(
+            first.clone(),
+            ArtifactCleanupPlan::AwaitStart { starter: journal() },
+        )
+        .expect("the starter guards its own input");
+        assert!(
+            ReferrerClaim::guarded(
+                first,
+                ArtifactCleanupPlan::AwaitStart {
+                    starter: next_starter
+                },
+            )
+            .is_err()
+        );
+        assert!(ReferrerClaim::unguarded(next).is_err());
     }
 
     #[test]

@@ -638,7 +638,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
 
 CREATE TABLE IF NOT EXISTS lash_attachment_referrer_edges (
     attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (char_length(attachment_id) > 0),
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
 );
@@ -648,7 +648,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_referrer_edges_referrer
 CREATE TABLE IF NOT EXISTS lash_attachment_pending_writes (
     write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (char_length(write_id) = 32),
     attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (char_length(attachment_id) > 0),
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (char_length(referrer_id) > 0),
     begun_at_ms   BIGINT NOT NULL
 );
@@ -1090,13 +1090,13 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
     ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     awaited_journal_key TEXT,

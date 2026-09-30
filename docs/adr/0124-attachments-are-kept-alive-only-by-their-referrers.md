@@ -25,12 +25,13 @@ keeps its name. Its claims, canonical codec, permanent fence
 (`referrer_fences`) and cleanup obligation are ADR 0113's, cited here and
 not restated.
 
-Four kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
+Five kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 
 | Kind | Acquired by | Guard | Ends when |
 |---|---|---|---|
 | `execution` (journal `j`) | a put in a session runtime bound to `j`; a delivery into any scope that is not a process | `AwaitJournal` | `j` settles (ADR 0113). |
 | `process_record` (`p`) | every put in `p`'s runtime; every delivery into `p`; `p`'s terminal output and its start input | none | Prune's `Ended` record. |
+| `start_input` (`key`, `starter`) | the start input's stored ids, before registration | `AwaitStart { starter }` | Cleanup acquires the retained input under `ProcessRecord(p)` before ending this starter's staging. Without a retained row, the starter's settled journal ends staging. |
 | `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. |
 | `upload` (`s`, `u`) | a put in a session runtime with no execution bound | `AwaitUploadExpiry { expires_at_ms }` | `expires_at_ms` passes, or `s` is deleted or absent. Each put mints a fresh `u`, so one expiry never fences a later upload. |
 
@@ -157,11 +158,18 @@ terminal output needs the row anyway.
   whose source was already swept is recorded as the typed failure
   `process_result_attachment_unavailable`; an external or host completion is
   refused with `ProcessOutputAttachmentUnavailable` and nothing is recorded.
-- **Start inputs.** Inside the journaled start step the registration
-  commits first, because it mints the id, and then the step acquires
-  `ProcessRecord(p)` on the input's stored ids. The starter's own edge
-  cannot end before its journal settles, which is after the step; a replay
-  of the step answers `Existing` and acquires again. An acquisition's
+- **Start inputs.** Before registration, the journaled start step acquires
+  `guarded(StartInput(key, starter), AwaitStart { starter })` on the input's
+  stored ids.
+  Unavailable input refuses the start before any process row is published.
+  Registration mints the id, and the step acquires `ProcessRecord(p)`.
+  Cleanup also acquires the retained record's input before ending
+  `StartInput(key, starter)`, including when the caller abandons the start
+  or an explicit `Ended` record ends staging. The upload expires independently.
+  The starter journal distinguishes staging claims across later uses of a
+  pruned host key. A fenced attempt can replay a retained row after acquiring its record;
+  it cannot publish a new row with unstaged input. A replay of the step
+  answers `Existing` and acquires again. An acquisition's
   `Contended` or `StorageFailure` retains its typed retryable classification:
   the step records no refusal, and its retry acquires under the same process
   id and start key.
@@ -241,7 +249,7 @@ a stand-in for its own id.
 
 ## Implementation
 
-- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the four
+- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the five
   attachment-holding kinds; `crates/lash-core-store/src/attachments.rs:1651`
   chooses the claim before a put.
 - `crates/lash-core-store/src/store/attachment_referrers.rs:474` defines
@@ -251,8 +259,10 @@ a stand-in for its own id.
   the receiver's claim; `:138`, `:153` and `:170` acquire terminal and start
   input references.
 - `crates/lash-restate/src/process_attach.rs:119` acquires before resolving
-  the wait. `crates/lash-core-execution/src/runtime/process/start_staging.rs:456`
-  acquires the start input after registration.
+  the wait. `crates/lash-core-execution/src/runtime/process/start_staging.rs:471`
+  stages input before registration and acquires the process record afterward.
+  `crates/lash-core/src/runtime/artifact_cleanup.rs:442` completes that
+  acquisition before staging ends during recovery.
 - `crates/lash-sqlite-store/src/persistence/turn_input.rs:971` and
   `crates/lash-postgres-store/src/postgres/runtime_persistence/turn_input.rs:513`
   acquire queued input in the acceptance transaction.

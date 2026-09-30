@@ -21,7 +21,8 @@ when its journal cannot replay
 
 An artifact has one exact edge per artifact/referrer pair. Six kinds hold
 artifacts: `frame_environment`, `process_record`, `subscription_revision`,
-`start`, `execution` and `host_pin`. `session` and `upload` hold attachments
+`start`, `execution` and `host_pin`. `session`, `upload` and `start_input`
+hold attachments
 only ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
 An artifact reference or definition id alone keeps no bytes alive.
 
@@ -33,6 +34,7 @@ An artifact reference or definition id alone keeps no bytes alive.
 | `process_record` | The process id's display form |
 | `subscription_revision` | Compact JSON array `["<subscription id>","<incarnation>",<revision>]` |
 | `start` | The start key's text |
+| `start_input` | Compact JSON array `["<start key>","<starter journal key>"]` |
 | `execution` | `EffectJournalIdentity::key()` |
 | `host_pin` | `host-pin:v1:` and 32 lowercase hex digits of a random v4 UUID |
 | `session` | The session id's text |
@@ -80,6 +82,7 @@ transaction (`crates/lash-core-execution/src/module_artifacts.rs:158-191`,
 
 A claim is unguarded for a frame, process record or host pin. Guarded
 claims pair an execution with `AwaitJournal`, a start with `AwaitStart`,
+input staging with `AwaitStart` naming its own starter,
 a subscription revision with `AwaitSubscriptionRevision`, or a prepared
 successor frame with `AwaitFrame`. Invalid pairings and `Ended` guards
 are refused. Attachment upload guards belong to ADR 0124
@@ -321,6 +324,12 @@ ends its attachment edges
 `crates/lash-core/src/runtime/artifact_cleanup.rs:552-557`).
 
 #### 3.3 `start`: engine start and replay settlement
+
+Input attachments stage under `StartInput(key, starter)` with
+`AwaitStart { starter }` ([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)).
+The starter journal makes this claim independent of earlier uses of a
+pruned host key. Its cleanup acquires the retained record's input before
+ending staging; without a retained record it waits for the starter to settle.
 
 A start stages its environment, engine artifacts, and any definition
 closure under `Start(key)` before registration. Existing or inherited

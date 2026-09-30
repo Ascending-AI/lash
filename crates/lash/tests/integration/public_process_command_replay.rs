@@ -23,6 +23,9 @@ use serde_json::{Value, json};
 
 const BOUND: Duration = Duration::from_secs(120);
 
+#[path = "host_uploaded_start_input.rs"]
+mod host_uploaded_start_input;
+
 #[derive(Clone, Copy)]
 enum Method {
     Signal,

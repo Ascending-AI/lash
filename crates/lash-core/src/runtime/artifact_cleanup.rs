@@ -230,6 +230,13 @@ impl ArtifactCleanupRelay {
                 self.hold_retained_start(key).await?;
                 Ok(Resolution::Carry(carries.clone()))
             }
+            (
+                ArtifactCleanupPlan::Ended { carries },
+                ArtifactReferrer::StartInput { start_key, .. },
+            ) => {
+                self.hold_start_input(start_key).await?;
+                Ok(Resolution::Carry(carries.clone()))
+            }
             (ArtifactCleanupPlan::Ended { carries }, _) => Ok(Resolution::Carry(carries.clone())),
             (
                 ArtifactCleanupPlan::AwaitFrame { creator },
@@ -255,6 +262,19 @@ impl ArtifactCleanupRelay {
                 {
                     Some(retained) => Ok(Resolution::Carry(self.start_carries(&retained).await?)),
                     None => Ok(settled_or_not_yet(self.journal_settled(starter).await?)),
+                }
+            }
+            (
+                ArtifactCleanupPlan::AwaitStart { starter },
+                ArtifactReferrer::StartInput {
+                    start_key,
+                    starter: authority,
+                },
+            ) if starter == authority => {
+                if self.hold_start_input(start_key).await? {
+                    Ok(Resolution::Carry(Vec::new()))
+                } else {
+                    Ok(settled_or_not_yet(self.journal_settled(starter).await?))
                 }
             }
             (
@@ -415,6 +435,41 @@ impl ArtifactCleanupRelay {
             }
         }
         Ok(())
+    }
+
+    /// Attachments carry no artifact names. Acquire the retained input
+    /// before either AwaitStart or Ended can sever its staging edges.
+    async fn hold_start_input(&self, key: &StartKey) -> Result<bool, DeliveryFailure> {
+        let Some(retained) = self
+            .ports
+            .authorities
+            .retained_start(key)
+            .await
+            .map_err(retryable_text("start-input key read"))?
+        else {
+            return Ok(false);
+        };
+        let ids = retained.input.stored_attachment_ids();
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        let referrer = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
+        let claim = ReferrerClaim::unguarded(referrer.clone())
+            .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
+        match self
+            .ports
+            .attachments
+            .acquire_attachment_refs(&claim, &ids)
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(crate::StoreError::ArtifactReferrerEnded { referrer: ended })
+                if ended == referrer =>
+            {
+                Ok(true)
+            }
+            Err(error) => Err(attachment_store_failure(error)),
+        }
     }
 
     /// Every artifact the retained record names: its environment, its

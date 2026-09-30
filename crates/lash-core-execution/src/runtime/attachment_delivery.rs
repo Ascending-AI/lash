@@ -227,8 +227,9 @@ pub async fn acquire_completion_output(
 }
 
 /// The start input a registered process holds through its record
-/// (ADR 0124 §4): acquired after the registration committed, since the
-/// id is minted there. A missing upload refuses the step.
+/// (ADR 0124 §4). The start's guarded staging edge already holds the input
+/// when registration mints the id; cleanup completes this acquisition if
+/// the registering caller dies. A missing upload refuses the step.
 pub async fn acquire_start_input(
     attachments: &dyn AttachmentReferrers,
     record: &crate::ProcessRecord,

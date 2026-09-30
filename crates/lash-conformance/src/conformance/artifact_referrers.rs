@@ -371,6 +371,10 @@ where
                 .expect("subscription revision"),
         ),
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
+        ArtifactReferrer::StartInput {
+            start_key: lash_core::StartKey::for_host("canonical-start"),
+            starter: journal.clone(),
+        },
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
         ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),

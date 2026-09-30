@@ -1,13 +1,18 @@
 //! The store half of one process start: stage what the start carries under
 //! the start's referrer, then register the row (ADR 0113 §3.3).
 //!
-//! Staging is an acquisition of `Start(key)`, guarded by `AwaitStart` on the
+//! Engine staging acquires `Start(key)`, guarded by `AwaitStart` on the
 //! starter's journal: the guard row is armed before the first edge, so no
 //! staged byte exists without a durable record that will end it. Nothing
 //! here severs or moves an edge. The cleanup executor resolves the guard:
 //! onto the key's retained record once one is registered, or to nothing once
 //! the starter's journal is settled with no record. A terminal refusal before
 //! any process holds the key ends `Start(key)` at once.
+//!
+//! Input attachments acquire `StartInput(key, starter)` before registration.
+//! Its guard also awaits the retained start or the starter's settled journal;
+//! cleanup holds the retained input before ending staging. The starter makes
+//! this claim independent of earlier uses of a pruned host key.
 //!
 //! Every engine runs this one sequence. The local executor runs it inline; the
 //! Restate controller runs it inside one journaled step, so a replay of the
@@ -306,7 +311,9 @@ impl RegisteredProcessStart {
 /// Stages and registers one process start.
 ///
 /// A start is addressed by its key (ADR 0107); a start with none is refused.
-/// Everything the start names is staged under `Start(key)` first. A start
+/// Engine artifacts are staged under `Start(key)` first. Input attachments
+/// use `StartInput(key, starter)`, so a later use of a pruned host key gets
+/// its own staging claim. A start
 /// whose key is already fenced — an earlier attempt settled it — stages
 /// nothing there and, once the registrar returns the row, acquires its own
 /// content directly under `ProcessRecord(id)` where the row adopts it.
@@ -315,6 +322,8 @@ impl RegisteredProcessStart {
 /// carries the retained row's content onto `ProcessRecord(id)`. A terminal
 /// refusal while no process holds the key upserts `Start(key)`'s `Ended`
 /// record instead: the authoritative abandonment (ADR 0113 §3.3).
+/// Input staging is nudged too; without a record its guard waits for the
+/// starter to settle, so a refused attempt cannot fence another starter's input.
 ///
 /// # Errors
 ///
@@ -336,13 +345,19 @@ pub async fn register_process_start(
     match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
-                ports.nudge(&ArtifactReferrer::Start(start_key)).await;
+                ports
+                    .nudge(&ArtifactReferrer::Start(start_key.clone()))
+                    .await;
+                ports.nudge(&start_input_referrer(stores, &start_key)).await;
             }
             Ok(registered)
         }
         Err(error) => {
             if error.is_terminal() {
-                abandon_start(stores, start_key).await?;
+                abandon_start(stores, start_key.clone()).await?;
+                if let Some(ports) = stores.ports() {
+                    ports.nudge(&start_input_referrer(stores, &start_key)).await;
+                }
             }
             Err(error)
         }
@@ -453,6 +468,7 @@ async fn stage_and_register(
     };
     let definition = stage_definition(stores, &claim, &mut registration, env_spec.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
+    Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
     let registered = stores
@@ -513,9 +529,9 @@ async fn stage_and_register(
             .acquire(engine.engines, &process_claim, &engine.names)
             .await?;
     }
-    // The start input is held through the row the registration just minted
-    // (ADR 0124 §4): record, then acquire. A replay of this step answers
-    // `Existing` and acquires again; an acquisition is idempotent.
+    // StartInput holds the input before registration. Both this step and its
+    // cleanup acquire the retained record before staging's attachment edges
+    // end, so an abandoned caller leaves the handoff to the cleanup relay.
     if let Some(ports) = stores.ports() {
         crate::runtime::attachment_delivery::acquire_start_input(
             ports.attachments().as_ref(),
@@ -528,6 +544,76 @@ async fn stage_and_register(
         disposition,
         env_ref: submitted_env_ref,
     })
+}
+
+fn start_input_referrer(stores: &ProcessStartStores<'_>, start_key: &StartKey) -> ArtifactReferrer {
+    ArtifactReferrer::StartInput {
+        start_key: start_key.clone(),
+        starter: stores.starter.clone(),
+    }
+}
+
+/// Hold input attachments before the registrar publishes a row. A fenced
+/// attempt can only replay a retained row, whose own claim is acquired first.
+async fn stage_input(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+    input: &ProcessInput,
+) -> Result<(), RuntimeEffectControllerError> {
+    let ids = input.stored_attachment_ids();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let ports = stores.ports().ok_or_else(|| {
+        RuntimeEffectControllerError::foreign(
+            "process_start_input_store_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "{} carries stored input attachments but has no attachment stores",
+                stores.executor
+            ),
+        )
+    })?;
+    let claim = ReferrerClaim::guarded(
+        start_input_referrer(stores, start_key),
+        ArtifactCleanupPlan::AwaitStart {
+            starter: stores.starter.clone(),
+        },
+    )
+    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let acquired = ports
+        .attachments()
+        .acquire_attachment_refs(&claim, &ids)
+        .await;
+    match acquired {
+        Ok(()) => return Ok(()),
+        Err(crate::StoreError::ArtifactReferrerEnded { referrer })
+            if &referrer == claim.referrer() => {}
+        Err(crate::StoreError::UnknownAttachment { digest }) => {
+            return Err(RuntimeEffectControllerError::foreign(
+                "process_start_input_attachment_unavailable",
+                TurnFailureCause::Outcome,
+                format!(
+                    "{} start input names attachment `{digest}`, which has no upload evidence",
+                    stores.executor
+                ),
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let retained = stores.registry.get_process_by_start_key(start_key).await?;
+    let Some(retained) = retained else {
+        return Err(crate::StoreError::ArtifactReferrerEnded {
+            referrer: claim.referrer().clone(),
+        }
+        .into());
+    };
+    crate::runtime::attachment_delivery::acquire_start_input(
+        ports.attachments().as_ref(),
+        &retained,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Whether `Start(key)` was fenced after this start staged under it: one
