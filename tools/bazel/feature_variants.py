@@ -309,3 +309,10 @@ def variant_hash(package_name: str, features: list[str]) -> str:
         ("\n".join([package_name, *features])).encode("utf-8"), digest_size=4
     )
     return digest.hexdigest()
+
+
+def vm_worker_pairing_error(worker_features: list[str], client_features: list[str]) -> str | None:
+    """The worker must handle every request the paired client can encode."""
+    if "testing" in client_features and "testing" not in worker_features:
+        return "testing vm-client is paired with a non-testing vm-worker"
+    return None

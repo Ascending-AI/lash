@@ -33,6 +33,57 @@ def expanded(directory, patterns):
 
 
 class SourceOwnershipTests(unittest.TestCase):
+    def test_vm_worker_lane_requests_keep_the_testing_protocol_paired(self):
+        metadata = generator.cargo_metadata()
+        workspace = feature_variants.Workspace.from_metadata(metadata)
+        checked = 0
+        for lane in generator.feature_coverage_plan()["lane"]:
+            for argv in lane["commands"]:
+                command = feature_variants.parse_command(argv)
+                resolution = feature_variants.resolve_request(
+                    workspace, command.package,
+                    default_features=command.default_features,
+                    requested=list(command.features), with_dev=command.with_dev,
+                ).sorted_features()
+                worker = "lash-internal-vm-worker"
+                client = "lash-internal-vm-client"
+                if worker not in resolution or client not in resolution:
+                    continue
+                checked += 1
+                with self.subTest(lane=lane["name"], command=argv):
+                    self.assertIsNone(feature_variants.vm_worker_pairing_error(
+                        resolution[worker], resolution[client]
+                    ))
+        self.assertGreater(checked, 0)
+
+    def test_generated_vm_workers_keep_the_testing_protocol_paired(self):
+        outputs = {
+            ROOT / directory / "BUILD.bazel": (ROOT / directory / "BUILD.bazel").read_text()
+            for directory in ("crates/lash-vm-worker", "crates/lash-vm-client")
+        }
+        self.assertEqual(generator.reconcile_vm_worker_variants(outputs), [])
+
+    def test_vm_worker_pairing_gate_rejects_default_and_variant_clients(self):
+        for client_label in ("lash-vm-client", "lash-vm-client__fv_test"):
+            for worker_features, client_features, invalid in (
+                ([], [], False), (["testing"], ["testing"], False),
+                ([], ["testing"], True),
+            ):
+                with self.subTest(client=client_label, worker=worker_features, features=client_features):
+                    swap = {} if client_label == "lash-vm-client" else {
+                        "//crates/lash-vm-client": f"//crates/lash-vm-client:{client_label}"
+                    }
+                    outputs = {
+                        ROOT / "crates/lash-vm-worker/BUILD.bazel":
+                            f'lash_rust_feature_library(name="lash-vm-worker__fv_test", crate_features={worker_features!r}, variant_deps={swap!r})',
+                        ROOT / "crates/lash-vm-client/BUILD.bazel":
+                            f'lash_rust_library(name="{client_label}", crate_features={client_features!r})',
+                    }
+                    failures = generator.reconcile_vm_worker_variants(outputs)
+                    self.assertEqual(len(failures), int(invalid))
+                    if invalid:
+                        self.assertIn("testing vm-client is paired with a non-testing vm-worker", failures[0])
+
     def test_runtime_siblings_keep_shared_and_path_modules_in_every_variant(self):
         directory = "crates/lash-core"
         own = {

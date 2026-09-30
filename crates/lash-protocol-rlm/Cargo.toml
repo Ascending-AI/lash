@@ -18,7 +18,7 @@ doctest = false
 
 [features]
 default = []
-testing = ["lash-vm-client/testing", "lashlang/testing", "lash-core/testing"]
+testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lashlang/testing", "lash-core/testing"]
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
 # constants it moves, and the store's lift and pin tables they rely on. Only
 # lash-upgrade-harness enables it; no production build does.
@@ -29,6 +29,7 @@ workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
+lash-vm-worker = { workspace = true, optional = true, features = ["testing"] }
 lash-vm-broker = { workspace = true }
 lash-vm-protocol = { workspace = true }
 tokio-util = { workspace = true }

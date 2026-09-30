@@ -92,6 +92,7 @@ http-transport = ["dep:lash-http-transport"]
 testing = [
     "lash-core/testing",
     "lash-protocol-rlm?/testing",
+    "lash-vm-worker?/testing",
     "lashlang?/testing",
 ]
 # Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
