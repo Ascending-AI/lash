@@ -2092,6 +2092,9 @@ macro_rules! attachment_referrer_tests {
         attachment_prefix_pin_keeps_the_session_edge_until_unpin,
         session_referrer_waits_for_graph_retirement,
         condemnation_needs_no_edge_and_no_pending_write,
+        skipped_attachment_referrer_kind_cannot_authorize_delete,
+        truncated_attachment_root_page_cannot_authorize_delete,
+        complete_attachment_roots_cover_every_kind_and_exhaust_pages,
     ]); };
     (@laws $fixture:block; [$($law:ident),* $(,)?]) => { $(
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

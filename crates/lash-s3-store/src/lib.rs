@@ -661,6 +661,43 @@ mod tests {
         .await;
     }
 
+    async fn partial_root_handles() -> lash_conformance::AttachmentReferrerHandles {
+        let mut config = live_s3_config().expect("live S3 is required for this law");
+        config.prefix = Some(format!("partial-roots/{}", unique_case_suffix()));
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open store set");
+        lash_conformance::AttachmentReferrerHandles {
+            factory: lash_core::StoreSet::session_store_factory(&stores),
+            cleanup: lash_core::StoreSet::artifact_cleanup(&stores),
+            bytes: Arc::new(move || {
+                Arc::new(S3AttachmentStore::from_config(config.clone()).expect("S3 store"))
+                    as Arc<dyn AttachmentStore>
+            }),
+            insert_edge: Arc::new(|_, _, _| {
+                Box::pin(async { panic!("this law uses normal referrer writes") })
+            }),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live S3-compatible storage"]
+    async fn skipped_attachment_referrer_kind_cannot_authorize_s3_delete() {
+        lash_conformance::skipped_attachment_referrer_kind_cannot_authorize_delete(
+            partial_root_handles().await,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live S3-compatible storage"]
+    async fn truncated_attachment_root_page_cannot_authorize_s3_delete() {
+        lash_conformance::truncated_attachment_root_page_cannot_authorize_delete(
+            partial_root_handles().await,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn duplicate_puts_are_content_addressed_when_live_s3_configured() {
         let Some(config) = live_s3_config() else {

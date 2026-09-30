@@ -345,6 +345,11 @@ pub enum StoreError {
         "attachment `{digest}` has no completed upload in this store; put the bytes before committing a reference to them"
     )]
     UnknownAttachment { digest: crate::AttachmentId },
+    #[error("incomplete enumeration of {scope}: {unfinished}")]
+    IncompleteEnumeration {
+        scope: &'static str,
+        unfinished: String,
+    },
     #[error("referrer kind `{kind}` cannot hold {store} bytes")]
     ReferrerKindRefused {
         kind: crate::artifact_referrer::ArtifactReferrerKind,
@@ -905,6 +910,7 @@ impl StoreError {
             | Self::TurnCancelClosureAuthorizationMismatch { .. }
             | Self::TurnCancelClosureLifecyclePinned { .. }
             | Self::TurnCancelClosureScopeRetired { .. }
+            | Self::IncompleteEnumeration { .. }
             | Self::ReferrerKindRefused { .. }
             | Self::UnknownAttachment { .. }
             | Self::StaleWritePermit { .. }
@@ -1018,6 +1024,7 @@ impl StoreError {
             }
             Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
             Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
+            Self::IncompleteEnumeration { .. } => "IncompleteEnumeration",
             Self::ReferrerKindRefused { .. } => "ReferrerKindRefused",
             Self::UnknownAttachment { .. } => "UnknownAttachment",
             Self::StaleWritePermit { .. } => "StaleWritePermit",

@@ -172,7 +172,9 @@ struct UnavailableRootSet;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnavailableRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(
+        &self,
+    ) -> Result<crate::attachments::CompleteAttachmentRoots, crate::StoreError> {
         Err(crate::StoreError::Backend(
             "root enumeration unavailable".to_string(),
         ))
@@ -187,12 +189,28 @@ impl AttachmentRootSet for UnavailableRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for RecordingRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(self
+    async fn attachment_root_page(
+        &self,
+        source: crate::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
+        let roots: BTreeSet<_> = self
             .manifests
             .iter()
             .flat_map(|manifest| manifest.live_ids())
-            .collect())
+            .collect();
+        let ids = if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session)
+        {
+            roots
+                .into_iter()
+                .filter(|id| after.is_none_or(|after| id > after))
+                .take(AttachmentRootPage::QUERY_LIMIT)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        AttachmentRootPage::from_rows(ids)
     }
 
     async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, crate::StoreError> {
@@ -306,8 +324,12 @@ struct EmptySnapshotFactoryRoots<'a> {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(BTreeSet::new())
+    async fn attachment_root_page(
+        &self,
+        _source: crate::attachments::AttachmentRootSource,
+        _after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        crate::attachments::AttachmentRootPage::from_rows(Vec::new())
     }
 
     async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
@@ -1043,8 +1065,12 @@ struct ScriptedRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for ScriptedRootSet {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        Ok(BTreeSet::new())
+    async fn attachment_root_page(
+        &self,
+        _source: crate::attachments::AttachmentRootSource,
+        _after: Option<&AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        crate::attachments::AttachmentRootPage::from_rows(Vec::new())
     }
 
     async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {

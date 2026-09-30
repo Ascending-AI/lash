@@ -126,6 +126,12 @@ Each artifact store applies an end in one transaction:
 4. Reclaim affected artifacts only when no edge remains. SQLite also checks
    the blob's other roots before reclaiming the shared blob.
 
+Step 4 consumes `CompleteArtifactReferrers`, whose closed source inventory is
+`ArtifactReferrerKind::ALL`. The store finishes the edge read and covers every
+kind before constructing that witness; a missing kind or unfinished page is
+`IncompleteEnumeration`. The exact `NOT EXISTS` delete remains inside the same
+transaction as the concurrency check (ADR 0067 §5).
+
 Reapplying a completed cleanup changes nothing. SQLite serializes the
 write; PostgreSQL takes sorted referrer locks before sorted artifact locks.
 Publish and acquire follow the same referrer-before-artifact order

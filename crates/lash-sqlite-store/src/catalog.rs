@@ -600,19 +600,18 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for SqliteStore {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<
-        std::collections::BTreeSet<lash_core_execution::AttachmentId>,
-        lash_core_execution::StoreError,
-    > {
+        source: lash_core_execution::attachments::AttachmentRootSource,
+        after: Option<&lash_core_execution::AttachmentId>,
+    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
         if !self.location.target().exists() {
             return Err(StoreError::Backend(format!(
                 "attachment catalog {} does not exist",
                 self.location.target()
             )));
         }
-        self.rooted_attachment_ids().await
+        SqliteStore::attachment_root_page(self, source, after).await
     }
     async fn list_condemnations(
         &self,

@@ -791,3 +791,171 @@ pub async fn condemnation_needs_no_edge_and_no_pending_write(h: AttachmentReferr
         Err(StoreError::StaleWritePermit { .. })
     ));
 }
+
+/// Deliberately stop a root enumeration before one kind or its next page.
+struct PartialAttachmentRoots {
+    factory: Arc<dyn DeploymentStore>,
+    omitted: AttachmentId,
+    truncate_page: bool,
+}
+
+#[async_trait::async_trait]
+impl AttachmentRootSet for PartialAttachmentRoots {
+    async fn attachment_root_page(
+        &self,
+        source: lash_core::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash_core::attachments::AttachmentRootPage, StoreError> {
+        use lash_core::attachments::{AttachmentRootPage, AttachmentRootSource};
+        if source == AttachmentRootSource::Referrer(ArtifactReferrerKind::ProcessRecord) {
+            if self.truncate_page && after.is_none() {
+                // Plant a nonterminal page. Stopping at this page must never
+                // authorize a deletion, even if another source was complete.
+                return AttachmentRootPage::from_rows(
+                    (0..AttachmentRootPage::QUERY_LIMIT)
+                        .map(|index| {
+                            AttachmentId::parse(format!("partial-page-{index:04}")).unwrap()
+                        })
+                        .collect(),
+                );
+            }
+            return Err(StoreError::IncompleteEnumeration {
+                scope: "live attachment roots",
+                unfinished: if self.truncate_page {
+                    "truncated process_record continuation"
+                } else {
+                    "skipped process_record source"
+                }
+                .into(),
+            });
+        }
+        self.factory.attachment_root_page(source, after).await
+    }
+
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
+        if id == &self.omitted {
+            return Ok(false);
+        }
+        self.factory.has_live_attachment_ref(id).await
+    }
+}
+
+async fn partial_attachment_enumeration(h: AttachmentReferrerHandles, truncate_page: bool) {
+    let store = create(&h.factory, "partial-roots").await;
+    let bytes = (h.bytes)();
+    let protected = bytes
+        .put(
+            b"protected by omitted process record".to_vec(),
+            image_meta(),
+        )
+        .await
+        .unwrap();
+    let visible = bytes
+        .put(b"visible session root".to_vec(), image_meta())
+        .await
+        .unwrap();
+    record_completed_write(
+        &store,
+        &write(
+            &protected.id,
+            ArtifactReferrer::ProcessRecord(ProcessId::fixture("partial-process")),
+        ),
+    )
+    .await;
+    record_completed_write(
+        &store,
+        &write(
+            &visible.id,
+            ArtifactReferrer::Session("partial-roots".into()),
+        ),
+    )
+    .await;
+    let partial = PartialAttachmentRoots {
+        factory: h.factory.clone(),
+        omitted: protected.id.clone(),
+        truncate_page,
+    };
+    let result = reclaim_unreferenced_attachments(
+        &partial,
+        bytes.as_ref(),
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await;
+    assert!(
+        matches!(result.unwrap_err().stop,
+        store::MaintenanceStop::Failed(AttachmentStoreError::RootSetEnumerationFailed { source })
+        if matches!(*source, StoreError::IncompleteEnumeration { .. })),
+        "partial enumeration must stop typed before destruction"
+    );
+    bytes
+        .get(&protected.id)
+        .await
+        .expect("omitted referrer's live bytes survive");
+    bytes
+        .get(&visible.id)
+        .await
+        .expect("visible live bytes survive");
+}
+
+pub async fn skipped_attachment_referrer_kind_cannot_authorize_delete(
+    h: AttachmentReferrerHandles,
+) {
+    partial_attachment_enumeration(h, false).await;
+}
+
+pub async fn truncated_attachment_root_page_cannot_authorize_delete(h: AttachmentReferrerHandles) {
+    partial_attachment_enumeration(h, true).await;
+}
+
+pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
+    h: AttachmentReferrerHandles,
+) {
+    let store = create(&h.factory, "complete-roots").await;
+    let session = SessionId::from("complete-roots");
+    let mut expected = std::collections::BTreeSet::new();
+    for index in 0..258 {
+        let id = AttachmentId::parse(format!("paged-root-{index:04}")).unwrap();
+        record_completed_write(
+            &store,
+            &write(&id, ArtifactReferrer::Session(session.clone())),
+        )
+        .await;
+        expected.insert(id);
+    }
+    for (index, referrer) in [
+        ArtifactReferrer::ProcessRecord(ProcessId::fixture("complete-process")),
+        ArtifactReferrer::Upload(UploadReferrerId::mint(session.clone())),
+        execution(&session, "complete-execution"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = AttachmentId::parse(format!("kind-root-{index}")).unwrap();
+        record_completed_write(&store, &write(&id, referrer)).await;
+        expected.insert(id);
+    }
+    let pending = AttachmentId::parse("pending-without-edge").unwrap();
+    let attempt = write(
+        &pending,
+        ArtifactReferrer::ProcessRecord(ProcessId::fixture("pending-process")),
+    );
+    let permit = permit(store.as_ref(), &attempt).await;
+    store
+        .forget_attachment_ref(attempt.claim.referrer(), &pending)
+        .await
+        .unwrap();
+    expected.insert(pending);
+    let witnessed = h.factory.live_attachment_refs().await.unwrap();
+    assert_eq!(
+        witnessed.values(),
+        &expected,
+        "the witness includes every source, the second page, and an edgeless pending write"
+    );
+    store
+        .abort_attachment_write(&attempt, permit)
+        .await
+        .unwrap();
+}

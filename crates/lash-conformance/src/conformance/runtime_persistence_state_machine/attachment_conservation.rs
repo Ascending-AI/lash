@@ -406,7 +406,7 @@ async fn probe_attachment_gc(
                 .to_string(),
         );
     }
-    if roots != expected {
+    if roots.values() != &expected {
         return Err(format!(
             "attachment GC root snapshot differs from surviving committed references: expected {expected:?}, got {roots:?}"
         ));
@@ -459,7 +459,7 @@ pub(super) async fn assert_attachment_conservation(
             "live attachment root set was empty while committed references survive".to_string(),
         );
     }
-    if actual != expected {
+    if actual.values() != &expected {
         return Err(format!(
             "live attachment roots differ from the union of surviving committed references: expected {expected:?}, got {actual:?}"
         ));

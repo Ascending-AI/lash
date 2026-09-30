@@ -5,7 +5,9 @@ struct UnsupportedAttachmentRoots;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnsupportedAttachmentRoots {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(
+        &self,
+    ) -> Result<crate::attachments::CompleteAttachmentRoots, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "live_attachment_refs",
         })

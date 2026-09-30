@@ -26,10 +26,24 @@ pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::Attachment
 #[async_trait::async_trait]
 #[diagnostic::do_not_recommend]
 impl crate::AttachmentRootSet for FixedAttachmentRoots {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-        Ok(self.0.clone())
+        source: crate::attachments::AttachmentRootSource,
+        after: Option<&crate::AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
+        use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
+        let roots =
+            if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session) {
+                self.0
+                    .iter()
+                    .filter(|id| after.is_none_or(|after| *id > after))
+                    .take(AttachmentRootPage::QUERY_LIMIT)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        AttachmentRootPage::from_rows(roots)
     }
 
     async fn has_live_attachment_ref(

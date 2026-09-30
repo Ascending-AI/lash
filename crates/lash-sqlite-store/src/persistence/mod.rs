@@ -103,35 +103,59 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
+/// One ancestry node whose complete indexed root check found no live child,
+/// session head, or anchor, under the severing transaction's writer lock.
+struct RetirableAncestryNode {
+    node_id: String,
+    parent_node_id: Option<String>,
+}
+
+fn retirable_ancestry_node_conn(
+    conn: &Connection,
+    node_id: &str,
+) -> Result<Option<RetirableAncestryNode>, StoreError> {
+    let parent = conn
+        .query_row(
+            session_sql().graph_sqlite.select_retirable_parent.sql(),
+            params![node_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    Ok(parent.map(|parent_node_id| RetirableAncestryNode {
+        node_id: node_id.to_owned(),
+        parent_node_id,
+    }))
+}
+
+fn retire_ancestry_node_conn(
+    conn: &Connection,
+    witness: RetirableAncestryNode,
+) -> Result<Option<String>, StoreError> {
+    crate::conn::cached_execute(
+        conn,
+        session_sql().graph_sqlite.retire.sql(),
+        params![witness.node_id],
+    )
+    .map_err(sqlite_error)?;
+    Ok(witness.parent_node_id)
+}
+
 /// Reclaim the ancestry prefix with no live child, session-head root, or
-/// explicit anchor. Reachability is derived at each destructive decision.
+/// explicit anchor. Every destructive step consumes its own complete check.
 pub(crate) fn retire_unreachable_ancestry_conn(
     conn: &Connection,
     first_node_id: &str,
 ) -> Result<(), StoreError> {
     let mut node_id = first_node_id.to_string();
     loop {
-        let parent_node_id = conn
-            .query_row(
-                session_sql().graph_sqlite.select_retirable_parent.sql(),
-                params![node_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let Some(parent_node_id) = parent_node_id else {
+        let Some(witness) = retirable_ancestry_node_conn(conn, &node_id)? else {
             return Ok(());
         };
-        crate::conn::cached_execute(
-            conn,
-            session_sql().graph_sqlite.retire.sql(),
-            params![node_id],
-        )
-        .map_err(sqlite_error)?;
-        let Some(parent_node_id) = parent_node_id else {
+        let Some(parent) = retire_ancestry_node_conn(conn, witness)? else {
             return Ok(());
         };
-        node_id = parent_node_id;
+        node_id = parent;
     }
 }
 

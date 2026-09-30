@@ -197,26 +197,51 @@ fn outcome<T>(value: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Result
     })
 }
 impl SqliteStore {
-    pub(crate) async fn rooted_attachment_ids(
+    pub(crate) async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
+        source: lash_core_execution::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
+        use lash_core_execution::attachments::{AttachmentRootPage, AttachmentRootSource};
+        let after = after.map(AttachmentId::to_string).unwrap_or_default();
         let ids = self
             .conn
-            .call(|conn| {
-                let mut statement =
-                    conn.prepare_cached(attachment_sql().edges.select_rooted_ids.sql())?;
-                statement
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()
+            .call(move |conn| {
+                let sql = attachment_sql();
+                let limit = AttachmentRootPage::QUERY_LIMIT as i64;
+                let (query, kind) = match source {
+                    AttachmentRootSource::Referrer(kind) => {
+                        (sql.edges.select_root_page.sql(), Some(kind.as_str()))
+                    }
+                    AttachmentRootSource::OtherReferrers => {
+                        (sql.edges.select_other_root_page.sql(), None)
+                    }
+                    AttachmentRootSource::PendingWrites => {
+                        (sql.pending.select_root_page.sql(), None)
+                    }
+                };
+                let mut statement = conn.prepare_cached(query)?;
+                let rows = if let Some(kind) = kind {
+                    statement
+                        .query_map(params![kind, after, limit], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                } else {
+                    statement
+                        .query_map(params![after, limit], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                Ok(rows)
             })
             .await
             .map_err(sqlite_error)?;
-        ids.into_iter()
-            .map(|id| {
-                AttachmentId::parse(&id)
-                    .map_err(|error| stored_data_corrupt("attachment root", error))
-            })
-            .collect()
+        AttachmentRootPage::from_rows(
+            ids.into_iter()
+                .map(|id| {
+                    AttachmentId::parse(&id)
+                        .map_err(|error| stored_data_corrupt("attachment root", error))
+                })
+                .collect::<Result<_, _>>()?,
+        )
     }
     pub(crate) async fn has_attachment_root(&self, id: &AttachmentId) -> Result<bool, StoreError> {
         let id = id.to_string();

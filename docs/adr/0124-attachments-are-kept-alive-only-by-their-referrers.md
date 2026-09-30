@@ -67,6 +67,11 @@ only the delete-time freshness re-check.
 An attachment URI is derived from its digest; the store keeps no second
 copy of it.
 
+Root enumeration returns `CompleteAttachmentRoots`, minted only after the
+shared collector reads every edge kind and pending write and exhausts every
+page. The sweep requires that witness before any physical delete, including
+an adopted condemnation's completion (ADR 0067 §5).
+
 ### 3. The verbs and their refusals
 
 The `AttachmentReferrers` port has eight verbs: `begin_attachment_write`,

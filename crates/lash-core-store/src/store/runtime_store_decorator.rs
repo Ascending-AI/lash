@@ -393,12 +393,13 @@ where
     T: RuntimeStoreDecorator + ?Sized,
     T::Inner: crate::attachments::AttachmentRootSet,
 {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, StoreError> {
-        self.inner().live_attachment_refs().await
+        source: crate::attachments::AttachmentRootSource,
+        after: Option<&crate::AttachmentId>,
+    ) -> Result<crate::attachments::AttachmentRootPage, StoreError> {
+        self.inner().attachment_root_page(source, after).await
     }
-
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
         self.inner().list_condemnations().await
     }

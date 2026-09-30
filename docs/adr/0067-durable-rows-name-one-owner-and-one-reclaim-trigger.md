@@ -2,8 +2,7 @@
 
 ## Status
 
-Accepted. The complete typed enumeration witness required by §5 depends on
-open work FIG-4343.
+Accepted.
 
 ## Context
 
@@ -140,27 +139,50 @@ ownership transitions occurred.
 
 ### 5. Witnessed emptiness
 
-Every destructive scope boundary consumes a complete, typed enumeration witness.
-Complete enumeration of zero rows is a different fact from a failed, partial
-or unavailable enumeration. An unwitnessed destructive scope refuses and names
-the source it cannot prove. A host assertion cannot manufacture the witness.
-FIG-4343 owns the explicit witness type at the reclamation boundary; the current
-attachment seam represents successful enumeration as
-`Result<BTreeSet<AttachmentId>, StoreError>`.
+Every destructive boundary that uses an enumerated live set consumes a typed
+complete-enumeration witness. An empty, complete scope differs from an error,
+a partial scan or an unwired source. None of those incomplete results can
+construct the witness or authorize a delete.
 
-The current pass preserves the outcome distinction. If root enumeration fails
-while an eligible blob exists, the pass fails. If blobs exist but all are
-grace-protected, it refuses with `UnwitnessedScope`. A completely enumerated,
-empty blob backend permits a witnessed nothing-to-do result even if root
-enumeration fails, because no blob deletion depends on those roots. Its root
-diagnostic stays in the report. A successfully enumerated empty root set still
-requires the host's explicit `EmptyRootSetPolicy::AuthorizeDeleteAll` before
-it permits deleting every unreferenced blob.
+`AttachmentRootSet::live_attachment_refs` returns `CompleteAttachmentRoots`.
+Only the shared collector constructs it. The collector visits every kind
+allowed by `ArtifactReferrerKind::holds_attachments`, the remaining edge kinds,
+and pending writes. For each source it reads ordered pages of 256 digests plus
+one lookahead row and follows every continuation. A missing source or failed
+continuation stops the pass before any physical delete, including completion
+of a crashed predecessor's condemnation. The backend's `attachment_root_page`
+returns unproven rows, not deletion authority.
+
+The SQLite and PostgreSQL blob collectors consume `CompleteEnumeration` before
+severing dead checkpoint projection edges or deleting unretained blobs. Their
+closed inventories include session heads and node anchors, complete checkpoint
+component traversal, and SQLite's artifact pointers. PostgreSQL stores artifact
+bytes separately. Artifact deletion consumes `CompleteArtifactReferrers`, which
+covers every `ArtifactReferrerKind::ALL` entry after a complete edge read, and
+retains the transactional `NOT EXISTS` predicate as its concurrency check.
+An unfinished `ReclamationEnumeration` returns `IncompleteEnumeration` with the
+unproven scope and source. It has no conversion to a deletion witness.
+
+Ancestry retirement consumes a private `RetirableAncestryNode`, constructed
+only after the complete child, session-head and anchor check under the same
+writer transaction or node lock as the retirement.
+
+Owner-scoped cascades and terminal-state vacuum do not decide liveness from a
+caller-supplied root set. Their owner transition and exact SQL edge predicates
+remain inside the transaction. Ending a referrer's edges consumes the resolved
+cleanup fact; it does not infer the referrer's death from enumeration or age.
+
+A refusal is `Err(MaintenanceFailure { stop: Refused(..), partial })`, never a
+healthy report. Backend enumeration errors are `Failed` and retain their
+structured cause. The attachment pass may report an empty backend with an
+unavailable root source because no byte's fate depended on those roots; when
+bytes exist it fails or refuses before destruction. A host's empty-root policy
+is applied only after complete enumeration and cannot substitute for it.
 
 ### 6. In-flight destruction: adoption-first, generation-fenced
 
-A fenced attachment sweep begins by adopting incomplete condemnations from
-proven-dead predecessors. The factory condemnation protocol owns those rows.
+After complete root enumeration, a fenced attachment sweep adopts incomplete
+condemnations from proven-dead predecessors. The factory condemnation protocol owns those rows.
 The pass completes each adopted row before listing and condemning new candidates.
 
 `begin_attachment_sweep` mints a monotonically increasing durable generation.
@@ -215,8 +237,8 @@ Generation CAS and backend liveness prove which pass owns the condemnation.
 Every durable table has a reviewable owner and reclaim trigger. Destructive
 maintenance reports its stops and partial work. Host cutoffs bound retained
 evidence, while physical deletion and interrupted deletion have separate
-ownership protocols. Complete typed witnesses remain an explicit implementation
-obligation under FIG-4343.
+ownership protocols. Complete typed witnesses enforce complete source and page
+coverage at the reclamation boundary.
 
 ## Executable evidence
 
@@ -241,3 +263,7 @@ obligation under FIG-4343.
 - Store laws run on SQLite file, SQLite memory and PostgreSQL. Effect-host laws
   run on the in-process Restate server double, live Restate and lash-sim's
   in-process effect host. Upgrade proofs use the synthetic-next tier.
+
+- [Complete attachment root collector](../../crates/lash-core-store/src/attachments/root_enumeration.rs).
+- [Reclamation enumeration witnesses and partial-scan laws](../../crates/lash-core-store/src/store/enumeration.rs).
+- [Skipped-kind and truncated-page laws](../../crates/lash-conformance/src/conformance/attachment_referrers.rs).

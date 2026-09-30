@@ -17,6 +17,7 @@ pub use checkpoint::{
 pub mod admission_plan;
 pub mod commit_budget;
 mod commit_identity;
+mod enumeration;
 mod error;
 pub mod fencing;
 #[cfg(test)]
@@ -33,6 +34,7 @@ mod identity_projection;
 pub mod ingress_obligation;
 mod lease_timings;
 mod maintenance;
+pub use enumeration::*;
 pub mod obligation;
 mod park;
 pub mod pending_follow_on;

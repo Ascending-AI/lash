@@ -462,14 +462,60 @@ impl PostgresLashlangArtifactStore {
         .await
         .map_err(backend)?;
         for artifact_ref in &source_refs {
-            sqlx::query(artifact_sql().postgres.delete_unreferenced.sql())
+            use lash_core_execution::store::{EnumerationProgress, ReclamationEnumeration};
+            let rows = sqlx::query(artifact_sql().edges.select_artifact_edges.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .execute(&mut **tx)
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(backend)?;
+            let referrers = rows
+                .iter()
+                .map(|row| {
+                    decode_edge_referrer(row)
+                        .map(|referrer| (referrer.kind(), referrer.canonical_id()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut enumeration = ReclamationEnumeration::<
+                lash_core_execution::ArtifactReferrerKind,
+                (lash_core_execution::ArtifactReferrerKind, String),
+            >::new();
+            for kind in lash_core_execution::ArtifactReferrerKind::ALL {
+                enumeration
+                    .page(
+                        kind,
+                        0,
+                        referrers
+                            .iter()
+                            .filter(|(source, _)| *source == kind)
+                            .cloned(),
+                        EnumerationProgress::Exhausted,
+                    )
+                    .map_err(ArtifactStoreError::from)?;
+            }
+            let witness = enumeration.finish().map_err(ArtifactStoreError::from)?;
+            Self::delete_unreferenced_artifact_tx(&mut tx, namespace, artifact_ref, &witness)
+                .await?;
         }
         tx.commit().await.map_err(backend)
+    }
+
+    async fn delete_unreferenced_artifact_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        namespace: &str,
+        artifact_ref: &str,
+        referrers: &lash_core_execution::store::CompleteArtifactReferrers,
+    ) -> Result<(), ArtifactStoreError> {
+        if !referrers.is_empty() {
+            return Ok(());
+        }
+        sqlx::query(artifact_sql().postgres.delete_unreferenced.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .execute(&mut **tx)
+            .await
+            .map_err(backend)?;
+        Ok(())
     }
 
     async fn get_namespaced(

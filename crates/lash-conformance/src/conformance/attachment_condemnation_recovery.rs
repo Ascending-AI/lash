@@ -53,10 +53,12 @@ impl InterruptedSweepRoot {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for InterruptedSweepRoot {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
-        self.inner.live_attachment_refs().await
+        source: lash_core::attachments::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash_core::attachments::AttachmentRootPage, StoreError> {
+        self.inner.attachment_root_page(source, after).await
     }
 
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {

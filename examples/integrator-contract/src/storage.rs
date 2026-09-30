@@ -55,7 +55,11 @@ impl AttachmentReferrers for Integrator {
 
 #[lash::async_trait]
 impl AttachmentRootSet for Integrator {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, StoreError> {
+    async fn attachment_root_page(
+        &self,
+        source: lash::persistence::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash::persistence::AttachmentRootPage, StoreError> {
         unreachable!("external signature witness")
     }
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {

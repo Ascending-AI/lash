@@ -384,6 +384,9 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     pub use lash_core::CheckpointKind;
+    pub use lash_core::attachments::{
+        AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
+    };
     /// Logical root references returned by a root store.
     pub use lash_core::engine::RootRef;
     /// The engine's evidence that a root's execution is lost, which
