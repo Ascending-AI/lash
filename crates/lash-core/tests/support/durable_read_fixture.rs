@@ -316,21 +316,24 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         claim: ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(SESSION_ID)))
             .expect("fixture session attachment claim"),
     };
-    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = session
+    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
+        .store
         .begin_attachment_write(&attachment_write)
         .await
         .expect("begin fixture attachment write")
     else {
         panic!("the fixture digest must grant its writer");
     };
-    session
+    handles
+        .store
         .complete_attachment_write(&attachment_write, attachment_permit)
         .await
         .expect("stamp fixture attachment upload");
     // Keep an independent pending attempt for the fixture generators' token
     // normalization and the durable pending-write shape, alongside the evidence.
     assert!(matches!(
-        session
+        handles
+            .store
             .begin_attachment_write(&attachment_write)
             .await
             .expect("begin fixture pending attachment write"),
