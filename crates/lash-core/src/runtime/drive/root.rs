@@ -29,6 +29,11 @@ use lash_core_execution::runtime::effect::AdmittedHeadVerdict;
 impl LashRuntime {
     /// Admit the turn-lane run `admitted` is headed by and drive it as the
     /// root's logical turn, under the drive fence the root's seal raised.
+    /// The admission records `executor`, the execution that runs the root.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the root's admission takes the drive fence and its executor from the drive path that runs it, beside the head, sinks and live input the turn needs"
+    )]
     pub(super) async fn run_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -37,6 +42,7 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
         fence: &crate::store::DriveFence,
+        executor: crate::store::RootExecutor,
     ) -> Result<RootRun, DriveAbort> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let root = admitted.root().clone();
@@ -103,6 +109,7 @@ impl LashRuntime {
                     turn_index: self.state.turn_index + 1,
                     generation: crate::runtime::turn_loop::generation_fence::current(self),
                     admitted_generation: admitted.admitted_generation().clone(),
+                    executor,
                     trace: AdmissionTrace {
                         sink: self.host.core.tracing.trace_sink.clone(),
                         base: self.host.core.tracing.trace_context.clone(),
@@ -1245,6 +1252,9 @@ struct AdmitRootRunner {
     /// The executable generation the root is admitted under (FIG-3571).
     generation: Option<crate::ExecutableGeneration>,
     admitted_generation: crate::engine::BuildGeneration,
+    /// The execution that runs the root, which the admission records
+    /// (FIG-4403).
+    executor: crate::store::RootExecutor,
     trace: AdmissionTrace,
 }
 
@@ -1374,6 +1384,7 @@ impl AdmitRootRunner {
             turn_index: self.turn_index as u64,
             generation: self.generation.clone(),
             admitted_generation: self.admitted_generation.clone(),
+            executor: self.executor.clone(),
         };
         if let Some(admission) = self.store.admit_root(&request).await? {
             let causes = admission

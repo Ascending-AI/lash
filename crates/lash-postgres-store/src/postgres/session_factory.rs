@@ -276,7 +276,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         &self,
         after: Option<&lash_core_execution::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
         let session = after.map_or("", |key| key.session.as_str());
         let root = after.map_or("", |key| key.root.as_str());
         let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
@@ -294,15 +294,24 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         .map_err(crate::store_sqlx_error)?;
         rows.into_iter()
             .map(|row| {
-                Ok(lash_core_execution::engine::RootRef {
-                    session: SessionId::from(
-                        row.try_get::<String, _>(0)
-                            .map_err(crate::store_sqlx_error)?,
-                    ),
-                    root: lash_sansio::TurnId::from(
-                        row.try_get::<String, _>(1)
-                            .map_err(crate::store_sqlx_error)?,
-                    ),
+                let admission = row
+                    .try_get::<Option<String>, _>(2)
+                    .map_err(crate::store_sqlx_error)?;
+                Ok(lash_core_execution::engine::OpenRoot {
+                    target: lash_core_execution::engine::RootRef {
+                        session: SessionId::from(
+                            row.try_get::<String, _>(0)
+                                .map_err(crate::store_sqlx_error)?,
+                        ),
+                        root: lash_sansio::TurnId::from(
+                            row.try_get::<String, _>(1)
+                                .map_err(crate::store_sqlx_error)?,
+                        ),
+                    },
+                    executor: admission
+                        .as_deref()
+                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
+                        .transpose()?,
                 })
             })
             .collect()

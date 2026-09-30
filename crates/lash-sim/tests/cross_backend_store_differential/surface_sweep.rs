@@ -1348,7 +1348,7 @@ impl BackendRunner {
             SurfaceMethod::NonTerminalRootsPage => {
                 let factory = self.factory();
                 let mut after = None;
-                let mut own_roots = 0;
+                let mut own_executors = Vec::new();
                 loop {
                     let page = factory
                         .non_terminal_roots_page(
@@ -1356,16 +1356,20 @@ impl BackendRunner {
                             std::num::NonZeroUsize::MIN.saturating_add(127),
                         )
                         .await?;
-                    own_roots += page
-                        .iter()
-                        .filter(|root| root.session == session_id)
-                        .count();
+                    own_executors.extend(
+                        page.iter()
+                            .filter(|open| open.target.session == session_id)
+                            .map(|open| format!("{:?}", open.executor)),
+                    );
                     if page.len() < 128 {
                         break;
                     }
-                    after = page.last().cloned();
+                    after = page.last().map(|open| open.target.clone());
                 }
-                format!("own_open_roots={own_roots}")
+                format!(
+                    "own_open_roots={} executors={own_executors:?}",
+                    own_executors.len()
+                )
             }
             SurfaceMethod::EndLostRoot => {
                 let root = lash_core::engine::RootRef {

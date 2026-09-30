@@ -762,12 +762,18 @@ impl LashRuntime {
                 break stop;
             }
             let work = admitted.work().clone();
+            // Every root this loop admits runs inline, in the execution of
+            // the drive's controller: no engine run of the root holds it
+            // (FIG-4403).
             let run = Box::pin(self.run_admitted_root_step(
                 controller,
                 admitted,
                 sinks,
                 live,
                 RootClose::Inline,
+                crate::store::RootExecutor::Inline {
+                    scope: controller.execution_scope().clone(),
+                },
             ))
             .await?;
             let stop = rules.after(&work, &run.outcome);
@@ -860,11 +866,14 @@ impl LashRuntime {
         close: RootClose<'_>,
     ) -> Result<RootRun, DriveAbort> {
         let mut attempt = EngineAttempt::enter(self);
-        let run = Box::pin(
-            attempt
-                .runtime
-                .run_admitted_root_step(controller, admitted, sinks, None, close),
-        )
+        let run = Box::pin(attempt.runtime.run_admitted_root_step(
+            controller,
+            admitted,
+            sinks,
+            None,
+            close,
+            crate::store::RootExecutor::Root,
+        ))
         .await;
         attempt.returned = true;
         run
@@ -992,7 +1001,8 @@ impl LashRuntime {
     /// correlation and lineage): it cannot cross the durable boundary, so it
     /// is re-attached when the root's admission drives that input. `close`
     /// says where the root's scope close runs once its terminal evidence is
-    /// durable.
+    /// durable, and `executor` names the execution that runs the root, which
+    /// the root's admission records (FIG-4403).
     pub(crate) async fn run_admitted_root_step(
         &mut self,
         controller: &ScopedEffectController<'_>,
@@ -1000,6 +1010,7 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
         close: RootClose<'_>,
+        executor: crate::store::RootExecutor,
     ) -> Result<RootRun, DriveAbort> {
         let store = self.drive_store()?;
         let root = admitted.root().clone();
@@ -1046,6 +1057,7 @@ impl LashRuntime {
                     sinks,
                     live,
                     &fence,
+                    executor,
                 ))
                 .await
             }
@@ -1057,6 +1069,7 @@ impl LashRuntime {
                     sinks,
                     None,
                     &fence,
+                    executor,
                 ))
                 .await
             }

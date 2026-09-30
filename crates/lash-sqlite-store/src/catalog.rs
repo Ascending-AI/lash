@@ -415,29 +415,44 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         &self,
         after: Option<&lash_core_execution::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
             return Ok(Vec::new());
         };
         let session = after.map_or_else(String::new, |key| key.session.to_string());
         let root = after.map_or_else(String::new, |key| key.root.to_string());
-        conn.call(move |conn| {
-            let mut stmt = conn.prepare_cached(
-                crate::session_roots::session_roots_sql()
-                    .roots
-                    .select_open_page
-                    .sql(),
-            )?;
-            let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
-                Ok(lash_core_execution::engine::RootRef {
-                    session: SessionId::from(row.get::<_, String>(0)?),
-                    root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+        let rows = conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    crate::session_roots::session_roots_sql()
+                        .roots
+                        .select_open_page
+                        .sql(),
+                )?;
+                let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
+                    Ok((
+                        lash_core_execution::engine::RootRef {
+                            session: SessionId::from(row.get::<_, String>(0)?),
+                            root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+                        },
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        rows.into_iter()
+            .map(|(target, admission)| {
+                Ok(lash_core_execution::engine::OpenRoot {
+                    target,
+                    executor: admission
+                        .as_deref()
+                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
+                        .transpose()?,
                 })
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()
-        })
-        .await
-        .map_err(sqlite_error)
+            })
+            .collect()
     }
     async fn end_lost_root(
         &self,

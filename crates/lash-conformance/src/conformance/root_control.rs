@@ -298,6 +298,7 @@ impl Fixture {
                 turn_index: state.turn_index as u64 + 1,
                 generation: None,
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("root-control"),
+                executor: lash_core::store::RootExecutor::Root,
             })
             .await
             .expect("admit the root")
@@ -782,6 +783,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         turn_index: state.turn_index as u64 + 1,
         generation: None,
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
+        executor: lash_core::store::RootExecutor::Root,
     };
     parts
         .store

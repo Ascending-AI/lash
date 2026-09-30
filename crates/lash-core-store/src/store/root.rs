@@ -630,6 +630,49 @@ pub struct RootAdmission {
     /// The executable generation the root runs under (FIG-3571): a redrive
     /// under another one is refused before any effect.
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+    /// The execution that runs the root (FIG-4403): recovery judges the
+    /// root by it, never by the root's name.
+    pub executor: RootExecutor,
+}
+
+/// The execution that runs an admitted root, recorded with its admission
+/// (FIG-4403).
+///
+/// An engine's lost-root recovery reads it to learn whose absence would
+/// prove the root lost. The first admission records it, and every later
+/// admission of the root reads it back unchanged with the rest of the
+/// record, so recovery decides from an immutable admitted fact (ADR 0105
+/// §1).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "run", rename_all = "snake_case")]
+pub enum RootExecutor {
+    /// The engine's own run of the root, keyed by the root's session and id
+    /// (Restate's `LashTurn/{session}:{root}`).
+    Root,
+    /// The drive of the execution `scope`, which runs the root inline and
+    /// holds no engine run of it: a process's run
+    /// ([`ExecutionScope::Process`](crate::ExecutionScope::Process)) drives
+    /// its child session's turn and every root admitted ahead of it that
+    /// way, and so does an in-process session drive or queue drain under
+    /// its own scope.
+    Inline { scope: crate::ExecutionScope },
+}
+
+impl RootExecutor {
+    /// The executor a stored admission (`session_roots.admission_json`)
+    /// records, read without decoding the rows it admitted.
+    pub fn from_stored_admission(admission_json: &str) -> Result<Self, StoreError> {
+        #[derive(Deserialize)]
+        struct Recorded {
+            executor: RootExecutor,
+        }
+        serde_json::from_str::<Recorded>(admission_json)
+            .map(|recorded| recorded.executor)
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "RootAdmission",
+                message: format!("root admission executor: {error}"),
+            })
+    }
 }
 
 impl RootAdmission {
@@ -716,7 +759,7 @@ pub enum RootAdmissionRefusal {
 /// resident head the root is admitted on; the store replaces its
 /// `generation` with the durable state generation it reads inside the
 /// admission transaction. `turn_index` and `generation` are recorded as
-/// given.
+/// given, and so is `executor`.
 #[derive(Clone, Debug)]
 pub struct AdmitRootRequest {
     /// The fence of the drive admission the root runs under: the one
@@ -730,6 +773,8 @@ pub struct AdmitRootRequest {
     pub turn_index: u64,
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
     pub admitted_generation: crate::build_generation::BuildGeneration,
+    /// The execution that runs the root, recorded as given.
+    pub executor: RootExecutor,
 }
 
 impl AdmitRootRequest {

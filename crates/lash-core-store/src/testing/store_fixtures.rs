@@ -243,8 +243,8 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
 impl<T: crate::RuntimeStore + ?Sized> RuntimeStoreTestDriveExt for T {}
 
 /// The admission request conformance laws present for `root` headed by
-/// `head` under `fence`: generous bounds, an empty base, and a test build
-/// generation.
+/// `head` under `fence`: generous bounds, an empty base, a test build
+/// generation, and the root run as its own engine run.
 pub fn admit_root_request_for_test(
     fence: &crate::store::DriveFence,
     root: &crate::TurnId,
@@ -265,6 +265,7 @@ pub fn admit_root_request_for_test(
         turn_index: 1,
         generation: None,
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
+        executor: crate::store::RootExecutor::Root,
     }
 }
 

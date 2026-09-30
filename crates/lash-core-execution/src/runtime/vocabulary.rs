@@ -478,14 +478,15 @@ pub trait DeploymentStore:
         through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError>;
 
-    /// Open logical roots in `(session, root)` order, after `after`. Recovery
-    /// checks their engine runs in bounded pages; it never guesses liveness
-    /// from a missing terminal row alone.
+    /// Open logical roots in `(session, root)` order, after `after`, each
+    /// with the executor its recorded admission names (FIG-4403). Recovery
+    /// checks the execution that runs each in bounded pages; it never guesses
+    /// liveness from a missing terminal row alone.
     async fn non_terminal_roots_page(
         &self,
         after: Option<&crate::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::engine::RootRef>, crate::StoreError>;
+    ) -> Result<Vec<crate::engine::OpenRoot>, crate::StoreError>;
 
     /// End an open root `SubstrateLost` on the engine's evidence `loss` that
     /// its execution is gone ([`RootRunLoss`](crate::engine::RootRunLoss)).

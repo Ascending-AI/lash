@@ -279,22 +279,30 @@ Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148`,
 `crates/lash-core-execution/src/runtime/vocabulary.rs:493`.
 
 The same pass reads a root whose key Restate holds no run of on any
-generation lane: retention purged the run, or its journal store was lost. An
-admission delivers its input's ingress obligation in the same write, so no
-relay owns that input. The store decides from the root's own record. A root
-that recorded its admission has started, its effects may have run, and a
-fresh execution would run them again under an empty journal, so it ends
-`SubstrateLost` in the same transaction as a failed run's root. A root whose
-record holds no admission has started nothing: its ingress obligation still
-owes its input and drives it, so the pass leaves it. An admin read that fails
-proves nothing about any run and ends nothing.
+generation lane. An admission delivers its input's ingress obligation in the
+same write, so no relay owns that input. The pass judges the root by the
+execution its recorded admission names (`RootExecutor`), which the store
+lists beside each open root. It never infers the executor from the root's
+name. The first admission records the executor, and every later admission of
+the root reads the record back unchanged.
 
-A root a live process runs is not a root run. A `SessionTurn` process drives
-its child turn's root, named by the process id, inline in its own process run,
-so no lane ever holds a run of that root's key. While the process's record is
-not terminal, the pass leaves the root and its admitted input; the lost-process
-pass owns the process's run. A terminal process runs nothing more, so its
-root is judged like any other. A failed registry read ends nothing.
+- **Its own run.** Retention purged the run, or its journal store was lost.
+  The root has started, its effects may have run, and a fresh execution
+  would run them again under an empty journal. It ends `SubstrateLost` in
+  the same transaction as a failed run's root.
+- **A process's run.** A `SessionTurn` process's drive runs inline, in the
+  process's own run, every root it admits: its child turn's root, and any
+  root admitted ahead of that turn in a reused session. No lane ever holds a
+  run of those keys. While the process's record is not terminal, the pass
+  leaves the root and its admitted input, and the lost-process pass owns the
+  process's run. A terminal process runs nothing more, so the root ends
+  `SubstrateLost`. A failed registry read ends nothing.
+- **Another execution's drive.** An in-process drive holds no engine run
+  the pass can read, so absence proves nothing and the pass leaves the root.
+- **No recorded admission.** The root has started nothing. Its ingress
+  obligation still owes its input and drives it, so the pass leaves it.
+
+An admin read that fails proves nothing about any run and ends nothing.
 
 ## 4. Two-phase session delete
 

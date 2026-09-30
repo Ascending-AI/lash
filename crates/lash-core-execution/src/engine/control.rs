@@ -91,6 +91,17 @@ pub struct RootRef {
     pub root: TurnId,
 }
 
+/// An open logical root as the store's recovery page lists it
+/// ([`DeploymentStore::non_terminal_roots_page`](crate::DeploymentStore::non_terminal_roots_page)),
+/// with the execution its recorded admission names (FIG-4403).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRoot {
+    pub target: RootRef,
+    /// The executor the root's admission recorded; `None` while the root
+    /// has recorded no admission.
+    pub executor: Option<crate::store::RootExecutor>,
+}
+
 /// The engine's evidence that an open root's execution is lost, which
 /// [`DeploymentStore::end_lost_root`](crate::DeploymentStore::end_lost_root)
 /// ends the root on (ADR 0104 O2, O6).
@@ -101,8 +112,10 @@ pub enum RootRunLoss {
     /// engine never runs that key again, so the root ends whether or not it
     /// had recorded its admission.
     FailedRun,
-    /// The engine holds no run of the root's key on any generation lane: the
-    /// run was purged or its history lost. A root that recorded its admission
+    /// No execution holds the root: the engine holds no run of the root's
+    /// key on any generation lane (the run was purged or its history lost),
+    /// and the execution its admission recorded runs nothing more
+    /// ([`RootExecutor`](crate::store::RootExecutor)). A root that recorded its admission
     /// started, and its effects may have run, so it ends: a fresh execution
     /// must never run it again (ADR 0105 L-S8). A root that never recorded
     /// its admission started nothing; its input is still owed by its ingress

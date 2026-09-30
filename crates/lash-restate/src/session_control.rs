@@ -15,10 +15,11 @@
 use std::sync::Arc;
 
 use lash_core::engine::{
-    EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, ParkReconcileReport,
-    ParkRecoveryWriter, ParkTarget, RootRef, RootRunLoss, SessionControlEngine, StalledExecution,
+    EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, OpenRoot,
+    ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, RootRunLoss,
+    SessionControlEngine, StalledExecution,
 };
-use lash_core::store::EnginePark;
+use lash_core::store::{EnginePark, RootExecutor};
 
 use crate::session_driver::{parse_turn_workflow_key, turn_workflow_key};
 use crate::{RestateAdminClient, RestateIngressClient, RestateInvocationId};
@@ -64,14 +65,23 @@ pub(crate) struct RecoveryScan<'a, C> {
 ///   recorded `Released` (FIG-4018), so the refused run is the one writer of
 ///   that root's terminal. A root whose failed runs recorded nothing ends
 ///   ([`RootRunLoss::FailedRun`]).
-/// - No lane holds a run of the key: its run was purged or its history lost
-///   after the root was admitted (FIG-4281). The store ends a root that
-///   recorded its admission, and so started: a fresh execution would run
-///   its effects again under an empty journal. A root that never recorded
-///   its admission started nothing; its ingress obligation still owns its
-///   input and drives it, so the store leaves it ([`RootRunLoss::NoRun`]).
-///   A root a live process runs is not a root run at all, so no lane ever
-///   holds one of its key, and the pass leaves it ([`run_by_live_process`]).
+/// - No lane holds a run of the key: the pass judges the root by the
+///   execution its recorded admission names ([`RootExecutor`], FIG-4403),
+///   never by the root's name.
+///   - Its own run ([`RootExecutor::Root`]): the run was purged or its
+///     history lost after the root was admitted (FIG-4281). The root
+///     started, and a fresh execution would run its effects again under an
+///     empty journal, so the store ends it ([`RootRunLoss::NoRun`]).
+///   - A process's run ([`RootExecutor::Inline`] under a process scope):
+///     the process drives the root inline and no lane ever holds a run of
+///     its key. While the process is live the pass leaves the root, and the
+///     lost-process pass owns the process's run. A terminal process runs
+///     nothing more, so the root ends ([`RootRunLoss::NoRun`]).
+///   - Another execution's drive: an in-process drive the engine holds no
+///     run of. Its absence from every lane proves nothing, so the pass
+///     leaves the root.
+///   - No recorded admission: the root started nothing; its ingress
+///     obligation still owns its input and drives it, so the pass leaves it.
 ///
 /// An admin read that fails proves nothing about any run: the pass stops
 /// before it ends anything on that page. Every row spends the inspected-record
@@ -107,7 +117,7 @@ pub(crate) async fn end_lost_root_runs(
         }
     };
     *after = if page.len() == limit.get() {
-        page.last().cloned()
+        page.last().map(|open| open.target.clone())
     } else {
         None
     };
@@ -116,7 +126,7 @@ pub(crate) async fn end_lost_root_runs(
     }
     let keys: Vec<String> = page
         .iter()
-        .map(|target| turn_workflow_key(&target.session, &target.root))
+        .map(|open| turn_workflow_key(&open.target.session, &open.target.root))
         .collect();
     let runs = match recovery_request(deadline, admin.root_runs(namespace, &keys)).await {
         Ok(runs) => runs,
@@ -131,20 +141,29 @@ pub(crate) async fn end_lost_root_runs(
             return Ok(pass);
         }
     };
-    for (target, key) in page.iter().zip(&keys) {
+    for (OpenRoot { target, executor }, key) in page.iter().zip(&keys) {
         let key_runs: Vec<&crate::RestateInvocationStatus> = runs
             .iter()
             .filter(|run| run.target_service_key.as_deref() == Some(key.as_str()))
             .collect();
         let loss = if key_runs.is_empty() {
-            match recovery_request(deadline, run_by_live_process(processes, target)).await {
-                Ok(false) => RootRunLoss::NoRun,
-                Ok(true) => {
+            let lost = match executor {
+                Some(RootExecutor::Root) => Ok(true),
+                Some(RootExecutor::Inline {
+                    scope: lash_core::ExecutionScope::Process { process_id },
+                }) => recovery_request(deadline, process_ended(processes, process_id))
+                    .await
+                    .map_err(|error| error.to_string()),
+                Some(RootExecutor::Inline { .. }) | None => Ok(false),
+            };
+            match lost {
+                Ok(true) => RootRunLoss::NoRun,
+                Ok(false) => {
                     pass.unchanged += 1;
                     continue;
                 }
                 Err(error) => {
-                    pass.failed.push((key.clone(), error.to_string()));
+                    pass.failed.push((key.clone(), error));
                     continue;
                 }
             }
@@ -226,32 +245,22 @@ pub(crate) enum RecoveryRequestError<E: std::fmt::Display> {
     BudgetExhausted,
 }
 
-/// Whether a live process runs `target` in its own execution (FIG-4378).
+/// Whether process `process_id`, whose run a root's admission recorded as
+/// its executor, runs nothing more (FIG-4403): its record is terminal, or
+/// the registry holds none.
 ///
-/// A `SessionTurn` process drives its child turn's root inline, in its own
-/// `LashProcessWorkflow` run: the root is admitted, sealed and committed
-/// there, and never runs as a `LashTurn` run. No lane of the root's key ever
-/// holds a run of it, so that absence proves nothing while the process is
-/// live, and the lost-process pass owns the process's run. A terminal
-/// process runs nothing more, so its root is judged like any other.
-///
-/// The child root is named by its process's id, and the process's recorded
-/// input names the session it runs as its own
-/// ([`ProcessRecord::session_turn_root`](lash_core::ProcessRecord::session_turn_root)).
-/// A root whose id is not a process id is no process's child root.
-async fn run_by_live_process(
+/// A process drives the roots its drive admits inline, in its own
+/// `LashProcessWorkflow` run: its child turn's root and every root admitted
+/// ahead of it in the session. While the process is live the lost-process
+/// pass owns that run, so a root it runs is never judged lost here.
+async fn process_ended(
     processes: &Arc<dyn lash_core::ProcessRegistry>,
-    target: &RootRef,
+    process_id: &lash_core::ProcessId,
 ) -> Result<bool, lash_core::PluginError> {
-    let Ok(process_id) = lash_core::ProcessId::parse(target.root.as_str()) else {
-        return Ok(false);
-    };
     Ok(processes
-        .get_process(&process_id)
+        .get_process(process_id)
         .await?
-        .is_some_and(|record| {
-            !record.is_terminal() && record.session_turn_root().as_ref() == Some(target)
-        }))
+        .is_none_or(|record| record.is_terminal()))
 }
 
 /// Whether any of `key`'s failed runs recorded the root's outcome, read on

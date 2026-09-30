@@ -2058,13 +2058,25 @@ async fn read_recovery_pass(
     passes
 }
 
-/// A `SessionTurn` process's child root is named by the process and runs in
-/// the process's own run, so the engine never holds a `LashTurn` run of its
-/// key on any lane (FIG-4378). While the process is live, the recovery pass
-/// leaves the started root and its admitted input to it. Once the process
-/// is terminal nothing runs the root, and the pass ends it `SubstrateLost`
-/// with its input.
-async fn process_child_root(server: HarnessServer) {
+/// Which root of a `SessionTurn` process's session a process-root law admits.
+#[derive(Clone, Copy, Debug)]
+enum ProcessRoot {
+    /// The process's own child root, named by the process (FIG-4378).
+    Child,
+    /// A root the process's drive admits ahead of its own row, named by its
+    /// input's source key (FIG-4403).
+    AdmittedAhead,
+}
+
+/// A root a `SessionTurn` process drives runs inline in the process's own
+/// run, so the engine never holds a `LashTurn` run of its key on any lane:
+/// the process's child root (FIG-4378), and every root its drive admits
+/// ahead of it in a reused session (FIG-4403), which its name does not tie
+/// to the process. The root's admission records the process's run as its
+/// executor. While the process is live, the recovery pass leaves the started
+/// root and its admitted input to it. Once the process is terminal nothing
+/// runs the root, and the pass ends it `SubstrateLost` with its input.
+async fn process_root(server: HarnessServer, which: ProcessRoot) {
     let harness = LiveConformanceHarness::start_on(server).await;
     let stores = harness.law_stores();
     let registry = stores.process_registry();
@@ -2091,19 +2103,15 @@ async fn process_child_root(server: HarnessServer) {
         .await
         .expect("register the SessionTurn process")
         .id;
-    let target = registry
-        .get_process(&process_id)
-        .await
-        .expect("read the process")
-        .expect("the process is registered")
-        .session_turn_root()
-        .expect("a SessionTurn process runs a child root");
-    assert_eq!(target.session, session, "the child root is in its session");
-    assert_eq!(
-        target.root.as_str(),
-        process_id.as_str(),
-        "the child root is named by its process"
-    );
+    let target = RootRef {
+        session: session.clone(),
+        root: match which {
+            ProcessRoot::Child => lash_core::runtime::process_session_turn_id(&process_id),
+            ProcessRoot::AdmittedAhead => {
+                lash_core::TurnId::from(format!("ahead-{}", harness.run_nonce()))
+            }
+        },
+    };
     let store = lash_core::runtime::admit_session_view(
         &factory,
         &lash_core::SessionStoreCreateRequest {
@@ -2135,15 +2143,20 @@ async fn process_child_root(server: HarnessServer) {
         "process-child-root",
     )
     .await;
-    lash_core::testing::store_fixtures::admit_root_for_test(
-        store.store(),
+    let mut admission = lash_core::testing::store_fixtures::admit_root_request_for_test(
         &fence,
         &target.root,
         AdmittedHead::Input(input.clone()),
-    )
-    .await
-    .expect("admit the child root")
-    .expect("the child root's admission reaches its head");
+    );
+    admission.executor = lash_core::store::RootExecutor::Inline {
+        scope: lash_core::ExecutionScope::process(process_id.clone()),
+    };
+    store
+        .store()
+        .admit_root(&admission)
+        .await
+        .expect("admit the process's root")
+        .expect("the root's admission reaches its head");
     let key = crate::session_driver::turn_workflow_key(&session, &target.root);
     assert!(
         harness
@@ -2155,7 +2168,7 @@ async fn process_child_root(server: HarnessServer) {
             .await
             .expect("root runs")
             .is_empty(),
-        "the engine holds no LashTurn run of the child root on any lane"
+        "the engine holds no LashTurn run of the process's root on any lane"
     );
 
     let work = harness.session_work();
@@ -2229,10 +2242,20 @@ async fn process_child_root(server: HarnessServer) {
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_live_process_keeps_its_child_root_and_a_terminal_one_releases_it() {
-    process_child_root(HarnessServer::in_process()).await;
+    process_root(HarnessServer::in_process(), ProcessRoot::Child).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires the pinned live Restate server"]
 async fn live_a_live_process_keeps_its_child_root_and_a_terminal_one_releases_it() {
-    process_child_root(HarnessServer::Live).await;
+    process_root(HarnessServer::Live, ProcessRoot::Child).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_process_keeps_a_root_admitted_ahead_of_its_own_and_a_terminal_one_releases_it() {
+    process_root(HarnessServer::in_process(), ProcessRoot::AdmittedAhead).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires the pinned live Restate server"]
+async fn live_a_live_process_keeps_a_root_admitted_ahead_of_its_own_and_a_terminal_one_releases_it()
+{
+    process_root(HarnessServer::Live, ProcessRoot::AdmittedAhead).await;
 }

@@ -1,18 +1,25 @@
-//! A `SessionTurn` process's child root is judged by its process (FIG-4378).
+//! A root a `SessionTurn` process runs is judged by its process (FIG-4378,
+//! FIG-4403).
 //!
 //! A `SessionTurn` process runs its child turn inline, in its own
-//! `LashProcessWorkflow` run: the child root is admitted, sealed and committed
-//! there and never runs as a `LashTurn` run. The lost-root recovery pass
-//! reads the `LashTurn` lanes of every open root's key, so it finds no run of
-//! a process's child root on any lane while the process is running it. That
-//! absence proves nothing: the process's run holds the root, and the
-//! lost-process pass owns that run.
+//! `LashProcessWorkflow` run: the drive there admits, seals and commits the
+//! child root, and every root admitted ahead of it in a reused session, and
+//! none of them runs as a `LashTurn` run. The lost-root recovery pass reads
+//! the `LashTurn` lanes of every open root's key, so it finds no run of such
+//! a root on any lane while the process is running it. That absence proves
+//! nothing: the root's admission records the process's run as its executor,
+//! and the lost-process pass owns that run.
 //!
-//! The law holds the child's model call, which leaves the child root open
-//! with its start input admitted, and runs the recovery pass. The pass keeps
-//! the root and its admitted input. Released, the child commits its turn:
-//! the root answers, the input settles with it, and the process completes.
-//! The law runs on SQLite memory, SQLite file and PostgreSQL, over the
+//! Each law holds a model call the process's drive makes, which leaves the
+//! root open with its input admitted, and runs the recovery pass. The pass
+//! keeps the root and its admitted input. Released, the root commits its
+//! turn: it answers, its input settles with it, and the process completes.
+//! - The child law holds the process's own child root.
+//! - The ahead law reuses an explicit session with a row queued before the
+//!   process's own, and holds the root the process's drive admits for it,
+//!   which its name does not tie to the process.
+//!
+//! The laws run on SQLite memory, SQLite file and PostgreSQL, over the
 //! server double (plain, and every attempt replayed when
 //! `LASH_RESTATE_TEST_ALWAYS_REPLAY=1`) and a live `restate-server` (the
 //! `crash-windows` Restate suite).
@@ -234,13 +241,19 @@ fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCore {
 }
 
 /// Start one detached `SessionTurn` child in a host handler and answer its
-/// process id.
-async fn start_child(harness: &Harness, core: &lash::LashCore) -> ProcessId {
+/// process id. The child runs in `session`, or in a session derived from
+/// its process id when none is named.
+async fn start_child(
+    harness: &Harness,
+    core: &lash::LashCore,
+    session: Option<&lash_core::SessionId>,
+    start_key: &str,
+) -> ProcessId {
     let mut create_request = lash_core::SessionCreateRequest::root(
         lash_core::SessionStartPoint::Empty,
         Default::default(),
     );
-    create_request.session_id = None;
+    create_request.session_id = session.cloned();
     let request = lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::SessionTurn {
             definition_key: "process-root-recovery-session-turn".into(),
@@ -251,7 +264,7 @@ async fn start_child(harness: &Harness, core: &lash::LashCore) -> ProcessId {
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_host_start_key(run_tag("process-root-start"));
+    .with_host_start_key(run_tag(start_key));
     let started = Arc::new(Mutex::new(None));
     let attempt: HandlerAttempt = {
         let core = core.clone();
@@ -293,11 +306,47 @@ async fn child_inputs(
         .expect("read the child session's inputs")
 }
 
+/// The recovery pass, run until one pass reads the engine without a
+/// failure: a loaded server's admin query can time out, and the pass then
+/// ends nothing and is retried, as the recovery interval does.
+async fn recovery_passes(
+    harness: &Harness,
+) -> Vec<Result<lash_core::engine::ParkReconcileReport, lash_core::engine::EngineRefusal>> {
+    let sessions = harness.backend().session_store_factory();
+    let clock = harness.backend().clock();
+    let writer = lash_core::drive::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
+    let control = harness.session_work().control();
+    let mut passes = Vec::new();
+    for _ in 0..20 {
+        let pass = control
+            .reconcile_parks(
+                &writer,
+                EnginePage {
+                    after: None,
+                    limit: std::num::NonZeroUsize::new(16).unwrap(),
+                    budget: Duration::from_secs(5),
+                },
+            )
+            .await;
+        let read = pass.as_ref().is_ok_and(|report| report.failed.is_empty());
+        passes.push(pass);
+        if read {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        matches!(passes.last(), Some(Ok(report)) if report.failed.is_empty()),
+        "a recovery pass read the engine: {passes:?}"
+    );
+    passes
+}
+
 async fn process_root_law(storage: Storage, live: bool) {
     let (harness, _stores) = Harness::new(storage, live).await;
     let call = Arc::new(HeldModelCall::new());
     let core = core(&harness, Arc::clone(&call));
-    let process_id = start_child(&harness, &core).await;
+    let process_id = start_child(&harness, &core, None, "process-root-start").await;
     tokio::time::timeout(BOUND, call.started.notified())
         .await
         .expect("the child's turn reaches its model call");
@@ -326,35 +375,7 @@ async fn process_root_law(storage: Storage, live: bool) {
         "the child root holds its start input: {admitted:?}"
     );
 
-    // The recovery pass, run until one pass reads the engine without a
-    // failure: a loaded server's admin query can time out, and the pass
-    // then ends nothing and is retried, as the recovery interval does.
-    let clock = harness.backend().clock();
-    let writer = lash_core::drive::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
-    let control = harness.session_work().control();
-    let mut passes = Vec::new();
-    for _ in 0..20 {
-        let pass = control
-            .reconcile_parks(
-                &writer,
-                EnginePage {
-                    after: None,
-                    limit: std::num::NonZeroUsize::new(16).unwrap(),
-                    budget: Duration::from_secs(5),
-                },
-            )
-            .await;
-        let read = pass.as_ref().is_ok_and(|report| report.failed.is_empty());
-        passes.push(pass);
-        if read {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(
-        matches!(passes.last(), Some(Ok(report)) if report.failed.is_empty()),
-        "a recovery pass read the engine: {passes:?}"
-    );
+    let passes = recovery_passes(&harness).await;
     assert!(
         passes.iter().all(|pass| pass
             .as_ref()
@@ -412,6 +433,122 @@ async fn process_root_law(storage: Storage, live: bool) {
     harness.finish().await;
 }
 
+/// The ahead law: a process that runs its turn in an explicit session the
+/// host created drives, inline in its own run, the root of a row queued
+/// there before its own; the recovery pass leaves that root to the process
+/// while it runs it.
+async fn ahead_root_law(storage: Storage, live: bool) {
+    let (harness, _stores) = Harness::new(storage, live).await;
+    let call = Arc::new(HeldModelCall::new());
+    let core = core(&harness, Arc::clone(&call));
+    let session = lash_core::SessionId::from(run_tag("process-root-ahead"));
+    let sessions = harness.backend().session_store_factory();
+
+    // The host creates the explicit session; no turn runs in it yet, so no
+    // execution has bound its turn cancellation.
+    core.session(session.clone())
+        .create(lash::SessionCreation::default())
+        .await
+        .expect("create the explicit session");
+
+    // A row queued in the session through the store alone: no drive is
+    // asked for it, so the process's drive admits it ahead of its own.
+    let target = RootRef {
+        session: session.clone(),
+        root: lash_core::TurnId::from(run_tag("ahead-turn")),
+    };
+    let ahead = sessions
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core::TurnInputIngress::next_turn(),
+                lash::TurnInput::text("queued ahead of the process"),
+            )
+            .with_source_key(target.root.as_str()),
+        )
+        .await
+        .expect("queue the row ahead")
+        .input_id;
+    let process_id = start_child(&harness, &core, Some(&session), "process-root-ahead").await;
+    tokio::time::timeout(BOUND, call.started.notified())
+        .await
+        .expect("the root admitted ahead reaches its model call");
+    assert!(
+        sessions
+            .root_terminal(&target.session, &target.root)
+            .await
+            .expect("read the ahead root's terminal")
+            .is_none(),
+        "the root admitted ahead is open while its model call is held"
+    );
+    let admitted_ahead = |rows: &[lash_core::PendingTurnInputRead]| {
+        rows.iter().any(|row| {
+            row.input.input_id == ahead
+                && row.status
+                    == lash_core::PendingTurnInputReadStatus::Admitted {
+                        root: target.root.clone(),
+                    }
+        })
+    };
+    let admitted = child_inputs(&harness, &session).await;
+    assert!(
+        admitted_ahead(&admitted),
+        "the process's drive admitted the queued row to its own root: {admitted:?}"
+    );
+
+    let passes = recovery_passes(&harness).await;
+    assert!(
+        passes.iter().all(|pass| pass
+            .as_ref()
+            .is_ok_and(|report| !report.ended_roots.contains(&target))),
+        "no recovery pass ends a root its live process admitted ahead of its own: {passes:?}"
+    );
+    assert_eq!(
+        sessions
+            .root_terminal(&target.session, &target.root)
+            .await
+            .expect("read the ahead root's terminal"),
+        None,
+        "the root admitted ahead stays open for its process"
+    );
+    let kept = child_inputs(&harness, &session).await;
+    assert!(
+        admitted_ahead(&kept),
+        "the root admitted ahead still holds its input: {kept:?}"
+    );
+
+    call.release.add_permits(2);
+    let output = tokio::time::timeout(BOUND, core.processes().await_output(&process_id))
+        .await
+        .expect("the child process reaches its terminal")
+        .expect("read the child's terminal");
+    assert!(
+        matches!(
+            &output,
+            lash_core::ProcessAwaitOutput::Settled { output }
+                if matches!(output.outcome, lash_core::ToolCallOutcome::Success(_))
+        ),
+        "the child process completes: {output:?}"
+    );
+    let terminal = sessions
+        .root_terminal(&target.session, &target.root)
+        .await
+        .expect("read the ahead root's terminal")
+        .expect("the root admitted ahead has its terminal");
+    assert_eq!(
+        terminal.kind,
+        lash_core::store::RootTerminalKind::Answered,
+        "the root admitted ahead answers with its committed turn: {terminal:?}"
+    );
+    let settled = child_inputs(&harness, &session).await;
+    assert!(
+        settled.is_empty(),
+        "every row settles with the root that drove it: {settled:?}"
+    );
+    drop(core);
+    harness.finish().await;
+}
+
 macro_rules! laws {
     ($module:ident, $storage:expr $(, $service:literal)?) => {
         mod $module {
@@ -425,6 +562,17 @@ macro_rules! laws {
             #[ignore = "live Restate; crash-windows suite"]
             async fn live_restate_a_recovery_pass_keeps_the_child_root_its_live_process_runs() {
                 process_root_law($storage, true).await;
+            }
+            $(#[ignore = $service])?
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_recovery_pass_keeps_a_root_its_live_process_admitted_ahead_of_its_own() {
+                ahead_root_law($storage, false).await;
+            }
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            #[ignore = "live Restate; crash-windows suite"]
+            async fn live_restate_a_recovery_pass_keeps_a_root_its_live_process_admitted_ahead_of_its_own()
+            {
+                ahead_root_law($storage, true).await;
             }
         }
     };

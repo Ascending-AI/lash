@@ -1468,19 +1468,7 @@ fn recorded_lineage(
     ancestry: &Ancestry,
     session_capability: Option<&SessionId>,
 ) -> ProcessLineage {
-    ProcessLineage::of_process(
-        process_id,
-        ancestry,
-        session_capability,
-        own_session(process_id, input).as_ref(),
-    )
-}
-
-/// The session a process runs as its own: a `SessionTurn` process's child
-/// session, named by its create request or derived from its id. No other
-/// input runs a session of its own.
-fn own_session(process_id: &ProcessId, input: &ProcessInput) -> Option<SessionId> {
-    match input {
+    let own_session = match input {
         ProcessInput::SessionTurn { create_request, .. } => Some(
             create_request
                 .session_id
@@ -1490,7 +1478,13 @@ fn own_session(process_id: &ProcessId, input: &ProcessInput) -> Option<SessionId
         ProcessInput::Engine { .. }
         | ProcessInput::External { .. }
         | ProcessInput::Definition { .. } => None,
-    }
+    };
+    ProcessLineage::of_process(
+        process_id,
+        ancestry,
+        session_capability,
+        own_session.as_ref(),
+    )
 }
 
 impl ProcessRecord {
@@ -1503,17 +1497,6 @@ impl ProcessRecord {
             &self.ancestry,
             self.session_capability.as_ref(),
         )
-    }
-
-    /// The root this process runs inline in its own execution, from its
-    /// recorded input: a `SessionTurn` process's child turn
-    /// ([`process_session_turn_id`]) in the session it runs as its own. No
-    /// other input drives a session root, so it has none.
-    pub fn session_turn_root(&self) -> Option<crate::engine::RootRef> {
-        own_session(&self.id, &self.input).map(|session| crate::engine::RootRef {
-            session,
-            root: process_session_turn_id(&self.id),
-        })
     }
 
     /// Builds the record of a process the registrar just minted `id` for.

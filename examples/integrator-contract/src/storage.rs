@@ -630,7 +630,7 @@ impl DeploymentStore for Integrator {
         &self,
         after: Option<&RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<RootRef>, StoreError> {
+    ) -> Result<Vec<OpenRoot>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn end_lost_root(

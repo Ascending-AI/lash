@@ -118,6 +118,7 @@ impl AdmittedRoot {
                 turn_index: 1,
                 generation: None,
                 admitted_generation: stamp.clone(),
+                executor: crate::store::RootExecutor::Root,
             })
             .await
             .expect("admit the root")

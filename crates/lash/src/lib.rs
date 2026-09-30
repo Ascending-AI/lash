@@ -402,11 +402,12 @@ pub mod persistence {
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
-    /// Logical root references returned by a root store.
-    pub use lash_core::engine::RootRef;
     /// The engine's evidence that a root's execution is lost, which
     /// `DeploymentStore::end_lost_root` ends the root on.
     pub use lash_core::engine::RootRunLoss;
+    /// Logical root references returned by a root store, and an open root
+    /// as the store's recovery page lists it.
+    pub use lash_core::engine::{OpenRoot, RootRef};
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
@@ -472,13 +473,14 @@ pub mod persistence {
     pub use lash_core::store::{
         AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, RootStartNonce, StoredDriveEpoch,
     };
-    /// A root's recorded admission of the turn-lane run it drives, what its
-    /// checkpoints admit, how a commit settles the rows its root holds, and
-    /// the session's one unfinished root (FIG-3927).
+    /// A root's recorded admission of the turn-lane run it drives and the
+    /// execution that runs it, what its checkpoints admit, how a commit
+    /// settles the rows its root holds, and the session's one unfinished
+    /// root (FIG-3927, FIG-4403).
     pub use lash_core::store::{
         AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
         IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, RootAdmission, RootAdmissionAnswer,
-        RootAdmissionRefusal, UnfinishedRoot,
+        RootAdmissionRefusal, RootExecutor, UnfinishedRoot,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).
