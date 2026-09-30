@@ -179,9 +179,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let seed_before_alloc = allocator_stats();
     let seed_started = Instant::now();
     let mut fixtures = Vec::with_capacity(points.len());
-    // The fixtures' cells keep their Lashlang artifacts in one memory store
-    // set; the state they capture is what the curve measures.
-    let artifacts = lash_sqlite_store::SqliteStoreSet::memory().await?;
+    // The fixtures' cells run on the production effect controller over one
+    // memory store set; their captured state is what the curve measures.
+    let artifacts = restate_backend().await?;
     for point in points {
         let session_id = SessionId::from(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
@@ -193,8 +193,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .admit_session(&runtime_perf_session_create_request(&session_id))
             .await?;
         let store: Arc<dyn lash_core::RuntimeStore> = store_factory.clone();
-        let artifacts_backend =
-            lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
+        let artifacts_backend = artifacts.lash_backend();
         let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &artifacts_backend,
@@ -255,7 +254,14 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
                 "checkpoint_curve.capture",
                 async {
-                    fixture.fixture.assign_one(sample, sample).await?;
+                    assign_checkpoint_binding(
+                        &mut fixture.fixture,
+                        &artifacts,
+                        &fixture.runtime_state.session_id,
+                        sample,
+                        sample,
+                    )
+                    .await?;
                     fixture.fixture.capture().map_err(anyhow::Error::from)
                 },
             ))

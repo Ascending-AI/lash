@@ -658,6 +658,42 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::CheckpointStateHotPaths,
+        2,
+        4,
+        &checkpoint_curve_config(),
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("checkpoint state hot paths should run");
+
+    assert_eq!(result.turns.len(), 2);
+    assert_eq!(result.extra_counters["execution_state_bindings"], 300);
+    assert_eq!(result.extra_counters["execution_state_components"], 300);
+    assert_eq!(result.extra_counters["incremental_changed_components"], 1);
+    assert!(result.extra_counters["checkpoint_bytes"] > 0);
+    assert!(result.extra_counters["hydrated_execution_state_bytes"] > 0);
+    for turn in &result.turns {
+        for phase in [
+            "incremental_capture",
+            "measure_budget",
+            "component_commit",
+            "component_load",
+            "execution_restore",
+        ] {
+            assert!(
+                turn.phase_profile
+                    .contains_key(&format!("checkpoint_state.{phase}")),
+                "turn {} must measure {phase}",
+                turn.turn_index,
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     let config = checkpoint_curve_config();
     let samples = 2;

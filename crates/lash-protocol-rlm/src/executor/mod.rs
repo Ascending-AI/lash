@@ -391,7 +391,14 @@ impl RlmCheckpointPerfFixture {
         self.state.acknowledge_execution_state_capture();
     }
 
-    pub async fn assign_one(&mut self, index: usize, turn: usize) -> Result<(), SessionError> {
+    /// Run the edit under the backend's scoped controller and this cell's
+    /// invocation, including the production projected-bindings journal.
+    pub async fn assign_one(
+        &mut self,
+        index: usize,
+        turn: usize,
+        ctx: RuntimeExecutionContext<'_>,
+    ) -> Result<(), SessionError> {
         let binding = index % self.binding_count.max(1);
         // A seeded global is an ambient `const` to a TypeScript cell, so the
         // per-turn edit is a re-declaration carrying an equivalent payload
@@ -405,15 +412,7 @@ impl RlmCheckpointPerfFixture {
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             self.dialect.as_ref(),
             &mut self.state,
-            // The fixture measures state capture over pure bindings: no
-            // effect, environment or attachment is reached, so the context
-            // runs over no host and would refuse one.
-            lash_core::testing::TestExecutionContextBuilder::over_controller(Arc::new(
-                lash_core::testing::UnavailableEffectController,
-            )
-                as Arc<dyn lash_core::RuntimeEffectController>)
-            .build()
-            .into_runtime(),
+            ctx,
             ExecRequest { code },
             self.artifact_store.clone(),
             LashlangSurface::default(),
