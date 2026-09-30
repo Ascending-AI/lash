@@ -19,7 +19,11 @@
 //! * a host reaches its session inside its journal: its session deleted while
 //!   it was parked, killed and replayed from the top, it replays exactly the
 //!   journal it recorded and answers (FIG-4277). This law also runs against a
-//!   live `restate-server` (the `host-send-wait` Restate suite).
+//!   live `restate-server` (the `host-send-wait` Restate suite);
+//! * the engine's own root does too: its session deleted after the root
+//!   journaled its admission, the killed root's replay follows its journal
+//!   and ends with the typed retirement (FIG-4346, live leg of
+//!   `lash::tests::deleted_session_root_replay`).
 
 #![expect(
     clippy::expect_used,
@@ -900,6 +904,163 @@ async fn live_restate_host_killed_after_its_session_was_deleted_replays_its_jour
     assert!(answer.answered, "{answer:?}");
     assert_eq!(answer.reply.as_deref(), Some("answered by the engine"));
     assert_eq!(barrier.calls.load(Ordering::SeqCst), 1);
+    backend.finish().await;
+}
+
+/// FIG-4346 against a live `restate-server`: the engine's root run dies
+/// after it journaled its admission (`drive-admit`) and before its head
+/// inspection (`drive-head`), the session's storage delete commits while it
+/// is down, and the server's retry replays the run into the deployment that
+/// comes back. The host still holds the session, so the drive runs on its
+/// resident runtime, whose head refresh before the admission meets the
+/// tombstone. The replay follows the journal (never `RT0016`), its head
+/// inspection records the retirement, and the run ends with the typed
+/// `SessionDeleted` refusal. On the suite's replay leg the run also
+/// suspends and replays at every await.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the host-send-wait Restate suite runs it"]
+async fn live_restate_root_killed_after_its_session_was_deleted_ends_typed() {
+    let env = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment names {name}"))
+    };
+    let key = format!(
+        "deleted-under-its-root-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let backend = LiveRestateBackend::start(LiveConfig {
+        ingress_url: env("RESTATE_INGRESS_URL"),
+        admin_url: env("RESTATE_ADMIN_URL"),
+        endpoint_bind: env("HSW_BIND").parse().expect("endpoint bind"),
+        endpoint_url: env("HSW_URL"),
+        run_tag: key.clone(),
+        namespace: lash_restate::RestateNamespace::default(),
+    })
+    .await
+    .expect("start the live backend");
+    let barrier = Arc::new(Barrier::default());
+    let core = core(backend.lash_backend(), &barrier);
+    let session_id = lash::SessionId::from(key.as_str());
+    let session = created_session(&core, session_id.clone())
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    let root = lash_core::TurnId::from("deleted-replay-root");
+    let turn_key = lash_restate::turn_workflow_key(&session_id, &root);
+    // The run dies with its admission journaled and its head inspection not.
+    backend.crash_on(
+        CrashRule::new(CrashPoint::BeforeRun {
+            name: format!("lash:drive-head:{root}"),
+        })
+        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE))
+        .key(turn_key.clone()),
+    );
+    // The storage delete commits while the dead run is down: the listener
+    // runs as the deployment dies, and the delete is the store's alone.
+    let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let factory = backend.lash_backend().session_store_factory();
+    assert!(backend.on_crash(Arc::new({
+        let deleted = Arc::clone(&deleted);
+        let session_id = session_id.clone();
+        move |_target: &str| {
+            let factory = Arc::clone(&factory);
+            let session_id = session_id.clone();
+            let delete = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime for the delete")
+                    .block_on(async {
+                        // The dead run's writer can still hold the session for
+                        // a moment: a contended delete is retried until a
+                        // bounded deadline.
+                        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                        loop {
+                            match factory.delete_session(&session_id).await {
+                                Ok(_) => return,
+                                Err(error)
+                                    if format!("{error:?}").contains("Contended")
+                                        && std::time::Instant::now() < deadline =>
+                                {
+                                    tokio::time::sleep(Duration::from_millis(25)).await;
+                                }
+                                Err(error) => panic!("the storage delete commits: {error:?}"),
+                            }
+                        }
+                    });
+            })
+            .join();
+            deleted.store(delete.is_ok(), Ordering::SeqCst);
+        }
+    })));
+    let _handle = session
+        .send(lash::TurnInput::text("delete me mid-root"))
+        .id(root.clone())
+        .await
+        .expect("the input is accepted");
+    until("the run dies before its head inspection", || {
+        deleted.load(Ordering::SeqCst)
+    })
+    .await;
+    backend
+        .start_serving()
+        .await
+        .expect("the killed deployment serves again");
+
+    let target = format!(
+        "{}/{turn_key}/run",
+        backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(180), async {
+        loop {
+            if let Some(run) = live_host(&backend, &target).await {
+                if let Some(failure) = &run.last_failure
+                    && diverged(failure)
+                {
+                    panic!("the root's replay diverged from its journal: {failure}");
+                }
+                if let Some(outcome) = backend.outcome(&run.id).await.expect("the run's outcome") {
+                    let journal = backend.journal(&run.id).await.expect("the run's journal");
+                    return (outcome, journal);
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    let Ok((outcome, journal)) = ended else {
+        let run = live_host(&backend, &target).await;
+        let journal = match &run {
+            Some(run) => backend.journal(&run.id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        panic!("the replayed root never ended: {run:?}\njournal {journal:?}");
+    };
+    for step in [
+        "drive-root-start:",
+        "drive-seal:",
+        "drive-admit:",
+        "drive-head:",
+    ] {
+        assert!(
+            journal.iter().any(|entry| entry.contains(step)),
+            "the replay issued the recorded steps and the head inspection after them, \
+             missing `{step}`: {journal:?}"
+        );
+    }
+    assert!(
+        matches!(&outcome, Err(failure) if failure.contains("session_deleted")),
+        "the root's run ends with the typed retirement: {outcome:?}\njournal {journal:?}"
+    );
+    assert_eq!(
+        barrier.calls.load(Ordering::SeqCst),
+        0,
+        "the deleted session's root called no model"
+    );
+    drop(session);
     backend.finish().await;
 }
 

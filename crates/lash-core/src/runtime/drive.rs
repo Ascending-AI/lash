@@ -418,8 +418,10 @@ pub async fn admit_drive_retired(
 /// O1) — and the seal's recorded body answers the session's retirement, which
 /// every redrive of the run decodes. A seal an earlier attempt recorded
 /// answers what it answered then: a superseded or lost admission is the
-/// refused root it was. `controller` serves the root's
-/// [`drive_root_scope`](crate::engine::drive_root_scope).
+/// refused root it was. An input-, queued- or command-headed root it
+/// recorded sealed goes on headless, through the recorded steps an earlier
+/// attempt may have journaled after the seal (FIG-4346). `controller` serves
+/// the root's [`drive_root_scope`](crate::engine::drive_root_scope).
 #[doc(hidden)]
 pub async fn run_admitted_root_retired(
     controller: &ScopedEffectController<'_>,
@@ -427,13 +429,45 @@ pub async fn run_admitted_root_retired(
 ) -> Result<RootOutcome, DriveAbort> {
     let scope = controller.admitted_scope().clone();
     let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
-    retired_root_outcome(&admitted, verdict)
+    if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
+        return retired_root_outcome(&admitted, verdict);
+    }
+    let headless = root::HeadlessRoot::Retired;
+    match admitted.work().clone() {
+        crate::engine::AdmittedWork::Input { head } => {
+            Box::pin(root::run_headless_root(
+                controller,
+                &admitted,
+                &crate::store::AdmittedHead::Input(head),
+                headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::Queued { head } => {
+            Box::pin(root::run_headless_root(
+                controller,
+                &admitted,
+                &crate::store::AdmittedHead::Batch(head),
+                headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::Commands { .. } => {
+            Box::pin(root::run_headless_commands_root(
+                controller, &admitted, headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::FollowOn { .. } => retired_root_outcome(&admitted, verdict),
+    }
 }
 
-/// What a root answers whose session retired before it ran: the refused root
-/// its seal recorded, or, for a seal that recorded the admission sealed, the
-/// retirement. A root sealed before its session's close is one the close
-/// ended and whose execution it released, so no run of it goes on.
+/// What a root answers whose session retired before it ran and that goes on
+/// no headless steps: the refused root its seal recorded, or, for a
+/// follow-on root its seal recorded sealed, the retirement. A follow-on root
+/// records no step between its seal and its turn (FIG-4361).
+/// A root sealed before its session's close is one the close ended and whose
+/// execution it released, so no run of it goes on.
 fn retired_root_outcome(
     admitted: &Admitted,
     verdict: crate::engine::SealVerdict,

@@ -111,7 +111,7 @@ cannot open another frame. A storeless runtime serializes direct compaction
 through its mutable runtime access.
 
 Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
-`crates/lash-core/src/runtime/session_api.rs:1390`,
+`crates/lash-core/src/runtime/session_api.rs:1375`,
 `crates/lash-core/src/runtime/compact_context.rs:1`, and
 `crates/lash-core-store/src/store/mod.rs:1590`.
 

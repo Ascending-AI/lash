@@ -66,6 +66,28 @@ Replay honors the recorded verdict at every journal position. A head that
 moves after a recorded `Ready` is met by the fenced commit, rather than a live
 re-check that changes the command stream.
 
+A live read outside the recorded steps never decides which steps a root
+journals: not the resident-session refresh before `AdmitRoot`, not the
+engine's opening of the session. A sealed root whose drive holds no current
+head, because the engine cannot open its session (its close or tombstone
+committed) or because the refresh fails, runs headless. It still issues its
+recorded steps under the envelopes a root with a head issues: `AdmitRoot` and
+`InspectAdmittedHead` for an input- or queued-headed root, and the
+`session-command-run:{n}` reads for a command root. A command root also reads
+on headless once its session retires under a run it read, because every
+command but a compaction settles and commits off the journal. The bodies of
+those steps admit, inspect and read nothing. A deleted session is the step's
+recorded outcome: the catalog's tombstone, read inside the step, or a session
+the engine cannot open. The root then ends with the typed `SessionDeleted`
+refusal of [ADR 0049](0049-session-ids-are-used-once.md) where its journal
+holds nothing more. Any other refresh fault is the attempt's and is recorded
+nowhere. A journal holding work past those steps (the turn after
+`InspectAdmittedHead`, a compaction's apply) cannot be retraced without the
+session's head. That attempt ends as a live fault that journals nothing, and
+the engine's park reconcile releases a root whose session stays deleted as
+`TargetGone`. A follow-on recovery root records no step between its seal and
+its turn, so it still decides live (FIG-4361).
+
 A sealed execution carries `DriveFence`. Head-changing writes and ingress
 settlement check that fence in their transaction. Replay envelopes do not hash
 the fence into effect identity, L-S12. A refusal no retry can change ends its
@@ -78,11 +100,13 @@ L-S6, rather than replacing it with a new commit.
 Evidence: `crates/lash-core/src/runtime/drive/admission.rs:94`,
 `crates/lash-core/src/runtime/root_start.rs:1`,
 `crates/lash-core-store/src/store/drive_fence.rs:185`,
-`crates/lash-core/src/runtime/drive/root.rs:99`,
-`crates/lash-core/src/runtime/drive/root.rs:343`,
-`crates/lash-core/src/runtime/drive/root.rs:490`,
-`crates/lash-core/src/runtime/drive.rs:860`,
-`crates/lash-core/src/runtime/drive.rs:896`.
+`crates/lash-core/src/runtime/drive/root.rs:103`,
+`crates/lash-core/src/runtime/drive/root.rs:346`,
+`crates/lash-core/src/runtime/drive/root.rs:800`,
+`crates/lash-core/src/runtime/drive/root.rs:557`,
+`crates/lash-core/src/runtime/drive/root.rs:605`,
+`crates/lash-core/src/runtime/drive.rs:894`,
+`crates/lash-core/src/runtime/drive.rs:930`.
 
 ### 3. Cancel races and losing work
 
@@ -222,7 +246,7 @@ store fence cannot retract a request already sent.
 Evidence: `crates/lash-core/src/runtime/turn_boundary.rs:1`,
 `crates/lash-core/src/runtime/turn_loop/commit.rs:1`,
 `crates/lash-core/src/runtime/drive/park.rs:1`,
-`crates/lash-core/src/runtime/drive.rs:896`,
+`crates/lash-core/src/runtime/drive.rs:930`,
 `crates/lash-core-store/src/store/runtime_commit.rs:1`.
 
 ### 10. Commands and executors

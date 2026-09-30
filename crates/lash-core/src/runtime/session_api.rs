@@ -1155,6 +1155,7 @@ impl LashRuntime {
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.drain_next_session_command_fenced(drive_fence, cancellation, effect_controller)
             .await
+            .map_err(CommandDrainStop::into_runtime_error)
     }
 
     /// Apply the session's leading open command run, its commit fenced by
@@ -1166,14 +1167,23 @@ impl LashRuntime {
     /// commit that applies the run settles them, predicated on each row still
     /// being open. A host withdrawal in between refuses that commit, which
     /// applies nothing, and the lane is read again.
+    ///
+    /// The resident session is reloaded outside any recorded step, so its
+    /// outcome never decides what the root journals (FIG-4346): a reload that
+    /// failed stops the drain [`CommandDrainStop::Headless`] before the next
+    /// recorded read, and the root reads on headless. So does a session that
+    /// retired under a run the root read, whose settlement and commit write
+    /// nothing to the journal.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
         drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+    ) -> Result<Option<crate::SessionCommandReceipt>, CommandDrainStop> {
         loop {
-            self.reload_invalidated_resident_session_state().await?;
+            if let Err(fault) = self.reload_invalidated_resident_session_state().await {
+                return Err(CommandDrainStop::Headless(fault));
+            }
             let Some(store) = self
                 .session
                 .as_ref()
@@ -1181,9 +1191,19 @@ impl LashRuntime {
             else {
                 return Ok(None);
             };
-            let batches = self
-                .read_session_command_run(store.clone(), drive_fence, effect_controller)
-                .await?;
+            let batches = execute_session_command_run_read(
+                effect_controller,
+                &self.state.session_id,
+                crate::RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(ReadSessionCommandRunRunner {
+                        store: store.clone(),
+                        fence: drive_fence.clone(),
+                    }),
+                    None,
+                ),
+            )
+            .await
+            .map_err(CommandDrainStop::Failed)?;
             if batches.is_empty() {
                 return Ok(None);
             }
@@ -1192,14 +1212,14 @@ impl LashRuntime {
                 batches,
             };
             let Some(commands) = run.session_commands() else {
-                return Err(RuntimeError::new(
+                return Err(CommandDrainStop::Failed(RuntimeError::new(
                     crate::RuntimeErrorCode::SessionCommandRun,
                     format!(
                         "session command run {:?} did not contain only single-command control \
                          batches",
                         run.batch_ids()
                     ),
-                ));
+                )));
             };
             let receipts = commands
                 .iter()
@@ -1225,12 +1245,25 @@ impl LashRuntime {
             // its commit published without committing again (FIG-4258). Any
             // other command journals nothing, so a settled run is simply
             // passed.
-            if !matches!(
+            let compaction = matches!(
                 commands.as_slice(),
                 [crate::SessionCommand::CompactContext { .. }]
-            ) && self
-                .session_command_run_settled(&store, &run.completion())
-                .await?
+            );
+            // Only a compaction journals its apply. Any other run settles and
+            // commits off the journal, so a session that retired under it
+            // leaves the root's next recorded step the next read.
+            let off_journal = |error: RuntimeError| {
+                if !compaction && error.is_session_retirement() {
+                    CommandDrainStop::Headless(error)
+                } else {
+                    CommandDrainStop::Failed(error)
+                }
+            };
+            if !compaction
+                && self
+                    .session_command_run_settled(&store, &run.completion())
+                    .await
+                    .map_err(off_journal)?
             {
                 return Ok(receipts.into_iter().next());
             }
@@ -1241,60 +1274,12 @@ impl LashRuntime {
                 cancellation.clone(),
                 effect_controller,
             ))
-            .await?
+            .await
+            .map_err(off_journal)?
             {
                 return Ok(receipts.into_iter().next());
             }
         }
-    }
-
-    /// Read the session's leading open command run as one recorded step
-    /// under `effect_controller`, keyed by the read's ordinal among its
-    /// reads (FIG-4201).
-    ///
-    /// The first execution reads the lane live, acknowledging the run's
-    /// obligations delivered under `drive_fence`. A replay of the root reads
-    /// back the run it recorded, even after the commit that applied it
-    /// settled the lane: an administrative compaction replays the base and
-    /// the summary it journaled and adopts its settled commit, and any other
-    /// settled run is passed. The live lane would skip the settled command
-    /// and run the root's next steps where its journal holds the
-    /// compaction's.
-    async fn read_session_command_run(
-        &self,
-        store: crate::store::SessionStore,
-        drive_fence: &crate::store::DriveFence,
-        effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
-        let ordinal = effect_controller.next_command_run_ordinal();
-        let session_id = self.state.session_id.clone();
-        let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                effect_controller.execution_scope().clone(),
-                format!("session-command-run:{ordinal}"),
-            )?,
-            crate::RuntimeAttribution::for_session(session_id.clone()),
-            format!("session-command-run:{ordinal}"),
-        );
-        effect_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::ReadSessionCommandRun {
-                        session: session_id,
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(ReadSessionCommandRunRunner {
-                        store,
-                        fence: drive_fence.clone(),
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_session_command_run)
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
     }
 
     /// Whether the commit that applies the command run `completion` names
@@ -1553,6 +1538,66 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 
 /// The first execution of one `ReadSessionCommandRun` step: the live read of
 /// the command lane under the root's fence (FIG-4201).
+/// Why a fenced command drain stopped without an answer.
+pub(in crate::runtime) enum CommandDrainStop {
+    /// The drain holds no current head for its next recorded read: the
+    /// resident session could not be reloaded (a deleted session's reload
+    /// among them), or the session retired under a run the root read. The
+    /// root reads on headless from its next read.
+    Headless(RuntimeError),
+    /// Anything else the drain met.
+    Failed(RuntimeError),
+}
+
+impl CommandDrainStop {
+    pub(in crate::runtime) fn into_runtime_error(self) -> RuntimeError {
+        match self {
+            Self::Headless(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
+/// Read the session's leading open command run as one recorded step,
+/// `session-command-run:{ordinal}` on `controller`'s scope, keyed by the
+/// read's ordinal among its reads (FIG-4201), whose first execution runs
+/// `runner`.
+///
+/// The first execution reads the lane live, acknowledging the run's
+/// obligations delivered under the drive fence. A replay of the root reads
+/// back the run it recorded, even after the commit that applied it settled
+/// the lane: an administrative compaction replays the base and the summary
+/// it journaled and adopts its settled commit, and any other settled run is
+/// passed. The live lane would skip the settled command and run the root's
+/// next steps where its journal holds the compaction's.
+pub(in crate::runtime) async fn execute_session_command_run_read(
+    controller: &crate::ScopedEffectController<'_>,
+    session_id: &SessionId,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
+    let ordinal = controller.next_command_run_ordinal();
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            controller.execution_scope().clone(),
+            format!("session-command-run:{ordinal}"),
+        )?,
+        crate::RuntimeAttribution::for_session(session_id.clone()),
+        format!("session-command-run:{ordinal}"),
+    );
+    controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::ReadSessionCommandRun {
+                    session: session_id.clone(),
+                },
+            ),
+            runner,
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_session_command_run)
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
+}
+
 struct ReadSessionCommandRunRunner {
     store: crate::store::SessionStore,
     fence: crate::store::DriveFence,

@@ -339,7 +339,7 @@ The writer does not raise the epoch to gain authority. [ADR 0101](0101-one-sessi
 owns command admission and ordering.
 
 Evidence: `crates/lash-core-store/src/store/drive_fence.rs:275` and
-`crates/lash-core/src/runtime/session_api.rs:1160`, `:1493`.
+`crates/lash-core/src/runtime/session_api.rs:1161`, `:1478`.
 
 ## 8. Executable evidence
 

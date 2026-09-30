@@ -32,7 +32,7 @@ pub(super) fn admission_id(request: &DriveRequestId, ordinal: u32) -> AdmissionI
 
 /// A store fault inside an admission step: the attempt's, never the step's
 /// outcome. A session-state generation refusal keeps its typed code.
-fn store_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
+pub(super) fn store_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
     let mut fault =
         RuntimeEffectControllerError::from(crate::runtime::runtime_error_from_store_commit(error));
     fault.message = format!("{context}: {}", fault.message);

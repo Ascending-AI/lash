@@ -1243,6 +1243,7 @@ mod aggregate_await_comprehension;
 #[cfg(feature = "rlm")]
 mod aggregate_oracle;
 mod commit_superseded;
+mod deleted_session_root_replay;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod failure_settlement;
