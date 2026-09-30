@@ -200,6 +200,43 @@ mod wait_registration_witness {
         receive
     }
 
+    type RegistrationHold = (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    );
+    static REGISTRATION_HOLDS: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, RegistrationHold>>,
+    > = std::sync::LazyLock::new(Default::default);
+
+    pub(crate) fn hold_wait_registration(
+        key: &AwaitEventKey,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        REGISTRATION_HOLDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                RestateDurableWaitAddress::for_key(key).workflow_key,
+                (entered, held),
+            );
+        (waiting, release)
+    }
+
+    pub(super) async fn await_registration_release(key: &AwaitEventKey) {
+        let hold = REGISTRATION_HOLDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&RestateDurableWaitAddress::for_key(key).workflow_key);
+        if let Some((entered, held)) = hold {
+            let _ = entered.send(());
+            let _ = held.await;
+        }
+    }
+
     pub(super) fn observe_wait_registration(
         key: &AwaitEventKey,
         registration: &RestateDurableWaitRegistration,
@@ -216,7 +253,7 @@ mod wait_registration_witness {
 }
 
 #[cfg(test)]
-pub(crate) use wait_registration_witness::arm_wait_registration_witness;
+pub(crate) use wait_registration_witness::{arm_wait_registration_witness, hold_wait_registration};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
@@ -520,6 +557,8 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
+        #[cfg(test)]
+        wait_registration_witness::await_registration_release(&request.key).await;
         let registration = self
             .namespace
             .durable_wait_registry(&ctx, index_key.clone())

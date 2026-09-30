@@ -28,14 +28,27 @@ use pretty_assertions::assert_eq;
 ///
 /// A tier that cannot run an `AwaitEvent` group child answers the open with
 /// the typed refusal and stops; that arm is the report, not a skip.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
+    losing_wait_isolation_with_registration_witness(make, prefix, |_| None).await;
+}
+
+/// The same isolation law for a backend that cannot list waits. The fixture
+/// arms its witness before dispatch and answers only after backend registration.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn losing_wait_isolation_with_registration_witness<F, W>(
+    make: &F,
+    prefix: &str,
+    registration_witness: W,
+) where
+    F: Fn() -> Host,
+    W: FnOnce(&crate::AwaitEventKey) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
+{
     let host = make();
     let session_id = crate::SessionId::from(format!("{prefix}-losing-wait-session"));
     let execution_scope = ExecutionScope::turn(
@@ -158,9 +171,8 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
     );
 
     // A second parked wait on the same process, in a sibling group the close
-    // is not addressed to. Where the host can enumerate its waits, park it and
-    // see it registered before the close; where it cannot, the resolve below
-    // is still the verdict.
+    // is not addressed to. Registration must precede close, proved by the
+    // registry snapshot or by the backend's registration witness.
     let companion_key = scoped
         .controller()
         .await_event_key(
@@ -169,6 +181,7 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         )
         .await
         .expect("the companion key mints");
+    let registration = registration_witness(&companion_key);
     let companion_group = RuntimeEffectGroup::try_new(
         header(&companion_key_str),
         companion_key_str.clone(),
@@ -193,28 +206,28 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         ))
         .await
         .expect("the companion group opens");
-    let can_list = host
-        .list_outstanding_await_event_keys(&session_id)
-        .await
-        .is_ok();
-    if can_list {
-        tokio::time::timeout(AWAIT_BUDGET, async {
-            loop {
-                if matches!(
-                    host.list_outstanding_await_event_keys(&session_id).await,
-                    Ok(keys) if keys.contains(&companion_key)
-                ) {
-                    break;
+    match host.list_outstanding_await_event_keys(&session_id).await {
+        Ok(mut keys) => {
+            tokio::time::timeout(AWAIT_BUDGET, async {
+                while !keys.contains(&companion_key) {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    keys = host
+                        .list_outstanding_await_event_keys(&session_id)
+                        .await
+                        .expect("the companion registry read is answered");
                 }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("the companion wait registers before the close");
-    } else {
-        // Give the companion child's claim a beat to commit so its key is live
-        // before the close is issued.
-        tokio::time::sleep(Duration::from_millis(250)).await;
+            })
+            .await
+            .expect("the companion wait registers before the close");
+        }
+        Err(error) if error.code == crate::RuntimeErrorCode::AwaitEventUnsupported => {
+            let registration = registration
+                .expect("a host without wait listing must supply a backend registration witness");
+            tokio::time::timeout(AWAIT_BUDGET, registration)
+                .await
+                .expect("the backend witnesses companion registration before the close");
+        }
+        Err(error) => panic!("the initial companion registry read failed: {error}"),
     }
 
     close(&scoped, handle, LoserPolicy::Cancel)
