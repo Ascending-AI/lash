@@ -680,32 +680,6 @@ impl LashRuntime {
         .await
     }
 
-    pub async fn cancel_queued_work_batch(
-        &self,
-        session_id: &SessionId,
-        batch_id: &str,
-    ) -> Result<Option<crate::QueuedWorkBatch>, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(queued_turn_input_store_required)?;
-        if store.session_id() != session_id {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                crate::StoreError::ForeignSessionRequest {
-                    view_session_id: store.session_id().clone(),
-                    request_session_id: session_id.clone(),
-                }
-                .to_string(),
-            ));
-        }
-        store
-            .cancel_queued_work_batch(batch_id)
-            .await
-            .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))
-    }
-
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         match self.resident_session.validity() {

@@ -28,6 +28,11 @@ pub enum AwaitEventWaitIdentity {
     /// written only by an immediate request that found the cancellation gate
     /// already holding an after-step request.
     TurnCancelEscalation,
+    /// Reserved first-writer-wins cancellation-versus-settlement gate for a
+    /// host plugin task a session command runs (FIG-4391), under the
+    /// command's own queue-drain scope: a host's cancel resolves it
+    /// cancelled, and the drive seals it once the task's code returned.
+    SessionCommandCancelGate,
 }
 impl AwaitEventWaitIdentity {
     pub fn tool_completion(tool_call_id: lash_sansio::ToolCallId) -> Self {
@@ -54,7 +59,10 @@ impl AwaitEventWaitIdentity {
                 signal_name,
                 ordinal,
             } => process_id.trim().is_empty() || signal_name.trim().is_empty() || *ordinal == 0,
-            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation => false,
+            Self::TurnCancelGate
+            | Self::TurnTerminal
+            | Self::TurnCancelEscalation
+            | Self::SessionCommandCancelGate => false,
             Self::Custom { key } => key.trim().is_empty(),
         };
         if invalid {

@@ -196,6 +196,10 @@ pub enum PluginOperationCommandOutcome {
     /// The operation failed: nothing of it committed, and the command is
     /// settled, so it is never applied again.
     Failed { message: String },
+    /// A host cancelled the task after a drive admitted it, and the cancel
+    /// won the task's cancel gate (FIG-4391): nothing of the task committed,
+    /// and the command is settled, so it is never applied again.
+    Cancelled,
 }
 
 /// How a host frame open the command lane applied settled (FIG-4202).

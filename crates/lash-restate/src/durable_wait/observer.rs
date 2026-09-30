@@ -30,7 +30,8 @@ impl WaitObserver {
             AwaitEventWaitIdentity::TurnTerminal => Some(Self::TurnTerminal),
             AwaitEventWaitIdentity::ToolCompletion { .. }
             | AwaitEventWaitIdentity::ProcessSignal { .. }
-            | AwaitEventWaitIdentity::Custom { .. } => None,
+            | AwaitEventWaitIdentity::Custom { .. }
+            | AwaitEventWaitIdentity::SessionCommandCancelGate => None,
         }
     }
 

@@ -1779,7 +1779,15 @@ macro_rules! frame_open_redrive_tests {
             (host_frame_open_crashed_before_its_commit_opens_once,
                 host_frame_open_applies_at_the_boundary, Some(BeforeCommit)),
             (host_frame_open_crashed_after_its_commit_opens_once,
-                host_frame_open_applies_at_the_boundary, Some(AfterCommit)));
+                host_frame_open_applies_at_the_boundary, Some(AfterCommit)),
+            (host_cancel_settles_an_admitted_plugin_task_cancelled,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, None),
+            (host_cancelled_plugin_task_crashed_after_its_lane_read_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(AfterLaneRead)),
+            (host_cancelled_plugin_task_crashed_before_its_commit_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(BeforeCommit)),
+            (host_cancelled_plugin_task_crashed_after_its_commit_settles_once,
+                host_cancel_settles_an_admitted_plugin_task_cancelled, Some(AfterCommit)));
     };
     (@commanded [$($attrs:tt)*] $fixture:block; ($name:ident, $law:ident, None) $(, $rest:tt)*) => {
         $($attrs)*

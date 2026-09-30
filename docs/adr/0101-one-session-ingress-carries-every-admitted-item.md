@@ -148,8 +148,18 @@ deadline, and a host reattaches by the receipt. The convenience calls
 (`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
 operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
-`AlreadyAdmitted` once a drive read it. The runtime writer is never held while
-a settlement is awaited. A command root, once it drained the lane, writes its
+`AlreadyAdmitted` once a drive read it. A host's cancel of a plugin task a
+drive admitted goes through the task's cancel gate, a first-writer-wins keyed
+promise (`SessionCommandCancelGate`) under the command's queue-drain scope.
+The host resolves it cancelled; the drive seals it the moment the task's code
+returns, before anything of the task enters resident state, and fires the
+task's cancellation token when the cancel lands. A cancel that won settles
+the command `PluginOperationCommandOutcome::Cancelled` with nothing of the
+task committed, and a seal that won keeps the task's own outcome. A redrive
+before the settling commit meets the same winner, and runs none of the code
+of a task whose cancel won. Neither the withdrawal nor the cancel takes the
+runtime writer, which the drive applying the commands holds. The runtime
+writer is never held while a settlement is awaited. A command root, once it drained the lane, writes its
 `RootTerminalCause::CommandsApplied` terminal and arms its scope close, so its
 journal is retired like a turn root's.
 
@@ -157,6 +167,7 @@ Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
 `crates/lash-core/src/runtime/session_api.rs:1375`,
 `crates/lash-core/src/runtime/compact_context.rs:1`,
 `crates/lash-core/src/runtime/host_commands.rs:1`,
+`crates/lash-core/src/runtime/host_commands/task_cancel.rs:1`,
 `crates/lash-core/src/runtime/drive/root.rs` (`run_commands_root`),
 `crates/lash/src/admin/host_commands.rs:1`, and
 `crates/lash-core-store/src/store/mod.rs:1591`.

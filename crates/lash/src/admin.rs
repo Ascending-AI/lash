@@ -1236,6 +1236,11 @@ impl PluginOperations {
     }
 
     /// Invokes a typed task operation with cancellation support.
+    ///
+    /// Firing `cancellation_token` withdraws a task no drive has admitted,
+    /// and cancels one a drive is running through its cancel gate: either
+    /// answers [`SessionError::SessionCommandCancelled`], unless the task's
+    /// code returned first and it settles with its own outcome (FIG-4391).
     pub async fn run_task_with_cancel<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
@@ -1265,6 +1270,11 @@ impl PluginOperations {
     }
 
     /// Invokes a raw task operation with cancellation support.
+    ///
+    /// Firing `cancellation_token` withdraws a task no drive has admitted,
+    /// and cancels one a drive is running through its cancel gate: either
+    /// answers [`SessionError::SessionCommandCancelled`], unless the task's
+    /// code returned first and it settles with its own outcome (FIG-4391).
     pub async fn run_task_raw_with_cancel(
         &self,
         name: &str,

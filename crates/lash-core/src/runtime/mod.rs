@@ -8,7 +8,8 @@ mod builder;
 mod compact_context;
 pub use compact_context::COMPACT_CONTEXT_COMMITTED_PHASE;
 pub use host_commands::{
-    SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE, SESSION_COMMAND_STAGED_PHASE,
+    PluginTaskCancelRequest, SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE,
+    SESSION_COMMAND_STAGED_PHASE, request_plugin_task_cancel,
 };
 mod compaction_base;
 pub use lash_core_execution::runtime::attachment_delivery;
