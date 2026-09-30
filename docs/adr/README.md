@@ -141,11 +141,11 @@ The generated region below is checked against the live filenames and headings.
 | 0099 | [Tool children of effect groups have one lifecycle — live, closing, settled](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
 | 0100 | [The run-observation contract](0100-the-run-observation-contract.md) |
 | 0101 | [One session ingress carries every admitted item](0101-one-session-ingress-carries-every-admitted-item.md) |
-| 0102 | [Zero-infra is a SQLite in-memory backend; every host journals; one substrate per backend](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
+| 0102 | [Every backend binds one journaled engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
 | 0103 | [Code cells replay by re-execution on every host](0103-code-cells-replay-by-re-execution-on-every-host.md) |
 | 0104 | [Restate is the only effect engine; SQL stores are storage](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md) |
-| 0105 | [The drive is deterministic workflow code](0105-the-drive-is-deterministic-workflow-code.md) |
-| 0106 | [Durable formats upgrade by migration or drain after the clean-slate release](0106-durable-formats-upgrade-by-migration-or-drain.md) |
+| 0105 | [The drive replays recorded decisions through the controller](0105-the-drive-is-deterministic-workflow-code.md) |
+| 0106 | [Durable formats use migration, drain or coexistence](0106-durable-formats-upgrade-by-migration-or-drain.md) |
 | 0107 | [A process is named by a minted id, a start by its key](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) |
 | 0108 | [A process lives until a scope its start could reach](0108-a-process-lives-until-a-scope-its-start-could-reach.md) |
 | 0109 | [Store→engine delivery is an outbox of obligations](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) |

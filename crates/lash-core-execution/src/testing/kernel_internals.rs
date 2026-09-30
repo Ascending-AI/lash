@@ -2,7 +2,7 @@
 //!
 //! Those tests were unit tests inside this crate until FIG-3582 moved every
 //! test that needs a concrete store or effect host to
-//! `tests/store_backed`, over a SQLite memory backend (ADR 0102): the store
+//! `tests/store_backed`, over a SQLite memory store set (ADR 0102): the store
 //! depends on this crate, so an in-crate `cfg(test)` module could not use it.
 //! This module is the `testing`-feature seam that keeps exactly the surface
 //! they reach reachable without widening the crate's shipped API. A

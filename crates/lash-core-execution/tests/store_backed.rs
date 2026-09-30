@@ -1,5 +1,5 @@
 //! The crate's tests that need a concrete store or effect host, over a SQLite
-//! memory backend (ADR 0102), under `kernel::` with their original module
+//! memory store set (ADR 0102), under `kernel::` with their original module
 //! paths and test names.
 //!
 //! They cannot stay in-crate: lash-sqlite-store depends on this crate, so a

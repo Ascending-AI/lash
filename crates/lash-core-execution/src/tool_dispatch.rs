@@ -59,7 +59,7 @@ pub(crate) use retry::{
 
 /// The static checks over this module's own source; the dispatch tests that
 /// run tool attempts need an effect host and run over a SQLite memory
-/// backend in `tests/store_backed` (ADR 0102).
+/// store set in `tests/store_backed` (ADR 0102).
 #[cfg(test)]
 mod tests {
     mod context_source;

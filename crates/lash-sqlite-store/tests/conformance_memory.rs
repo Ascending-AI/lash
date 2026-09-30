@@ -1,6 +1,6 @@
-//! Runs the shared conformance suites against SQLite memory backends: four
-//! named `memdb` databases pinned by the backend's anchors per fixture
-//! (ADR 0102). The same suite runs over file backends in `conformance.rs`.
+//! Runs the shared conformance suites against SQLite memory store sets: three
+//! named `memdb` databases pinned by the store set's anchors per fixture
+//! (ADR 0102). The same suite runs over file store sets in `conformance.rs`.
 
 #![expect(
     clippy::expect_used,
