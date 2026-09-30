@@ -19,6 +19,7 @@ pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
 mod tests {
     mod block_identity_tests;
     mod runtime_feedback;
+    mod stream_bounds;
     mod tool_identity;
     mod tool_result_shape;
     use runtime_feedback::request_with_instructions;

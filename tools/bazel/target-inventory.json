@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 54,
-  "cargo_target_count": 206,
+  "cargo_target_count": 207,
   "feature_lane_units": [
     {
       "features": [],
@@ -9853,7 +9853,13 @@
         "default"
       ],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_6732a326",
+      "label": "//crates/lash-perf:lash-perf__fv_82151432",
+      "package": "lash-perf"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-perf:lash-perf__fv_c5279ecc",
       "package": "lash-perf"
     },
     {
@@ -9861,13 +9867,7 @@
         "default"
       ],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_b218a3c8",
-      "package": "lash-perf"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_c5279ecc",
+      "label": "//crates/lash-perf:lash-perf__fv_e3536df4",
       "package": "lash-perf"
     },
     {
@@ -11941,6 +11941,22 @@
       ],
       "kind": "test",
       "label": "//crates/lash-provider-anthropic:charge_safety__test__fv_0e80edc8",
+      "package": "lash-internal-provider-anthropic"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_09828e25",
+      "package": "lash-internal-provider-anthropic"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_0ac3eb3e",
       "package": "lash-internal-provider-anthropic"
     },
     {
@@ -21641,7 +21657,7 @@
         "typescript"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_946407a5",
+      "label": "//crates/lash:lash__fv_8ae76d9f",
       "package": "lash-runtime"
     },
     {
@@ -21686,19 +21702,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_abd4c818",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "restate",
-        "rlm",
-        "sqlite",
-        "synthetic-next",
-        "typescript"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_b4ca4af1",
       "package": "lash-runtime"
     },
     {
@@ -21793,6 +21796,19 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_eed14de2",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "rlm",
+        "sqlite",
+        "synthetic-next",
+        "typescript"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_f128dcd5",
       "package": "lash-runtime"
     },
     {
@@ -23582,13 +23598,13 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23596,13 +23612,13 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23610,55 +23626,13 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__fv_c3ba64b6",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "bin-unit-test",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_56738711",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [],
-      "kind": "bin-unit-test",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_c3ba64b6",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin__fv_56738711",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [],
-      "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin__fv_c3ba64b6",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__fv_56738711",
-      "package": "lash-restate-postgres-workers-e2e"
-    },
-    {
-      "features": [],
-      "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23666,13 +23640,13 @@
         "synthetic-next"
       ],
       "kind": "bin-unit-test",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23680,13 +23654,13 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23694,13 +23668,27 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__fv_3a6d3bc2",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "bin-unit-test",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_324811fb",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [],
+      "kind": "bin-unit-test",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23708,13 +23696,55 @@
         "synthetic-next"
       ],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_3a6d3bc2",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_324811fb",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_3a6d3bc2",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_324811fb",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_3a6d3bc2",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "test",
+      "label": "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_324811fb",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23722,13 +23752,13 @@
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
@@ -23736,17 +23766,17 @@
         "synthetic-next"
       ],
       "kind": "unit-test",
-      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_56738711",
+      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_324811fb",
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_c3ba64b6",
+      "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test__fv_3a6d3bc2",
       "package": "lash-restate-postgres-workers-e2e"
     }
   ],
-  "generated_label_count": 273,
+  "generated_label_count": 274,
   "packages": [
     {
       "declared_features": [
@@ -27368,10 +27398,12 @@
         "lash-internal-core",
         "lash-internal-lashlang",
         "lash-internal-llm-tools",
+        "lash-internal-llm-transport",
         "lash-internal-plugin-process-controls",
         "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
         "lash-internal-protocol-rlm",
+        "lash-internal-provider-anthropic",
         "lash-internal-provider-openai",
         "lash-internal-restate",
         "lash-internal-s3-store",
@@ -27466,6 +27498,16 @@
           "kind": "bin",
           "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
           "tags": []
+        },
+        {
+          "cargo": "provider_stream_bounds",
+          "cargo_only": "requires native Restate and SQL services; execute this label uncached through scripts/ci/with-service.sh",
+          "kind": "test",
+          "label": "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
         }
       ],
       "test_batch": {

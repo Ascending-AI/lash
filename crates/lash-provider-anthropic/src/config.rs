@@ -10,6 +10,10 @@ pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
     LazyLock::new(|| Arc::new(ReqwestLlmHttpTransport::new()));
 
 /// Anthropic API (Claude) provider state and transport.
+///
+/// Streamed messages accept at most 1,024 content blocks. Starts must use
+/// consecutive indices beginning at zero; malformed indices end the stream
+/// without retry.
 #[derive(Clone, Debug)]
 pub struct AnthropicProvider {
     /// The API key. Redacted in every `Debug`/`Display` rendering; the

@@ -37,6 +37,14 @@ kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
 reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
 
+[[rule]]
+packages = ["lash-restate-postgres-workers-e2e"]
+kinds = ["test"]
+targets = ["provider_stream_bounds"]
+tags = ["manual", "cargo-service-gate"]
+reason = "requires native Restate and SQL services; execute this label uncached through scripts/ci/with-service.sh"
+args = ["--ignored"]
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard runs through `//tools/bazel:postgres_slot_runner`, which gives it
