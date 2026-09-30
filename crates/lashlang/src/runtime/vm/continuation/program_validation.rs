@@ -345,6 +345,25 @@ pub(super) fn validate_resume_point(
             .get(*index)
             .is_some_and(|candidate| candidate.text.as_ref() == name.as_str()),
         (VmSuspendedOperation::Sleep, Some(Instruction::SleepFor)) => true,
+        (
+            VmSuspendedOperation::ResourceOperationBatch,
+            Some(
+                Instruction::ResourceOperationBatch(_)
+                | Instruction::AwaitArray { .. }
+                | Instruction::AwaitPending,
+            ),
+        ) => true,
+        // The settled results ride above the awaited value, within the
+        // bound; the await issued again takes exactly `settled` of them or
+        // refuses.
+        (
+            VmSuspendedOperation::Await { settled },
+            Some(
+                Instruction::AwaitHandle
+                | Instruction::AwaitHandleUnwrap
+                | Instruction::AwaitPending,
+            ),
+        ) => *settled <= VM_PARKED_AWAIT_SETTLED_LIMIT,
         _ => false,
     };
     if issues {
@@ -354,5 +373,23 @@ pub(super) fn validate_resume_point(
             instruction_pointer: continuation.instruction_pointer,
             operation: format!("{operation:?}"),
         })
+    }
+}
+
+/// A run parked on an await carries at most
+/// [`VM_PARKED_AWAIT_SETTLED_LIMIT`] settled results: past the bound it
+/// cannot be captured, so it declines the park.
+pub(super) fn validate_parked_await_bound(resume: &VmResumePoint) -> Result<(), ContinuationError> {
+    match resume {
+        VmResumePoint::ReissueOperation {
+            operation: VmSuspendedOperation::Await { settled },
+            ..
+        } if *settled > VM_PARKED_AWAIT_SETTLED_LIMIT => {
+            Err(ContinuationError::ParkedAwaitTooLarge {
+                settled: *settled,
+                limit: VM_PARKED_AWAIT_SETTLED_LIMIT,
+            })
+        }
+        _ => Ok(()),
     }
 }

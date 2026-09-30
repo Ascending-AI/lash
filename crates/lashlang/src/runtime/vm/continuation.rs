@@ -9,6 +9,7 @@ use super::super::{
 use super::*;
 
 mod types;
+pub(crate) use types::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use types::{
     ContinuationError, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
@@ -1248,7 +1249,9 @@ fn profile_from_continuation(
 
 mod program_validation;
 mod structural_validation;
-use program_validation::{validate_program_continuation, validate_resume_point};
+use program_validation::{
+    validate_parked_await_bound, validate_program_continuation, validate_resume_point,
+};
 use structural_validation::{
     validate_continuation, validate_optional_value, validate_value, validate_values,
 };
@@ -1345,6 +1348,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// program that merely put a projected binding in a list unable to park at
     /// all, while the `State` snapshot accepted the identical value.
     pub fn suspend(&mut self) -> Result<VmContinuation, ContinuationError> {
+        validate_parked_await_bound(&self.resume_point)?;
         let roots = self.heap_roots();
         self.heap.collect(roots.iter());
         validate_values(&self.stack, "operand stack")?;

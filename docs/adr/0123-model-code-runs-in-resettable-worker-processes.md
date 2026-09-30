@@ -75,17 +75,21 @@ interface borrows:
   `ReissueOperation { operation, loop_phase }` when the continuation must
   issue an operation again. A signal wait handed to a successor reissues
   its wait. A run parked while awaiting an effect (section 8) reissues the
-  resource operation or sleep it was waiting on: the VM rewinds to the
-  operation's instruction, pushes its operands back, uncharges the
-  instruction and rewinds the call site's occurrence, so the reissued
-  request is the one it replaces. A foreground park also records
+  resource operation, resource-operation batch, process await or sleep it
+  was waiting on: the VM rewinds to the operation's instruction, pushes its
+  operands back, restores any pending-request entries a batch consumed,
+  uncharges the instruction and rewinds the occurrences of the call site and
+  of every batch leaf, so the reissued request is the one it replaces. An
+  await parked on one handle of a tuple, list or record of process handles
+  also carries the leaf results it already received (see "Await and batch
+  parking" below). A foreground park also records
   `loop_phase` (the instruction budget left until the next yield and the
   last announced cancel checkpoint), so a resumed run meets its cancel
   checkpoints where a run that never parked meets them, and it carries the
   run's expired functions. Resuming checks that the instruction pointer
   stands on the operation the discriminant names.
 - A resume may answer a parkable effect request (a resource operation, a
-  batch, a sleep or a signal wait) with `VmResume::Park`. The run suspends
+  batch, a process await, a sleep or a signal wait) with `VmResume::Park`. The run suspends
   into `VmStep::Parked` with `VmParkReason::AwaitingEffect`, and the parent
   resumes it later from the continuation with the effect's outcome. A run
   that cannot suspend there asks `VmRequest::ParkDeclined` and stays
@@ -236,15 +240,16 @@ belongs to the transport, which reports a silent worker as
   retries an effect locally. A partial frame is refused and the last
   checkpoint kept, and a fully received `Complete` wins over a later EOF.
 - **Park on effect releases the slot.** When a parkable request's effect
-  needs a worker of its own (nested compilation, a nested run), the broker
-  answers `Park`. The worker serializes the run. The broker holds that
+  needs a worker of its own (nested compilation, a nested run, the body of
+  an awaited process), the broker answers `Park`. The worker serializes the run. The broker holds that
   continuation
   within the invocation without committing a checkpoint, and the slot goes
   back to the pool before the effect is performed. On the
   outcome the broker checks a worker out again, resumes the continuation,
   and hands the held outcome to the reissued request, matched by
   fingerprint. A pool of one slot therefore completes a nested
-  compilation instead of deadlocking.
+  compilation, or a cell that awaits a process it started, instead of
+  deadlocking.
 - **Cancellation.** A stop sends `Cancel` and waits the grace period
   before a physical kill. The run ends `Cancelled` only when the journal
   observed the cancellation at an instruction checkpoint (ADR 0039);
@@ -352,11 +357,47 @@ per-attempt cap used in the bound above is the configured cumulative CPU budget
 plus one second. The ceiling bounds computation. The worker has the filesystem
 and network access of its OS user.
 
-### Pending await and batch parking
+### Await and batch parking
 
-Resource calls, sleep and signal waits suspend and release their worker before
-nested worker admission. Await and resource-operation batches currently answer
-in place. A cell awaiting a process can therefore hold the only slot while the
-awaited process queues for that slot. The ignored native law
-`one_slot_process_await_releases_worker_for_the_awaited_body` records the gap
-with a bounded checkout timeout.
+A cell or body that awaits a process handle, a tuple, list or record of them,
+or a resource-operation batch parks on that await and releases its worker, so
+the awaited body or nested work takes the slot. `EffectKind::parkable` and
+`VmRequest::parkable` admit `Await` and `ResourceOperationBatch`; the runtime
+adapter parks every parkable request. A hand-over answer on these paths is the
+park, never a guest error.
+
+An aggregate await stays one host await per handle, in traversal order. When
+the host parks the run on one handle, the continuation's resume point is
+`VmSuspendedOperation::Await { settled }`: the awaited value stands on the
+operand stack and, when `settled` is not zero, a list of the `settled` leaf
+results the run already received stands above it. The resumed run walks the
+same value again, takes those results for its first leaves without asking the
+host, and issues exactly the await it parked on, which the broker answers with
+its held outcome. A continuation carries at most
+`VM_PARKED_AWAIT_SETTLED_LIMIT` (1024) settled results; past the bound the
+capture declines and the host answers the await in place. Decoding refuses a
+larger count, and a reissued await whose carried results do not match its walk
+is refused.
+
+This representation keeps the host contract and the journal unchanged: each
+handle keeps its own admitted operation and ordinal, a straight-through run
+and a parked one issue the same awaits in the same order, and journal replay
+after a parent crash lines up position for position. Two alternatives are
+rejected. Reissuing the whole aggregate on resume would await settled handles
+again, so the reissued request would not match the held operation and
+each resume would admit fresh ordinals. One host await over the whole
+aggregate would change the `Await` ability for every host and merge
+separately journaled waits into one operation.
+
+A resource-operation batch is one host operation, so it parks as
+`VmSuspendedOperation::ResourceOperationBatch` and reissues the same batch.
+
+The native laws in `crates/lash-vm-worker/tests/pool_laws.rs`
+(`one_slot_process_await_releases_worker_for_the_awaited_body`,
+`one_slot_aggregate_process_await_parks_on_every_pending_handle`,
+`a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result`,
+`one_slot_resource_operation_batch_parks_and_resumes`), the VM laws in
+`crates/lashlang/src/runtime/tests/await_park_cases.rs`, and the RLM law
+`one_slot_cell_that_starts_and_awaits_a_process_completes` in
+`crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs`
+pin this behaviour.

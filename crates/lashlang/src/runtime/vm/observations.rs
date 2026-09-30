@@ -55,8 +55,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             return self.begin_lashlang_execution(instruction_ip);
         }
         let site = self.lashlang_execution_site_at(instruction_ip)?.clone();
+        Some(self.reissue_lashlang_execution_site(site))
+    }
+
+    /// The node of an operation a run issues again after it parked on it:
+    /// it takes back the occurrence its park gave up, and is not started a
+    /// second time.
+    pub(super) fn reissue_lashlang_execution_site(
+        &mut self,
+        site: LashlangExecutionSite,
+    ) -> ActiveLashlangExecutionNode {
         let occurrence = next_occurrence(&mut self.lashlang_execution_occurrences, &site.node_id);
-        Some(ActiveLashlangExecutionNode { site, occurrence })
+        ActiveLashlangExecutionNode { site, occurrence }
     }
 
     /// Takes back the occurrence `active` began with: the run parked on the

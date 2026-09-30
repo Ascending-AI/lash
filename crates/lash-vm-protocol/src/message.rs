@@ -258,14 +258,20 @@ pub enum EffectKind {
 
 impl EffectKind {
     /// Whether the parent may answer a request of this kind with
-    /// [`ParentMessage::Park`] instead of a response (FIG-4159): a resource
-    /// operation, a sleep or a signal wait, which a continuation can issue
-    /// again, and a process boundary. It mirrors the VM's `VmRequest::parkable`
-    /// and grants nothing.
+    /// [`ParentMessage::Park`] instead of a response (FIG-4159, FIG-4275): a
+    /// resource operation, a resource-operation batch, a process await, a
+    /// sleep or a signal wait, which a continuation can issue again, and a
+    /// process boundary. It mirrors the VM's `VmRequest::parkable` and grants
+    /// nothing.
     pub fn parkable(self) -> bool {
         matches!(
             self,
-            Self::ResourceOperation | Self::Sleep | Self::WaitSignal | Self::ProcessBoundary
+            Self::ResourceOperation
+                | Self::ResourceOperationBatch
+                | Self::Await
+                | Self::Sleep
+                | Self::WaitSignal
+                | Self::ProcessBoundary
         )
     }
 }

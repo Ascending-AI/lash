@@ -289,7 +289,14 @@ impl FakeWorker {
                 self.pending = None;
                 if self.fault == Some(Fault::DeclinePark) {
                     self.declining = true;
-                    self.request(EffectKind::ParkDeclined, EncodedPayload(Vec::new()));
+                    // The reason, encoded as the worker entry encodes it.
+                    self.request(
+                        EffectKind::ParkDeclined,
+                        EncodedPayload(
+                            rmp_serde::to_vec_named("the fake worker declines its park")
+                                .unwrap_or_default(),
+                        ),
+                    );
                     return;
                 }
                 // The run stands on the step that issued the request, and

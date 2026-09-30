@@ -111,15 +111,19 @@ pub enum VmRequest {
 
 impl VmRequest {
     /// Whether [`VmResume::Park`] may answer this request: an effect the run
-    /// can stand on again — a resource operation, a sleep or a signal wait —
+    /// can stand on again — a resource operation, a resource-operation batch,
+    /// a sleep, a signal wait, or the await of a process handle (alone or as
+    /// the next pending leaf of a tuple, list or record of them, FIG-4275) —
     /// so the host can park the run awaiting it and answer the operation when
-    /// a continuation issues it again. An aggregate, an await, a print or a
-    /// terminal is answered in place.
+    /// a continuation issues it again. A print or a terminal is answered in
+    /// place.
     pub fn parkable(&self) -> bool {
         matches!(
             self,
             Self::Effect(
                 AbilityOp::ResourceOperation(_)
+                    | AbilityOp::ResourceOperationBatch(_)
+                    | AbilityOp::Await(_)
                     | AbilityOp::Sleep(_)
                     | AbilityOp::WaitSignal { .. }
             )

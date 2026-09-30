@@ -1235,6 +1235,7 @@ mod compiler_cases;
 mod projection_cases;
 use projection_cases::*;
 mod async_and_cache_cases;
+mod await_park_cases;
 mod continuation_cases;
 use continuation_cases::*;
 mod continuation_wire_cases;
