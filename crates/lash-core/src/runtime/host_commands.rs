@@ -382,7 +382,14 @@ impl LashRuntime {
             Err(error) => return Ok(Err(error)),
         };
         Ok(self
-            .fold_host_plugin_operation(plugin_id, outcome, draft, batch_id)
+            .fold_host_plugin_operation(
+                plugin_id,
+                outcome.output,
+                outcome.events,
+                outcome.directives,
+                draft,
+                batch_id,
+            )
             .await)
     }
 
@@ -392,16 +399,17 @@ impl LashRuntime {
     async fn fold_host_plugin_operation(
         &mut self,
         plugin_id: String,
-        outcome: crate::plugin::ErasedPluginOperationOutcome,
+        output: serde_json::Value,
+        events: Vec<crate::PluginRuntimeEvent>,
+        directives: Vec<crate::PluginRuntimeDirective>,
         draft: super::turn_commit_draft::TurnGraphAppendDraft,
         batch_id: &crate::BatchId,
     ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
         draft
             .fold_into_final_state(&mut self.state)
             .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
-        if !outcome.events.is_empty() {
-            let nodes = outcome
-                .events
+        if !events.is_empty() {
+            let nodes = events
                 .iter()
                 .map(|event| {
                     crate::plugin_runtime_protocol_event(&plugin_id, event.clone())
@@ -434,7 +442,7 @@ impl LashRuntime {
         // source key takes one from the command, so a redrive of the
         // unsettled command enqueues the same turn once.
         let mut pending_turn_inputs = Vec::new();
-        for (index, directive) in outcome.directives.into_iter().enumerate() {
+        for (index, directive) in directives.into_iter().enumerate() {
             match directive {
                 crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {
                     let source_key = source_key
@@ -457,8 +465,8 @@ impl LashRuntime {
         }
         Ok(crate::runtime::PluginOperationCommandOutcome::Completed {
             plugin_id,
-            output: outcome.output,
-            events: outcome.events,
+            output,
+            events,
             pending_turn_inputs,
         })
     }
