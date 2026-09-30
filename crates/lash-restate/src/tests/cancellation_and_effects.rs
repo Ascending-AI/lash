@@ -1329,6 +1329,13 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
 ) -> lash_core::facade_support::LashRuntime {
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+        store.store().as_ref(),
+        session_id,
+        &policy,
+    )
+    .await
+    .expect("create the replay fixture session before runtime assembly");
     let mut builder = lash_core::facade_support::LashRuntime::builder(
         host,
         lash_core::LeaseOwnerIdentity::opaque(
