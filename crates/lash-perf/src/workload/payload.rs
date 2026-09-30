@@ -1,4 +1,4 @@
-use super::{Generator, TurnPlan};
+use super::{Generator, OperationId, ToolCallPlan, TurnPlan};
 use anyhow::{Result, ensure};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rand_chacha::rand_core::RngCore;
@@ -112,22 +112,23 @@ impl Generator<'_> {
             % words.len()]
     }
 
-    pub fn tool_argument(&self, actor: u64, ordinal: u64, bytes: u32) -> Result<Value> {
-        let mut record = json!({"record":{"kind":"synthetic"},"payload":""});
-        let overhead = serde_json::to_vec(&record)?.len();
-        ensure!(
-            bytes as usize >= overhead,
-            "tool argument target is too small"
-        );
-        let padding = bytes as usize - overhead;
+    /// The call's arguments: its key, the result size and callback delay the
+    /// synthetic tool must honour, and vocabulary padding to the sampled
+    /// serialized size.
+    pub fn tool_argument(&self, actor: u64, ordinal: u64, call: &ToolCallPlan) -> Result<Value> {
+        let mut argument = json!({
+            "record": {
+                "kind": "synthetic",
+                "key": call.idempotency_key,
+                "result_bytes": call.result_bytes,
+                "callback_ms": call.callback_ms,
+            },
+            "payload": "",
+        });
+        let padding = tool_argument_padding(call)?;
         let word = self.tool_word(actor, ordinal);
-        record["payload"] = format!(
-            "{}{}",
-            word.repeat(padding / word.len()),
-            &word[..padding % word.len()]
-        )
-        .into();
-        Ok(record)
+        argument["payload"] = word.repeat(padding.div_ceil(word.len()))[..padding].into();
+        Ok(argument)
     }
 
     pub fn record(&self, actor: u64, ordinal: u64, purpose: &str, bytes: u32) -> Result<Value> {
@@ -171,40 +172,15 @@ impl Generator<'_> {
         let id = &plan.operation;
         let mut tool_arguments = Vec::new();
         let mut tool_results = Vec::new();
-        for (batch, calls) in plan.tool_batches.iter().enumerate() {
-            for (index, call) in calls.iter().enumerate() {
-                tool_arguments.push(self.tool_argument(
-                    id.actor,
-                    id.ordinal,
-                    call.argument_bytes,
-                )?);
-                tool_results.push(self.record(
-                    id.actor,
-                    id.ordinal,
-                    &format!("tool-result/{batch}/{index}"),
-                    call.result_bytes,
-                )?);
+        for calls in &plan.tool_batches {
+            for call in calls {
+                tool_arguments.push(self.tool_argument(id.actor, id.ordinal, call)?);
+                tool_results.push(self.tool_result(&call.idempotency_key, call.result_bytes)?);
             }
         }
-        let mut attachments = Vec::new();
-        for (index, attachment) in plan.attachments.iter().enumerate() {
-            let actor = attachment.owner_actors.first().copied().unwrap_or(id.actor);
-            let bytes = self.png(
-                actor,
-                id.ordinal,
-                &format!("blob/{index}"),
-                attachment.bytes,
-            )?;
-            let generated = SyntheticAttachment {
-                blob_key: attachment.blob_key.clone(),
-                owner_actors: attachment.owner_actors.clone(),
-                media_type: "image/png".into(),
-                sha256: format!("{:x}", Sha256::digest(&bytes)),
-                bytes,
-            };
-            generated.verify(attachment.bytes)?;
-            attachments.push(generated);
-        }
+        let attachments = (0..plan.attachments.len())
+            .map(|index| self.attachment(plan, index))
+            .collect::<Result<Vec<_>>>()?;
         Ok(SyntheticPayloads {
             prompt: self.text(id.actor, id.ordinal, "prompt", plan.prompt_bytes),
             input: self.record(id.actor, id.ordinal, "input", plan.input_bytes)?,
@@ -214,12 +190,111 @@ impl Generator<'_> {
             attachments,
         })
     }
+
+    /// Blob `index` of `plan`: generated from its first owner's stream, so the
+    /// adjacent actor that shares it regenerates identical bytes.
+    pub fn attachment(&self, plan: &TurnPlan, index: usize) -> Result<SyntheticAttachment> {
+        let attachment = plan
+            .attachments
+            .get(index)
+            .ok_or_else(|| anyhow::anyhow!("plan {} has no blob {index}", plan.operation.key()))?;
+        let actor = attachment
+            .owner_actors
+            .first()
+            .copied()
+            .unwrap_or(plan.operation.actor);
+        let bytes = self.png(
+            actor,
+            plan.operation.ordinal,
+            &format!("blob/{index}"),
+            attachment.bytes,
+        )?;
+        let generated = SyntheticAttachment {
+            blob_key: attachment.blob_key.clone(),
+            owner_actors: attachment.owner_actors.clone(),
+            media_type: "image/png".into(),
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            bytes,
+        };
+        generated.verify(attachment.bytes)?;
+        Ok(generated)
+    }
+
+    /// The synthetic result for the tool call keyed `key`
+    /// (`run/actor/ordinal/tool/batch/index`), regenerated identically by the
+    /// tool that returns it and by the witness that checks it.
+    pub fn tool_result(&self, key: &str, bytes: u32) -> Result<Value> {
+        let (operation, child) = OperationId::parse(key)?;
+        ensure!(
+            operation.run == self.run(),
+            "tool key `{key}` belongs to another run"
+        );
+        let Some(position) = child.strip_prefix("tool/") else {
+            anyhow::bail!("`{key}` is not a tool call key");
+        };
+        self.record(
+            operation.actor,
+            operation.ordinal,
+            &format!("tool-result/{position}"),
+            bytes,
+        )
+    }
 }
 
+pub(super) fn tool_argument_padding(call: &ToolCallPlan) -> Result<usize> {
+    let overhead = serde_json::to_vec(&json!({
+        "record": {
+            "kind": "synthetic",
+            "key": call.idempotency_key,
+            "result_bytes": call.result_bytes,
+            "callback_ms": call.callback_ms,
+        },
+        "payload": "",
+    }))?
+    .len();
+    ensure!(
+        call.argument_bytes as usize >= overhead,
+        "tool argument target {} cannot hold the {overhead}-byte call record of `{}`",
+        call.argument_bytes,
+        call.idempotency_key
+    );
+    Ok(call.argument_bytes as usize - overhead)
+}
+
+/// Arguments of the synthetic tool: the call's key, its result size and
+/// callback delay, and vocabulary padding.
 pub fn tool_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["record","payload"],"properties":{
+        "record":{"type":"object","additionalProperties":false,"required":["kind","key","result_bytes","callback_ms"],"properties":{
+            "kind":{"const":"synthetic"},
+            "key":{"type":"string"},
+            "result_bytes":{"type":"integer","minimum":0},
+            "callback_ms":{"type":"integer","minimum":0}
+        }},
+        "payload":{"type":"string"}
+    }})
+}
+
+/// A synthetic tool's result: a nested record padded to the sampled size.
+pub fn tool_result_schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["record","payload"],"properties":{
         "record":{"type":"object","additionalProperties":false,"required":["kind"],"properties":{"kind":{"const":"synthetic"}}},
         "payload":{"type":"string"}
+    }})
+}
+
+/// Arguments of the witness mark a durable body makes once it has run.
+pub fn mark_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["key"],"properties":{
+        "key":{"type":"string"}
+    }})
+}
+
+/// Arguments of the attachment put a cell makes for blob `index` of its turn.
+pub fn attach_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["operation","index"],"properties":{
+        "operation":{"type":"string"},
+        "index":{"type":"integer","minimum":0}
     }})
 }
 

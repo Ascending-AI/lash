@@ -13,8 +13,10 @@ pub use generator::{
     AttachmentPlan, Generator, LlmRequestPlan, OperationId, ProcessPlan, QueuedInputPlan,
     ToolCallPlan, TurnPlan,
 };
-pub use payload::tool_schema;
-pub use payload::{SyntheticAttachment, SyntheticPayloads};
+pub use payload::{
+    SyntheticAttachment, SyntheticPayloads, attach_schema, mark_schema, tool_result_schema,
+    tool_schema,
+};
 pub use provider::{CallCounts, CallKind, ProviderChunk, ProviderResponse};
 pub use spec::{
     Attachments, Collection, Cron, Faults, GeneratorVersion, Inventory, ModelCodePool, Observation,
@@ -23,10 +25,22 @@ pub use spec::{
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 pub const V1_JSON: &str = include_str!("../../workloads/figments-v1.json");
+/// The figments-v1 mix with raised shares and a four-session population, so a
+/// run of a few turns per session exercises every durable operation class.
+pub const SMOKE_V1_JSON: &str = include_str!("../../workloads/smoke-v1.json");
 pub const V1_SCHEMA_JSON: &str = include_str!("../../workloads/workload-v1.schema.json");
+
+/// Turns per session of the pipeline smoke run: with `smoke-v1`'s four
+/// sessions, the first six ordinals of every session cover each durable
+/// operation class (checked by the workload fixture test).
+pub const SMOKE_TURNS_PER_SESSION: u64 = 6;
+
+/// The checked-in workloads a load run can name.
+pub const WORKLOAD_NAMES: [&str; 2] = ["figments-v1", "smoke-v1"];
 
 pub fn schema() -> schemars::schema::RootSchema {
     schema::generate()
@@ -34,11 +48,31 @@ pub fn schema() -> schemars::schema::RootSchema {
 
 /// Settings can only enter the generator after structural and semantic validation.
 #[derive(Debug, Clone)]
-pub struct Workload(WorkloadSpec);
+pub struct Workload {
+    spec: WorkloadSpec,
+    sha256: String,
+}
 
 impl Workload {
     pub fn v1() -> Result<Self> {
         Self::parse(V1_JSON)
+    }
+
+    pub fn smoke_v1() -> Result<Self> {
+        Self::parse(SMOKE_V1_JSON)
+    }
+
+    /// One of [`WORKLOAD_NAMES`]: every process of a load run loads the same
+    /// checked-in file by name and compares [`Self::sha256`].
+    pub fn named(name: &str) -> Result<Self> {
+        match name {
+            "figments-v1" => Self::v1(),
+            "smoke-v1" => Self::smoke_v1(),
+            other => anyhow::bail!(
+                "unknown workload `{other}`; expected one of {}",
+                WORKLOAD_NAMES.join(", ")
+            ),
+        }
     }
 
     pub fn parse(json: &str) -> Result<Self> {
@@ -163,15 +197,24 @@ impl Workload {
                 "{path}: invalid provenance"
             );
         }
-        Ok(Self(spec))
+        Ok(Self {
+            spec,
+            sha256: format!("{:x}", Sha256::digest(json.as_bytes())),
+        })
     }
 
     pub fn spec(&self) -> &WorkloadSpec {
-        &self.0
+        &self.spec
+    }
+
+    /// SHA-256 of the exact workload text, so processes of one run can prove
+    /// they generate from the same settings.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
     }
 
     pub fn provenance(&self, field: &str) -> Option<&str> {
-        self.0.provenance.fields.get(field).map(String::as_str)
+        self.spec.provenance.fields.get(field).map(String::as_str)
     }
 }
 

@@ -181,6 +181,8 @@ class ChartTests(unittest.TestCase):
             ['--set', 'faults.workerKill.index=2'],
             ['--set', 'faults.restateRestart.index=3'],
             ['--set', 'nameOverride=' + 'a' * 40, '--set', 'workers.generation=' + 'b' * 32],
+            ['--set', 'load.workload=figments-v2'],
+            ['--set', 'load.turnsPerSession=0'],
         ]:
             with self.subTest(overrides=overrides):
                 result = subprocess.run([
@@ -188,6 +190,27 @@ class ChartTests(unittest.TestCase):
                     str(ROOT / 'deploy/helm/lash-loadtest'), *overrides,
                 ], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
+
+    def test_durable_workload_job_is_opt_in_and_names_its_workload(self):
+        default = self.documents('values-local.yaml.rendered.yaml')
+        self.assertFalse(any(item['kind'] == 'Job' and item['metadata']['name'].endswith('-load') for item in default))
+        documents = self.documents('load-enabled.yaml')
+        load = proof.job(documents, 'load')
+        self.assertNotIn('annotations', load['metadata'])
+        self.assertEqual(load['spec']['backoffLimit'], 0)
+        container = load['spec']['template']['spec']['containers'][0]
+        self.assertEqual(container['command'], ['lash-loadtest-driver'])
+        env = {entry['name']: entry.get('value') for entry in container['env']}
+        self.assertEqual(env['LASH_LOAD_WORKLOAD'], 'smoke-v1')
+        self.assertEqual(env['LASH_LOAD_SESSIONS'], '4')
+        self.assertEqual(env['LASH_LOAD_TURNS_PER_SESSION'], '6')
+        self.assertEqual(len(env['WORKER_CONTROL_URLS'].split(',')), 2)
+        for item in documents:
+            if item['kind'] == 'Deployment' and ('-worker-' in item['metadata']['name'] or item['metadata']['name'].endswith('-provider')):
+                names = {entry['name']: entry.get('value') for entry in item['spec']['template']['spec']['containers'][0]['env']}
+                self.assertEqual(names['LASH_LOAD_WORKLOAD'], 'smoke-v1')
+        with self.assertRaises(ValueError):
+            proof.job(default, 'load')
 
     def test_credentials_are_operator_secrets(self):
         documents = self.documents('values-local.yaml.rendered.yaml')

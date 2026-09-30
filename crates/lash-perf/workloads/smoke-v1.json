@@ -1,0 +1,399 @@
+{
+  "format_version": 1,
+  "seed": 3790,
+  "generator": {
+    "algorithm": "ChaCha20",
+    "version": 1
+  },
+  "sessions": 4,
+  "turns_per_session_s": 0.1,
+  "arrival": "poisson_open_loop",
+  "rotate_after_turns": 4,
+  "history_prefill_turns": [
+    [
+      0,
+      0.5
+    ],
+    [
+      50,
+      0.4
+    ],
+    [
+      500,
+      0.1
+    ]
+  ],
+  "compact_every_turns": 50,
+  "warmup_s": 120,
+  "steady_s": 900,
+  "fault_window_s": 1200,
+  "saturation_rates_per_session_s": [
+    0.025,
+    0.05,
+    0.1,
+    0.2,
+    0.4,
+    0.8
+  ],
+  "saturation_step_s": 600,
+  "drain_timeout_s": 300,
+  "minimum_completed_turns": 10000,
+  "llm_requests_per_turn": 0.5,
+  "host_process_starts_per_turn": 0.5,
+  "external_occurrences_per_turn": 0.05,
+  "trigger_edits_per_turn": 0.01,
+  "promotion_reads_per_turn": 0.01,
+  "prompt_bytes": [
+    [
+      2048,
+      0.6
+    ],
+    [
+      16384,
+      0.3
+    ],
+    [
+      131072,
+      0.1
+    ]
+  ],
+  "input_bytes": [
+    [
+      1024,
+      0.6
+    ],
+    [
+      8192,
+      0.3
+    ],
+    [
+      65536,
+      0.1
+    ]
+  ],
+  "tool_argument_bytes": [
+    [
+      256,
+      0.7
+    ],
+    [
+      4096,
+      0.25
+    ],
+    [
+      32768,
+      0.05
+    ]
+  ],
+  "tool_result_bytes": [
+    [
+      1024,
+      0.7
+    ],
+    [
+      16384,
+      0.25
+    ],
+    [
+      262144,
+      0.05
+    ]
+  ],
+  "provider_output_bytes": [
+    [
+      1024,
+      0.8
+    ],
+    [
+      8192,
+      0.2
+    ]
+  ],
+  "tools": {
+    "turn_share": 0.6,
+    "batches": 1,
+    "fanout": [
+      [
+        1,
+        0.6
+      ],
+      [
+        4,
+        0.3
+      ],
+      [
+        16,
+        0.1
+      ]
+    ],
+    "parallel_share": 0.5,
+    "callback_ms": [
+      [
+        10,
+        0.7
+      ],
+      [
+        100,
+        0.25
+      ],
+      [
+        1000,
+        0.05
+      ]
+    ]
+  },
+  "processes": {
+    "turn_share": 0.5,
+    "fanout": [
+      [
+        1,
+        0.7
+      ],
+      [
+        4,
+        0.25
+      ],
+      [
+        8,
+        0.05
+      ]
+    ],
+    "await_share": 1,
+    "signal_share": 0.5,
+    "park_share": 0.5,
+    "wake_delay_ms": 1000,
+    "cancel_share": 0.25
+  },
+  "attachments": {
+    "turn_share": 1.0,
+    "count": [
+      [
+        1,
+        0.9
+      ],
+      [
+        3,
+        0.1
+      ]
+    ],
+    "aggregate_bytes": [
+      [
+        65536,
+        0.6
+      ],
+      [
+        262144,
+        0.3
+      ],
+      [
+        3145728,
+        0.1
+      ]
+    ],
+    "explicit_reads_per_blob": 2
+  },
+  "queued": {
+    "inputs_per_turn": 0.6,
+    "active_turn_share": 0.5,
+    "cancel_share": 0.3,
+    "maximum_drain_batch": 64
+  },
+  "cron": {
+    "subscriptions": 2,
+    "cadence_s": 30,
+    "jitter": "seeded_phase"
+  },
+  "turn_cancel_share": 0.15,
+  "delete_per_turn": 0.15,
+  "observation": {
+    "streams_per_turn": 1,
+    "reconnect_share": 0.05,
+    "poll_ms": 100,
+    "pending_reads_per_turn": 1,
+    "workflow_read_sets_per_start": 1,
+    "projector_poll_s": 1,
+    "projector_idle_s": 2,
+    "subscription_reconcile_s": 60,
+    "process_prune_s": 3600
+  },
+  "provider": {
+    "latency_ms": [
+      [
+        50,
+        0.2
+      ],
+      [
+        500,
+        0.5
+      ],
+      [
+        2000,
+        0.25
+      ],
+      [
+        10000,
+        0.05
+      ]
+    ],
+    "stream_share": 0.5,
+    "chunks": 8,
+    "retryable_first_attempt_share": 0.1,
+    "max_concurrent": 1024
+  },
+  "faults": {
+    "worker_kill_s": 300,
+    "worker_restart_delay_s": 5,
+    "restate_restart_s": 600,
+    "restate_restart_delay_s": 5,
+    "rolling_deploy_s": 900,
+    "rolling_worker_pause_s": 10
+  },
+  "topology": {
+    "workers": 2,
+    "worker_cpu": 2,
+    "worker_memory_mib": 2048,
+    "pg_connections_per_worker": 16,
+    "restate_nodes": 3,
+    "restate_partitions": 24,
+    "replication": 2,
+    "restate_cpu": 2,
+    "restate_memory_mib": 4096,
+    "pg_cpu": 4,
+    "pg_memory_mib": 8192,
+    "garage_cpu": 2,
+    "garage_memory_mib": 2048,
+    "one_way_delay_ms": 1,
+    "network_jitter_ms": 0.25,
+    "bandwidth_mbps": 1000
+  },
+  "model_code_pool": {
+    "workers_per_lash_worker": 4,
+    "queue_limit": 128,
+    "execution_memory_mib": 64
+  },
+  "collection": {
+    "scrape_s": 1,
+    "journal_sample_s": 10,
+    "retention_s": 7200,
+    "recovery_stable_s": 60,
+    "comparison_repetitions": 3,
+    "bootstrap_resamples": 2000,
+    "confidence": 0.95
+  },
+  "provenance": {
+    "default": "I",
+    "worker_shape": "V: production values-production.yaml:119,127,128",
+    "pg_connections": "V: values.yaml:571",
+    "attachment_max": "V: image_policy.rs:58,60",
+    "maximum_drain_batch": "V: turns.rs:547",
+    "polling": "V: inventory observation rows",
+    "process_prune": "V: config.rs:30",
+    "restate_partitions": "V: upstream v1.7.12 common.rs:1081",
+    "fields": {
+      "/format_version": "I: synthetic default from FIG-3790 section 2",
+      "/seed": "I: synthetic default from FIG-3790 section 2",
+      "/generator/algorithm": "I: synthetic default from FIG-3790 section 2",
+      "/generator/version": "I: synthetic default from FIG-3790 section 2",
+      "/sessions": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/turns_per_session_s": "I: synthetic default from FIG-3790 section 2",
+      "/arrival": "I: synthetic default from FIG-3790 section 2",
+      "/rotate_after_turns": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/history_prefill_turns": "I: synthetic default from FIG-3790 section 2",
+      "/compact_every_turns": "I: synthetic default from FIG-3790 section 2",
+      "/warmup_s": "I: synthetic default from FIG-3790 section 2",
+      "/steady_s": "I: synthetic default from FIG-3790 section 2",
+      "/fault_window_s": "I: synthetic default from FIG-3790 section 2",
+      "/saturation_rates_per_session_s": "I: synthetic default from FIG-3790 section 2",
+      "/saturation_step_s": "I: synthetic default from FIG-3790 section 2",
+      "/drain_timeout_s": "I: synthetic default from FIG-3790 section 2",
+      "/minimum_completed_turns": "I: synthetic default from FIG-3790 section 2",
+      "/llm_requests_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/host_process_starts_per_turn": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/external_occurrences_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/trigger_edits_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/promotion_reads_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/prompt_bytes": "I: synthetic default from FIG-3790 section 2",
+      "/input_bytes": "I: synthetic default from FIG-3790 section 2",
+      "/tool_argument_bytes": "I: synthetic default from FIG-3790 section 2",
+      "/tool_result_bytes": "I: synthetic default from FIG-3790 section 2",
+      "/provider_output_bytes": "I: synthetic default from FIG-3790 section 2",
+      "/tools/turn_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/tools/batches": "I: synthetic default from FIG-3790 section 2",
+      "/tools/fanout": "I: synthetic default from FIG-3790 section 2",
+      "/tools/parallel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/tools/callback_ms": "I: synthetic default from FIG-3790 section 2",
+      "/processes/turn_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/processes/fanout": "I: synthetic default from FIG-3790 section 2",
+      "/processes/await_share": "I: synthetic default from FIG-3790 section 2",
+      "/processes/signal_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/processes/park_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/processes/wake_delay_ms": "I: synthetic default from FIG-3790 section 2",
+      "/processes/cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/attachments/turn_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/attachments/count": "I: synthetic default from FIG-3790 section 2",
+      "/attachments/aggregate_bytes": "I: synthetic mix; V: maximum 3145728 bytes, image_policy.rs:58,60",
+      "/attachments/explicit_reads_per_blob": "I: synthetic default from FIG-3790 section 2",
+      "/queued/inputs_per_turn": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/queued/active_turn_share": "I: synthetic default from FIG-3790 section 2",
+      "/queued/cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/queued/maximum_drain_batch": "V: turns.rs:547",
+      "/cron/subscriptions": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/cron/cadence_s": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/cron/jitter": "I: synthetic default from FIG-3790 section 2",
+      "/turn_cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/delete_per_turn": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/observation/streams_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/observation/reconnect_share": "I: synthetic default from FIG-3790 section 2",
+      "/observation/poll_ms": "V: inventory observation rows",
+      "/observation/pending_reads_per_turn": "I: synthetic default from FIG-3790 section 2",
+      "/observation/workflow_read_sets_per_start": "I: synthetic default from FIG-3790 section 2",
+      "/observation/projector_poll_s": "V: inventory observation rows",
+      "/observation/projector_idle_s": "V: inventory observation rows",
+      "/observation/subscription_reconcile_s": "V: inventory observation rows",
+      "/observation/process_prune_s": "V: config.rs:30",
+      "/provider/latency_ms": "I: synthetic default from FIG-3790 section 2",
+      "/provider/stream_share": "I: synthetic default from FIG-3790 section 2",
+      "/provider/chunks": "I: synthetic default from FIG-3790 section 2",
+      "/provider/retryable_first_attempt_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
+      "/provider/max_concurrent": "I: synthetic default from FIG-3790 section 2",
+      "/faults/worker_kill_s": "I: synthetic default from FIG-3790 section 2",
+      "/faults/worker_restart_delay_s": "I: synthetic default from FIG-3790 section 2",
+      "/faults/restate_restart_s": "I: synthetic default from FIG-3790 section 2",
+      "/faults/restate_restart_delay_s": "I: synthetic default from FIG-3790 section 2",
+      "/faults/rolling_deploy_s": "I: synthetic default from FIG-3790 section 2",
+      "/faults/rolling_worker_pause_s": "I: synthetic default from FIG-3790 section 2",
+      "/topology/workers": "I: synthetic default from FIG-3790 section 2",
+      "/topology/worker_cpu": "V: production values-production.yaml:119,127,128",
+      "/topology/worker_memory_mib": "V: production values-production.yaml:119,127,128",
+      "/topology/pg_connections_per_worker": "V: values.yaml:571",
+      "/topology/restate_nodes": "I: synthetic default from FIG-3790 section 2",
+      "/topology/restate_partitions": "V: upstream v1.7.12 common.rs:1081",
+      "/topology/replication": "I: synthetic default from FIG-3790 section 2",
+      "/topology/restate_cpu": "I: synthetic default from FIG-3790 section 2",
+      "/topology/restate_memory_mib": "I: synthetic default from FIG-3790 section 2",
+      "/topology/pg_cpu": "I: synthetic default from FIG-3790 section 2",
+      "/topology/pg_memory_mib": "I: synthetic default from FIG-3790 section 2",
+      "/topology/garage_cpu": "I: synthetic default from FIG-3790 section 2",
+      "/topology/garage_memory_mib": "I: synthetic default from FIG-3790 section 2",
+      "/topology/one_way_delay_ms": "I: synthetic default from FIG-3790 section 2",
+      "/topology/network_jitter_ms": "I: synthetic default from FIG-3790 section 2",
+      "/topology/bandwidth_mbps": "I: synthetic default from FIG-3790 section 2",
+      "/model_code_pool/workers_per_lash_worker": "I: synthetic default from FIG-3790 section 2",
+      "/model_code_pool/queue_limit": "I: synthetic default from FIG-3790 section 2",
+      "/model_code_pool/execution_memory_mib": "I: synthetic default from FIG-3790 section 2",
+      "/collection/scrape_s": "I: synthetic default from FIG-3790 section 2",
+      "/collection/journal_sample_s": "I: synthetic default from FIG-3790 section 2",
+      "/collection/retention_s": "I: synthetic default from FIG-3790 section 2",
+      "/collection/recovery_stable_s": "I: synthetic default from FIG-3790 section 2",
+      "/collection/comparison_repetitions": "I: synthetic default from FIG-3790 section 2",
+      "/collection/bootstrap_resamples": "I: synthetic default from FIG-3790 section 2",
+      "/collection/confidence": "I: synthetic default from FIG-3790 section 2",
+      "/inventory/lash_sha": "V: FIG-3790 inventory source snapshot",
+      "/inventory/figments_sha": "V: FIG-3790 inventory source snapshot"
+    }
+  },
+  "inventory": {
+    "lash_sha": "f610cad0995ef99285e2d193adbbea01d549dc92",
+    "figments_sha": "ea5ee6cacd1079c42490c2548b261d002817a3b4"
+  }
+}

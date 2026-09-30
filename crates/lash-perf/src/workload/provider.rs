@@ -1,4 +1,4 @@
-use super::{Generator, LlmRequestPlan, ProcessPlan, TurnPlan};
+use super::{Generator, LlmRequestPlan, ProcessPlan, QueuedInputPlan, TurnPlan};
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
@@ -45,23 +45,26 @@ impl CallCounts {
 
 impl Generator<'_> {
     /// Every primary turn finishes through an RLM cell, including turns without tools or processes.
+    ///
+    /// The response is padded to the sampled output size. A cell whose planned
+    /// work does not fit the sampled bucket is served whole and unpadded: the
+    /// durable work it drives matters more than the byte bucket.
     pub fn provider_response(&self, plan: &TurnPlan, attempt: u32) -> Result<ProviderResponse> {
         ensure!(attempt > 0, "attempts start at one");
         let id = &plan.operation;
         let source = cell_source(plan, self.tool_word(id.actor, id.ordinal))?;
         let response = format!("<typescript>\n{source}\n</typescript>");
-        ensure!(
-            response.len() <= plan.provider_output_bytes as usize,
-            "provider output bucket {} cannot fit the {}-byte cell",
-            plan.provider_output_bytes,
-            response.len()
-        );
-        let padding_bytes = plan.provider_output_bytes - response.len() as u32;
-        let text = if padding_bytes > 0 {
-            let padding = self.text(id.actor, id.ordinal, "provider-padding", padding_bytes - 1);
-            format!("{padding}\n{response}")
-        } else {
-            response
+        let text = match (plan.provider_output_bytes as usize).checked_sub(response.len()) {
+            Some(padding_bytes) if padding_bytes > 0 => {
+                let padding = self.text(
+                    id.actor,
+                    id.ordinal,
+                    "provider-padding",
+                    padding_bytes as u32 - 1,
+                );
+                format!("{padding}\n{response}")
+            }
+            _ => response,
         };
         Ok(ProviderResponse {
             operation_id: id.key(),
@@ -78,6 +81,70 @@ impl Generator<'_> {
             text,
             cell_source: Some(source),
         })
+    }
+
+    /// A queued input's own turn: a cell that finishes with the input's key,
+    /// so the terminal proves which input the turn answered.
+    pub fn queued_response(
+        &self,
+        plan: &TurnPlan,
+        queued: &QueuedInputPlan,
+    ) -> Result<ProviderResponse> {
+        ensure!(
+            plan.queued_inputs
+                .iter()
+                .any(|input| input.idempotency_key == queued.idempotency_key),
+            "`{}` is not a queued input of {}",
+            queued.idempotency_key,
+            plan.operation.key()
+        );
+        let source = format!(
+            "finish({{synthetic:true,operation:{}}});",
+            serde_json::to_string(&queued.idempotency_key)?
+        );
+        let text = format!("<typescript>\n{source}\n</typescript>");
+        Ok(ProviderResponse {
+            operation_id: queued.idempotency_key.clone(),
+            retryable: false,
+            chunks: stream_chunks(&text, plan.provider_latency_ms, 1)?,
+            text,
+            cell_source: Some(source),
+        })
+    }
+
+    /// The cell that registers every cron schedule of the run as a trigger
+    /// subscription whose target body marks each emission it runs for.
+    pub fn cron_setup_response(&self) -> Result<ProviderResponse> {
+        let mut source = String::from(
+            "const on_tick=async(event: load.cron.Tick)=>{return await tools.mark({key:event.schedule+\"/tick/\"+event.tick});};\n",
+        );
+        let schedules = (0..u64::from(self.workload().spec().cron.subscriptions))
+            .map(|subscription| self.cron_schedule(subscription))
+            .collect::<Vec<_>>();
+        for schedule in &schedules {
+            let schedule = serde_json::to_string(schedule)?;
+            source.push_str(&format!(
+                "await triggers.register({{source:load.cron.tick({{schedule:{schedule}}}),target:on_tick,inputs:(event)=>({{event:event}}),name:{schedule}}});\n"
+            ));
+        }
+        source.push_str(&format!(
+            "finish({{synthetic:true,operation:{},schedules:{}}});",
+            serde_json::to_string(&self.cron_setup_key())?,
+            serde_json::to_string(&schedules)?
+        ));
+        let text = format!("<typescript>\n{source}\n</typescript>");
+        Ok(ProviderResponse {
+            operation_id: self.cron_setup_key(),
+            retryable: false,
+            chunks: stream_chunks(&text, 1, 1)?,
+            text,
+            cell_source: Some(source),
+        })
+    }
+
+    /// The key of the turn that registers the run's cron schedules.
+    pub fn cron_setup_key(&self) -> String {
+        format!("{}/cron", self.run())
     }
 
     /// Plain completions belong to independently keyed auxiliary LLM requests.
@@ -103,12 +170,15 @@ impl Generator<'_> {
         })
     }
 
-    /// A host-start body has the same durable wait as a cell-authored child.
+    /// The module a host start links: a durable `body` process taking the
+    /// start's key. A body that waits for its `resume` signal ends with the
+    /// signal's payload beside the key; any other body ends with the key.
     pub fn process_body(&self, process: &ProcessPlan) -> String {
-        if process.parked {
-            "const body = async () => { return await waitSignal(\"resume\"); };".into()
+        if process.waits_for_signal() {
+            "const body = async (key) => { const resumed = await waitSignal(\"resume\"); return { key: key, resumed: resumed }; };\nfinish(null);".into()
         } else {
-            "const body = async () => { return { synthetic: true }; };".into()
+            "const body = async (key) => { return { key: key, synthetic: true }; };\nfinish(null);"
+                .into()
         }
     }
 }
@@ -135,49 +205,72 @@ fn stream_chunks(text: &str, latency_ms: u32, count: u32) -> Result<Vec<Provider
 }
 
 fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
-    let mut code = String::new();
-    if !plan.tool_batches.is_empty() {
-        let batches: Vec<Vec<u32>> = plan
-            .tool_batches
-            .iter()
-            .map(|batch| batch.iter().map(|call| call.argument_bytes).collect())
-            .collect();
-        let overhead =
-            serde_json::to_vec(&serde_json::json!({"record":{"kind":"synthetic"},"payload":""}))?
-                .len();
-        code.push_str(&format!("const argument = (size) => ({{record:{{kind:\"synthetic\"}},payload:\"{word}\".repeat(size).slice(0,size-{overhead})}});\n"));
+    let mut code = format!(
+        "const op={};\n",
+        serde_json::to_string(&plan.operation.key())?
+    );
+    if !plan.attachments.is_empty() {
         code.push_str(&format!(
-            "for(const batch of {}){{const calls=[];for(const size of batch){{",
+            "for(let i=0;i<{};i=i+1){{await tools.attach({{operation:op,index:i}});}}\n",
+            plan.attachments.len()
+        ));
+    }
+    if !plan.tool_batches.is_empty() {
+        // Each call is [padding, result_bytes, callback_ms]; its key is
+        // `op/tool/batch/index`, the plan's idempotency key.
+        let mut batches = Vec::new();
+        for calls in &plan.tool_batches {
+            let mut batch = Vec::new();
+            for call in calls {
+                batch.push([
+                    super::payload::tool_argument_padding(call)? as u64,
+                    u64::from(call.result_bytes),
+                    u64::from(call.callback_ms),
+                ]);
+            }
+            batches.push(batch);
+        }
+        code.push_str(&format!(
+            "const w={};\nconst arg=(k,c)=>({{record:{{kind:\"synthetic\",key:k,result_bytes:c[1],callback_ms:c[2]}},payload:w.repeat(c[0]).slice(0,c[0])}});\nconst batches={};\n",
+            serde_json::to_string(word)?,
             serde_json::to_string(&batches)?
         ));
         if plan.parallel_tools {
-            code.push_str(
-                "calls.push(tools.synthetic(argument(size)));}await Promise.all(calls);}\n",
-            );
+            code.push_str("for(let b=0;b<batches.length;b=b+1){const calls=[];for(let i=0;i<batches[b].length;i=i+1){calls.push(tools.synthetic(arg(op+\"/tool/\"+b+\"/\"+i,batches[b][i])));}await Promise.all(calls);}\n");
         } else {
-            code.push_str("await tools.synthetic(argument(size));}}\n");
+            code.push_str("for(let b=0;b<batches.length;b=b+1){for(let i=0;i<batches[b].length;i=i+1){await tools.synthetic(arg(op+\"/tool/\"+b+\"/\"+i,batches[b][i]));}}\n");
         }
     }
     if !plan.child_processes.is_empty() {
-        let parked: Vec<bool> = plan.child_processes.iter().map(|p| p.parked).collect();
-        code.push_str("const child = async (parked) => {if(parked){return await waitSignal(\"resume\");}return {synthetic:true};};\n");
-        code.push_str(&format!("const parked={};const handles=[];for(const park of parked){{handles.push(await processes.start({{definition:child,args:{{parked:park}}}}));}}\n", serde_json::to_string(&parked)?));
-        if parked.contains(&true) {
+        // One named handle per child: a cell keeps process handles in
+        // variables, never in lists.
+        code.push_str("const child=async(parked,key)=>{if(parked){const resumed=await waitSignal(\"resume\");await tools.mark({key:key});return resumed;}await tools.mark({key:key});return {synthetic:true};};\n");
+        for (index, process) in plan.child_processes.iter().enumerate() {
+            code.push_str(&format!(
+                "const h{index}=await processes.start({{definition:child,args:{{parked:{},key:op+\"/child/{index}\"}}}});\n",
+                process.parked
+            ));
+        }
+        if plan.child_processes.iter().any(|process| process.parked) {
             let delay = plan
                 .child_processes
                 .iter()
                 .map(|p| p.wake_delay_ms)
                 .max()
                 .unwrap_or(0);
-            code.push_str(&format!("await sleep({delay});for(let i=0;i<handles.length;i=i+1){{if(parked[i]){{await processes.signal({{handle:handles[i],name:\"resume\",payload:{{synthetic:true}}}});}}}}\n"));
+            code.push_str(&format!("await sleep({delay});\n"));
+            for (index, process) in plan.child_processes.iter().enumerate() {
+                if process.parked {
+                    code.push_str(&format!("await processes.signal({{handle:h{index},name:\"resume\",payload:{{synthetic:true}}}});\n"));
+                }
+            }
         }
-        let awaits: Vec<bool> = plan
-            .child_processes
-            .iter()
-            .map(|p| p.await_result)
-            .collect();
-        code.push_str(&format!("const awaits={};for(let i=0;i<handles.length;i=i+1){{if(awaits[i]){{await processes.await({{handle:handles[i]}});}}}}\n", serde_json::to_string(&awaits)?));
+        for (index, process) in plan.child_processes.iter().enumerate() {
+            if process.await_result {
+                code.push_str(&format!("await processes.await({{handle:h{index}}});\n"));
+            }
+        }
     }
-    code.push_str("finish({synthetic:true});");
+    code.push_str("finish({synthetic:true,operation:op});");
     Ok(code)
 }

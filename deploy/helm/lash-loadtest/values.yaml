@@ -66,6 +66,17 @@ driver:
   resources:
     requests: {cpu: "1", memory: 512Mi}
     limits: {cpu: "2", memory: 1Gi}
+# The durable workload (FIG-4168). The recipe enables it after the topology
+# gates; the smoke profile covers every durable operation class in a few turns.
+load:
+  enabled: false
+  workload: smoke-v1
+  sessions: 4
+  turnsPerSession: 6
+  activeDeadlineSeconds: 900
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: "2", memory: 1Gi}
 metrics:
   image: prom/prometheus:v3.5.0
   scrapeInterval: 1s

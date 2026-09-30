@@ -38,6 +38,11 @@ name = "lash-loadtest-smoke"
 path = "src/bin/loadtest_smoke.rs"
 test = false
 
+[[bin]]
+name = "lash-loadtest-driver"
+path = "src/bin/loadtest_driver.rs"
+test = false
+
 [lib]
 doctest = false
 
@@ -50,8 +55,10 @@ async-trait = { workspace = true }
 axum = "0.8"
 chrono = { workspace = true }
 lash-core = { workspace = true }
-lash = { workspace = true, features = ["rlm", "restate"] }
+lash = { workspace = true, features = ["rlm", "restate", "typescript"] }
 lash-llm-tools = { workspace = true }
+lash-perf = { path = "../../crates/lash-perf" }
+lashlang = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true }
@@ -64,6 +71,7 @@ reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

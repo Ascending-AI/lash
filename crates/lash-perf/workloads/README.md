@@ -64,17 +64,38 @@ occupy their own lines, as the RLM scanner requires. `llm_request` and
 `llm_response` supply separately keyed auxiliary requests with independently
 sampled prompt sizes, output sizes, latency and retry decisions. Their responses
 are plain completions.
-Its decoded response body, including cell framing and synthetic padding,
-matches the sampled provider output byte count. Stream chunks preserve UTF-8
+A cell names its operation key, puts its turn's blobs through `tools.attach`,
+passes each synthetic tool call its key, result size and callback delay, and
+starts children that call `tools.mark` with their key once they have run; it
+finishes with `{synthetic: true, operation}`. `queued_response` answers a queued
+input with a cell finishing on the input's key, and `cron_setup_response`
+registers every cron schedule as a `load.cron.tick` subscription whose target
+marks each emission. `tool_result` and `attachment` regenerate a call's result
+and a blob from their keys, so the tools that return them and the witness that
+checks them agree without sharing state.
+When the cell fits, its decoded response body, including cell framing and
+synthetic padding, matches the sampled provider output byte count. A cell whose
+planned work exceeds the sampled bucket is served whole and unpadded. Stream chunks preserve UTF-8
 and their final deadline equals the sampled total latency. Only the first
 attempt is retryable when selected; successful response content and operation
 identity remain the same. Fresh calls, replayed effects and retries have separate
-counters. A host-start process body is available independently.
+counters. `process_body` is the module a host start links: one durable `body`
+process taking its key, which waits for `resume` when the plan parks, signals or
+cancels it.
+
+`smoke-v1.json` is figments-v1 with a four-session population and raised shares
+(each override's provenance names it). Its first `SMOKE_TURNS_PER_SESSION` (6)
+ordinals of every session cover every durable operation class: parallel and
+serial tools, parked children, signalled and cancelled host starts, attachments
+shared by an actor pair, active and idle queued inputs and their cancels, turn
+cancels, deletes, rotations and retryable first attempts. The fixture test
+checks that coverage.
 
 `fixtures/sizes-v1.json` covers every text/JSON byte bucket and all six attachment
 aggregate/count combinations. `fixtures/mix-v1.json` sets a 25,000-plan sample
 and statistical bounds for 12 distributions, overlapping membership and
 conditional/auxiliary rates. Provider fixtures parse 300 responses and their
 retries with the existing TypeScript frontend. These are input-generation
-checks. The later workload and measurement lanes own public API execution,
-callback services, clocks, witnesses and proof of model-code pool execution.
+checks. `runbooks/restate-postgres-workers/src/load` executes them through
+lash's public API with independent witness evidence (FIG-4168); the
+measurement lane owns clocks, counters and proof of model-code pool execution.

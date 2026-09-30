@@ -26,6 +26,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use lash_restate_postgres_workers_e2e::load::worker::{
+    E2eLoadWorkflow as _, LoadWorker, LoadWorkerConfig,
+};
+use lash_restate_postgres_workers_e2e::load::{
+    LoadContext, LoadEvent, WitnessedOperation, WitnessedPhase, record_load_event,
+};
 use lash_restate_postgres_workers_e2e::{
     BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
     DirectDurableWaitAwaitResponse, DirectDurableWaitResolveRequest,
@@ -33,21 +39,16 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, crash_exit_taken,
-    default_session_originator_id, driven_queued_roots, e2e_tokio_thread_stack_bytes,
-    ensure_e2e_schema, env, record_terminal_result, record_turn_activity, record_worker_event,
-    required_env, s3_store_from_env, turn_session_id,
+    create_or_open_session, default_session_originator_id, driven_queued_roots,
+    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, record_terminal_result,
+    record_turn_activity, record_worker_event, required_env, s3_store_from_env, turn_handler_error,
+    turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
     TerminalError::new(err.to_string())
 }
 
-/// A retryable lash error is not a workflow failure: it says the identical
-/// invocation is safe to run again and will converge. Turning it into a
-/// `TerminalError` would make an ordinary failover — where the accepted turn
-/// input is momentarily held by a driver that has gone away (ADR 0069 §5) —
-/// user-visible-fatal, so retryable errors leave the invocation retryable and
-/// only genuinely terminal ones end it.
 /// A settled root's output. A root that parked holds its work until an
 /// operator resolves the park, and an input withdrawn before it ran has no
 /// turn: neither is an answer this workflow can report, so each ends the
@@ -60,14 +61,6 @@ fn settled_output(outcome: lash::SendOutcome) -> HandlerResult<lash::TurnOutput>
             outcome.status
         ))
         .into()),
-    }
-}
-
-fn turn_error(err: lash::EmbedError) -> restate_sdk::errors::HandlerError {
-    if err.is_retryable() {
-        restate_sdk::errors::HandlerError::from(anyhow::anyhow!(err.to_string()))
-    } else {
-        terminal_error(err).into()
     }
 }
 
@@ -90,6 +83,8 @@ struct AppState {
     trace_dir: Option<PathBuf>,
     fail_once: bool,
     witness: sqlx::PgPool,
+    /// The load workload this worker serves (FIG-4168), when it serves one.
+    load: Option<LoadContext>,
 }
 
 impl AppState {
@@ -126,6 +121,7 @@ impl AppState {
         }
         let fail_once = env("LASH_E2E_FAIL_ONCE", "0") == "1";
         let witness = lash_restate_postgres_workers_e2e::witness::connect_witness().await?;
+        let load = LoadContext::from_env()?;
         Ok(Self {
             worker_id,
             storage,
@@ -136,6 +132,7 @@ impl AppState {
             trace_dir,
             fail_once,
             witness,
+            load,
         })
     }
 
@@ -150,6 +147,7 @@ impl AppState {
             trace_dir: self.trace_dir.clone(),
             fail_once: self.fail_once,
             witness: self.witness.clone(),
+            load: self.load.clone(),
         })
     }
 
@@ -416,7 +414,7 @@ impl AppState {
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(turn_error)?;
+            .map_err(turn_handler_error)?;
         let first_completed = pending_after_follow
             .iter()
             .all(|input| input.input.input_id != first_input);
@@ -437,13 +435,13 @@ impl AppState {
             .durable()
             .queued_work()
             .await
-            .map_err(turn_error)?
+            .map_err(turn_handler_error)?
             .is_empty();
         let inputs_empty = session
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(turn_error)?
+            .map_err(turn_handler_error)?
             .is_empty();
         self.finish_response(
             &request,
@@ -500,13 +498,13 @@ impl AppState {
             .durable()
             .queued_work()
             .await
-            .map_err(turn_error)?
+            .map_err(turn_handler_error)?
             .is_empty();
         let inputs_empty = session
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(turn_error)?
+            .map_err(turn_handler_error)?
             .is_empty();
         let recovered_before_switch_commit =
             crash_exit_taken(self.storage.pool(), &request.workflow_id)
@@ -562,7 +560,7 @@ impl AppState {
                 scoped,
             )
             .await
-            .map_err(turn_error)?;
+            .map_err(turn_handler_error)?;
         let started = report
             .started_process_ids()
             .first()
@@ -605,7 +603,7 @@ impl AppState {
             .cancel()
             .origin("scripted-e2e-worker")
             .await
-            .map_err(turn_error)?;
+            .map_err(turn_handler_error)?;
         self.record(
             &request.workflow_id,
             "cancel_receipt",
@@ -619,13 +617,13 @@ impl AppState {
             .durable()
             .queued_work()
             .await
-            .map_err(turn_error)?
+            .map_err(turn_handler_error)?
             .is_empty()
             && session
                 .durable()
                 .pending_turn_inputs()
                 .await
-                .map_err(turn_error)?
+                .map_err(turn_handler_error)?
                 .is_empty();
         let usable = settled_output(
             session
@@ -857,6 +855,61 @@ async fn topology_attachment(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))
 }
 
+#[derive(serde::Deserialize)]
+struct LoadAttachmentRead {
+    run: String,
+    blob_key: String,
+}
+
+/// An explicit read of a load blob (FIG-4168): the stored bytes of the
+/// session's attachment, after checking the session holds a committed
+/// reference to it. The witness records the exact bytes read.
+async fn load_attachment(
+    State(state): State<AppState>,
+    axum::extract::Path((session_id, attachment_id)): axum::extract::Path<(String, String)>,
+    axum::extract::Query(read): axum::extract::Query<LoadAttachmentRead>,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
+    let attempt = async {
+        let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
+        let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
+        let committed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM lash_attachment_manifest
+             WHERE session_id = $1 AND attachment_id = $2 AND committed_at_ms IS NOT NULL)",
+        )
+        .bind(&session_id)
+        .bind(&attachment_id)
+        .fetch_one(state.storage.pool())
+        .await?;
+        record_load_event(
+            &state.witness,
+            LoadEvent {
+                run: &read.run,
+                subject: &read.blob_key,
+                operation: WitnessedOperation::Attachment,
+                phase: WitnessedPhase::Read,
+                observer: &state.worker_id,
+                detail: &serde_json::json!({
+                    "session_id": session_id,
+                    "attachment_id": attachment_id,
+                    "committed": committed,
+                    "worker_id": state.worker_id,
+                }),
+                content: Some(&stored.bytes),
+            },
+        )
+        .await?;
+        Ok::<_, anyhow::Error>(serde_json::json!({
+            "worker_id": state.worker_id,
+            "committed": committed,
+            "byte_len": stored.bytes.len(),
+        }))
+    };
+    attempt
+        .await
+        .map(AxumJson)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))
+}
+
 async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
@@ -972,26 +1025,6 @@ fn prompt_for_request(request: &TurnRequest) -> String {
 
 async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
     create_or_open_session(core, DEFAULT_SESSION_ID).await
-}
-
-/// Open `session_id`, creating it first when the catalog does not hold it.
-/// A handler reaches its session the same way on its first delivery and on a
-/// replay, so it means create-or-use; only `create` creates (FIG-4112), and
-/// an existing session is the arm where creation config does not apply.
-async fn create_or_open_session(
-    core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
-) -> HandlerResult<lash::LashSession> {
-    let session_id = session_id.into();
-    match core
-        .session(session_id.clone())
-        .create(lash::SessionCreation::default())
-        .await
-    {
-        Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
-        Err(error) => return Err(turn_error(error)),
-    }
-    core.session(session_id).open().await.map_err(turn_error)
 }
 
 async fn wait_for_cancel_gate(pool: &sqlx::PgPool, workflow_id: &str) -> Result<()> {
@@ -1250,6 +1283,10 @@ async fn async_main() -> Result<()> {
             "/topology/attachments/{session_id}/{attachment_id}",
             get(topology_attachment),
         )
+        .route(
+            "/load/attachments/{session_id}/{attachment_id}",
+            get(load_attachment),
+        )
         .route("/await-durable-wait", post(direct_await_durable_wait))
         .route("/resolve-durable-wait", post(direct_resolve_durable_wait))
         .with_state(state.clone());
@@ -1283,8 +1320,22 @@ async fn async_main() -> Result<()> {
     // tool batch opens — come from the backend, over the effect host every
     // core of this worker installs its tool-child resolver on. The worker
     // binds only its turn workflow beside them.
-    let endpoint = backend
-        .endpoint_builder(processes)
+    let mut builder = backend.endpoint_builder(processes);
+    if let Some(load) = state.load.clone() {
+        builder = builder.bind(
+            LoadWorker::new(LoadWorkerConfig {
+                worker_id: state.worker_id.clone(),
+                core: core.clone(),
+                witness: state.witness.clone(),
+                load,
+                restate_ingress_url: state.restate_ingress_url.clone(),
+                restate_authority_id: state.restate_authority_id.clone(),
+                model: lash_restate_postgres_workers_e2e::e2e_model_spec()?,
+            })
+            .serve(),
+        );
+    }
+    let endpoint = builder
         .bind(E2eTurnWorkflowImpl::new(state, core).serve())
         .build();
     let listener = tokio::net::TcpListener::bind(addr).await?;

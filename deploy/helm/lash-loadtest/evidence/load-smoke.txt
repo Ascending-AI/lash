@@ -1,0 +1,33 @@
+# FIG-4168 durable workload smoke on the local kind topology
+# Command: kiln gate lash fig-4168 -- just multi-node-load (run directory lash-fig-4168-20260929T235203Z)
+# Topology gates (from result.txt):
+topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1
+# Driver log, without the JSON summary line (load.log):
+load run=smoke-v1-72fbcf456727 workload=smoke-v1 sha256=8607c31499408ab9861ce21647b993afb95e5ec4d997c0eb230d1d1851284c72 sessions=4 turns_per_session=6
+load drained run=smoke-v1-72fbcf456727 elapsed_s=253.1
+load witness class=attachment-puts witnessed=21 violations=0
+load witness class=attachment-reads witnessed=21 violations=0
+load witness class=cells witnessed=17 violations=0
+load witness class=child-processes witnessed=14 violations=0
+load witness class=cron-closed-after-delete witnessed=2 violations=0
+load witness class=cron-setup witnessed=1 violations=0
+load witness class=cron-ticks witnessed=16 violations=0
+load witness class=deletes witnessed=4 violations=4
+load witness class=host-cancels witnessed=2 violations=0
+load witness class=host-processes witnessed=9 violations=0
+load witness class=host-signals witnessed=9 violations=0
+load witness class=peer-reads witnessed=21 violations=0
+load witness class=provider-retries witnessed=2 violations=0
+load witness class=queued-cancels witnessed=3 violations=0
+load witness class=queued-inputs witnessed=10 violations=0
+load witness class=shared-attachments witnessed=1 violations=0
+load witness class=tools witnessed=19 violations=0
+load witness class=turn-cancels witnessed=7 violations=0
+load witness class=turns witnessed=24 violations=0
+load witness violation class=deletes: deleted session `load-smoke-v1-72fbcf456727-0-g0` still opened or answered DeleteSession(DeleteReport { worker_id: "worker-0", session_id: "load-smoke-v1-72fbcf456727-0-g0", deletion: Closing, reopen_refusal: None, refused_after_ms: 120695, closing_waits: Some("Failed(Storage(MaintenanceFailure { stop: Failed(StorageFailure { backend: \"postgres\", message: \"error returned from database: update or delete on table \\\"lash_blobs\\\" violates foreign key constraint \\\"lash_checkpoint_blob_refs_blob_ref_fkey\\\" on table \\\"lash_checkpoint_blob_refs\\\"\" }), partial: SessionBlobReclaimReport { enumerated_blob_count: 5, retained_blob_count: 1, deleted_blob_count: 0 } }))") })
+load witness violation class=deletes: deleted session `load-smoke-v1-72fbcf456727-1-g1` still opened or answered DeleteSession(DeleteReport { worker_id: "worker-0", session_id: "load-smoke-v1-72fbcf456727-1-g1", deletion: Closing, reopen_refusal: None, refused_after_ms: 120233, closing_waits: Some("Failed(Storage(MaintenanceFailure { stop: Failed(StorageFailure { backend: \"postgres\", message: \"error returned from database: update or delete on table \\\"lash_blobs\\\" violates foreign key constraint \\\"lash_checkpoint_blob_refs_blob_ref_fkey\\\" on table \\\"lash_checkpoint_blob_refs\\\"\" }), partial: SessionBlobReclaimReport { enumerated_blob_count: 5, retained_blob_count: 0, deleted_blob_count: 0 } }))") })
+load witness violation class=deletes: deleted session `load-smoke-v1-72fbcf456727-2-g0` still opened or answered DeleteSession(DeleteReport { worker_id: "worker-0", session_id: "load-smoke-v1-72fbcf456727-2-g0", deletion: Closing, reopen_refusal: None, refused_after_ms: 120663, closing_waits: Some("Failed(Storage(MaintenanceFailure { stop: Failed(StorageFailure { backend: \"postgres\", message: \"error returned from database: update or delete on table \\\"lash_blobs\\\" violates foreign key constraint \\\"lash_checkpoint_blob_refs_blob_ref_fkey\\\" on table \\\"lash_checkpoint_blob_refs\\\"\" }), partial: SessionBlobReclaimReport { enumerated_blob_count: 5, retained_blob_count: 0, deleted_blob_count: 0 } }))") })
+load witness violation class=deletes: deleted session `load-smoke-v1-72fbcf456727-3-g0` still opened or answered DeleteSession(DeleteReport { worker_id: "worker-1", session_id: "load-smoke-v1-72fbcf456727-3-g0", deletion: Closing, reopen_refusal: None, refused_after_ms: 120651, closing_waits: Some("Failed(Storage(MaintenanceFailure { stop: Failed(StorageFailure { backend: \"postgres\", message: \"error returned from database: update or delete on table \\\"lash_blobs\\\" violates foreign key constraint \\\"lash_checkpoint_blob_refs_blob_ref_fkey\\\" on table \\\"lash_checkpoint_blob_refs\\\"\" }), partial: SessionBlobReclaimReport { enumerated_blob_count: 6, retained_blob_count: 0, deleted_blob_count: 0 } }))") })
+load witness verdict=failed run=smoke-v1-72fbcf456727 classes=19 covered=19 violations=4 absorbed_effect_attempts=0
+Error: load witness failed with 4 violations
+# The four delete violations are FIG-4237 (a PostgreSQL session delete stays Closing).

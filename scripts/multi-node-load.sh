@@ -38,6 +38,7 @@ if values['s3']['mode'] != 'garage':
     raise SystemExit('the local proof uses run-owned Garage storage')
 values['image']['tag'] = tag
 values['driver']['enabled'] = False
+values['load']['enabled'] = False
 path = pathlib.Path(directory)
 (path/'run-values.yaml').write_text(yaml.safe_dump(values))
 (path/'kind.yaml').write_text(yaml.safe_dump({
@@ -49,13 +50,14 @@ path = pathlib.Path(directory)
     'repository': values['image']['repository'], 'name': values['nameOverride'],
     'secret': values['credentialsSecret'], 'workers': values['workers']['count'],
     'generation': values['workers']['generation'],
+    'loadDeadline': values['load']['activeDeadlineSeconds'],
 }))
 PYVALUES
 values=(-f "$run/run-values.yaml")
 readarray -t settings < <(python3 - "$run/build-settings.json" <<'PYSETTINGS'
 import json, sys
 settings = json.load(open(sys.argv[1]))
-for key in ['name', 'secret', 'workers', 'generation']:
+for key in ['name', 'secret', 'workers', 'generation', 'loadDeadline']:
     print(settings[key])
 PYSETTINGS
 )
@@ -63,6 +65,7 @@ resource="${settings[0]}"
 secret="${settings[1]}"
 workers="${settings[2]}"
 generation="${settings[3]}"
+load_deadline="${settings[4]}"
 export KUBECONFIG="$run/kubeconfig"
 k=(kubectl --kubeconfig "$KUBECONFIG" --namespace "$namespace")
 created=0
@@ -90,9 +93,11 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-labels=(//runbooks/restate-postgres-workers:lash-e2e-worker__bin //runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin //runbooks/restate-postgres-workers:lash-loadtest-smoke__bin)
+binaries=(lash-e2e-worker lash-e2e-mock-provider lash-loadtest-smoke lash-loadtest-driver)
+labels=()
+for binary in "${binaries[@]}"; do labels+=("//runbooks/restate-postgres-workers:${binary}__bin"); done
 kiln build --remote_download_outputs=toplevel "${labels[@]}"
-for binary in lash-e2e-worker lash-e2e-mock-provider lash-loadtest-smoke; do
+for binary in "${binaries[@]}"; do
   install -m 755 "bazel-bin/runbooks/restate-postgres-workers/${binary}__bin" "target/loadtest-image/bin/$binary"
 done
 # The chart's schema Job creates the witness role/database using secret values.
@@ -184,7 +189,7 @@ done
 cat "$run/availability.txt"
 printf 'driver:\n  enabled: true\n' > "$run/driver-values.yaml"
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/driver-values.yaml" \
-  --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py smoke-job | "${k[@]}" apply -f -
+  --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job smoke | "${k[@]}" apply -f -
 "${k[@]}" wait --for=condition=complete "job/${resource}-smoke" --timeout=300s
 "${k[@]}" logs "job/${resource}-smoke" -c smoke > "$run/smoke.log"
 ctl snapshots create --trim-log > "$run/snapshots.txt" 2>&1
@@ -205,6 +210,22 @@ for attempt in $(seq 1 60); do
 done
 python3 scripts/check_loadtest_cluster.py metrics "$run/metrics-targets.json"
 printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1\n' | tee "$run/result.txt"
+# The durable workload (FIG-4168): every public durable operation class,
+# reconciled against the witness ledgers by the driver itself.
+printf 'load:\n  enabled: true\n' > "$run/load-values.yaml"
+helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/load-values.yaml" \
+  --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job load | "${k[@]}" apply -f -
+load_state=""
+for attempt in $(seq 1 "$load_deadline"); do
+  load_state="$("${k[@]}" get "job/${resource}-load" -o jsonpath='{.status.succeeded}/{.status.failed}')"
+  if [[ "$load_state" == 1/* || "$load_state" == */1 ]]; then break; fi
+  sleep 1
+done
+"${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
+grep '^load \|^load witness' "$run/load.log" > "$run/load-witness.txt" || true
+grep -F 'load witness verdict=passed' "$run/load.log"
+[[ "$load_state" == 1/* ]]
+printf 'durable workload passed: %s\n' "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
 }
 
 main "$@"; exit "$?"

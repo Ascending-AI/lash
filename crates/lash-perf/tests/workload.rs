@@ -1,5 +1,6 @@
 use lash_perf::workload::{
-    CallCounts, CallKind, Generator, V1_JSON, V1_SCHEMA_JSON, Workload, schema,
+    CallCounts, CallKind, Generator, OperationId, ToolCallPlan, V1_JSON, V1_SCHEMA_JSON, Workload,
+    schema,
 };
 use rand_chacha::rand_core::RngCore;
 use serde_json::{Value, json};
@@ -190,7 +191,9 @@ fn synthetic_text_and_nested_json_hit_every_size_fixture() {
         serde_json::from_str(include_str!("../workloads/fixtures/sizes-v1.json")).unwrap();
     let workload = Workload::v1().unwrap();
     let generator = Generator::new(&workload, "sizes").unwrap();
-    let validator = jsonschema::JSONSchema::compile(&lash_perf::workload::tool_schema()).unwrap();
+    let arguments = jsonschema::JSONSchema::compile(&lash_perf::workload::tool_schema()).unwrap();
+    let results =
+        jsonschema::JSONSchema::compile(&lash_perf::workload::tool_result_schema()).unwrap();
     for size in fixture["text_bytes"].as_array().unwrap() {
         let bytes = size.as_u64().unwrap() as u32;
         let text = generator.text(1, 2, "fixture", bytes);
@@ -200,13 +203,37 @@ fn synthetic_text_and_nested_json_hit_every_size_fixture() {
     for size in fixture["json_bytes"].as_array().unwrap() {
         let bytes = size.as_u64().unwrap() as u32;
         let record = generator.record(1, 2, "fixture", bytes).unwrap();
-        let argument = generator.tool_argument(1, 2, bytes).unwrap();
-        assert!(validator.is_valid(&argument));
+        let call = ToolCallPlan {
+            idempotency_key: generator.operation(1, 2).child_key("tool/0", 3),
+            argument_bytes: bytes,
+            result_bytes: 1024,
+            callback_ms: 10,
+        };
+        let argument = generator.tool_argument(1, 2, &call).unwrap();
+        assert!(arguments.is_valid(&argument));
+        assert_eq!(argument["record"]["key"], json!("sizes/1/2/tool/0/3"));
         assert_eq!(serde_json::to_vec(&argument).unwrap().len(), bytes as usize);
         assert_eq!(serde_json::to_vec(&record).unwrap().len(), bytes as usize);
-        assert!(validator.is_valid(&record));
+        assert!(results.is_valid(&record));
+        let result = generator.tool_result(&call.idempotency_key, bytes).unwrap();
+        assert!(results.is_valid(&result));
+        assert_eq!(serde_json::to_vec(&result).unwrap().len(), bytes as usize);
     }
     assert!(generator.record(0, 0, "too-small", 1).is_err());
+    let cramped = ToolCallPlan {
+        idempotency_key: generator.operation(1, 2).child_key("tool/0", 0),
+        argument_bytes: 64,
+        result_bytes: 1024,
+        callback_ms: 10,
+    };
+    assert!(generator.tool_argument(1, 2, &cramped).is_err());
+    assert!(generator.tool_result("other/1/2/tool/0/0", 1024).is_err());
+    assert!(generator.tool_result("sizes/1/2/child/0", 1024).is_err());
+    assert_eq!(
+        OperationId::parse("sizes/1/2/tool/0/3").unwrap(),
+        (generator.operation(1, 2), "tool/0/3")
+    );
+    assert!(OperationId::parse("sizes/one/2").is_err());
     eprintln!(
         "size fixtures: 3 UTF-8 text buckets, {} nested JSON buckets",
         fixture["json_bytes"].as_array().unwrap().len()
@@ -347,10 +374,24 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             "synthetic",
             &lashlang::OperationContract::new(
                 lash_perf::workload::tool_schema(),
-                lash_perf::workload::tool_schema(),
+                lash_perf::workload::tool_result_schema(),
             ),
         )
         .unwrap();
+    for (name, arguments) in [
+        ("mark", lash_perf::workload::mark_schema()),
+        ("attach", lash_perf::workload::attach_schema()),
+    ] {
+        catalog
+            .add_module_operation_contract(
+                ["tools"],
+                "Tools",
+                name,
+                name,
+                &lashlang::OperationContract::new(arguments, json!({"type": "object"})),
+            )
+            .unwrap();
+    }
     catalog
         .add_module_operation(
             ["processes"],
@@ -395,7 +436,17 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         assert!(!retry.retryable);
         assert_eq!(first.operation_id, retry.operation_id);
         assert_eq!(first.text, retry.text);
-        assert_eq!(first.text.len(), plan.provider_output_bytes as usize);
+        let cell = format!(
+            "<typescript>\n{}\n</typescript>",
+            first.cell_source.as_deref().unwrap()
+        );
+        if cell.len() < plan.provider_output_bytes as usize {
+            assert_eq!(first.text.len(), plan.provider_output_bytes as usize);
+            witnessed.insert("padded");
+        } else {
+            assert_eq!(first.text, cell, "an overflowing cell is served whole");
+            witnessed.insert("overflow");
+        }
         assert_eq!(
             first
                 .chunks
@@ -413,6 +464,12 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             let linked =
                 lash_typescript::link(&code, &host).unwrap_or_else(|e| panic!("{e:?}\n{code}"));
             if !plan.child_processes.is_empty() {
+                // A process handle read back from a list is null at run
+                // time (FIG-4168 smoke): cells keep each handle in a name.
+                assert!(!code.contains("handles"), "{code}");
+                for index in 0..plan.child_processes.len() {
+                    assert!(code.contains(&format!("const h{index}=await processes.start(")));
+                }
                 let process = linked
                     .artifact
                     .ir()
@@ -455,11 +512,37 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             witnessed.insert("plain");
         }
         for process in &plan.host_processes {
-            let body = format!(
-                "{} const handle=await processes.start({{definition:body}});finish(handle);",
-                generator.process_body(process)
+            let linked = lash_typescript::link(&generator.process_body(process), &host).unwrap();
+            let bodies: Vec<_> = linked
+                .artifact
+                .ir()
+                .declarations
+                .iter()
+                .filter_map(|declaration| match declaration {
+                    lashlang::Declaration::Process(process) => Some(process),
+                    _ => None,
+                })
+                .collect();
+            let [body] = bodies.as_slice() else {
+                panic!("a host start links exactly one durable body");
+            };
+            assert_eq!(
+                body.signals
+                    .iter()
+                    .any(|signal| signal.name.as_str() == "resume"),
+                process.waits_for_signal()
             );
-            lash_typescript::link(&body, &host).unwrap();
+            witnessed.insert(if process.waits_for_signal() {
+                "host-waiting"
+            } else {
+                "host"
+            });
+        }
+        for queued in &plan.queued_inputs {
+            let response = generator.queued_response(&plan, queued).unwrap();
+            lash_typescript::link(response.cell_source.as_ref().unwrap(), &host).unwrap();
+            assert!(response.text.contains(&queued.idempotency_key));
+            witnessed.insert("queued");
         }
     }
     let mut worst = generator.plan(0, 0).unwrap();
@@ -479,15 +562,45 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
     child.parked = true;
     child.await_result = true;
     worst.child_processes = vec![child; 8];
+    let mut attachment = generator.plan(0, 0).unwrap();
+    while attachment.attachments.len() < 3 {
+        attachment = generator.plan(0, attachment.operation.ordinal + 1).unwrap();
+    }
+    worst.attachments = attachment.attachments;
     for parallel in [true, false] {
         worst.parallel_tools = parallel;
         let response = generator.provider_response(&worst, 1).unwrap();
-        lash_typescript::link(response.cell_source.as_ref().unwrap(), &host).unwrap();
-        assert_eq!(response.text.len(), 1024);
+        let source = response.cell_source.as_ref().unwrap();
+        lash_typescript::link(source, &host).unwrap();
+        // The worst cell overflows the smallest bucket: it is served whole.
+        assert!(response.text.len() > 1024);
+        assert_eq!(
+            response.text,
+            format!("<typescript>\n{source}\n</typescript>")
+        );
     }
+    let cron = generator.cron_setup_response().unwrap();
+    assert_eq!(cron.operation_id, "provider/cron");
+    assert!(cron.text.contains("provider/cron/0"));
+    assert!(cron.text.contains(&format!(
+        "provider/cron/{}",
+        workload.spec().cron.subscriptions - 1
+    )));
+    assert_eq!(generator.cron_tick_key(3, 7), "provider/cron/3/tick/7");
     assert_eq!(
         witnessed,
-        BTreeSet::from(["cell", "tools", "process", "delayed-signal", "plain"])
+        BTreeSet::from([
+            "cell",
+            "tools",
+            "process",
+            "delayed-signal",
+            "plain",
+            "host",
+            "host-waiting",
+            "queued",
+            "padded",
+            "overflow"
+        ])
     );
     let mut counts = CallCounts::default();
     for kind in [
@@ -713,4 +826,71 @@ fn auxiliary_llm_requests_keep_independent_retry_ids_and_byte_sizes() {
         "auxiliary fixtures: {} independently keyed requests, exact prompt/output sizes and unchanged retries",
         turn.auxiliary_llm_requests
     );
+}
+
+#[test]
+fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
+    let workload = Workload::smoke_v1().unwrap();
+    assert_eq!(
+        Workload::named("smoke-v1").unwrap().sha256(),
+        workload.sha256()
+    );
+    assert_ne!(Workload::v1().unwrap().sha256(), workload.sha256());
+    assert!(Workload::named("figments-v2").is_err());
+    let generator = Generator::new(&workload, "smoke").unwrap();
+    let mut covered: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut hit = |class: &'static str, yes: bool| {
+        *covered.entry(class).or_default() += u64::from(yes);
+    };
+    let sessions = u64::from(workload.spec().sessions);
+    for actor in 0..sessions {
+        for ordinal in 0..lash_perf::workload::SMOKE_TURNS_PER_SESSION {
+            let plan = generator.plan(actor, ordinal).unwrap();
+            hit("turn", true);
+            hit(
+                "tools-parallel",
+                !plan.tool_batches.is_empty() && plan.parallel_tools,
+            );
+            hit(
+                "tools-serial",
+                !plan.tool_batches.is_empty() && !plan.parallel_tools,
+            );
+            hit("child-process", !plan.child_processes.is_empty());
+            hit(
+                "child-parked",
+                plan.child_processes.iter().any(|process| process.parked),
+            );
+            for process in &plan.host_processes {
+                hit("host-process", true);
+                hit(
+                    "host-signalled",
+                    process.waits_for_signal() && !process.cancel,
+                );
+                hit("host-cancelled", process.cancel);
+            }
+            hit("attachment", !plan.attachments.is_empty());
+            let shared = plan.attachments.iter().any(|attachment| {
+                attachment.owner_actors.len() == 2
+                    && attachment
+                        .owner_actors
+                        .iter()
+                        .all(|owner| *owner < sessions)
+            });
+            hit("attachment-shared", shared);
+            for queued in &plan.queued_inputs {
+                hit("queued-active", queued.during_active_turn);
+                hit("queued-after", !queued.during_active_turn);
+                hit("queued-cancelled", queued.cancel);
+            }
+            hit("turn-cancel", plan.cancel);
+            hit("delete", plan.delete);
+            hit("rotate", plan.rotate);
+            hit("provider-retry", plan.retryable_first_attempt);
+        }
+    }
+    eprintln!("smoke coverage over {sessions} sessions: {covered:?}");
+    for (class, count) in &covered {
+        assert!(*count > 0, "the smoke workload never exercises {class}");
+    }
+    assert_eq!(covered.len(), 17);
 }

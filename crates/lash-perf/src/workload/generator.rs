@@ -18,6 +18,27 @@ impl OperationId {
     pub fn child_key(&self, purpose: &str, index: usize) -> String {
         format!("{}/{purpose}/{index}", self.key())
     }
+
+    /// The operation a `run/actor/ordinal` key names, and the child path after
+    /// it (empty for the operation itself). Run IDs never contain `/`.
+    pub fn parse(key: &str) -> Result<(Self, &str)> {
+        let mut parts = key.splitn(4, '/');
+        let (Some(run), Some(actor), Some(ordinal)) = (parts.next(), parts.next(), parts.next())
+        else {
+            anyhow::bail!("`{key}` is not a run/actor/ordinal operation key");
+        };
+        ensure!(!run.is_empty(), "`{key}` names no run");
+        let id = Self {
+            run: run.to_owned(),
+            actor: actor
+                .parse()
+                .map_err(|_| anyhow::anyhow!("`{key}` has a non-numeric actor"))?,
+            ordinal: ordinal
+                .parse()
+                .map_err(|_| anyhow::anyhow!("`{key}` has a non-numeric ordinal"))?,
+        };
+        Ok((id, parts.next().unwrap_or("")))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +75,14 @@ pub struct ProcessPlan {
     pub signal: bool,
     pub cancel: bool,
     pub wake_delay_ms: u32,
+}
+
+impl ProcessPlan {
+    /// A body waits for its `resume` signal when it parks, when the host
+    /// signals it, or when the host cancels it: a cancel must meet active work.
+    pub fn waits_for_signal(&self) -> bool {
+        self.parked || self.signal || self.cancel
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,6 +196,20 @@ impl<'a> Generator<'a> {
             .spec()
             .history_prefill_turns
             .sample(&mut self.stream(actor, session_ordinal, "prefill"))
+    }
+
+    pub fn run(&self) -> &str {
+        &self.run
+    }
+
+    /// The name of cron schedule `subscription`, unique within the run.
+    pub fn cron_schedule(&self, subscription: u64) -> String {
+        format!("{}/cron/{subscription}", self.run)
+    }
+
+    /// The idempotency key of one scheduled cron emission.
+    pub fn cron_tick_key(&self, subscription: u64, tick: u64) -> String {
+        format!("{}/tick/{tick}", self.cron_schedule(subscription))
     }
 
     pub fn cron_phase_s(&self, subscription: u64) -> f64 {

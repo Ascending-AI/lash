@@ -75,7 +75,37 @@ until the local controller has provisioned Restate. Schema setup is an install
 hook and is not reapplied during compatible upgrades. The bounded driver is an
 install/upgrade hook so Kubernetes never has to mutate a completed Job. Disable
 it for L4 campaigns that supply their own sustained driver. The driver is the L2 smoke.
-The sustained durable workload and final result archive belong to later lanes.
+
+# Durable workload
+
+`load.enabled` renders the `<name>-load` Job, which runs `lash-loadtest-driver`
+against the running topology (FIG-4168). It is off at install; `just
+multi-node-load` applies it after the topology gates, waits for it, archives
+its log as `load.log` and `load-witness.txt`, and fails unless the driver
+printed `load witness verdict=passed`. `load.workload` names the checked-in
+workload every worker, the provider and the driver generate from (`smoke-v1`
+or `figments-v1`); `load.sessions` and `load.turnsPerSession` bound the run.
+The default is the pipeline smoke: four sessions of six turns, a minute or two.
+It is not a baseline and derives no budgets.
+
+Every session is an open-loop Poisson clock of primary turns sent through
+Restate ingress to the workers' `E2eLoadWorkflow`, which runs each through
+lash's public API: `session.send` with its queued inputs and cancels, RLM cells
+calling synthetic tools, child processes with awaits and delayed signals,
+host process starts with signals, cancels and awaits, attachment puts, cron
+schedules registered as trigger subscriptions and emitted on their seeded
+phases, and deletes of rotated or deleted sessions. Workers read every blob
+back through their `/load/attachments` endpoint, rotating so a peer reads what
+another worker put. Deleting the cron owner ends its subscriptions; one more
+emission per schedule must start nothing.
+
+The evidence lives in the witness database, outside lash's store: the driver's
+sent and terminal rows, the provider's receipts, the synthetic tools' effect
+attempts and commits, and the exact blob bytes put and read (digested by the
+witness). The driver then reconciles 19 evidence classes against the plan the
+workload regenerates and prints one `load witness class=...` line per class.
+Any violation, and any class with no evidence, fails the run. The final result
+archive and measurements belong to later lanes.
 
 The `<name>-faults` ConfigMap exports `hooks.json` from values and `targets.json`
 with the namespace, selected worker Deployment, selected Restate pod, generation

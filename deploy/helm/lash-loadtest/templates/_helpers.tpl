@@ -33,4 +33,5 @@ env:
   - {name: RESTATE_ADMIN_URL, value: "http://{{ include "loadtest.name" . }}-restate:9070"}
   - {name: RESTATE_AUTHORITY_ID, value: "loadtest:{{ .Release.Namespace }}"}
   - {name: MOCK_PROVIDER_BASE_URL, value: "http://{{ include "loadtest.name" . }}-provider:18001"}
+  - {name: LASH_LOAD_WORKLOAD, value: {{ .Values.load.workload | quote }}}
 {{- end -}}

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 52,
-  "cargo_target_count": 196,
+  "cargo_target_count": 197,
   "feature_lane_units": [
     {
       "features": [],
@@ -19795,7 +19795,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 260,
+  "generated_label_count": 261,
   "packages": [
     {
       "declared_features": [
@@ -23264,6 +23264,7 @@
         "axum",
         "chrono",
         "lash-internal-core",
+        "lash-internal-lashlang",
         "lash-internal-llm-tools",
         "lash-internal-plugin-process-controls",
         "lash-internal-plugin-standard-compaction",
@@ -23273,11 +23274,13 @@
         "lash-internal-restate",
         "lash-internal-s3-store",
         "lash-internal-sqlite-store",
+        "lash-perf",
         "lash-runtime",
         "reqwest",
         "restate-sdk",
         "serde",
         "serde_json",
+        "sha2",
         "sqlx",
         "tempfile",
         "tokio",
@@ -23348,6 +23351,12 @@
           "cargo": "lash-e2e-worker",
           "kind": "bin",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
+          "tags": []
+        },
+        {
+          "cargo": "lash-loadtest-driver",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
           "tags": []
         },
         {

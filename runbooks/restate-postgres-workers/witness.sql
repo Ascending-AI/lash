@@ -126,5 +126,28 @@ CREATE TABLE witness_provider_receipts (
 GRANT INSERT (request_id, scenario, workflow_id, model, request_bytes, response_bytes)
     ON witness_provider_receipts TO lash_witness;
 
+-- The FIG-3790 durable load workload's evidence (FIG-4168). The driver
+-- appends every operation it sends and the typed terminal it read back; the
+-- attachment tool and the workers' read endpoint append the exact blob bytes
+-- they put and read. With the provider receipts and the effect ledgers above,
+-- the load verifier reconciles these rows against the regenerated plan.
+CREATE TABLE witness_load_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK (
+        operation IN ('turn', 'delete-session', 'cron-setup', 'cron-tick', 'attachment')
+    ),
+    phase TEXT NOT NULL CHECK (phase IN ('sent', 'terminal', 'put', 'read')),
+    observer TEXT NOT NULL,
+    detail_json TEXT NOT NULL,
+    content_bytes BYTEA,
+    content_digest TEXT GENERATED ALWAYS AS (encode(sha256(content_bytes), 'hex')) STORED,
+    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us()
+);
+CREATE INDEX witness_load_events_by_run ON witness_load_events (run_id, operation, phase);
+GRANT INSERT (run_id, subject, operation, phase, observer, detail_json, content_bytes)
+    ON witness_load_events TO lash_witness;
+
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lash_witness;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO lash_witness;

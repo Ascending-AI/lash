@@ -1,10 +1,13 @@
 use lash::ProcessId;
 use lash::SessionId;
 mod batch_journal;
+pub mod load;
 pub mod local_restate;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
+mod session_support;
+pub use session_support::{create_or_open_session, turn_handler_error};
 pub mod witness;
 use anyhow::{Context, Result, bail};
 use lash::persistence::{AttachmentStore, LeaseOwnerIdentity};
@@ -463,6 +466,16 @@ pub struct E2eCoreConfig {
     pub fail_once: bool,
     /// The witness ledger pool (`witness.sql`), apart from `storage`.
     pub witness: PgPool,
+    /// The load workload this worker serves, when it serves a load run.
+    pub load: Option<load::LoadContext>,
+}
+
+/// The model every e2e core and its host-started processes run.
+pub fn e2e_model_spec() -> Result<lash::ModelSpec> {
+    lash::ModelSpec::builder("e2e-mock")
+        .context_window_tokens(200_000)
+        .build()
+        .map_err(|err| anyhow::anyhow!(err))
 }
 
 pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
@@ -497,12 +510,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         factory,
     )
         .provider(provider)
-        .model(
-            lash::ModelSpec::builder("e2e-mock")
-                .context_window_tokens(200_000)
-                .build()
-                .map_err(|err| anyhow::anyhow!(err))?,
-        )
+        .model(e2e_model_spec()?)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
@@ -519,6 +527,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             restate_authority_id: config.restate_authority_id,
             fail_once: config.fail_once,
             witness: config.witness,
+            load: config.load,
         }));
     if let Some(trace_dir) = config.trace_dir.as_ref() {
         builder =
@@ -542,6 +551,7 @@ struct E2ePluginFactory {
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
+    load: Option<load::LoadContext>,
 }
 
 impl PluginFactory for E2ePluginFactory {
@@ -564,6 +574,7 @@ impl PluginFactory for E2ePluginFactory {
                 button_pressed_event_type(),
             )
             .expect("valid e2e button trigger source");
+        load::register_cron_trigger_source(&mut resources);
         vec![
             PluginExtensionContribution::new(
                 LASHLANG_SURFACE_EXTENSION_ID,
@@ -588,6 +599,7 @@ impl PluginFactory for E2ePluginFactory {
             restate_authority_id: self.restate_authority_id.clone(),
             fail_once: self.fail_once,
             witness: self.witness.clone(),
+            load: self.load.clone(),
         }))
     }
 }
@@ -600,6 +612,7 @@ struct E2eSessionPlugin {
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
+    load: Option<load::LoadContext>,
 }
 
 impl SessionPlugin for E2eSessionPlugin {
@@ -614,6 +627,7 @@ impl SessionPlugin for E2eSessionPlugin {
             "pressed",
             button_pressed_payload_schema(),
         ))?;
+        reg.triggers().declare(load::cron_trigger_event())?;
         reg.tools()
             .provider(e2e_tool_provider(
                 self.pool.clone(),
@@ -622,6 +636,7 @@ impl SessionPlugin for E2eSessionPlugin {
                 self.restate_authority_id.clone(),
                 self.fail_once,
                 self.witness.clone(),
+                self.load.clone(),
             ))
             .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))?;
         Ok(())
@@ -680,179 +695,187 @@ fn e2e_tool_provider(
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
+    load: Option<load::LoadContext>,
 ) -> Arc<dyn ToolProvider> {
+    let load_tools =
+        load.map(|load| load::tools::LoadTools::new(load, witness.clone(), worker_id.clone()));
+    let mut definitions = vec![
+        e2e_tool_definition(
+            "tool:app_lookup",
+            "app_lookup",
+            "Deterministic E2E application data lookup.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" }
+                },
+                "required": ["key"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "type": "string" },
+                    "worker_id": { "type": "string" }
+                },
+                "required": ["key", "value", "worker_id"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "app_lookup"),
+        ),
+        e2e_tool_definition(
+            "tool:async_lookup",
+            "async_lookup",
+            "Deterministic E2E lookup that completes through external AwaitEvent ingress.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "key": { "type": "string" }
+                },
+                "required": ["workflow_id", "key"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "type": "string" },
+                    "worker_id": { "type": "string" },
+                    "async": { "type": "boolean" }
+                },
+                "required": ["key", "value", "worker_id", "async"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "async_lookup"),
+        ),
+        e2e_tool_definition(
+            "tool:make_attachment",
+            "make_attachment",
+            "Write a deterministic attachment through the session attachment store.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["workflow_id", "name"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "mime": { "type": "string" },
+                    "filename": { "type": "string" },
+                    "byte_len": { "type": "integer" }
+                },
+                "required": ["id", "mime", "filename", "byte_len"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "make_attachment"),
+        ),
+        e2e_tool_definition(
+            "tool:batch_side_effect",
+            "batch_side_effect",
+            "Record a deterministic side effect for aggregate tool-batch replay coverage.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "key": { "type": "string" },
+                    "delay_ms": { "type": "integer" },
+                    "lose_after_commit": { "type": "boolean" },
+                    "batch_width": { "type": "integer" }
+                },
+                "required": ["workflow_id", "key"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "type": "string" },
+                    "worker_id": { "type": "string" }
+                },
+                "required": ["key", "value", "worker_id"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "batch_side_effect"),
+        ),
+        e2e_tool_definition(
+            "tool:crash_once",
+            "crash_once",
+            "Crash one worker once for a requested workflow, after previous atomic attempts replay.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "peer_takeover": { "type": "boolean" }
+                },
+                "required": ["workflow_id"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "crashed": { "type": "boolean" },
+                    "worker_id": { "type": "string" }
+                },
+                "required": ["crashed", "worker_id"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "crash_once"),
+        ),
+        e2e_tool_definition(
+            "tool:durable_input_request",
+            "durable_input_request",
+            "Open a durable input request from inside a tool and wait for runner resolution.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "question": { "type": "string" },
+                    "attach_after_resolution": { "type": "boolean" }
+                },
+                "required": ["workflow_id", "question"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "request_id": { "type": "string" },
+                    "answer": { "type": "string" },
+                    "worker_id": { "type": "string" }
+                },
+                "required": ["request_id", "answer", "worker_id"],
+                "additionalProperties": false
+            }),
+            ToolBinding::new(["tools"], "durable_input_request"),
+        ),
+        e2e_tool_definition(
+            "tool:cancel_gate",
+            "cancel_gate",
+            "Block a follow-on frame until the public turn-cancel API signals cancellation.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" }
+                },
+                "required": ["workflow_id"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object" }),
+            ToolBinding::new(["tools"], "cancel_gate"),
+        ),
+    ];
+    // A load worker's cells also call the synthetic load tools.
+    if load_tools.is_some() {
+        definitions.extend(load::tools::definitions());
+    }
     Arc::new(StaticToolProvider::new(
-        vec![
-            e2e_tool_definition(
-                "tool:app_lookup",
-                "app_lookup",
-                "Deterministic E2E application data lookup.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "key": { "type": "string" }
-                    },
-                    "required": ["key"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "key": { "type": "string" },
-                        "value": { "type": "string" },
-                        "worker_id": { "type": "string" }
-                    },
-                    "required": ["key", "value", "worker_id"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "app_lookup"),
-            ),
-            e2e_tool_definition(
-                "tool:async_lookup",
-                "async_lookup",
-                "Deterministic E2E lookup that completes through external AwaitEvent ingress.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" },
-                        "key": { "type": "string" }
-                    },
-                    "required": ["workflow_id", "key"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "key": { "type": "string" },
-                        "value": { "type": "string" },
-                        "worker_id": { "type": "string" },
-                        "async": { "type": "boolean" }
-                    },
-                    "required": ["key", "value", "worker_id", "async"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "async_lookup"),
-            ),
-            e2e_tool_definition(
-                "tool:make_attachment",
-                "make_attachment",
-                "Write a deterministic attachment through the session attachment store.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" },
-                        "name": { "type": "string" }
-                    },
-                    "required": ["workflow_id", "name"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" },
-                        "mime": { "type": "string" },
-                        "filename": { "type": "string" },
-                        "byte_len": { "type": "integer" }
-                    },
-                    "required": ["id", "mime", "filename", "byte_len"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "make_attachment"),
-            ),
-            e2e_tool_definition(
-                "tool:batch_side_effect",
-                "batch_side_effect",
-                "Record a deterministic side effect for aggregate tool-batch replay coverage.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" },
-                        "key": { "type": "string" },
-                        "delay_ms": { "type": "integer" },
-                        "lose_after_commit": { "type": "boolean" },
-                        "batch_width": { "type": "integer" }
-                    },
-                    "required": ["workflow_id", "key"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "key": { "type": "string" },
-                        "value": { "type": "string" },
-                        "worker_id": { "type": "string" }
-                    },
-                    "required": ["key", "value", "worker_id"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "batch_side_effect"),
-            ),
-            e2e_tool_definition(
-                "tool:crash_once",
-                "crash_once",
-                "Crash one worker once for a requested workflow, after previous atomic attempts replay.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" },
-                        "peer_takeover": { "type": "boolean" }
-                    },
-                    "required": ["workflow_id"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "crashed": { "type": "boolean" },
-                        "worker_id": { "type": "string" }
-                    },
-                    "required": ["crashed", "worker_id"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "crash_once"),
-            ),
-            e2e_tool_definition(
-                "tool:durable_input_request",
-                "durable_input_request",
-                "Open a durable input request from inside a tool and wait for runner resolution.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" },
-                        "question": { "type": "string" },
-                        "attach_after_resolution": { "type": "boolean" }
-                    },
-                    "required": ["workflow_id", "question"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "request_id": { "type": "string" },
-                        "answer": { "type": "string" },
-                        "worker_id": { "type": "string" }
-                    },
-                    "required": ["request_id", "answer", "worker_id"],
-                    "additionalProperties": false
-                }),
-                ToolBinding::new(["tools"], "durable_input_request"),
-            ),
-            e2e_tool_definition(
-                "tool:cancel_gate",
-                "cancel_gate",
-                "Block a follow-on frame until the public turn-cancel API signals cancellation.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": { "type": "string" }
-                    },
-                    "required": ["workflow_id"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({ "type": "object" }),
-                ToolBinding::new(["tools"], "cancel_gate"),
-            ),
-        ],
+        definitions,
         E2eTools {
             pool,
             worker_id,
@@ -860,6 +883,7 @@ fn e2e_tool_provider(
             restate_authority_id,
             fail_once,
             witness,
+            load_tools,
         },
     )) as Arc<dyn ToolProvider>
 }
@@ -884,6 +908,7 @@ struct E2eTools {
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
+    load_tools: Option<load::tools::LoadTools>,
 }
 
 type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolOutcome> + Send + 'a>>;
@@ -917,6 +942,9 @@ impl E2eTools {
             "crash_once" => Box::pin(self.crash_once(call)),
             "durable_input_request" => Box::pin(self.durable_input_request(call)),
             "cancel_gate" => Box::pin(self.cancel_gate(call)),
+            name if load::tools::TOOL_NAMES.contains(&name) => {
+                load::tools::execute(self.load_tools.as_ref(), call)
+            }
             name => {
                 Box::pin(
                     async move { ToolOutcome::err_fmt(format_args!("unknown e2e tool `{name}`")) },

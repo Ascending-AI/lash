@@ -108,15 +108,21 @@ def metrics(document):
     return 'restate_scrapes=3 healthy=3'
 
 
+def job(documents, suffix):
+    jobs = [document for document in documents
+            if document['kind'] == 'Job' and document['metadata']['name'].endswith('-' + suffix)]
+    if len(jobs) != 1:
+        raise ValueError(f'expected one {suffix} Job')
+    return jobs[0]
+
+
 def main():
     mode, *paths = sys.argv[1:]
-    if mode == 'smoke-job':
+    if mode == 'job':
         import yaml
+        (suffix,) = paths
         documents = [document for document in yaml.safe_load_all(sys.stdin) if document]
-        jobs = [document for document in documents if document['kind'] == 'Job' and document['metadata']['name'].endswith('-smoke')]
-        if len(jobs) != 1:
-            raise ValueError('expected one smoke Job')
-        sys.stdout.write(json.dumps(jobs[0]))
+        sys.stdout.write(json.dumps(job(documents, suffix)))
         return
     if mode in {'availability', 'recovery'}:
         node_path, status_path, restarted_name = paths

@@ -832,6 +832,7 @@ pub(super) async fn assert_reopened_session_agrees(
         trace_dir,
         fail_once: false,
         witness: witness.clone(),
+        load: None,
     })?;
     let session = core.session(DEFAULT_SESSION_ID).open().await?;
     let read = storage

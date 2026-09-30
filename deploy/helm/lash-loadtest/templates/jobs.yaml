@@ -90,3 +90,36 @@ spec:
             - {name: WORKER_CONTROL_URLS, value: "{{ range $index := until (int .Values.workers.count) }}{{ if $index }},{{ end }}http://{{ $name }}-worker-{{ $index }}-{{ $.Values.workers.generation }}:18101{{ end }}"}
           resources: {{ toJson .Values.driver.resources }}
 {{- end }}
+{{- if .Values.load.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-load
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.load.activeDeadlineSeconds }}
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-topology
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bash, -ec]
+          args:
+            - |
+              until curl -fsS http://{{ $name }}-restate:9070/health >/dev/null; do sleep 1; done
+              {{ range $index := until (int .Values.workers.count) }}until curl -fsS http://{{ $name }}-worker-{{ $index }}-{{ $.Values.workers.generation }}:18101/health >/dev/null; do sleep 1; done
+              {{ end }}
+      containers:
+        - name: load
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [lash-loadtest-driver]
+          {{- include "loadtest.env" . | nindent 10 }}
+            - {name: LASH_LOAD_SESSIONS, value: {{ .Values.load.sessions | quote }}}
+            - {name: LASH_LOAD_TURNS_PER_SESSION, value: {{ .Values.load.turnsPerSession | quote }}}
+            - {name: WORKER_CONTROL_URLS, value: "{{ range $index := until (int .Values.workers.count) }}{{ if $index }},{{ end }}http://{{ $name }}-worker-{{ $index }}-{{ $.Values.workers.generation }}:18101{{ end }}"}
+          resources: {{ toJson .Values.load.resources }}
+{{- end }}
