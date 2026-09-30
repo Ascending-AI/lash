@@ -349,9 +349,10 @@ pub mod tools {
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver,
-        RecordedGrantInstallError, Resolution as DeferredToolResolution,
-        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant, link_with_deferred_resolution,
+        DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+        DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError,
+        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
+        ToolGrant as DeferredToolGrant, link_with_deferred_resolution,
     };
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
@@ -384,6 +385,9 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     pub use lash_core::CheckpointKind;
+    /// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
+    /// objects, nameable so a host can decorate a store set (FIG-4373).
+    pub use lash_core::ProcessDefinitionStore;
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
@@ -408,6 +412,9 @@ pub mod persistence {
         TurnLaneAdmissionPolicy, TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out
+    /// as a trait object (FIG-4373).
+    pub use lash_core::store::ArtifactCleanupLedger;
     /// The current state of an obligation a custom ledger exposes.
     pub use lash_core::store::ObligationStanding;
     /// A process park write accepted by a custom registry.
@@ -552,6 +559,10 @@ pub mod plugins {
         BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
         ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
     };
+    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
+    /// factory that wraps another (the RLM factory, say) forwards it so the
+    /// wrapped factory's process engines are still contributed (FIG-4373).
+    pub use lash_core::plugin::ProcessEngineContributionContext;
     /// Hook contracts and reports used by plugin authors.
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
@@ -575,6 +586,15 @@ pub mod plugins {
         ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
         ProtocolSessionRestoreView, RecordedSessionConfig, SessionAuthorityContext,
         SessionCreationConfig, TurnFinalization, TurnPreparation,
+    };
+    /// The registration groups [`PluginRegistrar`]'s accessors return
+    /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
+    /// one as a parameter.
+    pub use lash_core::plugin::{
+        ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
+        PluginOperationRegistrations, PromptRegistrations, ProtocolRegistrations,
+        SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
+        ToolResultRegistrations, TriggerEventRegistrations, TurnRegistrations,
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
     pub use lash_core::plugin::{

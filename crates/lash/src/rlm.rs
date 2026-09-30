@@ -164,6 +164,9 @@ pub use lash_lashlang_runtime::{
     LashlangSurfaceContribution, SharedDeferredTriggerResolver, TriggerGrant, TriggerResolution,
     lashlang_surface_extension,
 };
+pub use lash_lashlang_runtime::{
+    LashlangProcessAdmissionRefusal, LashlangRuntimeError, ToolBindingError,
+};
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
     MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
@@ -177,6 +180,9 @@ pub use lash_protocol_rlm::{
     DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation,
     TypescriptDialect,
 };
+/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
+/// assembled from.
+pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local
 /// runtime configuration; durable session seeds use [`RlmSeed`].
@@ -186,6 +192,7 @@ pub use lash_rlm_types::{
     RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig,
     RlmSessionConfigConflict, RlmTermination, RlmTurnOptions,
 };
+pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
 pub use lashlang::LinkedModule;
 
 /// The Lashlang compile APIs are operations over an

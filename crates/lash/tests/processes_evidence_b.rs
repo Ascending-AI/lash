@@ -396,16 +396,16 @@ fn processes_area_witnesses_b() {
     fn meth_0453<T: lash::plugins::ProcessEngine>(_: &T) {
         let _ = T::run;
     }
-    // W0455: lash_core::ProcessEngineContributionContext [struct]
-    type_witness::<lash_core::ProcessEngineContributionContext>();
-    // W0456: lash_core::ProcessEngineContributionContext::extensions [function]
-    let _ = lash_core::ProcessEngineContributionContext::extensions;
-    // W0457: lash_core::ProcessEngineContributionContext::new [function]
-    let _ = lash_core::ProcessEngineContributionContext::new;
-    // W0458: lash_core::ProcessEngineContributionContext::process_lifecycle_available [function]
-    let _ = lash_core::ProcessEngineContributionContext::process_lifecycle_available;
-    // W0459: lash_core::ProcessEngineContributionContext::trace_context [function]
-    let _ = lash_core::ProcessEngineContributionContext::trace_context;
+    // W0455: lash::plugins::ProcessEngineContributionContext [struct]
+    type_witness::<lash::plugins::ProcessEngineContributionContext>();
+    // W0456: lash::plugins::ProcessEngineContributionContext::extensions [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::extensions;
+    // W0457: lash::plugins::ProcessEngineContributionContext::new [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::new;
+    // W0458: lash::plugins::ProcessEngineContributionContext::process_lifecycle_available [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
+    // W0459: lash::plugins::ProcessEngineContributionContext::trace_context [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::trace_context;
     // W0460: lash::plugins::ProcessEngineRunContext [struct]
     type_witness::<lash::plugins::ProcessEngineRunContext>();
     // W0461: lash::plugins::ProcessEngineRunContext::cancellation_token [function]
