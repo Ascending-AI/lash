@@ -15,7 +15,11 @@ it can enforce non-reuse within the store that admits it.
 A host-facing session id is host-provided, nonempty, NUL-free UTF-8 and opaque
 to Lash. A transport may impose narrower syntax. Once a store materializes
 session metadata for an id, that id identifies one session lifetime.
-Deleting it writes permanent deletion evidence. Creating or forking to that
+An accepted close first makes it refuse new work. Physical deletion follows
+its owed cleanup and writes permanent deletion evidence. A `Closing` result
+has not yet deleted storage; `LashCore::await_session_deletion` observes the
+permanent tombstone and returns typed stalls that need operator re-arm.
+Creating or forking to that
 id fails with `StoreError::SessionDeleted`. Retention and vacuum cannot remove
 this evidence. Deleting an id that never materializes is a no-op.
 

@@ -298,9 +298,29 @@ root is judged like any other. A failed registry read ends nothing.
 
 ## 4. Two-phase session delete
 
-Delete first records `CloseSession` and marks the session closing. New sends
-refuse as `SessionClosing`. The engine half stops its roots and closes its
-scopes. Acknowledgement arms `SessionDelete` in the same transaction.
+Before accepting a close, delete checks the session's pending turn-cancel
+closure authorizations. A pending authorization refuses it as
+`StoreError::TurnCancelClosureLifecyclePinned`, with its session and count.
+Nothing has closed. The turn's final commit consumes its exact authorization;
+its answer does not prove that a successor or a replaying turn holds no pin.
+`LashCore::await_turn_cancel_closures` observes consumption of these stored
+pins before a host attempts a close again. It does not wait for effect-group
+pins. Every close still checks its refusals, since new work can race readiness.
+
+Delete records `CloseSession` and marks the session closing. New sends refuse
+as `SessionClosing`. The engine half stops its roots and closes its scopes.
+Acknowledgement arms `SessionDelete` in the same transaction. Once the close
+commits, deletion bypasses pre-close pin checks and retains its recorded close.
+
+An answered root's terminal commit arms `ScopeClose`. On Restate, the root's
+`run` returns and sends its separate shared `close` handler. The answer can
+therefore precede delivery of scope cleanup. That delivery records and applies
+parent-end plans and calls `LashDurableWaitIndex/<session>/retire_root` to
+retire the root's indexed waits. The session index serializes this call with
+its other exclusive handlers. A busy index can delay cleanup; an attempt that
+fails or exceeds its delivery budget leaves its obligation owed under §1.4.
+Replay alone is not a reason to retain the scope-close obligation after its
+consumer has acknowledged the close.
 
 Physical delete waits retryably while the session's scope-close or parent-end
 cleanup is undelivered. It removes process-session state and subscriptions,
@@ -308,6 +328,18 @@ revokes waits, retires the effect journal and deletes storage last. Storage
 delete removes the owning obligation row. Every preceding step is idempotent;
 a failed attempt leaves the obligation owed for another relay attempt.
 The permanent `CloseSession` tombstone is retained, per ADR 0108 §5a.
+
+`SessionDeletion::Closing` means accepted deletion remains owed, with a typed
+reason: an unacknowledged close, cleanup counts, a failed delivery or the
+obligation's standing. Hosts await `LashCore::await_session_deletion` instead
+of reissuing deletion. It makes no engine request and starts no delivery.
+`SessionDeleteCompletion::Deleted` requires the permanent storage tombstone;
+`Absent` and `NotClosing` distinguish an unknown id and a live id whose close
+has not committed. `Stalled` carries the retained close, scope-close,
+parent-end or physical-delete obligation for explicit operator re-arm.
+Neither a missing obligation nor an elapsed timeout proves deletion. Dropping
+the observer leaves accepted work owed to recovery. A Restate host journals
+the returned observation in its own step.
 
 Delete does not wait for arbitrary engine replay. Journaled admission and
 seal steps record either their pre-delete answer or retirement. Closing
@@ -319,9 +351,12 @@ A stalled close arms no physical delete. Its unfinished roots remain
 accounted for as `held_by_stalled_close` until re-arm or deletion settles the
 work. Cleanup stalls use the same operator listing and re-arm as other kinds.
 
-Evidence: `crates/lash-core/src/runtime/session_delete.rs:202`, `:291`,
-`crates/lash-sqlite-store/src/session_delete_ledger.rs:40`, and
-`crates/lash-core-store/src/store/session_delete.rs`.
+Evidence: `crates/lash-core/src/runtime/session_close.rs`,
+`crates/lash-core/src/runtime/session_delete.rs`,
+`crates/lash/src/core/session_deletion.rs`,
+`crates/lash-restate/src/session_driver.rs`,
+`crates/lash-core-execution/src/runtime/process/scope_close.rs`, and
+`crates/lash-restate-test/tests/host_send_wait/session_delete.rs`.
 
 ## 5. Due time belongs to delivery
 

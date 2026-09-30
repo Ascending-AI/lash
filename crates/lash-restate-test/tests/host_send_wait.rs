@@ -68,6 +68,9 @@ use restate_sdk::errors::HandlerResult;
 use restate_sdk::serde::Json;
 use tokio::sync::Notify;
 
+#[path = "host_send_wait/session_delete.rs"]
+mod session_delete;
+
 const SESSION: &str = "durable-host";
 /// A probe window short enough that a held turn spans many probes.
 const PROBE: Duration = Duration::from_millis(20);
@@ -421,9 +424,21 @@ async fn world(config: ServerConfig) -> World {
 /// A world over `stores`, or `None` for PostgreSQL when no server is
 /// configured.
 async fn world_over(config: ServerConfig, stores: Stores) -> Option<World> {
+    world_over_gated(config, stores, None).await
+}
+
+async fn world_over_gated(
+    config: ServerConfig,
+    stores: Stores,
+    gate: Option<Arc<session_delete::LifecycleGate>>,
+) -> Option<World> {
     let (backend, storage) = backend_over(config, stores).await?;
     let barrier = Arc::new(Barrier::default());
-    let core = core(backend.lash_backend(), &barrier);
+    let runtime_backend = match gate {
+        Some(gate) => session_delete::gated_backend(backend.lash_backend(), gate),
+        None => backend.lash_backend(),
+    };
+    let core = core(runtime_backend, &barrier);
     let session = created_session(&core, SESSION)
         .await
         .open()
@@ -674,7 +689,10 @@ impl lash_core::SessionDeleteExecution for DeleteExecution<'_> {
 async fn deletion(
     core: &lash::LashCore,
     session_id: &str,
-) -> (HandlerAttempt, Arc<Mutex<Option<String>>>) {
+) -> (
+    HandlerAttempt,
+    Arc<Mutex<Option<lash::Result<lash::SessionDeletion>>>>,
+) {
     let administration = core.session_administration().await;
     let answered = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&answered);
@@ -690,44 +708,55 @@ async fn deletion(
             let context = lash_core::SessionDeleteContext::from_execution(&execution, &session_id)
                 .expect("the delete context");
             let deletion = lash::LashCore::delete_session(context).await;
-            *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(format!("{deletion:?}"));
+            *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(deletion);
         })
     });
     (attempt, answered)
 }
 
-/// Delete `session_id` in handlers `run` runs, until the store records the
-/// deletion: the session gone, or closed with its physical delete owed to
-/// the recovery relay. Either way no attempt may use it again. A turn that
-/// just answered can still pin the session for its cancellation closure, and
-/// the store refuses the delete until the engine consumes that pin.
+/// Delete once after each observed closure change, then await physical
+/// completion. A retained pin is read without reissuing delete, and Closing
+/// leaves delivery to the finalizer rather than repeating the close.
 async fn delete_session<F, Fut>(core: &lash::LashCore, session_id: &str, run: F)
 where
     F: Fn(HandlerAttempt) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    let mut answered = String::new();
-    for _ in 0..200 {
+    let id = lash::SessionId::from(session_id);
+    loop {
         let (attempt, slot) = deletion(core, session_id).await;
         run(attempt).await.expect("the delete handler runs");
-        answered = slot
+        let answer = slot
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .unwrap_or_default();
-        if ["Ok(Deleted(", "Ok(AlreadyDeleted", "Ok(Closing("]
-            .iter()
-            .any(|deleted| answered.starts_with(deleted))
-        {
-            return;
+            .take()
+            .expect("the deletion answered");
+        match answer {
+            Err(lash::EmbedError::Store(
+                lash_core::StoreError::TurnCancelClosureLifecyclePinned { .. },
+            )) => {
+                core.await_turn_cancel_closures(&id)
+                    .await
+                    .expect("the closure ends");
+            }
+            Ok(
+                lash::SessionDeletion::Deleted(_) | lash::SessionDeletion::AlreadyDeleted { .. },
+            ) => return,
+            Ok(lash::SessionDeletion::Closing(_)) => {
+                let completed = core
+                    .await_session_deletion(&id)
+                    .await
+                    .expect("observe deletion");
+                assert_eq!(
+                    completed,
+                    lash::SessionDeleteCompletion::Deleted,
+                    "`{session_id}` delete did not complete"
+                );
+                return;
+            }
+            Err(error) => panic!("`{session_id}` could not be deleted: {error:?}"),
         }
-        assert!(
-            answered.contains("TurnCancelClosureLifecyclePinned"),
-            "`{session_id}` could not be deleted: {answered}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("`{session_id}` stayed pinned: {answered}");
 }
 
 /// How a law makes the parked host replay after its session is deleted.
@@ -802,13 +831,23 @@ async fn a_host_replayed_after_its_session_was_deleted_keeps_its_journal(replay:
         "the host reached its session inside its journal"
     );
 
-    delete_session(&world.core, key, |attempt| {
-        world.backend.run_in_handler(
-            lash_core::AdmittedScope::session_delete(lash::SessionId::from(key)),
-            attempt,
-        )
-    })
-    .await;
+    let deleting = tokio::spawn({
+        let core = world.core.clone();
+        let backend = world.backend.clone();
+        async move {
+            delete_session(&core, key, |attempt| {
+                backend.run_in_handler(
+                    lash_core::AdmittedScope::session_delete(lash::SessionId::from(key)),
+                    attempt,
+                )
+            })
+            .await;
+        }
+    });
+    // A parked host keeps the double's automatic clock fixed. Once cleanup
+    // settles, make the finalizer's already owed retry eligible explicitly.
+    session_delete::finish_session_cleanup(&world, key).await;
+    deleting.await.expect("physical deletion completed");
     if let Replay::Kill = replay {
         assert!(
             server.crash(&parked.id),
@@ -1578,6 +1617,13 @@ struct LiveWorld {
 }
 
 async fn live_world(name: &str) -> LiveWorld {
+    live_world_gated(name, None).await
+}
+
+async fn live_world_gated(
+    name: &str,
+    gate: Option<Arc<session_delete::LifecycleGate>>,
+) -> LiveWorld {
     let env = |name: &str| {
         std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment names {name}"))
     };
@@ -1606,7 +1652,11 @@ async fn live_world(name: &str) -> LiveWorld {
     .await
     .expect("start the live backend");
     let barrier = Arc::new(Barrier::default());
-    let core = core(backend.lash_backend(), &barrier);
+    let runtime_backend = match gate {
+        Some(gate) => session_delete::gated_backend(backend.lash_backend(), gate),
+        None => backend.lash_backend(),
+    };
+    let core = core(runtime_backend, &barrier);
     let session = created_session(&core, key.as_str())
         .await
         .open()

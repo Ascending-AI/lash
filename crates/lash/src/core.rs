@@ -16,8 +16,10 @@ pub(crate) mod held_drives;
 mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;
+mod session_deletion;
 pub(crate) mod session_driver;
 mod session_policy;
+pub use session_deletion::SessionDeleteCompletion;
 mod tool_child_context;
 mod work_drivers;
 
@@ -665,14 +667,15 @@ impl LashCore {
     /// an obligation, which this call attempts before it returns.
     ///
     /// The physical delete waits for the close's cleanup — each root's scope
-    /// close, each owned scope's parent-end plan — to be delivered, and for
-    /// the engine to finish the session's work (on Restate, a released root
-    /// often still is, so the delete defers to the reconcile tick). What this
+    /// close, each owned scope's parent-end plan, to be delivered. What this
     /// call could not finish is [`SessionDeletion::Closing`]: the session
     /// stays closed and the recovery relay retries the delete with backoff,
     /// stalling it (surfaced in [`drain_status`](Self::drain_status) and
     /// [`stalled_obligations`](Self::stalled_obligations)) at the attempt
-    /// ceiling. The caller does not retry to finish a deletion.
+    /// ceiling. Await physical completion with [`await_session_deletion`](Self::await_session_deletion).
+    /// A pre-close `TurnCancelClosureLifecyclePinned` refusal can be followed
+    /// with [`await_turn_cancel_closures`](Self::await_turn_cancel_closures)
+    /// before a new close attempt.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeletion> {
