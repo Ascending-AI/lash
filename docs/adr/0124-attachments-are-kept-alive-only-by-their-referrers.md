@@ -73,14 +73,27 @@ The `AttachmentReferrers` port has eight verbs: `begin_attachment_write`,
 `complete_attachment_write`, `abort_attachment_write`,
 `acquire_attachment_refs`, `forget_attachment_ref`,
 `end_attachment_referrer`, `session_referrer_state` and
-`attachment_referrers`. Each is one transaction. Every verb that names a
-referrer refuses:
+`attachment_referrers`. Each is one transaction. A verb that opens a new
+edge or write permit — `begin` or `acquire` — is checked against the
+referrer's kind and its ended fence; `forget` and `end` check the kind.
+These verbs refuse:
 
 - a kind that does not hold attachments, with `ReferrerKindRefused`;
-- a fenced referrer, with `ArtifactReferrerEnded` (except `forget` and
-  `end`, for which a fenced referrer is a no-op);
+- a fenced referrer, with `ArtifactReferrerEnded` (`forget` and `end`
+  open nothing, so a fenced referrer is a no-op for them);
 - and, for `acquire`, a digest with no evidence, with `UnknownAttachment`.
   A refusal writes nothing for any id in the batch.
+
+Completion and abort of an in-flight write are settled by the write
+permit `begin` issued, not by a fresh referrer check: once the referrer
+ends and its pending row is removed, completion refuses the typed
+`StaleWritePermit`, and abort without a permit is an idempotent no-op.
+The permit carries the referrer and kind `begin` checked, so SQLite's
+completion and abort need no second kind check
+(`crates/lash-sqlite-store/src/attachments.rs:764-819`, with
+`abort_write_conn` at `crates/lash-sqlite-store/src/attachments.rs:150`);
+PostgreSQL obtains one through referrer locking, which is equivalent
+(`crates/lash-postgres-store/src/postgres/attachments.rs:663-718`).
 
 `end_attachment_referrer` fences the referrer, deletes its pending writes
 (releasing their condemnation claims) and deletes its edges. It reclaims
