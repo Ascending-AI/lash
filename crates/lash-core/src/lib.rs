@@ -580,8 +580,8 @@ pub use tool_result::{
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
+    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog,
+    TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
     TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
     TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
     TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,

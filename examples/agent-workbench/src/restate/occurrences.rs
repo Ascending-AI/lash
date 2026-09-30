@@ -16,10 +16,10 @@ pub(crate) struct CronEmitReport {
 /// Every delivery a trigger occurrence produced, with the outcome and, for a
 /// refusal, the reason.
 ///
-/// `started_process_ids()` filters to `Started`, so tracing only that turned a
-/// delivery the store had already reserved and then refused into silence: a
-/// cron schedule registered without `tz` reserved a delivery on every tick and
-/// started nothing, and no trace said so.
+/// `started_process_ids()` leaves out a delivery that failed to start, so
+/// tracing only that turned a delivery the store had reserved and then refused
+/// into silence: a cron schedule registered without `tz` reserved a delivery
+/// on every tick and started nothing, and no trace said so.
 pub(crate) fn trigger_delivery_trace(
     report: &lash::triggers::TriggerEmitReport,
 ) -> serde_json::Value {
@@ -30,9 +30,6 @@ pub(crate) fn trigger_delivery_trace(
             .map(|delivery| {
                 let (outcome, reason) = match &delivery.outcome {
                     lash::triggers::TriggerDeliveryEmitOutcome::Started => ("started", None),
-                    lash::triggers::TriggerDeliveryEmitOutcome::AlreadyReserved => {
-                        ("already_reserved", None)
-                    }
                     lash::triggers::TriggerDeliveryEmitOutcome::Failed { reason } => {
                         ("failed", Some(reason.clone()))
                     }

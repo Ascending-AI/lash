@@ -1110,7 +1110,7 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
 /// The trigger arm of the public byte-stability law: two clean drives of the
 /// same recorded declaration hand the caller identical bytes, even though the
 /// second drive re-ingests an occurrence that already exists and re-starts a
-/// delivery the store now reads back as `AlreadyReserved` (FIG-806).
+/// delivery the store already holds (FIG-806).
 #[tokio::test]
 async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emission() {
     let world = intent_law_world().await;
@@ -1345,9 +1345,9 @@ async fn cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress()
 /// The at-most-once half: a crash after the occurrence is ingested and its
 /// delivery start commits leaves durable state the redrive must not add to. The
 /// redrive re-ingests the same idempotency key, replays the same delivery start
-/// from the journal, and reports the same bytes — the reservation reads back as
-/// `AlreadyReserved` on the second drive, which is exactly the live-state read a
-/// recorded outcome may not expose.
+/// from the journal, and reports the same bytes: the second drive finds the
+/// reservation already held, a live-state read a recorded outcome may not
+/// expose.
 #[tokio::test]
 async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome() {
     let (store, subscription, redriven) = Box::pin(crashed_trigger_intent_redrive(

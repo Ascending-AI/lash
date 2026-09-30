@@ -251,8 +251,8 @@ pub mod triggers {
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
         LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
-        TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-        TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
+        TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerIngressReceipt,
+        TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
         TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
         TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
         TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,

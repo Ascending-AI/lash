@@ -414,7 +414,6 @@ impl SqliteTriggerStore {
         subscription_json: String,
         process_id: Option<ProcessId>,
         created_at_ms: i64,
-        reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome,
     ) -> Result<lash_core_execution::TriggerDeliveryReservation, lash_core_execution::PluginError>
     {
         Ok(lash_core_execution::TriggerDeliveryReservation {
@@ -422,7 +421,6 @@ impl SqliteTriggerStore {
             subscription: Self::decode_subscription(subscription_json)?,
             process_id,
             created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
-            reservation_status,
         })
     }
 
@@ -462,7 +460,6 @@ impl SqliteTriggerStore {
                             subscription_json,
                             process_id,
                             created_at_ms,
-                            lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?);
                     }
                     Ok(deliveries)
@@ -907,11 +904,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired,
                     ) {
                         (true, true) => reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?,
-                        (false, true) => sqlite_delivery_snapshots(
-                            tx,
-                            &record,
-                            lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
-                        )?,
+                        (false, true) => sqlite_delivery_snapshots(tx, &record)?,
                         (_, false) => Vec::new(),
                     };
                     if is_new
@@ -1435,7 +1428,6 @@ fn reserve_sqlite_deliveries(
             subscription,
             process_id: None,
             created_at_ms,
-            reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome::Reserved,
         });
     }
     lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
@@ -1445,7 +1437,6 @@ fn reserve_sqlite_deliveries(
 fn sqlite_delivery_snapshots(
     tx: &rusqlite::Transaction<'_>,
     occurrence: &lash_core_execution::TriggerOccurrenceRecord,
-    reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome,
 ) -> Result<Vec<lash_core_execution::TriggerDeliveryReservation>, lash_core_execution::PluginError>
 {
     let mut stmt = tx
@@ -1470,7 +1461,6 @@ fn sqlite_delivery_snapshots(
             subscription: SqliteTriggerStore::decode_subscription(snapshot_json)?,
             process_id,
             created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
-            reservation_status: reservation_status.clone(),
         });
     }
     lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);

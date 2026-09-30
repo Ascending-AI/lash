@@ -1664,9 +1664,11 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
         lash_core::facade_support::trigger_delivery_start_key(&replay.reservations[0]),
         "a replayed ingest reserves the delivery its first ingest reserved"
     );
+    assert_eq!(first.realization, lash_core::StoreRealization::Realized);
     assert_eq!(
-        replay.reservations[0].reservation_status,
-        crate::TriggerDeliveryReservationOutcome::AlreadyReserved
+        replay.realization,
+        lash_core::StoreRealization::Coalesced,
+        "the replayed ingest reports that it coalesced onto the recorded occurrence"
     );
 }
 

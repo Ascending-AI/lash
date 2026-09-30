@@ -58,13 +58,6 @@ fn drain_area_witnesses() {
     });
     // W0021: lash::triggers::TriggerDeliveryEmitOutcome [enum]
     type_witness::<lash::triggers::TriggerDeliveryEmitOutcome>();
-    // W0022: lash::triggers::TriggerDeliveryEmitOutcome::AlreadyReserved [variant]
-    variant_witness(|value: &lash::triggers::TriggerDeliveryEmitOutcome| {
-        matches!(
-            value,
-            lash::triggers::TriggerDeliveryEmitOutcome::AlreadyReserved
-        )
-    });
     // W0023: lash::triggers::TriggerDeliveryEmitOutcome::Failed [variant]
     variant_witness(|value: &lash::triggers::TriggerDeliveryEmitOutcome| {
         matches!(

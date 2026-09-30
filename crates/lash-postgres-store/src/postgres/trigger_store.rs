@@ -1176,7 +1176,6 @@ async fn reserve_postgres_deliveries(
             subscription,
             process_id: None,
             created_at_ms,
-            reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome::Reserved,
         });
     }
     lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
@@ -1204,8 +1203,6 @@ async fn postgres_delivery_snapshots(
                     .map(|value| crate::stored_process_id(&value))
                     .transpose()?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
-                reservation_status:
-                    lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })
         })
         .collect::<Result<Vec<_>, PluginError>>()?;
@@ -1239,8 +1236,6 @@ async fn list_deliveries_with(
                     .map(|value| crate::stored_process_id(&value))
                     .transpose()?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
-                reservation_status:
-                    lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })
         })
         .collect()

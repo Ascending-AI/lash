@@ -196,3 +196,42 @@ async fn process_start_store_refusals_and_transient_faults_on_postgres() {
         }
     }
 }
+
+/// FIG-4272 on PostgreSQL: a reattached trigger emission reports the
+/// deliveries its committed attempt started.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn a_reattached_emission_reports_the_deliveries_its_committed_attempt_started_on_postgres() {
+    use super::trigger_emit_reattach_on_the_double::{
+        SEEDS, a_reattached_emission_reports_the_deliveries_its_committed_attempt_started,
+    };
+
+    let url = database_url().expect("the PostgreSQL reattach law requires a database");
+    let _lock = DatabaseLock::acquire(&url).await;
+    for seed in SEEDS {
+        let storage = lash_postgres_store::PostgresStorage::connect(&url)
+            .await
+            .expect("connect the PostgreSQL reattach law store");
+        reset(storage.pool()).await;
+        let attachments = tempfile::tempdir().expect("attachment directory");
+        let backend = lash_restate_test::backend_with_store_set(
+            seed,
+            lash_restate_test::ServerConfig::default(),
+            lash_restate_test::DeploymentHooks::default(),
+            |clock| async {
+                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    &storage,
+                    Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                        attachments.path(),
+                    )),
+                    lash_core::WakeDeliveryConfig::default(),
+                    clock,
+                )) as Arc<dyn lash_core::StoreSet>)
+            },
+        )
+        .await
+        .expect("the Restate SDK over PostgreSQL");
+        a_reattached_emission_reports_the_deliveries_its_committed_attempt_started(&backend, seed)
+            .await;
+    }
+}

@@ -86,11 +86,10 @@ use lash_core::{
     ProtocolTurnOptions, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover,
     SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
     SessionScope, SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage,
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation, TriggerInputBinding,
+    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
+    WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1158,10 +1157,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].subscription.subscription_key, TRIGGER_KEY);
     assert!(deliveries[0].subscription.lifecycle.enabled());
-    assert_eq!(
-        deliveries[0].reservation_status,
-        TriggerDeliveryReservationOutcome::AlreadyReserved
-    );
     assert_eq!(
         deliveries[0].occurrence.payload,
         serde_json::json!({"value": 42})

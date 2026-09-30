@@ -195,9 +195,6 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome>
     fn from(value: lash_core::facade_support::TriggerDeliveryEmitOutcome) -> Self {
         match value {
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Started => Self::Started,
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved => {
-                Self::AlreadyReserved
-            }
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { reason } => {
                 Self::Failed { reason }
             }
@@ -211,7 +208,6 @@ impl From<RemoteTriggerDeliveryEmitOutcome>
     fn from(value: RemoteTriggerDeliveryEmitOutcome) -> Self {
         match value {
             RemoteTriggerDeliveryEmitOutcome::Started => Self::Started,
-            RemoteTriggerDeliveryEmitOutcome::AlreadyReserved => Self::AlreadyReserved,
             RemoteTriggerDeliveryEmitOutcome::Failed { reason } => Self::Failed { reason },
         }
     }

@@ -1610,10 +1610,13 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
 
     let report = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&output)
         .expect("decode trigger emit report");
+    // The replay reports the delivery its first attempt started, not the
+    // store's live read of an already-held reservation (FIG-4272).
     assert!(matches!(
         report.deliveries.as_slice(),
         [lash_core::facade_support::TriggerDeliveryEmitReceipt {
-            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
+            process_id: Some(_),
             ..
         }]
     ));
@@ -1834,7 +1837,7 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
             .map(|subscription_id| {
                 (
                     subscription_id,
-                    &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
+                    &lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
                 )
             })
             .collect::<Vec<_>>()
@@ -1851,7 +1854,8 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
 }
 
 #[tokio::test]
-pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_second_process() {
+pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery_without_a_second_process()
+ {
     let store = memory_trigger_store().await;
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
@@ -1933,13 +1937,10 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
     .expect("second independent client invocation");
     let second = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&second)
         .expect("decode second client report");
-    assert!(matches!(
-        second.deliveries.as_slice(),
-        [lash_core::facade_support::TriggerDeliveryEmitReceipt {
-            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
-            ..
-        }]
-    ));
+    assert_eq!(
+        second, first,
+        "an independent retry reports the delivery the first invocation started (FIG-4272)"
+    );
     assert_eq!(
         registry
             .list_processes(&lash_core::ProcessListFilter::default())

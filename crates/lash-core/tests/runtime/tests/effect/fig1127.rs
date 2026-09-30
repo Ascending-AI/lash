@@ -193,12 +193,8 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         lash_core::facade_support::TriggerDeliveryEmitOutcome::Started
     );
     assert_eq!(
-        redrive.deliveries[0].outcome,
-        lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved
-    );
-    assert_eq!(
-        first.deliveries[0].process_id,
-        redrive.deliveries[0].process_id
+        redrive, first,
+        "the redrive reports the delivery the first emission started (FIG-4272)"
     );
     assert_eq!(
         controller.process_starts.load(Ordering::SeqCst),

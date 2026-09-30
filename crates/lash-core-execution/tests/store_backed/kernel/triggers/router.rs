@@ -420,7 +420,7 @@ mod tests {
             assert!(retry.deliveries[0].process_id.is_some());
             assert_eq!(
                 retry.deliveries[0].outcome,
-                TriggerDeliveryEmitOutcome::AlreadyReserved
+                TriggerDeliveryEmitOutcome::Started
             );
             drop(scoped);
         }
@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn trigger_emit_report_records_started_and_already_reserved_deliveries() {
+    async fn a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started() {
         let world = router_world().await;
         let store = Arc::clone(&world.store);
         let registry = Arc::clone(&world.registry);
@@ -653,12 +653,9 @@ mod tests {
             )
             .await
             .expect("replay trigger");
-        assert_eq!(replay.deliveries.len(), 1);
-        assert_eq!(
-            replay.deliveries[0].outcome,
-            TriggerDeliveryEmitOutcome::AlreadyReserved
-        );
-        assert_eq!(replay.deliveries[0].process_id, delivery.process_id);
+        // The replay finds the reservation already held and reports the
+        // settled delivery, identical to the first report (FIG-4272).
+        assert_eq!(replay, report);
         drop(scoped_controller);
         handler.close().await.expect("close the emit handler");
     }

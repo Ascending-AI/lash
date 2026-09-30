@@ -424,15 +424,11 @@ impl TriggerRouter {
     /// settles the report so redriving that one declaration returns the same
     /// bytes.
     ///
-    /// [`Self::emit`] reports each delivery's live reservation status, which is
-    /// committed outside the effect journal and flips `Reserved` to
-    /// `AlreadyReserved` once the first drive has run (FIG-806). A recorded
-    /// declaration cannot carry that read: its report becomes the durable,
-    /// wire-visible `ToolIntentExecutionOutcome::Executed` result, and on a
-    /// runtime-owned host there is no journal to replay it from, so the drain
-    /// must recompute the identical value. Every drive starts each reserved
-    /// delivery under the same deterministic journal key, so `Started` is the
-    /// statement that holds on the first drive and every redrive.
+    /// A recorded declaration's report becomes the durable, wire-visible
+    /// `ToolIntentExecutionOutcome::Executed` result, and on a runtime-owned
+    /// host there is no journal to replay it from, so the drain must recompute
+    /// the identical value. [`Self::emit`] reports `Started` for every
+    /// delivery it started, on the first drive and every redrive alike.
     ///
     /// A delivery that did not start carries no such statement: its reason is a
     /// live error string, and the next drive may well start it. Reporting that
@@ -481,21 +477,12 @@ impl TriggerRouter {
         let (report, realization) = self
             .emit_reporting_realization(request, effect_controller)
             .await?;
-        let mut deliveries = Vec::with_capacity(report.deliveries.len());
-        for mut delivery in report.deliveries {
-            delivery.outcome = match delivery.outcome {
-                TriggerDeliveryEmitOutcome::AlreadyReserved => TriggerDeliveryEmitOutcome::Started,
-                TriggerDeliveryEmitOutcome::Failed { reason } => {
-                    return Err(unstarted_delivery(&delivery.subscription_id, &reason));
-                }
-                outcome => outcome,
-            };
-            deliveries.push(delivery);
+        for delivery in &report.deliveries {
+            if let TriggerDeliveryEmitOutcome::Failed { reason } = &delivery.outcome {
+                return Err(unstarted_delivery(&delivery.subscription_id, reason));
+            }
         }
-        Ok((
-            TriggerEmitReport::new(report.occurrence_id, deliveries),
-            realization,
-        ))
+        Ok((report, realization))
     }
 
     pub async fn emit(
@@ -523,11 +510,12 @@ impl TriggerRouter {
         let process_work = &self.process_work;
         let mut deliveries = Vec::new();
         for reservation in reservations {
-            // FIG-806: reservation status is committed outside the effect
-            // journal and changes from Reserved to AlreadyReserved on replay.
-            // Emit the deterministic process start before consulting it. The
-            // journal and deterministic process id provide the dedupe point;
-            // status may shape only the post-emission report.
+            // A replay finds the occurrence and its reservation already
+            // recorded (FIG-806). It emits the same deterministic process
+            // start, which its journal answers with the process the first
+            // attempt started, so the delivery reports `Started` on every
+            // attempt: the settled outcome, never the live store read
+            // (FIG-4272).
             let process_id = match self
                 .start_delivery(
                     &reservation,
@@ -547,13 +535,9 @@ impl TriggerRouter {
                     continue;
                 }
             };
-            let outcome = match reservation.reservation_status {
-                TriggerDeliveryReservationOutcome::Reserved => TriggerDeliveryEmitOutcome::Started,
-                TriggerDeliveryReservationOutcome::AlreadyReserved => {
-                    TriggerDeliveryEmitOutcome::AlreadyReserved
-                }
-            };
-            deliveries.push(reservation.emit_report(Some(process_id), outcome));
+            deliveries.push(
+                reservation.emit_report(Some(process_id), TriggerDeliveryEmitOutcome::Started),
+            );
         }
         Ok((
             TriggerEmitReport::new(occurrence.occurrence_id, deliveries),

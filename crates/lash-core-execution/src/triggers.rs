@@ -151,11 +151,19 @@ impl TriggerEventCatalog {
     }
 }
 
+/// How one delivery of an emitted occurrence ended.
+///
+/// The statement is the delivery's settled one, identical on the first
+/// emission and on every replay of it: a replayed emission finds the
+/// occurrence and its delivery already recorded and starts the same process
+/// under the same journal key, so it reports `Started` as the first did
+/// (FIG-4272). Whether a call coalesced onto an occurrence the store already
+/// held is the call's own fact, reported beside the report by
+/// [`crate::StoreRealization`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerDeliveryEmitOutcome {
     Started,
-    AlreadyReserved,
     Failed { reason: String },
 }
 
@@ -1640,13 +1648,6 @@ pub struct TriggerIngressReceipt {
     pub realization: crate::StoreRealization,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerDeliveryReservationOutcome {
-    Reserved,
-    AlreadyReserved,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerDeliveryReservation {
     pub occurrence: TriggerOccurrenceRecord,
@@ -1658,7 +1659,6 @@ pub struct TriggerDeliveryReservation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_id: Option<ProcessId>,
     pub created_at_ms: u64,
-    pub reservation_status: TriggerDeliveryReservationOutcome,
 }
 
 /// Stable identity used by store implementors during delivery retention.

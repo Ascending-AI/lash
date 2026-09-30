@@ -7,7 +7,9 @@ ids, the `TriggerStore` trait exposed no reads over occurrences or deliveries, a
 between reserving a delivery and starting its process lost the delivery forever (replayed emits
 skip already-reserved pairs). We decided the delivery is a first-class, observable, recoverable
 substrate fact: process provenance carries `subscription_id` alongside `occurrence_id`, the
-emit report returns per-delivery outcomes (started / already reserved / failed with reason),
+emit report returns each delivery's settled outcome (started with the process it bound, or failed
+with reason), identical on the first emit and on every replay of it, while the call's
+`TriggerIngressReceipt::realization` says whether it coalesced onto a recorded occurrence,
 the trigger store exposes occurrence and delivery reads, and recovery sweeps deliveries that
 have no registered process and starts them idempotently (safe because delivery process ids are
 deterministic and registration is idempotent by hash).
