@@ -759,3 +759,31 @@ pub enum SessionObservedProcessOutcome {
         message: String,
     },
 }
+
+#[cfg(test)]
+mod frame_reason_contract_tests {
+    use super::*;
+
+    #[test]
+    fn custom_frame_reason_round_trips_without_core_branching() {
+        for label in [
+            "host:handoff/v7",
+            "plugin résumé ☃",
+            "",
+            "compaction/custom",
+        ] {
+            let reason = AgentFrameReason::new(label);
+            let wire = serde_json::to_value(&reason).unwrap();
+            assert_eq!(wire, serde_json::json!(label));
+            let restored: AgentFrameReason = serde_json::from_value(wire).unwrap();
+            assert_eq!(restored.as_str(), label);
+            let request = OpenAgentFrameRequest::new(
+                crate::FrameKey::from_caller_material("custom-reason").unwrap(),
+                reason.clone(),
+            );
+            let restored: OpenAgentFrameRequest =
+                serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+            assert_eq!(restored.reason, reason);
+        }
+    }
+}

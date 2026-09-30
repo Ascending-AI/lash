@@ -574,8 +574,40 @@ fn termination_and_trajectory_parity() {
     }
 }
 #[test]
-fn native_rejects_malformed_calls_without_execution() {
+fn native_normalization_covers_every_schema_refusal() {
     let cases = [
+        (
+            vec![call("a", "execute_code", "null")],
+            "retry_invalid_arguments",
+        ),
+        (
+            vec![call("a", "execute_code", "[]")],
+            "retry_invalid_arguments",
+        ),
+        (
+            vec![call("a", "execute_code", "42")],
+            "retry_invalid_arguments",
+        ),
+        (
+            vec![call("a", "execute_code", r#"{"code":null}"#)],
+            "retry_missing_code",
+        ),
+        (
+            vec![call("a", "execute_code", r#"{"code":42}"#)],
+            "retry_missing_code",
+        ),
+        (
+            vec![call("a", "execute_code", r#"{"code":[]}"#)],
+            "retry_missing_code",
+        ),
+        (
+            vec![call(
+                "a",
+                "execute_code",
+                r#"{"code":"finish(1)","extra":true}"#,
+            )],
+            "retry_invalid_arguments",
+        ),
         (vec![call("a", "unknown", "{}")], "retry_unknown_tool"),
         (
             vec![call("a", "execute_code", "{")],
@@ -625,6 +657,23 @@ fn native_rejects_malformed_calls_without_execution() {
             .collect::<Vec<_>>();
         assert_eq!(decisions, vec![serde_json::json!(decision)]);
     }
+    let mut machine = TurnMachine::new(
+        config(true, RlmTermination::Natural),
+        Vec::new(),
+        Default::default(),
+        0,
+    );
+    let initial = drain(&mut machine);
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![call("valid", "execute_code", r#"{"code":"finish(17)"}"#)],
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { code, .. } if code == "finish(17)"))
+    );
 }
 #[test]
 fn native_reasoning_only_is_provider_error() {
@@ -1474,4 +1523,78 @@ fn native_extraction_diagnostic_matches_the_shared_shape() {
             },
         })
     );
+}
+
+#[test]
+fn native_user_stop_is_terminal_live_and_after_restore() {
+    for restore in [false, true] {
+        let mut machine = TurnMachine::new(
+            config(true, RlmTermination::Natural),
+            Vec::new(),
+            Default::default(),
+            0,
+        );
+        let initial = drain(&mut machine);
+        let mut effects = reply(
+            &mut machine,
+            &initial,
+            vec![call("stop-call", "execute_code", r#"{"code":"print(1)"}"#)],
+        );
+        if restore {
+            let checkpoint =
+                serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
+                    .unwrap();
+            machine = TurnMachine::restore_from_checkpoint(
+                config(true, RlmTermination::Natural),
+                checkpoint,
+            )
+            .unwrap();
+            effects = drain(&mut machine);
+        }
+        let id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::ExecCode { id, .. } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        machine.record_cancellation_evidence(lash_sansio::TurnCancellationEvidence {
+            request_id: "user-stop".into(),
+            origin: Some("host".into()),
+            reason: Some("Stop".into()),
+            undelivered: lash_sansio::TurnCancelUndeliveredInputPolicy::Defer,
+            mode: lash_sansio::TurnCancelMode::Immediate,
+            honoured_after_step: None,
+        });
+        machine.handle_response(Response::ExecResult {
+            id,
+            result: Ok(response(None)),
+        });
+        let mut terminal = drain(&mut machine);
+        if let Some(id) = terminal.iter().find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        }) {
+            machine.handle_response(Response::Checkpoint {
+                id,
+                delivery: Default::default(),
+            });
+            terminal.extend(drain(&mut machine));
+        }
+        assert!(machine.is_done());
+        assert!(terminal.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+                outcome: lash_core::facade_support::TurnOutcome::Stopped(
+                    lash_core::facade_support::TurnStop::Cancelled { .. }
+                )
+            })
+        )));
+        assert!(
+            !terminal
+                .iter()
+                .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
+        );
+        assert!(!machine.events().iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
+    }
 }

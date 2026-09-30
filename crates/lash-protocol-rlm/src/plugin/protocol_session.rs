@@ -508,6 +508,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn retired_dialect_fixture_matrix_refuses_every_boundary() {
+        let program = lash_typescript::parse("finish(1)").unwrap();
+        let artifact = lashlang::ModuleArtifact::from_program(program).unwrap();
+        let current: serde_json::Value =
+            serde_json::from_slice(&artifact.to_store_bytes().unwrap()).unwrap();
+        for retired in [
+            serde_json::json!("lashlang"),
+            serde_json::json!("typescript"),
+            serde_json::Value::Null,
+        ] {
+            let mut wire = current.clone();
+            wire["artifact"]["compilation_dialect"] = retired.clone();
+            assert!(matches!(
+                lashlang::ModuleArtifact::from_store_bytes(&serde_json::to_vec(&wire).unwrap()),
+                Err(lashlang::ModuleArtifactError::RetiredCompilationDialect)
+            ));
+            let recorded =
+                ProtocolTurnOptions::from_payload(serde_json::json!({"dialect":retired}));
+            assert_eq!(
+                rlm_session_config(&recorded),
+                Err(RlmSessionConfigDecodeError::RetiredDialectField)
+            );
+            assert!(
+                resolve_rlm_session_options(&recorded, &PluginOptions::default(), true).is_err()
+            );
+            assert!(serde_json::from_value::<RlmCreateExtras>(recorded.payload).is_err());
+        }
+    }
+
     /// A create request that still names a language is refused the same way:
     /// the create contract has no such field and `RlmCreateExtras` denies
     /// unknown keys, so the host learns at once rather than having its choice

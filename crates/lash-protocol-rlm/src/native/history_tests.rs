@@ -121,7 +121,7 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
     assert!(!messages[1].starts_user_segment);
 }
 #[test]
-fn reload_preserves_replay_and_observation_bytes() {
+fn native_replay_keeps_captured_result_and_opaque_bytes() {
     let entry = step("reload", None, false);
     let events = pair(entry.clone());
     let reloaded =
@@ -129,10 +129,7 @@ fn reload_preserves_replay_and_observation_bytes() {
             .unwrap();
     let messages = render(&reloaded);
     assert_eq!(ids(&messages).0, ["reload"]);
-    let dialect = crate::dialect::TypescriptDialect::prompt_only(
-        lash_lashlang_runtime::LashlangSurface::default(),
-    );
-    let expected = crate::driver::history::step_output_text(dialect.prompt_vocabulary(), 0, &entry);
+    let expected = "history[0].output[0]:\nobserved".to_string();
     let output = messages
         .iter()
         .flat_map(|message| message.blocks.iter())

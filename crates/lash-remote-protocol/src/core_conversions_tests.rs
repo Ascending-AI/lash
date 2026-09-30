@@ -1838,57 +1838,6 @@ fn remote_turn_activity_sink_records_flush_error() {
 }
 
 #[test]
-fn remote_session_observation_from_core_maps_snapshot_metadata() {
-    let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-    let prepared = lash_core::LiveReplayStore::prepare_publication(
-        &store,
-        &SessionId::from("session"),
-        lash_core::SessionRevision::new(4),
-        vec![lash_core::LiveReplayEventDraft::new(
-            None::<String>,
-            lash_core::SessionObservationEventPayload::QueueChanged {
-                kind: lash_core::SessionQueueEventKind::Enqueued,
-                batch_ids: vec!["batch-1".to_string()],
-            },
-        )],
-    )
-    .expect("prepare observation event");
-    let event = lash_core::LiveReplayStore::publish_prepared(&store, prepared)
-        .expect("publish observation event")
-        .remove(0);
-    let snapshot = lash_core::SessionSnapshot {
-        session_id: SessionId::from("session"),
-        turn_index: 12,
-        token_usage: lash_core::TokenUsage {
-            input_tokens: 10,
-            output_tokens: 4,
-            cache_read_input_tokens: 2,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 1,
-        },
-        ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    let observation = lash_core::facade_support::SessionObservation {
-        read_view: lash_core::SessionReadView::from_snapshot(&snapshot),
-        cursor: event.cursor.clone(),
-    };
-
-    let remote = RemoteSessionObservation::from_core(observation);
-    remote.validate().expect("valid remote observation");
-    assert_eq!(remote.session_id, "session");
-    assert_eq!(remote.cursor, event.cursor.to_string());
-    assert_eq!(remote.turn_index, 12);
-    assert_eq!(remote.usage.input_tokens, 10);
-
-    let remote_cursor = RemoteSessionCursor::from(&event.cursor);
-    let core_cursor =
-        lash_core::SessionCursor::try_from(remote_cursor.clone()).expect("core cursor");
-    assert_eq!(core_cursor.to_string(), remote_cursor.cursor);
-}
-
-#[test]
 fn remote_session_observation_from_core_maps_all_payload_variants() {
     fn event(
         turn_id: Option<&TurnId>,

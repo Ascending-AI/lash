@@ -259,3 +259,54 @@ fn every_session_binder_is_probed() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn fixed_language_cases_have_registered_corpus_rows() {
+    let corpus = corpus();
+    for (id, source, outcome) in [
+        ("mutable-capture-read", "console.log(f());", "normal"),
+        (
+            "for-of-appends-during-the-loop",
+            "queue.push(item * 2);",
+            "normal",
+        ),
+        (
+            "builtin-method-call-spread",
+            "items.push(...[4, 5]);",
+            "normal",
+        ),
+    ] {
+        let session = corpus
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .unwrap_or_else(|| panic!("fixed regression {id} is not registered"));
+        assert!(
+            session
+                .cells
+                .iter()
+                .any(|cell| cell.source.contains(source)),
+            "{id} no longer exercises its repaired construct"
+        );
+        assert!(
+            session
+                .cells
+                .iter()
+                .all(|cell| cell.reject.is_none() && cell.defect.is_none()),
+            "{id} is a fixed regression, not an open defect"
+        );
+        assert!(
+            session
+                .cells
+                .iter()
+                .any(|cell| cell.node.outcome == outcome)
+        );
+        let registered = super::corpora::all();
+        assert!(
+            registered
+                .iter()
+                .any(|row| row.id.starts_with(&format!("session:{id}:"))),
+            "{id} is absent from the corpus laws"
+        );
+    }
+}

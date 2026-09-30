@@ -251,3 +251,6 @@ fn hex_digest(bytes: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+pub(crate) use fixed_script::script_manifest_entry;

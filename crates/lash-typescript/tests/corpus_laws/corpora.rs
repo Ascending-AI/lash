@@ -94,6 +94,7 @@ pub(crate) fn all() -> Vec<CorpusProgram> {
     programs.extend(sessions());
     programs.extend(goldens());
     programs.extend(codemode_parity());
+    programs.extend(teaching());
     let ids = programs
         .iter()
         .map(|program| program.id.as_str())
@@ -281,4 +282,70 @@ fn codemode_parity() -> Vec<CorpusProgram> {
     .into_iter()
     .map(|(name, source)| CorpusProgram::new(format!("codemode-parity:{name}"), source.to_string()))
     .collect()
+}
+
+fn teaching() -> Vec<CorpusProgram> {
+    runner_teaching_rows()
+        .into_iter()
+        .map(|(key, source)| CorpusProgram::new(format!("teaching:{key}"), source))
+        .collect()
+}
+fn runner_teaching_rows() -> Vec<(String, String)> {
+    std::fs::read_to_string(data_path("accepted-teaching.tsv"))
+        .expect("read teaching witnesses")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| {
+            let (key, source) = line.split_once('\t').expect("teaching row");
+            (
+                key.to_string(),
+                serde_json::from_str(source).expect("teaching source JSON"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_accepted_census_capability_has_a_teaching_witness() {
+    let mut expected = BTreeSet::new();
+    let mut directories = vec![data_path("census")];
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                directories.push(path);
+                continue;
+            }
+            for line in std::fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+            {
+                let columns = line.split('\t').collect::<Vec<_>>();
+                if columns[2] == "accepted" {
+                    expected.insert(format!("{}/{}", columns[0], columns[1]));
+                }
+            }
+        }
+    }
+    let witnesses = teaching();
+    let actual = witnesses
+        .iter()
+        .map(|row| row.id.trim_start_matches("teaching:").to_string())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual.len(), witnesses.len(), "duplicate teaching witness");
+    assert_eq!(
+        actual, expected,
+        "every accepted capability needs a reviewed teaching example"
+    );
+    let registered = all().into_iter().map(|row| row.id).collect::<BTreeSet<_>>();
+    for witness in witnesses {
+        assert!(
+            registered.contains(&witness.id),
+            "{} bypasses corpus laws",
+            witness.id
+        );
+        lash_typescript::link(&witness.source, &witness.environment())
+            .unwrap_or_else(|error| panic!("{}: {error}", witness.id));
+    }
 }

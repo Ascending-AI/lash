@@ -1,0 +1,45 @@
+{
+  "commit": "95ece260f58d0d8386147739bab3dc9c4655457d",
+  "ticket": "FIG-528",
+  "nominated": 8,
+  "deleted": 5,
+  "survivors": [
+    {
+      "property": "sim exactly-once",
+      "mutation": "replay controller invokes local executor"
+    },
+    {
+      "property": "batch ordering",
+      "mutation": "production sort reversed"
+    },
+    {
+      "property": "serial tools",
+      "mutation": "run tools in parallel"
+    }
+  ],
+  "dispositions": [
+    {
+      "property": "segmentation terminal-delivery",
+      "coverage": "unclaimed"
+    },
+    {
+      "property": "active-checkpoint process-wake eligibility",
+      "coverage": "unclaimed",
+      "surviving_coverage": "sim.oracle.process-wake-at-most-once-runtime-turn.v1"
+    },
+    {
+      "property": "Restate replay-cut threshold",
+      "coverage": "covered",
+      "surviving_coverage": "restate_segment_transition_replay_matrix_preserves_lineage_invariants"
+    },
+    {
+      "property": "keyed successor-send idempotence and retry-resume continuation stability",
+      "coverage": "unclaimed"
+    },
+    {
+      "property": "Google-specific raw 429 parsing",
+      "coverage": "unclaimed",
+      "surviving_coverage": "lash-core provider classifier and handle tests cover retryable 429 classification and throttle deferral"
+    }
+  ]
+}

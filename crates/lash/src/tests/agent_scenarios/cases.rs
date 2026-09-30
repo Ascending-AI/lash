@@ -754,3 +754,27 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
         "expected {distinct_expected} distinct lifted definitions, got {labels:?}"
     );
 }
+
+#[test]
+fn legacy_scenario_seeds_remain_registered() {
+    let registered = AGENT_SCENARIO_COVERAGE
+        .iter()
+        .map(|row| row.test_name)
+        .collect::<BTreeSet<_>>();
+    for seed in [
+        "foreground_labeled_tool_call",
+        "started_process_labeled_tool_call",
+        "process_durable_input_request_tool",
+        "started_process_labeled_subagent_spawn",
+        "nested_process_start_await",
+        "session_turn_process_child",
+        "failed_child_preserves_failure_graph",
+        "parallel_spawn_and_join",
+        "tuple_values_finish_as_json_arrays",
+    ] {
+        assert!(
+            registered.contains(format!("agent_scenario_{seed}").as_str()),
+            "legacy seed missing: {seed}"
+        );
+    }
+}

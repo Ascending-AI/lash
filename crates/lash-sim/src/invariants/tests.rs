@@ -523,3 +523,66 @@ fn a_broken_frame_chain_breaks_frame_lineage() {
         "frames-form-one-chain",
     );
 }
+
+#[test]
+fn checker_failure_retains_history_and_registered_regression() {
+    let mut history = clean();
+    let (at, call, attempt, failed_attempts_before) = tool_run(&history);
+    history.push(Fact::ToolExecuted {
+        call,
+        attempt,
+        failed_attempts_before,
+    });
+    let report = check(&history);
+    assert!(!report.passed());
+    assert!(
+        CHECKERS
+            .iter()
+            .any(|checker| checker.invariant() == "effect-at-least-once-window")
+    );
+    let retained = report
+        .history
+        .as_ref()
+        .expect("failure retains full history");
+    assert_eq!(retained.records, history.records);
+    assert_eq!(retained.seed, SEED);
+    assert!(report.failure().contains("full history:"));
+    assert!(report.failure().contains(&format!("#{at:<5}")));
+    assert_eq!(
+        serde_json::to_value(&retained.stores).unwrap(),
+        serde_json::to_value(&history.stores).unwrap()
+    );
+    let regression: fn() = a_rerun_outside_the_window_breaks_the_effect_window;
+    regression();
+}
+
+#[test]
+fn failure_artifact_keeps_seed_history_and_checker() {
+    let mut history = clean();
+    let (_, call, attempt, failed_attempts_before) = tool_run(&history);
+    history.push(Fact::ToolExecuted {
+        call,
+        attempt,
+        failed_attempts_before,
+    });
+    let report = check(&history);
+    let path = tempfile::tempdir().unwrap();
+    let artifact = path.path().join("failure.json");
+    std::fs::write(&artifact, serde_json::to_vec(&report).unwrap()).unwrap();
+    let restored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap();
+    assert_eq!(restored["seed"], SEED);
+    assert_eq!(restored["history"], serde_json::to_value(&history).unwrap());
+    assert!(
+        restored["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["invariant"] == "effect-at-least-once-window")
+    );
+    assert!(restored["rendered"].as_array().unwrap().iter().any(|row| {
+        row.as_str()
+            .unwrap()
+            .contains("effect-at-least-once-window")
+    }));
+}

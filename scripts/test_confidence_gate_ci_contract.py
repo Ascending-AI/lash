@@ -9,6 +9,7 @@ import os
 import pathlib
 import re
 import runpy
+import shlex
 import subprocess
 import tempfile
 import tomllib
@@ -959,6 +960,64 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}"',
             gate,
         )
+
+    def test_failed_confidence_attempt_keeps_original_artifacts(self) -> None:
+        workflow = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
+        uploads = [step for job in workflow["jobs"].values() for step in job.get("steps", [])
+                   if step.get("uses", "").startswith("actions/upload-artifact@")]
+        self.assertGreater(len(uploads), 0)
+        for step in uploads:
+            name = step["with"]["name"]
+            self.assertIn("${{ github.run_attempt }}", name)
+            self.assertNotEqual(step["with"].get("overwrite", False), True)
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                names = [name.replace("${{ github.run_attempt }}", str(attempt)) for attempt in (1, 2)]
+                first = root / names[0]
+                second = root / names[1]
+                first.write_bytes(b"original failing log and history")
+                second.write_bytes(b"later green evidence")
+                self.assertEqual(first.read_bytes(), b"original failing log and history")
+                self.assertEqual(second.read_bytes(), b"later green evidence")
+
+    def test_scenario_review_includes_untracked_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            source = root / "crates/lash-core/tests/runtime/tests/runtime_scenarios/new_case.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("#[test] fn new_scenario() {}\n")
+            def git(*args: str) -> str:
+                return subprocess.run(["git", "-C", str(root), *args], check=True, text=True, capture_output=True).stdout
+            self.assertEqual(git("diff"), "")
+            review = (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md").read_text().split("```sh", 1)[1].split("```", 1)[0]
+            command = shlex.split(review.replace("\\\n", " "))
+            flags = [arg for arg in command[1:] if arg == "add" or arg.startswith("-")]
+            git(*flags, str(source.relative_to(root)))
+            self.assertIn("+#[test] fn new_scenario() {}", git("diff"))
+            self.assertEqual(git("diff", "--cached"), "")
+            source.write_text("#[test] fn new_scenario() { assert!(true); }\n")
+            self.assertIn("assert!(true)", git("diff"))
+
+    def test_deletion_evidence_records_survivor_and_coverage_disposition(self) -> None:
+        evidence = json.loads((ROOT / "scripts/fixtures/test-deletion-evidence.json").read_text())
+        self.assertEqual(evidence["commit"], "95ece260f58d0d8386147739bab3dc9c4655457d")
+        self.assertEqual(evidence["ticket"], "FIG-528")
+        self.assertEqual(evidence["nominated"], evidence["deleted"] + len(evidence["survivors"]))
+        self.assertEqual({row["property"] for row in evidence["survivors"]},
+                         {"sim exactly-once", "batch ordering", "serial tools"})
+        self.assertTrue(all(row["mutation"] for row in evidence["survivors"]))
+        self.assertEqual(len(evidence["dispositions"]), 5)
+        for row in evidence["dispositions"]:
+            self.assertTrue(row["property"])
+            self.assertIn(row["coverage"], ("covered", "moved", "unclaimed"))
+            if row["coverage"] == "covered":
+                self.assertTrue(row["surviving_coverage"])
+            elif row["coverage"] == "moved":
+                self.assertRegex(row["ticket"], r"^FIG-\d+$")
+        google = next(row for row in evidence["dispositions"] if row["property"] == "Google-specific raw 429 parsing")
+        self.assertEqual(google["coverage"], "unclaimed")
+        self.assertIn("retryable 429 classification", google["surviving_coverage"])
 
     def test_every_script_self_test_is_run_by_ci(self) -> None:
         # The self-test list is enumerated by hand, so a new gate's own test can

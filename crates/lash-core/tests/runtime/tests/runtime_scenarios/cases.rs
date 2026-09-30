@@ -723,3 +723,125 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         "the StartProcess declaration must realize through the runtime"
     );
 }
+
+#[derive(Debug)]
+struct PublicationFailureStore {
+    inner: lash_core::facade_support::InMemoryLiveReplayStore,
+    failed: std::sync::atomic::AtomicBool,
+}
+impl lash_core::LiveReplayStore for PublicationFailureStore {
+    fn prepare_publication(
+        &self,
+        session: &SessionId,
+        revision: lash_core::SessionRevision,
+        events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> Result<lash_core::PreparedLiveReplayPublication, lash_core::LiveReplayStoreError> {
+        self.inner.prepare_publication(session, revision, events)
+    }
+    fn publish_prepared(
+        &self,
+        prepared: lash_core::PreparedLiveReplayPublication,
+    ) -> Result<Vec<Arc<lash_core::SessionObservationEvent>>, lash_core::LiveReplayStoreError> {
+        if prepared.events().iter().any(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            )
+        }) && !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            drop(prepared);
+            return Err(lash_core::LiveReplayStoreError::Store(
+                "post-prepare publication failure".into(),
+            ));
+        }
+        self.inner.publish_prepared(prepared)
+    }
+    fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor)
+    }
+    fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError> {
+        self.inner.subscribe_after_cursor(cursor)
+    }
+    fn current_cursor(
+        &self,
+        session: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.current_cursor(session, revision)
+    }
+    fn trim_session(&self, session: &SessionId) -> Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.trim_session(session)
+    }
+}
+
+#[tokio::test]
+async fn publication_failure_preserves_committed_turn_and_exposes_gap() {
+    let double = kernel_double(SEED + 52, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = recording_session_store(&backend, "root").await;
+    let runtime = TestRuntime::new(
+        &backend,
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "committed answer despite publication failure".into(),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            }),
+        }]),
+    )
+    .tools(Arc::new(EmptyTools))
+    .store(store.clone())
+    .with_session_id("root")
+    .build()
+    .await;
+    let replay = Arc::new(PublicationFailureStore {
+        inner: Default::default(),
+        failed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let handle =
+        lash_core::facade_support::RuntimeHandle::with_live_replay_store(runtime, replay.clone());
+    let cursor = handle.observe().cursor().clone();
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "publication-failure"))
+        .await
+        .unwrap();
+    let writer = handle.writer();
+    let mut runtime = writer.lock().await;
+    let result = runtime
+        .drive_turn(
+            TurnInput::text("answer once"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result.assistant_output.safe_text,
+        "committed answer despite publication failure"
+    );
+    handle.publish_from(&runtime);
+    let durable = durable_state(store, "root").await;
+    assert_eq!(durable.turn_index, 1);
+    drop(runtime);
+    assert!(replay.failed.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(matches!(
+        handle.resume_session_observation(&cursor).unwrap(),
+        lash_core::facade_support::SessionResume::Gap {
+            gap: lash_core::facade_support::LiveReplayGap {
+                reason: lash_core::LiveReplayGapReason::Unavailable,
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(handle.observe().read_view.turn_index(), 1);
+    handler.close().await.unwrap();
+}

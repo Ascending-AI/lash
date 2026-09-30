@@ -216,17 +216,23 @@ fn lane_summary_for_manifest(manifest: &FixedScriptManifest) -> FixedScriptLaneS
 pub(super) fn script_hash_manifest() -> Result<Vec<ScriptHashManifest>, FixedScriptRunnerError> {
     CANONICAL_SCRIPTS
         .iter()
-        .map(|entry| {
-            let script = ProviderWireScript::from_json_str(entry.content)?;
-            Ok(ScriptHashManifest {
-                path: entry.path.to_string(),
-                name: script.name,
-                provider_kind: script.provider_kind,
-                sha256: sha256_hex(entry.content.as_bytes()),
-                bytes: entry.content.len(),
-            })
-        })
+        .map(|entry| script_manifest_entry(entry.path, entry.content))
         .collect()
+}
+
+pub(crate) fn script_manifest_entry(
+    path: &str,
+    content: &str,
+) -> Result<ScriptHashManifest, FixedScriptRunnerError> {
+    let script = ProviderWireScript::from_json_str(content)?;
+    Ok(ScriptHashManifest {
+        path: path.to_string(),
+        provenance: script.provenance,
+        name: script.name,
+        provider_kind: script.provider_kind,
+        sha256: sha256_hex(content.as_bytes()),
+        bytes: content.len(),
+    })
 }
 
 pub(super) fn script_bundle_hash(scripts: &[ScriptHashManifest]) -> String {

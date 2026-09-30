@@ -457,6 +457,9 @@ pub struct Report {
     pub quarantined: Vec<(&'static str, Violation)>,
     /// The rendered excerpt of every violation, quarantined ones included.
     pub rendered: Vec<String>,
+    /// Full diagnostic history on failure, including records outside excerpts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<History>,
 }
 
 impl Report {
@@ -486,7 +489,14 @@ impl Report {
     /// The failing violations, each with its seed, invariant and excerpt.
     #[must_use]
     pub fn failure(&self) -> String {
-        self.rendered[..self.violations.len()].join("\n")
+        let mut failure = self.rendered[..self.violations.len()].join("\n");
+        if let Some(history) = &self.history {
+            let full = serde_json::to_string_pretty(history)
+                .unwrap_or_else(|error| format!("history encoding failed: {error}"));
+            failure.push_str("\nfull history:\n");
+            failure.push_str(&full);
+        }
+        failure
     }
 
     /// Print every quarantined violation, so a quarantined defect stays
@@ -538,7 +548,9 @@ pub fn check_with(history: &History, checkers: &[&dyn HistoryChecker]) -> Report
         .chain(quarantined.iter().map(|(_, violation)| violation))
         .map(|violation| render(history, violation))
         .collect();
+    let failed = !violations.is_empty() || !quarantined.is_empty();
     Report {
+        history: failed.then(|| history.clone()),
         scenario: history.scenario.clone(),
         seed: history.seed,
         observed,

@@ -1208,3 +1208,210 @@ fn standard_protocol_scenario_max_turns_terminates_after_tool_result() {
         })
         .run();
 }
+
+#[test]
+fn scenario_transcript_has_an_independent_public_outcome() {
+    let run = StandardProtocolScenario::new("independent terminal witness")
+        .user_message("answer directly")
+        .llm_response(false, vec![text_part("literal public answer")])
+        .checkpoint()
+        .expect(StandardProtocolExpectations {
+            llm_call_count: Some(1),
+            done: Some(true),
+            turn_outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                text: "literal public answer".into(),
+            })),
+            checkpoints: vec![CheckpointKind::BeforeCompletion],
+            ..Default::default()
+        })
+        .run();
+    assert_eq!(
+        run.turn_outcomes,
+        vec![TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: "literal public answer".into()
+        })]
+    );
+    assert!(run.transcript.render().contains("literal public answer"));
+}
+
+#[derive(Clone, Copy)]
+enum PublicWork {
+    Model,
+    Tool,
+    Code,
+    Checkpoint,
+}
+struct ThirdPartyDriver(PublicWork);
+impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
+    fn prepare_protocol_iteration(
+        &self,
+        ctx: lash_core::DriverContextView<'_>,
+    ) -> Vec<lash_core::DriverAction> {
+        use lash_core::sansio::{CheckpointResumeAction, PendingToolCall, PendingWork};
+        let work = match self.0 {
+            PublicWork::Model => PendingWork::Llm {
+                request: ctx.project_llm_request(true),
+                driver_state: None,
+            },
+            PublicWork::Tool => PendingWork::Tools {
+                calls: vec![PendingToolCall {
+                    call_id: lash_core::ToolCallId::fixture("third-party-call"),
+                    provider_call_id: Some("provider-call".into()),
+                    tool_name: "external_tool".into(),
+                    args: serde_json::json!({"argument": 17}),
+                    replay: None,
+                }],
+                expansion: Default::default(),
+            },
+            PublicWork::Code => PendingWork::Exec {
+                language: "typescript".into(),
+                code: "finish(17)".into(),
+                driver_state: lash_core::ProtocolDriverState::new(
+                    "external",
+                    serde_json::json!({"pending":17}),
+                ),
+            },
+            PublicWork::Checkpoint => PendingWork::Checkpoint {
+                checkpoint: CheckpointKind::BeforeCompletion,
+                on_empty: CheckpointResumeAction::Finish(public_protocol_outcome()),
+            },
+        };
+        vec![lash_core::DriverAction::Start(work)]
+    }
+    fn handle_llm_success(
+        &self,
+        _ctx: lash_core::DriverContextView<'_>,
+        _request: Arc<LlmRequest>,
+        _state: Option<lash_core::ProtocolDriverState>,
+        response: LlmResponse,
+        _calls: &lash_core::sansio::ResponseToolCalls,
+        _streamed: bool,
+    ) -> Vec<lash_core::DriverAction> {
+        assert_eq!(response.full_text(), "external provider result");
+        vec![lash_core::DriverAction::Finish(public_protocol_outcome())]
+    }
+    fn handle_tool_results(
+        &self,
+        _ctx: lash_core::DriverContextView<'_>,
+        _completed: Vec<lash_core::sansio::CompletedToolCall>,
+    ) -> Vec<lash_core::DriverAction> {
+        vec![lash_core::DriverAction::Finish(public_protocol_outcome())]
+    }
+    fn handle_exec_result(
+        &self,
+        _ctx: lash_core::DriverContextView<'_>,
+        _state: lash_core::ProtocolDriverState,
+        _result: Result<lash_core::ExecResponse, String>,
+    ) -> Vec<lash_core::DriverAction> {
+        vec![lash_core::DriverAction::Finish(public_protocol_outcome())]
+    }
+}
+fn public_protocol_outcome() -> TurnOutcome {
+    TurnOutcome::Finished(TurnFinish::AssistantMessage {
+        text: "external terminal witness".into(),
+    })
+}
+fn external_config(work: PublicWork) -> TurnMachineConfig {
+    let mut config = standard_config();
+    config.protocol_driver = Arc::new(ThirdPartyDriver(work));
+    config
+}
+#[test]
+fn third_party_protocol_runs_using_only_public_seams() {
+    let mut machine = TurnMachine::new(
+        external_config(PublicWork::Model),
+        vec![user_message("external input")],
+        Default::default(),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let (id, request) = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LlmCall { id, request } => Some((*id, request)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(format!("{:?}", request.messages).contains("external input"));
+    machine.handle_response(Response::LlmComplete {
+        id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            parts: vec![text_part("external provider result")],
+            ..Default::default()
+        }),
+    });
+    let terminal = drain_effects(&mut machine);
+    assert!(machine.is_done());
+    assert!(terminal.iter().any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) if *outcome == TurnOutcome::Finished(TurnFinish::AssistantMessage { text: "external terminal witness".into() }))));
+    assert!(
+        terminal
+            .iter()
+            .any(|effect| matches!(effect, Effect::Done { .. }))
+    );
+}
+#[test]
+fn public_effect_emission_contract_matrix() {
+    for work in [
+        PublicWork::Model,
+        PublicWork::Tool,
+        PublicWork::Code,
+        PublicWork::Checkpoint,
+    ] {
+        let mut machine = TurnMachine::new(
+            external_config(work),
+            vec![user_message("public input")],
+            Default::default(),
+            0,
+        );
+        let first = drain_effects(&mut machine);
+        let checkpoint =
+            serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap()).unwrap();
+        let mut restored =
+            TurnMachine::restore_from_checkpoint(external_config(work), checkpoint).unwrap();
+        let replayed = drain_effects(&mut restored);
+        for effects in [&first, &replayed] {
+            let waiting = effects
+                .iter()
+                .filter(|effect| {
+                    matches!(
+                        effect,
+                        Effect::LlmCall { .. }
+                            | Effect::ToolCalls { .. }
+                            | Effect::ExecCode { .. }
+                            | Effect::Checkpoint { .. }
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(waiting.len(), 1);
+            match (work, waiting[0]) {
+                (PublicWork::Model, Effect::LlmCall { request, .. }) => {
+                    assert!(format!("{:?}", request.messages).contains("public input"))
+                }
+                (PublicWork::Tool, Effect::ToolCalls { calls, .. }) => {
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0].tool_name, "external_tool");
+                    assert_eq!(calls[0].args, serde_json::json!({"argument":17}));
+                }
+                (PublicWork::Code, Effect::ExecCode { code, .. }) => assert_eq!(code, "finish(17)"),
+                (PublicWork::Checkpoint, Effect::Checkpoint { checkpoint, .. }) => {
+                    assert_eq!(*checkpoint, CheckpointKind::BeforeCompletion)
+                }
+                _ => panic!("public work emitted the wrong effect"),
+            }
+        }
+        let ids = |effects: &[Effect]| {
+            effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::LlmCall { id, .. }
+                    | Effect::ToolCalls { id, .. }
+                    | Effect::ExecCode { id, .. }
+                    | Effect::Checkpoint { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&first), ids(&replayed));
+    }
+}

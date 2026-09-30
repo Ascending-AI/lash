@@ -332,7 +332,7 @@ fn every_recorded_reality_fixture_carries_reviewable_provenance() {
 }
 
 #[test]
-fn reviewed_live_capture_has_valid_recorded_reality_provenance() {
+fn provider_fixture_manifest_records_capture_provenance() {
     let provenance = ProviderWireProvenance {
         kind: ProviderWireProvenanceKind::CapturedLive,
         source: "/v1/chat/completions".to_string(),
@@ -340,6 +340,37 @@ fn reviewed_live_capture_has_valid_recorded_reality_provenance() {
         notes: Some("Dedicated test project; redaction reviewed".to_string()),
     };
     assert!(validate_recorded_reality_provenance(&provenance).is_ok());
+    let wire = serde_json::to_value(&provenance).unwrap();
+    assert_eq!(
+        wire,
+        json!({"kind":"captured_live", "source":"/v1/chat/completions", "captured_at":"2026-07-22T10:15:00Z", "notes":"Dedicated test project; redaction reviewed"})
+    );
+    let mut script: serde_json::Value = serde_json::from_str(OPENAI_PER_MINUTE).unwrap();
+    script["provenance"] = wire.clone();
+    let entry = crate::runner::script_manifest_entry(
+        "captured-provider.json",
+        &serde_json::to_string(&script).unwrap(),
+    )
+    .unwrap();
+    let manifest = serde_json::to_value(entry).unwrap();
+    assert_eq!(manifest["provenance"], wire);
+    assert_eq!(manifest["path"], "captured-provider.json");
+    assert_eq!(manifest["sha256"].as_str().unwrap().len(), 64);
+    for (field, value) in [
+        ("source", json!("https://unreviewed.test/?secret=1")),
+        ("captured_at", json!(null)),
+        ("captured_at", json!("yesterday")),
+        ("notes", json!(null)),
+        ("notes", json!("not reviewed")),
+    ] {
+        let mut invalid = wire.clone();
+        invalid[field] = value;
+        let restored: ProviderWireProvenance = serde_json::from_value(invalid).unwrap();
+        assert!(
+            validate_recorded_reality_provenance(&restored).is_err(),
+            "missing provenance gate for {field}"
+        );
+    }
 }
 
 fn validate_recorded_reality_provenance(provenance: &ProviderWireProvenance) -> Result<(), String> {
