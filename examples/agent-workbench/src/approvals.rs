@@ -342,10 +342,11 @@ impl ToolProvider for ApprovalToolProvider {
                 Ok(key) => key,
                 Err(error) => return ToolOutcome::err_fmt(error),
             };
-            if let Err(error) =
-                self.approvals
-                    .record(&key, call.args, &SessionId::from(call.context.session_id()))
-            {
+            let session_id = match call.context.session_id() {
+                Ok(session_id) => session_id.clone(),
+                Err(error) => return ToolOutcome::err_fmt(error),
+            };
+            if let Err(error) = self.approvals.record(&key, call.args, &session_id) {
                 return ToolOutcome::err_fmt(error);
             }
             ToolOutcome::pending(PendingCompletion::new())

@@ -1019,6 +1019,7 @@ impl RestateProcessDeployment {
         &self,
         serving: RestateProcessServing,
         build_generation: lash_core::engine::BuildGeneration,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
     ) -> LashProcessWorkflowImpl<RestateCoreProcessRunner> {
         let RestateProcessServing {
             worker,
@@ -1030,6 +1031,7 @@ impl RestateProcessDeployment {
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
             self.ingress.clone(),
+            attachments,
             self.authority_id.clone(),
             build_generation,
             &self.namespace,

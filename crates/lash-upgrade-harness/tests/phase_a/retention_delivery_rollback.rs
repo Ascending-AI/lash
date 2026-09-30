@@ -130,10 +130,14 @@ async fn postgres_snapshot(url: &str, session: &str) -> Result<Snapshot> {
         .bind(session)
         .fetch_one(&mut pg)
         .await?;
-    let attachment_roots: i64 = sqlx::query_scalar(&count("lash_attachment_manifest"))
-        .bind(session)
-        .fetch_one(&mut pg)
-        .await?;
+    // The session's own attachment edges: what its boundary commits held.
+    let attachment_roots: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_attachment_referrer_edges
+         WHERE referrer_kind = 'session' AND referrer_id = $1",
+    )
+    .bind(session)
+    .fetch_one(&mut pg)
+    .await?;
     let edges = sqlx::query(
         "SELECT artifact_ref, referrer_kind, referrer_id FROM lash_artifact_referrer_edges
          ORDER BY 1, 2, 3",
@@ -146,14 +150,13 @@ async fn postgres_snapshot(url: &str, session: &str) -> Result<Snapshot> {
     let modules = sqlx::query_scalar("SELECT artifact_ref FROM lash_lashlang_artifacts ORDER BY 1")
         .fetch_all(&mut pg)
         .await?;
-    let fences = sqlx::query(
-        "SELECT referrer_kind, referrer_id FROM lash_artifact_referrer_fences ORDER BY 1, 2",
-    )
-    .fetch_all(&mut pg)
-    .await?
-    .iter()
-    .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
-    .collect::<Result<_, sqlx::Error>>()?;
+    let fences =
+        sqlx::query("SELECT referrer_kind, referrer_id FROM lash_referrer_fences ORDER BY 1, 2")
+            .fetch_all(&mut pg)
+            .await?
+            .iter()
+            .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
+            .collect::<Result<_, sqlx::Error>>()?;
     let cleanups = sqlx::query(
         "SELECT referrer_kind, referrer_id, obligation_state, obligation_stall_reason
          FROM lash_artifact_cleanup_obligations ORDER BY 1, 2",
@@ -204,7 +207,7 @@ fn sqlite_snapshot(path: &Path, session: &str) -> Result<Snapshot> {
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let fences = db
-        .prepare("SELECT referrer_kind, referrer_id FROM artifact_referrer_fences ORDER BY 1, 2")?
+        .prepare("SELECT referrer_kind, referrer_id FROM referrer_fences ORDER BY 1, 2")?
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
     let cleanups = db
@@ -219,7 +222,12 @@ fn sqlite_snapshot(path: &Path, session: &str) -> Result<Snapshot> {
     Ok(Snapshot {
         graph_nodes: count("graph_nodes")?,
         turn_commits: count("runtime_turn_commits")?,
-        attachment_roots: count("attachment_manifest")?,
+        attachment_roots: db.query_row(
+            "SELECT COUNT(*) FROM attachment_referrer_edges
+             WHERE referrer_kind = 'session' AND referrer_id = ?1",
+            [session],
+            |row| row.get(0),
+        )?,
         edges,
         modules,
         fences,

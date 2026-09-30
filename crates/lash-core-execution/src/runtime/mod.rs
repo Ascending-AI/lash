@@ -1,12 +1,16 @@
 use crate::TurnId;
 pub use lash_core_store::turn_input_vocabulary::*;
+pub mod attachment_delivery;
 pub mod causal;
 pub(crate) use lash_core_ids::clock;
 pub mod drive;
 pub mod effect;
 pub mod host;
+mod owner;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
+pub use owner::ExecutionOwner;
+pub(crate) use owner::not_a_session_runtime;
 pub mod process;
 pub mod process_start;
 pub mod trigger_delivery;
@@ -138,10 +142,10 @@ pub use process::{
     fold_process_record, lifetime, load_process_execution_env, materialize_process_event_semantics,
     mint_process_id, parent_end_delivery_key, parent_end_requester, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_child_session_id, process_park_transitions, process_runtime_session_ids,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, publish_process_execution_env, reconcile_pruned_trigger_deliveries,
+    process_child_session_id, process_park_transitions, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, release_bound_trigger_delivery_pins,
     require_event_replay, terminal_append_request, terminal_event_type_name,
     validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,

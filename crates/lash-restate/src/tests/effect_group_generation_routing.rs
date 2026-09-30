@@ -123,11 +123,13 @@ pub(super) async fn build_endpoint_reading(
             effect_host: &host,
             ingress: ingress.clone(),
             sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
+            attachments: stores.session_store_factory() as Arc<dyn lash_core::AttachmentReferrers>,
             process_workflow: LashProcessWorkflowImpl::new(
                 Arc::new(IdleRunner),
                 Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
                 registry as Arc<dyn lash_core::ProcessContinuationStore>,
                 ingress,
+                Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                 test_restate_authority_id(),
                 generation(build),
                 &crate::services::DEFAULT_NAMESPACE,

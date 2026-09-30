@@ -349,6 +349,7 @@ impl Processes {
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
                 lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+                    .with_process_attachments(self.core.backend.attachment_referrers())
                     .with_process_starts(
                         self.core
                             .backend

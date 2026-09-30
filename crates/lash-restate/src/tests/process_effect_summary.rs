@@ -387,6 +387,7 @@ async fn drive_to_terminal(
                 let (output, prelude) = terminal(outcome);
                 match crate::process::complete_process_outcome(
                     &writes,
+                    &lash_core::attachments::NoopAttachmentReferrers,
                     &process_id,
                     output,
                     prelude,
@@ -410,6 +411,7 @@ async fn drive_to_terminal(
                         );
                         break crate::process::complete_process_outcome(
                             &writes,
+                            &lash_core::attachments::NoopAttachmentReferrers,
                             &process_id,
                             output,
                             prelude,
@@ -618,9 +620,15 @@ async fn a_boundary_refuses_a_changed_summary_payload_without_reaching_the_progr
         .await
         .expect("the replay proposes the recorded terminal"),
     );
-    let refused = crate::process::complete_process_outcome(&registry, &process_id, output, prelude)
-        .await
-        .expect_err("the terminal batch refuses a changed payload under the same key");
+    let refused = crate::process::complete_process_outcome(
+        &registry,
+        &lash_core::attachments::NoopAttachmentReferrers,
+        &process_id,
+        output,
+        prelude,
+    )
+    .await
+    .expect_err("the terminal batch refuses a changed payload under the same key");
     assert!(
         refused
             .to_string()

@@ -968,7 +968,9 @@ impl ModelStore {
         let recorded_intents =
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: SessionId::from(event.actor_alias.clone()),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                        event.actor_alias.clone(),
+                    )),
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),

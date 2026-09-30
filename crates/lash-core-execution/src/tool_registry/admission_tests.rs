@@ -351,7 +351,7 @@ fn test_attempt_context() -> crate::AttemptContext<'static> {
             crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
+        Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),

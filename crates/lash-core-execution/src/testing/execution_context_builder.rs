@@ -88,6 +88,7 @@ impl<'run> TestExecutionPorts<'run> {
             modules,
             Arc::clone(&self.process_env_store),
             backend.process_definitions(),
+            backend.attachment_referrers(),
             backend.artifact_cleanup(),
             Arc::clone(&self.clock),
         ));
@@ -169,7 +170,7 @@ pub struct TestExecutionContextBuilder<'run> {
     /// fixture that redrives one cell reuses the invocation through
     /// [`TestExecutionContextBuilder::runtime_parent_invocation`] instead.
     protocol_iteration: usize,
-    attachment_store: Arc<crate::SessionAttachmentStore>,
+    attachment_store: Arc<crate::RuntimeAttachmentStore>,
     clock: Arc<dyn crate::Clock>,
     /// Protocol factories the session is built from. `None` takes the code
     /// protocol these contexts default to; lash-core's own `cfg(test)` binary
@@ -261,7 +262,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             dispatch_parent_invocation: None,
             runtime_parent_invocation: None,
             protocol_iteration: 0,
-            attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_store)),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(attachment_store)),
             clock,
             plugin_factories: None,
             process_lineage: None,
@@ -437,7 +438,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     /// artifacts through (FIG-3420) hands in its own.
     pub fn attachment_store(
         mut self,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
     ) -> Self {
         self.attachment_store = attachment_store;
         self
@@ -601,9 +602,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
             parent_invocation: self.dispatch_parent_invocation,
             observation_call_key: None,
             execution_env_spec: self.execution_env_spec.clone(),
-            session_id: self.session_id,
-            agent_frame_id: crate::FrameNodeId::new("test-frame")
-                .expect("test frame identity is non-empty"),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: self.session_id,
+                agent_frame_id: crate::FrameNodeId::new("test-frame")
+                    .expect("test frame identity is non-empty"),
+            },
             observer: Arc::new(crate::engine::NullObservationSink),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -638,11 +641,19 @@ impl<'run> TestExecutionContextBuilder<'run> {
 }
 
 impl<'run> BuiltTestExecutionContext<'run> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the builder only builds session-frame dispatches"
+    )]
     pub fn into_runtime(self) -> crate::RuntimeExecutionContext<'run> {
         let attachment_store = Arc::clone(&self.dispatch.attachment_store);
-        let session_id = self.dispatch.session_id.clone();
+        let session_id = self
+            .dispatch
+            .owner
+            .session_id()
+            .cloned()
+            .expect("a test execution context runs in a session");
         let mut context = crate::RuntimeExecutionContext::new(
-            session_id.clone(),
             self.dispatch,
             self.process_env_store,
             attachment_store,

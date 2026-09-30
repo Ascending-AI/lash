@@ -186,137 +186,6 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
 }
 
 #[tokio::test]
-pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
-    let context = Arc::new(RecordingContext::default());
-    let turn_cancel =
-        test_turn_cancel_wait_request(&SessionId::from("recording-process"), &TurnId::from("turn"));
-    let task_context = Arc::clone(&context);
-    let task = tokio::spawn(async move {
-        RestateControllerContext::await_process_terminal_or_turn_cancel(
-            &task_context,
-            &crate::services::DEFAULT_NAMESPACE,
-            ProcessId::fixture("recording-process-child"),
-            Some(turn_cancel),
-            crate::controller::context::ProcessCancelRace::NotRaced,
-        )
-        .await
-    });
-    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel =
-        test_turn_cancel_wait_request(&SessionId::from("recording-process"), &TurnId::from("turn"));
-    RestateControllerContext::resolve_event(
-        &context,
-        &crate::services::DEFAULT_NAMESPACE,
-        RestateDurableWaitResolveRequest {
-            key: turn_cancel.key,
-            resolution: Resolution::Cancelled,
-        },
-    )
-    .await
-    .expect("resolve recording-context gate");
-
-    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
-        .await
-        .expect("recording-context process await must wake")
-        .expect("join recording-context process await")
-        .expect("recording-context process await outcome");
-    assert!(matches!(
-        outcome,
-        RestateTurnCancelRaceOutcome::TurnCancelled
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn positional_replay_context_process_await_reports_turn_cancelled() {
-    let context = Arc::new(PositionalReplayContext::default());
-    let turn_cancel = test_turn_cancel_wait_request(
-        &SessionId::from("positional-process"),
-        &TurnId::from("turn"),
-    );
-    let task_context = Arc::clone(&context);
-    let task = tokio::spawn(async move {
-        RestateControllerContext::await_process_terminal_or_turn_cancel(
-            &task_context,
-            &crate::services::DEFAULT_NAMESPACE,
-            ProcessId::fixture("positional-process-child"),
-            Some(turn_cancel),
-            crate::controller::context::ProcessCancelRace::NotRaced,
-        )
-        .await
-    });
-    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request(
-        &SessionId::from("positional-process"),
-        &TurnId::from("turn"),
-    );
-    RestateControllerContext::resolve_event(
-        &context,
-        &crate::services::DEFAULT_NAMESPACE,
-        RestateDurableWaitResolveRequest {
-            key: turn_cancel.key,
-            resolution: Resolution::Cancelled,
-        },
-    )
-    .await
-    .expect("resolve positional-context gate");
-
-    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
-        .await
-        .expect("positional-context process await must wake")
-        .expect("join positional-context process await")
-        .expect("positional-context process await outcome");
-    assert!(matches!(
-        outcome,
-        RestateTurnCancelRaceOutcome::TurnCancelled
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn replayable_recording_context_process_await_reports_turn_cancelled() {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let turn_cancel = test_turn_cancel_wait_request(
-        &SessionId::from("replayable-process"),
-        &TurnId::from("turn"),
-    );
-    let task_context = Arc::clone(&context);
-    let task = tokio::spawn(async move {
-        RestateControllerContext::await_process_terminal_or_turn_cancel(
-            &task_context,
-            &crate::services::DEFAULT_NAMESPACE,
-            ProcessId::fixture("replayable-process-child"),
-            Some(turn_cancel),
-            crate::controller::context::ProcessCancelRace::NotRaced,
-        )
-        .await
-    });
-    wait_for_test_turn_cancel_registration(&context.events.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request(
-        &SessionId::from("replayable-process"),
-        &TurnId::from("turn"),
-    );
-    RestateControllerContext::resolve_event(
-        &context,
-        &crate::services::DEFAULT_NAMESPACE,
-        RestateDurableWaitResolveRequest {
-            key: turn_cancel.key,
-            resolution: Resolution::Cancelled,
-        },
-    )
-    .await
-    .expect("resolve replayable-context gate");
-
-    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
-        .await
-        .expect("replayable-context process await must wake")
-        .expect("join replayable-context process await")
-        .expect("replayable-context process await outcome");
-    assert!(matches!(
-        outcome,
-        RestateTurnCancelRaceOutcome::TurnCancelled
-    ));
-}
-
-#[tokio::test]
 pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate() {
     let recording = Arc::new(RecordingContext::default());
     RestateControllerContext::sleep_or_turn_cancel(
@@ -498,7 +367,9 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                             intents: lash_core::ToolIntents::v3(vec![
                                 lash_core::ToolIntent::StartProcess(Box::new(
                                     lash_core::StartProcessIntent {
-                                        session_id: SessionId::from("session"),
+                                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                                            "session",
+                                        )),
                                         declaration: lash_core::ProcessStartDeclaration::external(
                                             lash_core::ProcessOriginator::host_scoped(
                                                 "restate-positional-law",

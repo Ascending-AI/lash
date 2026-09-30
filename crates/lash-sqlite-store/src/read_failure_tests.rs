@@ -139,9 +139,9 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
 }
 
 #[tokio::test]
-async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
+async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("unknown-attachment-owner.db");
+    let path = dir.path().join("unknown-attachment-referrer.db");
     let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open store");
@@ -149,57 +149,20 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("allow unknown durable enum injection");
     raw.execute(
-        "INSERT INTO attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id)
-         VALUES ('unknown-owner', 'unknown-attachment-owner',
-                 'lash-attachment://unknown', 0, NULL, 'unknown', 'owner')",
+        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-referrer', 'unknown', 'opaque')",
         [],
     )
-    .expect("insert unknown owner kind");
+    .expect("insert unknown referrer kind");
 
-    let error = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
-        .await
-        .expect_err("unknown SQLite attachment owner kind must refuse");
+    let error = lash_core_execution::AttachmentReferrers::attachment_referrers(
+        &store,
+        &lash_core_execution::AttachmentId::parse("unknown-referrer").unwrap(),
+    )
+    .await
+    .expect_err("unknown SQLite attachment referrer kind must refuse");
     assert!(
         matches!(error, StoreError::Incompatible { .. }),
-        "SQLite must return the typed attachment-owner incompatibility, got {error:?}"
-    );
-}
-
-#[tokio::test]
-async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("unminted-process-attachment-owner.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("open store");
-    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-    raw.execute(
-        "INSERT INTO attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id)
-         VALUES ('unminted-process-owner', 'unminted-process-attachment-owner',
-                 'lash-attachment://unminted-process', 0, NULL, 'process', 'process-1')",
-        [],
-    )
-    .expect("insert a process owner no registrar minted");
-
-    let error = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
-        .await
-        .expect_err("an unminted SQLite process attachment owner must refuse");
-    let expected = lash_core_execution::ProcessId::parse("process-1")
-        .expect_err("a host-chosen name is not a process id")
-        .to_string();
-    assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner",
-                ref message,
-            } if *message == expected
-        ),
-        "SQLite must return the canonical unminted-process-owner refusal, got {error:?}"
+        "SQLite must return the typed attachment-referrer incompatibility, got {error:?}"
     );
 }
 
@@ -748,13 +711,16 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .is_none()
     );
     assert!(
-        lash_core_execution::AttachmentManifest::list_uncommitted(store.as_ref(), 0)
-            .await
-            .expect("list uncommitted attachments")
-            .is_empty()
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
+            store.as_ref(),
+            &lash_core_execution::AttachmentId::parse("absent").unwrap()
+        )
+        .await
+        .expect("list uncommitted attachments")
+        .is_empty()
     );
     assert!(
-        lash_core_execution::AttachmentManifest::list_all_refs(store.as_ref())
+        lash_core_execution::AttachmentRootSet::live_attachment_refs(store.as_ref())
             .await
             .expect("list attachment refs")
             .is_empty()
@@ -841,16 +807,16 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("allow unknown durable enum injection");
     raw.execute(
-        "INSERT INTO attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id)
-         VALUES ('unknown-owner', 'corrupt', 'lash-attachment://unknown', 0,
-                 NULL, 'unknown', 'owner')",
+        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-owner', 'unknown', 'opaque')",
         [],
     )
     .expect("insert unknown owner kind");
     assert!(matches!(
-        lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await,
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
+            &store,
+            &lash_core_execution::AttachmentId::parse("unknown-owner").unwrap()
+        )
+        .await,
         Err(StoreError::Incompatible { .. })
     ));
 
@@ -1015,11 +981,15 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     );
     assert_storage_failure("get_checkpoint", store.get_checkpoint(&blob_ref).await);
     assert_storage_failure(
-        "AttachmentManifest::list_uncommitted",
-        lash_core_execution::AttachmentManifest::list_uncommitted(store.as_ref(), 0).await,
+        "AttachmentReferrers::attachment_referrers",
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
+            store.as_ref(),
+            &lash_core_execution::AttachmentId::parse("absent").unwrap(),
+        )
+        .await,
     );
     assert_storage_failure(
-        "AttachmentManifest::list_all_refs",
-        lash_core_execution::AttachmentManifest::list_all_refs(store.as_ref()).await,
+        "AttachmentRootSet::live_attachment_refs",
+        lash_core_execution::AttachmentRootSet::live_attachment_refs(store.as_ref()).await,
     );
 }

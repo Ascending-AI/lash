@@ -81,7 +81,7 @@ pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
 }
 
 pub(in crate::runtime::session_manager) async fn resolve_session_init(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     mut request: SessionCreateRequest,
 ) -> Result<SessionInitPlan, crate::PluginError> {
     let session_id = request
@@ -159,7 +159,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
 /// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
 /// rather than silently overwriting the pin the root open established.
 fn resolve_session_policy(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     request: &SessionCreateRequest,
     session_id: &SessionId,
 ) -> Result<SessionPolicy, crate::SessionError> {
@@ -217,7 +217,7 @@ fn build_runtime_state(
 }
 
 async fn materialize_session_init(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<MaterializedSession, crate::PluginError> {
     let (plugins, plugin_init) = build_session_plugins(current, plan)?;
@@ -260,7 +260,7 @@ async fn materialize_session_init(
 }
 
 fn build_session_plugins<'a>(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: &'a SessionInitPlan,
 ) -> Result<
     (
@@ -295,7 +295,7 @@ fn build_session_plugins<'a>(
                     config: plan.plugin_config.clone(),
                     seed_snapshot: Some(&init.plugin_state),
                 },
-                session_id: (&plan.session_id).into(),
+                owner: crate::RuntimeOwner::Session(plan.session_id.clone()),
             })?;
             Ok((session, Some(init)))
         }
@@ -303,7 +303,7 @@ fn build_session_plugins<'a>(
 }
 
 async fn bind_session_store(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<crate::store::SessionStore, crate::PluginError> {
     let store = crate::runtime::admit_session_view(
@@ -328,7 +328,7 @@ async fn bind_session_store(
     Ok(store)
 }
 
-fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
+fn embedded_host(current: &CurrentOwnerCapability) -> EmbeddedRuntimeHost {
     EmbeddedRuntimeHost::new(current.host.core.clone())
 }
 
@@ -372,7 +372,7 @@ async fn validate_created_session_store_binding(
 /// process observer intents. The runtime itself stays owned by the caller —
 /// nothing registers it.
 async fn commit_initialized_session(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: SessionInitPlan,
     mut materialized: MaterializedSession,
 ) -> Result<(SessionHandle, RuntimeHandle), crate::PluginError> {
@@ -428,7 +428,7 @@ async fn commit_initialized_session(
 /// session's durable row. Idempotent and durably recoverable, so a reopen
 /// after a crashed create attempt completes it the same way.
 async fn settle_session_observer_intents(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     session_id: &SessionId,
     store: &crate::store::SessionStore,
 ) -> Result<Vec<crate::plugin::SessionObservedProcessReceipt>, crate::PluginError> {
@@ -460,7 +460,7 @@ fn session_catalog_lookup_unsupported(error: &crate::PluginError) -> bool {
 
 /// The session's durable store when its catalog row already exists.
 async fn durable_session_store(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     session_id: &SessionId,
 ) -> Result<Option<crate::store::SessionStore>, crate::PluginError> {
     crate::runtime::live_session_view(&current.host.core.session_store_factory(), session_id)
@@ -490,14 +490,13 @@ async fn durable_session_store(
 /// durable row must not already exist — replaying a recorded identity is the
 /// process run port's contract, not a host create's.
 pub(in crate::runtime::session_manager) async fn create_session(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
 ) -> Result<SessionHandle, crate::PluginError> {
     let plan = resolve_session_init(current, request).await?;
-    if plan.session_id == current.session_id
-        || durable_session_store(current, &plan.session_id)
-            .await?
-            .is_some()
+    if durable_session_store(current, &plan.session_id)
+        .await?
+        .is_some()
     {
         return Err(crate::PluginError::SessionAlreadyExists {
             session_id: plan.session_id,
@@ -516,7 +515,7 @@ pub(in crate::runtime::session_manager) async fn create_session(
 /// or reopen it when a previous attempt already committed the durable row.
 /// Either way the result is an ordinary session runtime owned by the caller.
 async fn initialize_session(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
     owning_process_id: &crate::ProcessId,
 ) -> Result<InitializedSession, crate::PluginError> {
@@ -540,7 +539,7 @@ async fn initialize_session(
 /// The fresh-create half of `initialize_session`: materialize the plan and
 /// commit its initial head, then hand the ordinary runtime to the caller.
 async fn commit_fresh_session_init(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: SessionInitPlan,
 ) -> Result<InitializedSession, crate::PluginError> {
     let materialized = materialize_session_init(current, &plan).await?;
@@ -593,7 +592,7 @@ async fn recorded_session_state(
 /// head: rebuild the plugin session from the recorded state and assemble the
 /// runtime under the resumed-session assembly.
 async fn reopen_committed_session(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
     store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,

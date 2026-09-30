@@ -143,7 +143,7 @@ impl LashRuntime {
         }
         self.session
             .as_ref()
-            .map(|session| session.shared_tool_catalog(&self.state.session_id))
+            .map(|session| session.shared_tool_catalog())
             .unwrap_or_else(|| Ok(Arc::new(Vec::new())))
     }
 

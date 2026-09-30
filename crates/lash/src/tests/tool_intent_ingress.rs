@@ -205,7 +205,7 @@ async fn ingress_core_with_trigger_store(
 
 fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         request: lash_core::TriggerOccurrenceRequest::new(
             "intent.ingress.trigger",
             "intent-ingress-source",
@@ -230,7 +230,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let register =
         lash_core::ToolIntent::RegisterTrigger(Box::new(lash_core::RegisterTriggerIntent {
-            session_id: SessionId::from(SESSION),
+            owner: crate::RuntimeOwner::Session(SessionId::from(SESSION)),
             owner_scope: lash_core::TriggerOwnerScope::session(SESSION),
             actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(SESSION)),
             env_spec: None,
@@ -502,7 +502,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
     let session_id = SessionId::from(SESSION);
     let register = |owner_scope, actor| {
         lash_core::ToolIntent::RegisterTrigger(Box::new(lash_core::RegisterTriggerIntent {
-            session_id: session_id.clone(),
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope,
             actor,
             env_spec: None,
@@ -1053,7 +1053,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
 
 fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         process_id: process.clone(),
         event_type: EVENT.to_string(),
         payload: serde_json::json!({"law": "duplicate-submit"}),
@@ -1062,7 +1062,7 @@ fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIn
 
 fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         declaration: lash_core::ProcessStartDeclaration::external(
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
@@ -1073,7 +1073,7 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 
 fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::Engine {
                 kind: "testing-fixture".to_string(),
@@ -1098,7 +1098,7 @@ fn cancel_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::Tool
 
 fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         process_id: target.clone(),
     })
 }
@@ -1414,7 +1414,7 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
     );
     let key_value = serde_json::to_value(&key).expect("serialize ingress key");
     for field in [
-        "session_id",
+        "owner",
         "execution_scope_id",
         "tool_call_id",
         "intent_index",
@@ -1947,7 +1947,7 @@ async fn ingress_engine_core(
 
 fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: SessionId::from(SESSION.to_string()),
+        owner: crate::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::Engine {
                 kind: kind.to_string(),

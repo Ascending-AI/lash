@@ -1,4 +1,4 @@
-use super::{CurrentSessionCapability, UsageCapability};
+use super::{CurrentOwnerCapability, UsageCapability};
 use crate::runtime::effect::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,
     emit_llm_trace_started, token_usage_from_llm,
@@ -17,7 +17,7 @@ use crate::{
 /// methods project from this single result.
 #[allow(private_interfaces)]
 pub(crate) async fn apply_direct_outcome(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     usage_capability: &UsageCapability,
     request: &CoreLlmRequest,
     usage_source: &str,
@@ -61,7 +61,7 @@ pub(crate) async fn apply_direct_outcome(
     reason = "direct effect application keeps usage, causal, outcome, and attempt capabilities explicit"
 )]
 async fn apply_direct_llm_result(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     usage_capability: &UsageCapability,
     request: &CoreLlmRequest,
     usage_source: &str,
@@ -118,7 +118,7 @@ async fn apply_direct_llm_result(
 }
 
 fn emit_direct_llm_trace_started(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     request: &CoreLlmRequest,
     caused_by: Option<&CausalRef>,
 ) -> Option<String> {
@@ -127,7 +127,7 @@ fn emit_direct_llm_trace_started(
     emit_llm_trace_started(
         &current.host.core.tracing.trace_sink,
         &current.host.core.tracing.trace_context,
-        direct_trace_context(&current.session_id, Some(&llm_call_id), caused_by),
+        direct_trace_context(&current.runtime_owner(), Some(&llm_call_id), caused_by),
         request,
         current.host.core.clock.as_ref(),
     );
@@ -135,7 +135,7 @@ fn emit_direct_llm_trace_started(
 }
 
 fn emit_direct_llm_trace_completed(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
     response: &LlmResponse,
@@ -148,7 +148,7 @@ fn emit_direct_llm_trace_completed(
     emit_llm_trace_completed(
         &current.host.core.tracing.trace_sink,
         &current.host.core.tracing.trace_context,
-        direct_trace_context(&current.session_id, Some(llm_call_id), caused_by),
+        direct_trace_context(&current.runtime_owner(), Some(llm_call_id), caused_by),
         response,
         request_model,
         0,
@@ -159,7 +159,7 @@ fn emit_direct_llm_trace_completed(
 }
 
 fn emit_direct_llm_trace_failed(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
     err: &LlmCallError,
@@ -171,7 +171,7 @@ fn emit_direct_llm_trace_failed(
     emit_llm_trace_failed(
         &current.host.core.tracing.trace_sink,
         &current.host.core.tracing.trace_context,
-        direct_trace_context(&current.session_id, Some(llm_call_id), caused_by),
+        direct_trace_context(&current.runtime_owner(), Some(llm_call_id), caused_by),
         LlmTraceFailure::from(err),
         None,
         call_record,

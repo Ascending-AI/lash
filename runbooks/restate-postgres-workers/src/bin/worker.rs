@@ -855,14 +855,17 @@ async fn topology_attachment(
         let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
         let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
         let committed: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM lash_attachment_manifest
-             WHERE session_id = $1 AND attachment_id = $2 AND committed_at_ms IS NOT NULL)",
+            "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
+             WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",
         )
         .bind(&session_id)
         .bind(&attachment_id)
         .fetch_one(state.storage.pool())
         .await?;
-        anyhow::ensure!(committed, "attachment has no committed session ownership");
+        anyhow::ensure!(
+            committed,
+            "attachment is not held by its committing session"
+        );
         session.close().await?;
         Ok::<_, anyhow::Error>(serde_json::json!({
             "worker_id": state.worker_id,
@@ -895,8 +898,8 @@ async fn load_attachment(
         let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
         let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
         let committed: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM lash_attachment_manifest
-             WHERE session_id = $1 AND attachment_id = $2 AND committed_at_ms IS NOT NULL)",
+            "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
+             WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",
         )
         .bind(&session_id)
         .bind(&attachment_id)

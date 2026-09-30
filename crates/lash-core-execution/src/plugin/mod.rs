@@ -49,6 +49,8 @@ pub use history::{
     ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,
     PluginTraceEmitter, SessionReadView, TurnContextTransform, TurnTransformContext,
 };
+pub(crate) use hooks::owner_trace_context;
+pub use hooks::require_session_owner;
 pub use hooks::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
     AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
@@ -261,9 +263,10 @@ mod tests {
         }
 
         fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(MockPlugin {
-                session_id: ctx.session_id.clone(),
-            }))
+            let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
+                PluginError::Session("the mock plugin serves sessions".to_string())
+            })?;
+            Ok(Arc::new(MockPlugin { session_id }))
         }
     }
 
@@ -909,7 +912,10 @@ mod tests {
             host.build_session(PluginSessionRequest::creation("root", Default::default()))
                 .expect("session"),
         );
-        assert_eq!(services.plugins.session_id(), "root");
+        assert_eq!(
+            services.plugins.owner(),
+            &crate::RuntimeOwner::Session("root".into())
+        );
         assert!(
             services
                 .plugins

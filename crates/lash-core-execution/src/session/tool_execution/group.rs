@@ -371,8 +371,7 @@ impl RuntimeExecutionContext<'_> {
                 ToolChildScope {
                     opener: opener.clone(),
                     admitted_scope: admitted.clone(),
-                    session_id: self.dispatch.session_id.clone(),
-                    agent_frame_id: self.dispatch.agent_frame_id.clone(),
+                    owner: self.dispatch.owner.clone(),
                 },
                 cancellation_authority.clone(),
                 execution_env.clone(),
@@ -834,7 +833,7 @@ impl RuntimeExecutionContext<'_> {
             );
             let site = crate::tool_dispatch::ParkSite {
                 processes: self.dispatch.processes.as_ref(),
-                session_id: &self.dispatch.session_id,
+                owner: self.dispatch.owner.runtime_owner(),
                 call_id,
                 scope: self.process_scope(Some(parent)),
                 child_trace_hook: None,

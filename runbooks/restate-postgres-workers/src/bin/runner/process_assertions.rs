@@ -768,23 +768,17 @@ pub(super) async fn assert_attachments_round_trip(
                 response.attachment_id
             )
         })?;
-        let manifest: Option<(String, Option<i64>)> = sqlx::query_as(
-            "SELECT session_id, committed_at_ms
-             FROM lash_attachment_manifest
-             WHERE attachment_id = $1",
+        let held_by_session: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
+             WHERE attachment_id = $1 AND referrer_kind = 'session' AND referrer_id = $2)",
         )
         .bind(response.attachment_id.as_str())
-        .fetch_optional(pool)
+        .bind(DEFAULT_SESSION_ID)
+        .fetch_one(pool)
         .await
-        .with_context(|| format!("load attachment manifest for `{}`", response.attachment_id))?;
-        let (session_id, committed_at_ms) = manifest.with_context(|| {
-            format!(
-                "missing attachment manifest row for `{}`",
-                response.attachment_id
-            )
-        })?;
-        // Blob storage is flat and content-addressed now; session ownership is
-        // asserted through the Postgres manifest row below, not the object key.
+        .with_context(|| format!("load attachment referrers for `{}`", response.attachment_id))?;
+        // Blob storage is flat and content-addressed; the committing session's
+        // hold is asserted through its referrer edge below, not the object key.
         let stored = store
             .get(&id)
             .await
@@ -794,13 +788,8 @@ pub(super) async fn assert_attachments_round_trip(
             "worker attachment `{id}` bytes did not match expected content"
         );
         anyhow::ensure!(
-            session_id == DEFAULT_SESSION_ID,
-            "attachment manifest session mismatch for `{}`: {session_id}",
-            response.attachment_id
-        );
-        anyhow::ensure!(
-            committed_at_ms.is_some(),
-            "attachment manifest row for `{}` was not committed",
+            held_by_session,
+            "attachment `{}` is not held by the committing session `{DEFAULT_SESSION_ID}`",
             response.attachment_id
         );
     }

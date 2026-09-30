@@ -24,6 +24,7 @@ async fn intent_law_world() -> IntentLawWorld {
             crate::StoreSet::module_artifacts(backend.as_ref()),
             backend.process_env_store(),
             crate::StoreSet::process_definitions(backend.as_ref()),
+            crate::StoreSet::attachment_referrers(backend.as_ref()),
             crate::StoreSet::artifact_cleanup(backend.as_ref()),
             Arc::new(crate::SystemClock),
         ),
@@ -37,7 +38,7 @@ fn recorded_event_intents(target: &ProcessId, event_types: &[&str]) -> crate::To
             .enumerate()
             .map(|(index, event_type)| {
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     process_id: target.clone(),
                     event_type: (*event_type).to_string(),
                     payload: json!({"source_index": index}),
@@ -119,7 +120,6 @@ fn runtime_execution_for_intent_law(
 ) -> crate::RuntimeExecutionContext<'static> {
     let attachment_store = Arc::clone(&context.attachment_store);
     crate::RuntimeExecutionContext::new(
-        SessionId::from("session"),
         Arc::new(context),
         Arc::clone(&world.env_store),
         attachment_store,
@@ -247,7 +247,7 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
 fn recorded_start_intents() -> crate::ToolIntents {
     crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
         crate::StartProcessIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             declaration: crate::ProcessStartDeclaration::external(
                 crate::ProcessOriginator::host_scoped("intent-law"),
                 json!({"step": "start"}),
@@ -367,7 +367,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     let controller = Arc::new(IntentReplayController::new(None).await);
     let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             process_id: target.clone(),
             signal_name: "redrive.signal".to_string(),
             payload: json!({"recorded": true}),
@@ -505,13 +505,13 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     let controller = Arc::new(IntentReplayController::new(None).await);
     let intents = crate::ToolIntents::v3(vec![
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             process_id: target.clone(),
             event_type: "intent.refusal.first".to_string(),
             payload: json!({"committed": true}),
         }),
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             process_id: crate::ProcessId::fixture("missing-intent-target"),
         }),
     ]);
@@ -850,7 +850,7 @@ async fn register_trigger_intent_refuses_foreign_authority_before_installing() {
             crate::ProcessIdentity::new("testing-fixture"),
         );
         let mut registration = crate::RegisterTriggerIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             owner_scope: crate::TriggerOwnerScope::session("session"),
             actor: crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
                 "session",
@@ -925,7 +925,7 @@ async fn register_trigger_intent_refuses_foreign_authority_before_installing() {
 fn recorded_trigger_intents() -> crate::ToolIntents {
     crate::ToolIntents::v3(vec![crate::ToolIntent::EmitTrigger(
         crate::EmitTriggerIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             request: crate::TriggerOccurrenceRequest::new(
                 "intent.trigger.emitted",
                 "intent-law-source",
@@ -1173,7 +1173,7 @@ async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None).await);
     let declaration = crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
-        session_id: SessionId::from("session"),
+        owner: crate::RuntimeOwner::Session(SessionId::from("session")),
         request: crate::TriggerOccurrenceRequest::new(
             "intent.trigger.emitted",
             "intent-law-source",
@@ -1274,7 +1274,7 @@ async fn cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress()
     let predecessor = crate::ToolIntents {
         protocol_version: 1,
         intents: vec![crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             request: request.clone(),
         })],
     };

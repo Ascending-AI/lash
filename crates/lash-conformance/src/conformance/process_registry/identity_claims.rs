@@ -445,7 +445,7 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     let key = crate::StartKey::for_tool_intent(
         crate::DERIVED_START_KEYS,
         &crate::derive_tool_intent_identity(
-            &SessionId::from("execution-owner"),
+            &crate::RuntimeOwner::Session(SessionId::from("execution-owner")),
             "original-turn",
             &crate::ToolCallId::fixture("scope-environment"),
             0,

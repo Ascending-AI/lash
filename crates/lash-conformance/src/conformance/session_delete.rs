@@ -565,6 +565,8 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
         modules: stores.module_artifacts(),
         definitions: stores.process_definitions(),
         engines: admin.process_engines().clone(),
+        attachments: stores.attachment_referrers(),
+        clock: stores.clock(),
     }));
     let ttl = relay.policy().claim_ttl_ms;
     let page = NonZeroUsize::new(64).expect("non-zero page");

@@ -1,11 +1,10 @@
 use super::*;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 struct ProcessCommandRunner<'scope> {
-    current: &'scope CurrentSessionCapability,
+    current: &'scope CurrentOwnerCapability,
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     effect_controller: &'scope dyn crate::RuntimeEffectController,
@@ -15,7 +14,7 @@ struct ProcessCommandRunner<'scope> {
 
 impl<'scope> ProcessCommandRunner<'scope> {
     fn new(
-        current: &'scope CurrentSessionCapability,
+        current: &'scope CurrentOwnerCapability,
         scope: &'scope crate::ProcessOpScope<'scope>,
         unavailable_message: &'static str,
     ) -> Result<Self, crate::PluginError> {
@@ -185,8 +184,8 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 crate::tool_provider::process_events::enqueue_wake_delivery(
                     Arc::clone(&self.registry),
                     self.current
-                        .store
-                        .as_ref()
+                        .session()
+                        .and_then(|session| session.store.as_ref())
                         .map(|store| Arc::clone(store.store())),
                     Some(&self.current.host.core.session_store_factory()),
                     wake_delivery.map(|delivery| *delivery),
@@ -298,6 +297,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
             &self.current.host.core.durability.process_env_store,
         ))
         .with_process_engines(self.current.host.core.process_engines.clone())
+        .with_process_attachments(Arc::clone(
+            self.current
+                .host
+                .core
+                .durability
+                .attachment_store
+                .referrers(),
+        ))
         .with_process_effect_controller(owned_controller);
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
@@ -332,7 +339,7 @@ fn wrong_process_outcome(op: &str) -> crate::PluginError {
 impl ProcessCapability {
     fn command_runner<'scope>(
         &self,
-        current: &'scope CurrentSessionCapability,
+        current: &'scope CurrentOwnerCapability,
         scope: &'scope crate::ProcessOpScope<'scope>,
     ) -> Result<ProcessCommandRunner<'scope>, crate::PluginError> {
         ProcessCommandRunner::new(
@@ -352,17 +359,9 @@ impl ProcessCapability {
             .unwrap_or_else(|| crate::SessionScope::new(session_id))
     }
 
-    fn current_execution_env_spec(
-        &self,
-        current: &CurrentSessionCapability,
-    ) -> crate::ProcessExecutionEnvSpec {
-        let state = current.snapshot.to_runtime_state();
-        state.process_execution_env_spec(&current.policy)
-    }
-
     async fn capture_execution_env(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         registration: &crate::ProcessRegistration,
         requested_env_spec: Option<crate::ProcessExecutionEnvSpec>,
     ) -> Result<
@@ -391,7 +390,7 @@ impl ProcessCapability {
             // A start by id resolves to an engine start, which runs in an
             // environment like every other.
             crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. } => {
-                let spec = self.current_execution_env_spec(current);
+                let spec = current.execution_env_spec()?;
                 Ok((None, Some(spec.clone()), Some(spec)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
@@ -402,7 +401,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn start_process(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
@@ -461,12 +460,14 @@ impl ProcessCapability {
     /// structural parent invocation, then crosses the journal immediately.
     pub(in crate::runtime::session_manager) async fn start_process_from_recorded_intent(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.mark_current_process_sync_needed(current, session_id);
+        if let Some(session_id) = owner.session_id() {
+            self.mark_current_process_sync_needed(current, session_id);
+        }
         let caused_by = scope
             .parent_invocation
             .as_ref()
@@ -546,7 +547,7 @@ impl ProcessCapability {
     /// Admit immutable recorded inputs and stamp the sole engine identity.
     async fn admit_and_stamp_engine_start(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         registration: crate::ProcessRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
@@ -580,7 +581,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn await_process(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
@@ -608,7 +609,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn await_process_ref(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
@@ -621,7 +622,7 @@ impl ProcessCapability {
     /// journaled process seam, and return without waiting for it.
     pub(in crate::runtime::session_manager) async fn attach_process_terminal(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: crate::ProcessId,
         key: crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
@@ -641,7 +642,7 @@ impl ProcessCapability {
     /// band is rejected.
     pub(in crate::runtime::session_manager) async fn complete_external_process(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
@@ -664,6 +665,21 @@ impl ProcessCapability {
         // this explicit authority, so it is enforced uniformly across backends
         // rather than only here (ADR 0027).
         self.mark_current_process_sync_needed(current, session_id);
+        // The record holds what the output delivers before the registry
+        // records it; an output whose source was swept is refused with
+        // nothing recorded (ADR 0124 §8.5).
+        crate::runtime::attachment_delivery::acquire_completion_output(
+            current
+                .host
+                .core
+                .durability
+                .attachment_store
+                .referrers()
+                .as_ref(),
+            process_id,
+            &await_output,
+        )
+        .await?;
         runner
             .registry()
             .complete_process(
@@ -685,7 +701,7 @@ impl ProcessCapability {
     /// enforces the rest of the state machine.
     pub(in crate::runtime::session_manager) async fn report_process_caller_departure(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         process_id: &ProcessId,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -704,7 +720,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn list_process_handles(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
@@ -719,7 +735,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
@@ -732,24 +748,33 @@ impl ProcessCapability {
         ))
     }
 
+    /// The host's tool-visibility filter narrows what a session sees; it is
+    /// keyed by session, so a process owner's list is its started children
+    /// unnarrowed.
     pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles_for_attempt(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let records = self
-            .list_process_handles_for_attempt(current, session_id, mode)
+            .list_process_handles_for_attempt(current, owner, mode)
             .await?;
-        Ok(Self::narrow_tool_visible_records(
-            current, session_id, records,
-        ))
+        Ok(match owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                Self::narrow_tool_visible_records(current, session_id, records)
+            }
+            crate::RuntimeOwner::Process(_) => records,
+        })
     }
 
+    /// What `owner` sees: the processes a session observes, or the children
+    /// a process started — those whose recorded ancestry names the process as
+    /// its starter and whose lifetime ends with it.
     pub(in crate::runtime::session_manager) async fn list_process_handles_for_attempt(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let registry = current.host.process_registry().ok_or_else(|| {
@@ -757,18 +782,37 @@ impl ProcessCapability {
                 "process registry is unavailable in this runtime".to_string(),
             )
         })?;
-        match mode {
-            crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
-            crate::ProcessListMode::All => {
-                registry
-                    .list_observed_by(
-                        session_id,
-                        &crate::ProcessListFilter {
-                            status: crate::ProcessStatusFilter::Any,
-                            ..Default::default()
-                        },
-                    )
-                    .await
+        match owner {
+            crate::RuntimeOwner::Session(session_id) => match mode {
+                crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
+                crate::ProcessListMode::All => {
+                    registry
+                        .list_observed_by(
+                            session_id,
+                            &crate::ProcessListFilter {
+                                status: crate::ProcessStatusFilter::Any,
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                }
+            },
+            crate::RuntimeOwner::Process(process_id) => {
+                let starter = crate::ScopeId::process(process_id.clone());
+                Ok(registry
+                    .list_processes(&crate::ProcessListFilter {
+                        status: crate::ProcessStatusFilter::Any,
+                        until: Some(starter.clone()),
+                        ..Default::default()
+                    })
+                    .await?
+                    .into_iter()
+                    .filter(|record| record.ancestry.starter() == Some(&starter))
+                    .filter(|record| match mode {
+                        crate::ProcessListMode::Live => !record.status.is_retired(),
+                        crate::ProcessListMode::All => true,
+                    })
+                    .collect())
             }
         }
     }
@@ -779,13 +823,13 @@ impl ProcessCapability {
     )]
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        let _ = session_id;
+        let _ = owner;
         runner
             .cancel_named(
                 process_id,
@@ -799,7 +843,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
@@ -818,7 +862,7 @@ impl ProcessCapability {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime::session_manager) async fn emit_process_event(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         process_id: &ProcessId,
         event_type: String,
@@ -828,7 +872,7 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         self.validate_model_tool_process_handles(
             current,
-            session_id,
+            &crate::RuntimeOwner::Session(session_id.clone()),
             std::slice::from_ref(process_id),
         )
         .await?;
@@ -842,8 +886,8 @@ impl ProcessCapability {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime::session_manager) async fn signal_possessed_process(
         &self,
-        current: &CurrentSessionCapability,
-        _session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -874,7 +918,7 @@ impl ProcessCapability {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime::session_manager) async fn signal_recorded_intent(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -894,7 +938,7 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn emit_event_recorded_intent(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         event_type: String,
         replay_key: String,
@@ -910,31 +954,36 @@ impl ProcessCapability {
 
     pub(in crate::runtime::session_manager) async fn validate_process_handles_observed(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         let _ = scope;
-        self.validate_process_handles_observed_inner(current, session_id, handle_ids)
+        self.validate_process_handles_observed_inner(current, owner, handle_ids)
             .await
     }
 
     pub(in crate::runtime::session_manager) async fn validate_model_tool_process_handles(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
-        self.validate_process_handles_observed_inner(current, session_id, handle_ids)
+        self.validate_process_handles_observed_inner(current, owner, handle_ids)
             .await?;
-        self.validate_tool_filter(current, session_id, handle_ids)
-            .await
+        match owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.validate_tool_filter(current, session_id, handle_ids)
+                    .await
+            }
+            crate::RuntimeOwner::Process(_) => Ok(()),
+        }
     }
 
     pub(in crate::runtime::session_manager) async fn transfer_process_handles(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         from_session_id: &SessionId,
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
@@ -954,10 +1003,10 @@ impl ProcessCapability {
 
     async fn ensure_known_process_session(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
     ) -> Result<(), crate::PluginError> {
-        if session_id == current.session_id {
+        if current.is_current_session(session_id) {
             return Ok(());
         }
         Err(crate::PluginError::Session(format!(
@@ -967,16 +1016,16 @@ impl ProcessCapability {
 
     fn mark_current_process_sync_needed(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
     ) {
-        if session_id == current.session_id {
+        if current.is_current_session(session_id) {
             self.sync_needed.store(true, Ordering::Release);
         }
     }
 
     fn narrow_tool_visible_records(
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         records: Vec<crate::ProcessRecord>,
     ) -> Vec<crate::ProcessRecord> {
@@ -1028,11 +1077,13 @@ impl ProcessCapability {
             .collect()
     }
 
-    /// FIG-653: this gate enforces observer subscription relationships, not authorization.
+    /// FIG-653: this gate enforces observer subscription relationships, not
+    /// authorization. A session sees what it observes; a process sees the
+    /// children whose recorded ancestry names it as their starter.
     async fn validate_process_handles_observed_inner(
         &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        current: &CurrentOwnerCapability,
+        owner: &crate::RuntimeOwner,
         process_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
         if process_ids.is_empty() {
@@ -1042,7 +1093,18 @@ impl ProcessCapability {
             crate::PluginError::Session("process registry is unavailable in this runtime".into())
         })?;
         for process_id in process_ids {
-            match registry.is_observer(session_id, process_id).await {
+            let visible = match owner {
+                crate::RuntimeOwner::Session(session_id) => {
+                    registry.is_observer(session_id, process_id).await
+                }
+                crate::RuntimeOwner::Process(starter) => {
+                    let starter = crate::ScopeId::process(starter.clone());
+                    registry.get_process(process_id).await.map(|record| {
+                        record.is_some_and(|record| record.ancestry.starter() == Some(&starter))
+                    })
+                }
+            };
+            match visible {
                 Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
                 Ok(false) => return Err(process_visibility_miss(process_id)),
                 Err(error) => return Err(error),
@@ -1053,7 +1115,7 @@ impl ProcessCapability {
 
     async fn validate_tool_filter(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         session_id: &SessionId,
         process_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
@@ -1113,7 +1175,7 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// and that owner's lineage from its row, so the start records the owner
 /// above the session (R1).
 async fn with_admitted_start_cx(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     registration: crate::ProcessRegistration,
     scope: &crate::ProcessOpScope<'_>,
 ) -> Result<crate::ProcessRegistration, crate::PluginError> {
@@ -1162,11 +1224,11 @@ async fn with_admitted_start_cx(
 /// retention already pruned: a pruned owner ended long ago, its scope is
 /// closed, and it can bound nothing a start made now would name.
 async fn owning_process_lineage(
-    current: &CurrentSessionCapability,
+    current: &CurrentOwnerCapability,
     session_id: &SessionId,
 ) -> Result<Option<crate::ProcessLineage>, crate::PluginError> {
-    let store = match current.store.as_ref() {
-        Some(store) if current.session_id == *session_id => Some(store.clone()),
+    let store = match current.session().and_then(|session| session.store.as_ref()) {
+        Some(store) if current.is_current_session(session_id) => Some(store.clone()),
         _ => crate::runtime::live_session_view(
             &current.host.core.session_store_factory(),
             session_id,

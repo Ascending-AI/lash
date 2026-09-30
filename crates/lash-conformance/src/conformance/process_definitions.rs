@@ -196,6 +196,8 @@ impl World {
             modules: Arc::clone(ports.modules()),
             definitions: Arc::clone(ports.definitions()),
             engines: engines.clone(),
+            attachments: Arc::clone(ports.attachments()),
+            clock: Arc::new(crate::SystemClock),
         })
         .with_policy(RelayPolicy {
             base_backoff_ms: 1,

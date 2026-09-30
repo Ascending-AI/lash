@@ -1,18 +1,14 @@
-//! Postgres proof that the process-prune delete path obeys the tombstone-reclaim
-//! law: the batch delete drains rows orphaned under sessions outside the batch,
-//! pruned process-session ids join the deleted set, and a later delete drains
-//! rows orphaned under them.
+//! Postgres proofs that process pruning preserves independent session roots
+//! and durably fences the ProcessRecord referrer with its cleanup obligation.
 //!
 //! This lives in its own test target rather than the conformance suite, which is
 //! at its line budget.
 
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use std::sync::Arc;
 
-use lash_core_execution::store::RootStore;
 use lash_core_execution::{
     DeploymentStore, ProcessExecutionEnvStore, ProcessLifecycle as _, ProcessRegistrar as _,
-    ProcessRegistry, ProcessRetention as _, SessionCatalogStore as _, TurnInputStore,
+    ProcessRegistry, ProcessRetention as _,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -70,8 +66,7 @@ lash_conformance::process_prune_reclaim_tests!({
     };
     reset(&storage).await;
     let storage = Arc::new(storage);
-    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn DeploymentStore>;
+    let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(blob_probe::PostgresBlobProbe::new(
         storage,
@@ -91,6 +86,7 @@ lash_conformance::process_start_staging_tests!({
         Arc::new(storage.lashlang_artifact_store()),
         Arc::new(storage.process_env_store()),
         Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
     );
@@ -108,6 +104,7 @@ lash_conformance::process_definition_tests!({
         Arc::new(storage.lashlang_artifact_store()),
         Arc::new(storage.process_env_store()),
         Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
     );
@@ -171,7 +168,7 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
 
     let referrer = lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id);
     let fenced: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+        "SELECT EXISTS (SELECT 1 FROM lash_referrer_fences
          WHERE referrer_kind = $1 AND referrer_id = $2)",
     )
     .bind(referrer.kind().as_str())
@@ -199,117 +196,5 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
     assert_eq!(cleanup.referrer, referrer);
     assert!(
         matches!(cleanup.plan, lash_core_execution::ArtifactCleanupPlan::Ended { carries } if carries.is_empty())
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_removes_an_admitted_roots_record() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres process-prune root-admission law: database URL is not set");
-        return;
-    };
-    reset(&storage).await;
-    let registry = storage.process_registry();
-    let process = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
-        ))
-        .await
-        .expect("register process");
-    let session_id =
-        lash_core_execution::facade_support::process_runtime_session_ids(&process.id)[0].clone();
-    let factory = storage.session_store_factory_with_shared_process_registry();
-    factory
-        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash_core_execution::SessionRelation::default(),
-            config: lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-            )
-            .into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
-        })
-        .await
-        .expect("create process-owned session");
-    let store = factory;
-    let input = store
-        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
-            &session_id,
-            lash_core_execution::TurnInputIngress::NextTurn,
-            lash_core_execution::TurnInput::text("queued before prune"),
-        ))
-        .await
-        .expect("enqueue pending input");
-    let lease = store
-        .seal_drive_epoch_for_test(
-            &session_id,
-            &lash_core_execution::LeaseOwnerIdentity::opaque(
-                "prune-run-owner",
-                "prune-run-incarnation",
-            ),
-            "prune-run-executor",
-            60_000,
-        )
-        .await
-        .expect("seal drive")
-        .acquired()
-        .expect("drive sealed");
-    let admission = store
-        .admit_root(
-            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
-                &lease,
-                &lash_core_execution::TurnId::from("prune-root"),
-                lash_core_execution::store::AdmittedHead::Input(input.input_id.clone()),
-            ),
-        )
-        .await
-        .expect("admit the root")
-        .expect("the root reaches its head");
-    assert_eq!(admission.input_ids(), vec![input.input_id]);
-    let admitted: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM lash_session_roots \
-         WHERE session_id = $1 AND admission_json IS NOT NULL",
-    )
-    .bind(session_id.as_str())
-    .fetch_one(storage.pool())
-    .await
-    .expect("count admitted roots before prune");
-    assert_eq!(
-        admitted, 1,
-        "the root's record carries the process-owned admission"
-    );
-    let terminal = registry
-        .complete_process(
-            &process.id,
-            lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
-            ),
-            lash_core_execution::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete process");
-    registry
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune process-owned session");
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM lash_session_roots WHERE session_id = $1")
-            .bind(session_id.as_str())
-            .fetch_one(storage.pool())
-            .await
-            .expect("count root records after prune");
-    assert_eq!(
-        remaining, 0,
-        "lash_session_roots must not retain a deleted process session"
     );
 }

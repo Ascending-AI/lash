@@ -40,6 +40,7 @@ pub struct ArtifactReferrerPorts {
     modules: Arc<dyn ModuleArtifactStore>,
     env: Arc<dyn ProcessExecutionEnvStore>,
     definitions: Arc<dyn super::ProcessDefinitionStore>,
+    attachments: Arc<dyn crate::AttachmentReferrers>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
 }
@@ -59,6 +60,7 @@ impl ArtifactReferrerPorts {
         modules: Arc<dyn ModuleArtifactStore>,
         env: Arc<dyn ProcessExecutionEnvStore>,
         definitions: Arc<dyn super::ProcessDefinitionStore>,
+        attachments: Arc<dyn crate::AttachmentReferrers>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -66,6 +68,7 @@ impl ArtifactReferrerPorts {
             modules,
             env,
             definitions,
+            attachments,
             cleanup,
             clock,
         }
@@ -77,6 +80,7 @@ impl ArtifactReferrerPorts {
             backend.module_artifacts(),
             backend.process_env_store(),
             backend.process_definitions(),
+            backend.attachment_referrers(),
             backend.artifact_cleanup(),
             backend.clock(),
         )
@@ -92,6 +96,10 @@ impl ArtifactReferrerPorts {
 
     pub fn definitions(&self) -> &Arc<dyn super::ProcessDefinitionStore> {
         &self.definitions
+    }
+
+    pub fn attachments(&self) -> &Arc<dyn crate::AttachmentReferrers> {
+        &self.attachments
     }
 
     pub fn cleanup(&self) -> &Arc<dyn ArtifactCleanupLedger> {
@@ -444,6 +452,16 @@ async fn stage_and_register(
             .ports
             .acquire(engine.engines, &process_claim, &engine.names)
             .await?;
+    }
+    // The start input is held through the row the registration just minted
+    // (ADR 0124 §8.6): record, then acquire. A replay of this step answers
+    // `Existing` and acquires again; an acquisition is idempotent.
+    if let Some(ports) = stores.ports() {
+        crate::runtime::attachment_delivery::acquire_start_input(
+            ports.attachments().as_ref(),
+            &record,
+        )
+        .await?;
     }
     Ok(RegisteredProcessStart {
         record,

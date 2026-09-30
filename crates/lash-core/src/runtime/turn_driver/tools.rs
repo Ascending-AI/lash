@@ -160,13 +160,11 @@ impl RuntimeTurnDriver<'_> {
         let Some(tool_id) = context.callable_tool_id_by_name(tool_name) else {
             return Ok(None);
         };
-        self.session
-            .tool_surface_drift(&self.session_id, &tool_id)
-            .map_err(|error| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
-                    error.to_string(),
-                )
-            })
+        self.session.tool_surface_drift(&tool_id).map_err(|error| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                error.to_string(),
+            )
+        })
     }
 }

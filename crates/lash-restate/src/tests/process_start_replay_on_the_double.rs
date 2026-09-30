@@ -101,7 +101,7 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
         external_registration().with_start_key(Some(lash_core::StartKey::for_tool_intent(
             lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS,
             &lash_core::derive_tool_intent_identity(
-                &lash_core::SessionId::from("session"),
+                &lash_core::RuntimeOwner::Session(lash_core::SessionId::from("session")),
                 "turn",
                 &lash_core::ToolCallId::fixture("spawn-child"),
                 0,

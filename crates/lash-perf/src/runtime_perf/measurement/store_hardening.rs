@@ -101,7 +101,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                 },
             )
             .await?;
-            let postgres_factory = postgres.session_store_factory_with_shared_process_registry();
+            let postgres_factory = postgres.store();
 
             let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
             let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
@@ -124,7 +124,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
                     &sqlite_root.join("process-registry.sqlite"),
-                    sqlite_root.join("process-sessions"),
                 )
                 .await?,
             );
@@ -414,24 +413,20 @@ async fn measure_store_hardening_backend_turn(
     let attachment_id =
         lash_core::AttachmentId::parse(format!("hardening-attachment-{session_id}-{turn_index}"))
             .expect("valid attachment id");
-    let attachment_intent = AttachmentIntent {
+    let attachment_write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: SessionId::from(session_id.to_string()),
-        canonical_uri: format!("sha256:{attachment_id}"),
-        intent_at_epoch_ms: turn_index as u64 + 1,
-        owner: Some(lash_core::AttachmentOwner::Turn {
-            id: format!("hardening-turn-{turn_index}"),
-        }),
+        claim: lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::Session(
+            session_id.clone(),
+        ))?,
     };
     let (_, phase) = measure_runtime_perf_async_phase(names.attachment_intent, async {
-        let lash_core::AttachmentWriteFence::Granted(permit) = store
-            .begin_attachment_write(attachment_intent.clone())
-            .await?
+        let lash_core::AttachmentWriteFence::Granted(permit) =
+            store.begin_attachment_write(&attachment_write).await?
         else {
             anyhow::bail!("hardening attachment write was fenced off");
         };
         store
-            .complete_attachment_write(&attachment_intent, permit)
+            .complete_attachment_write(&attachment_write, permit)
             .await?;
         Ok(())
     })

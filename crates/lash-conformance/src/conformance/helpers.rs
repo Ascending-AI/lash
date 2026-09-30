@@ -34,10 +34,10 @@ pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
 )]
 pub(crate) async fn record_completed_attachment_write(
     store: &Arc<dyn crate::RuntimeStore>,
-    intent: crate::AttachmentIntent,
+    intent: crate::AttachmentWrite,
 ) {
     let crate::AttachmentWriteFence::Granted(permit) = store
-        .begin_attachment_write(intent.clone())
+        .begin_attachment_write(&intent)
         .await
         .expect("begin attachment write")
     else {

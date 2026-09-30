@@ -49,7 +49,6 @@ impl RecordedTurnCancel {
 
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
-    pub(super) session_id: SessionId,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     pub(super) tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
     /// The catalog the live registry resolves to, when the dispatch catalog
@@ -63,7 +62,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// build's newest (FIG-3796). Contexts with no store default to the
     /// build's own generation.
     fleet_format: crate::FleetFormat,
-    attachment_store: Arc<crate::SessionAttachmentStore>,
+    attachment_store: Arc<crate::RuntimeAttachmentStore>,
     chronological_projection: Arc<crate::ChronologicalProjection>,
     turn_context: crate::TurnContext,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
@@ -265,7 +264,12 @@ impl<'run> RuntimeExecutionContext<'run> {
             Some(crate::ProcessOriginator::Session { session_id, .. }) => {
                 crate::RuntimeAttribution::for_session(session_id.clone())
             }
-            None => crate::RuntimeAttribution::for_session(self.session_id.clone()),
+            None => self
+                .dispatch
+                .owner
+                .session_id()
+                .map(|session_id| crate::RuntimeAttribution::for_session(session_id.clone()))
+                .unwrap_or_else(crate::RuntimeAttribution::none),
         }
     }
 
@@ -466,7 +470,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.dispatch.effect_controller.clone())
             .with_parent_invocation(parent_invocation)
-            .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
+            .with_agent_frame_id(self.dispatch.owner.agent_frame_id().cloned())
             .with_process_lineage(self.dispatch.process_lineage.clone())
     }
 
@@ -493,15 +497,13 @@ impl<'run> RuntimeExecutionContext<'run> {
         reason = "code execution bridge carries explicit per-turn runtime dependencies"
     )]
     pub fn new(
-        session_id: SessionId,
         dispatch: Arc<ToolDispatchContext<'run>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
     ) -> Self {
         Self {
-            session_id,
             dispatch,
             tool_children: None,
             process_env_store,
@@ -540,7 +542,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
-            session_id: self.session_id.clone(),
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_children: self.tool_children.clone(),
             live_tool_catalog: self.live_tool_catalog.clone(),
@@ -616,11 +617,21 @@ impl<'run> RuntimeExecutionContext<'run> {
         correlation.authority.attempt_for(&correlation.process_id)
     }
 
-    pub fn session_scope(&self) -> crate::SessionScope {
-        crate::SessionScope::for_agent_frame(
-            self.session_id.clone(),
-            self.dispatch.agent_frame_id.clone(),
-        )
+    /// The session scope of the frame this execution was admitted on, or
+    /// [`crate::PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_scope(&self) -> Result<crate::SessionScope, crate::PluginError> {
+        match &self.dispatch.owner {
+            crate::ExecutionOwner::SessionFrame {
+                session_id,
+                agent_frame_id,
+            } => Ok(crate::SessionScope::for_agent_frame(
+                session_id.clone(),
+                agent_frame_id.clone(),
+            )),
+            crate::ExecutionOwner::Process { process_id } => Err(
+                crate::runtime::not_a_session_runtime("session_scope", process_id),
+            ),
+        }
     }
 
     pub fn trigger_store(&self) -> Option<Arc<dyn crate::TriggerStore>> {
@@ -1159,7 +1170,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Shares the session-scoped attachment store with code-executor implementors so code-produced
     /// artifacts follow the same durable ownership contract as turn input.
-    pub fn attachment_store(&self) -> Arc<crate::SessionAttachmentStore> {
+    pub fn attachment_store(&self) -> Arc<crate::RuntimeAttachmentStore> {
         Arc::clone(&self.attachment_store)
     }
 
@@ -1228,7 +1239,13 @@ impl<'run> RuntimeExecutionContext<'run> {
                 crate::ProcessOriginator::Host { .. } => Vec::new(),
                 crate::ProcessOriginator::Session { session_id, .. } => vec![session_id.clone()],
             },
-            None => vec![self.session_id.clone()],
+            None => self
+                .dispatch
+                .owner
+                .session_id()
+                .cloned()
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -1339,11 +1356,17 @@ impl<'run> RuntimeExecutionContext<'run> {
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }
+        let session_id = match self.session_id() {
+            Ok(session_id) => session_id.clone(),
+            Err(err) => {
+                return crate::ToolInvocationReply::error(serde_json::json!(err.to_string()));
+            }
+        };
         match self
             .dispatch
             .processes
             .start(
-                &self.session_id,
+                &session_id,
                 registration,
                 options,
                 self.process_scope(self.parent_invocation.clone()),
@@ -1557,6 +1580,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                     )
                 })?,
         )
+        .with_process_attachments(Arc::clone(self.attachment_store.referrers()))
         .with_process_effect_controller(owned_controller);
         let outcome = if let Some(task_requests) = task_requests {
             crate::runtime::effect::drive_effect_controller_task(
@@ -1759,8 +1783,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.parent_invocation.as_ref()
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    /// Who this execution runs for.
+    pub fn owner(&self) -> &crate::ExecutionOwner {
+        &self.dispatch.owner
+    }
+
+    /// The session this execution runs in, or
+    /// [`crate::PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_id(&self) -> Result<&SessionId, crate::PluginError> {
+        self.dispatch.owner.require_session("execution_session_id")
     }
 
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
@@ -1781,26 +1812,30 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub fn trigger_actor(&self) -> crate::ProcessOriginator {
-        self.process_execution
-            .as_ref()
-            .map(|exec| exec.originator.clone())
-            .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
+    /// The originator a trigger command issued here acts as: the process's
+    /// recorded originator, or the session frame itself.
+    pub fn trigger_actor(&self) -> Result<crate::ProcessOriginator, crate::PluginError> {
+        match self.process_execution.as_ref() {
+            Some(exec) => Ok(exec.originator.clone()),
+            None => Ok(crate::ProcessOriginator::session(self.session_scope()?)),
+        }
     }
 
     pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
         resolve_trigger_owner_scope(
-            &self.session_id,
+            &self.dispatch.owner.runtime_owner(),
             self.process_execution.as_ref().map(|exec| &exec.originator),
         )
     }
 
+    /// Where a registration's deliveries wake: the process's recorded wake
+    /// target, else the session frame. A process with no wake target wakes
+    /// nothing.
     pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
-        self.process_execution
-            .as_ref()
-            .and_then(|exec| exec.wake_session_id.as_ref())
-            .map(crate::SessionScope::new)
-            .or_else(|| Some(self.session_scope()))
+        match self.process_execution.as_ref() {
+            Some(exec) => exec.wake_session_id.as_ref().map(crate::SessionScope::new),
+            None => self.session_scope().ok(),
+        }
     }
 
     pub fn turn_context(&self) -> &crate::TurnContext {

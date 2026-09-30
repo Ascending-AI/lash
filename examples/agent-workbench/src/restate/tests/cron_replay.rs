@@ -613,7 +613,7 @@ async fn register_then_disable(
             )),
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
                 subscription_key,
-                lash::process::ProcessExecutionEnvRef::new(format!("process-env:{source_key}")),
+                lash::process::ProcessExecutionEnvRef::new(format!("execution-env:{source_key}")),
                 crate::CRON_SCHEDULE_SOURCE_TYPE,
                 source_key,
                 lash::process::ProcessInput::Engine {

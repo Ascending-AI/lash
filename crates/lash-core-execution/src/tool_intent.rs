@@ -1,5 +1,5 @@
 use crate::ProcessId;
-use crate::SessionId;
+use crate::RuntimeOwner;
 use crate::{ToolIntentIdentity, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
@@ -125,9 +125,10 @@ macro_rules! define_tool_intent {
                 }
             }
 
-            pub fn session_id(&self) -> &str {
+            /// The runtime whose authority declared this intent.
+            pub fn owner(&self) -> &RuntimeOwner {
                 match self {
-                    $(Self::$variant(intent) => &intent.session_id,)*
+                    $(Self::$variant(intent) => &intent.owner,)*
                 }
             }
         }
@@ -232,8 +233,8 @@ pub enum ToolIntentSubmissionAdmission {
 /// same process; the registrar mints the id and the realized result carries
 /// it (FIG-2994, ADR 0107).
 pub struct StartProcessIntent {
-    /// Session whose authority owns the child.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the child.
+    pub owner: RuntimeOwner,
     /// Durable process-start declaration, minus the derived key.
     pub declaration: crate::ProcessStartDeclaration,
 }
@@ -262,8 +263,8 @@ impl StartProcessIntent {
 /// silently succeeding. The declaration shape is what a leaf `register` tool
 /// binds against, which is why it exists ahead of its table.
 pub struct RegisterProcessDefinitionIntent {
-    /// Session whose authority owns the registration.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the registration.
+    pub owner: RuntimeOwner,
     /// Engine that owns the definition, e.g. the value an engine registry keys on.
     pub engine_kind: String,
     /// Engine-owned definition value.
@@ -312,8 +313,8 @@ pub struct DeclaredModuleArtifact {
 /// the same reason it cannot emit synchronously — a subscription that outlived
 /// a failed attempt would wake a target the attempt never committed.
 pub struct RegisterTriggerIntent {
-    /// Session whose authority owns the subscription.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the subscription.
+    pub owner: RuntimeOwner,
     /// The registrant scope the declaring attempt resolved, exactly as the
     /// retired host-operation path resolved it from the live context.
     pub owner_scope: crate::TriggerOwnerScope,
@@ -331,8 +332,8 @@ pub struct RegisterTriggerIntent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Signal declaration consumed by protocol and process-engine implementors.
 pub struct SignalProcessIntent {
-    /// Session whose authority owns the signal.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the signal.
+    pub owner: RuntimeOwner,
     /// Target process id.
     pub process_id: ProcessId,
     /// Declared signal name.
@@ -345,8 +346,8 @@ pub struct SignalProcessIntent {
 /// Cancellation declaration consumed by protocol and process-engine implementors.
 #[serde(deny_unknown_fields)]
 pub struct CancelProcessIntent {
-    /// Session whose authority owns the cancellation.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the cancellation.
+    pub owner: RuntimeOwner,
     /// Target process id.
     pub process_id: ProcessId,
 }
@@ -354,8 +355,8 @@ pub struct CancelProcessIntent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Event declaration consumed by protocol and process-engine implementors.
 pub struct EmitProcessEventIntent {
-    /// Session whose authority owns the append.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the append.
+    pub owner: RuntimeOwner,
     /// Target process id.
     pub process_id: ProcessId,
     /// Registered event type.
@@ -386,14 +387,15 @@ pub struct EmitProcessEventIntent {
 ///   router replaces it with the declaration replay key as the occurrence's
 ///   store-side dedupe key, so distinct declarations cannot collapse while
 ///   redriving the same declaration remains exactly-once.
-/// - `session_id` here is the authority the intent executor validates the
+/// - `owner` here is the authority the intent executor validates the
 ///   declaration against; `request.session_id` is the occurrence's own routing
 ///   scope, which the router carries onto the occurrence record and never
 ///   checks against it.
 pub struct EmitTriggerIntent {
-    /// Session whose authority owns the emission. Validated: a declaration
-    /// naming another session is refused before it reaches the router.
-    pub session_id: SessionId,
+    /// The runtime whose authority owns the emission. Validated: a
+    /// declaration naming another owner is refused before it reaches the
+    /// router.
+    pub owner: RuntimeOwner,
     /// Complete durable trigger-occurrence request. At realization the router
     /// replaces its caller-supplied `idempotency_key` with the declaration
     /// replay key. Its own `session_id` is the occurrence's routing scope, not
@@ -409,18 +411,12 @@ const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
 /// [`derive_tool_intent_identity_under`], which additionally binds the identity
 /// to the durable invocation that minted the declaration.
 pub fn derive_tool_intent_identity(
-    session_id: &SessionId,
+    owner: &RuntimeOwner,
     execution_scope_id: &str,
     tool_call_id: &crate::ToolCallId,
     intent_index: u32,
 ) -> ToolIntentIdentity {
-    derive_tool_intent_identity_inner(
-        session_id,
-        execution_scope_id,
-        tool_call_id,
-        intent_index,
-        None,
-    )
+    derive_tool_intent_identity_inner(owner, execution_scope_id, tool_call_id, intent_index, None)
 }
 
 /// The one derivation every runtime-side declaration site uses.
@@ -434,14 +430,14 @@ pub fn derive_tool_intent_identity(
 /// identity an attempt reports and the identity the executor realizes under
 /// cannot be derived by two rules (FIG-2994).
 pub fn derive_tool_intent_identity_under(
-    session_id: &SessionId,
+    owner: &RuntimeOwner,
     execution_scope_id: &str,
     tool_call_id: &crate::ToolCallId,
     intent_index: u32,
     parent_invocation: Option<&crate::RuntimeInvocation>,
 ) -> ToolIntentIdentity {
     derive_tool_intent_identity_inner(
-        session_id,
+        owner,
         execution_scope_id,
         tool_call_id,
         intent_index,
@@ -450,7 +446,7 @@ pub fn derive_tool_intent_identity_under(
 }
 
 fn derive_tool_intent_identity_inner(
-    session_id: &SessionId,
+    owner: &RuntimeOwner,
     execution_scope_id: &str,
     tool_call_id: &crate::ToolCallId,
     intent_index: u32,
@@ -460,7 +456,7 @@ fn derive_tool_intent_identity_inner(
         "lash.tool-intent",
         TOOL_INTENT_IDENTITY_FAMILY_VERSION,
     );
-    encoder.string(session_id);
+    encode_owner(&mut encoder, owner);
     encoder.string(execution_scope_id);
     encoder.string(tool_call_id.as_str());
     encoder.u32(intent_index);
@@ -473,7 +469,7 @@ fn derive_tool_intent_identity_inner(
         &encoder.finish(),
     );
     ToolIntentIdentity {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: owner.clone(),
         execution_scope_id: execution_scope_id.to_string(),
         tool_call_id: tool_call_id.clone(),
         intent_index,
@@ -489,12 +485,27 @@ fn derive_tool_intent_identity_inner(
 /// re-derived one carries a forged or corrupted identity.
 pub fn rederive_tool_intent_identity(identity: &ToolIntentIdentity) -> ToolIntentIdentity {
     derive_tool_intent_identity_inner(
-        &identity.session_id,
+        &identity.owner,
         &identity.execution_scope_id,
         &identity.tool_call_id,
         identity.intent_index,
         identity.minting_emission_replay_key.as_deref(),
     )
+}
+
+/// The owner's kind, then its id: a session named like a process id can
+/// never share an identity with that process.
+fn encode_owner(encoder: &mut crate::stable_identity::IdentityEncoder, owner: &RuntimeOwner) {
+    match owner {
+        RuntimeOwner::Session(session_id) => {
+            encoder.string("session");
+            encoder.string(session_id);
+        }
+        RuntimeOwner::Process(process_id) => {
+            encoder.string("process");
+            encoder.string(process_id.as_str());
+        }
+    }
 }
 
 /// A completed leaf-provider value. Unlike [`crate::ToolOutcome`], this type has
@@ -572,6 +583,7 @@ impl From<crate::ToolOutcome> for ToolAttemptOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
 
     fn sample_intent(kind: ToolIntentKind) -> ToolIntent {
         let session_id = SessionId::from("session");
@@ -580,7 +592,7 @@ mod tests {
         match kind {
             ToolIntentKind::StartProcess => {
                 ToolIntent::StartProcess(Box::new(StartProcessIntent {
-                    session_id,
+                    owner: crate::RuntimeOwner::Session(session_id),
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host(),
                         serde_json::Value::Null,
@@ -589,25 +601,25 @@ mod tests {
                 }))
             }
             ToolIntentKind::SignalProcess => ToolIntent::SignalProcess(SignalProcessIntent {
-                session_id,
+                owner: crate::RuntimeOwner::Session(session_id),
                 process_id: crate::process_id_for_test("process"),
                 signal_name: "go".to_string(),
                 payload: serde_json::Value::Null,
             }),
             ToolIntentKind::CancelProcess => ToolIntent::CancelProcess(CancelProcessIntent {
-                session_id,
+                owner: crate::RuntimeOwner::Session(session_id),
                 process_id: crate::process_id_for_test("process"),
             }),
             ToolIntentKind::EmitProcessEvent => {
                 ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
-                    session_id,
+                    owner: crate::RuntimeOwner::Session(session_id),
                     process_id: crate::process_id_for_test("process"),
                     event_type: "note".to_string(),
                     payload: serde_json::Value::Null,
                 })
             }
             ToolIntentKind::EmitTrigger => ToolIntent::EmitTrigger(EmitTriggerIntent {
-                session_id,
+                owner: crate::RuntimeOwner::Session(session_id),
                 request: crate::TriggerOccurrenceRequest::new(
                     "source",
                     "source-key",
@@ -617,7 +629,7 @@ mod tests {
             }),
             ToolIntentKind::RegisterProcessDefinition => {
                 ToolIntent::RegisterProcessDefinition(Box::new(RegisterProcessDefinitionIntent {
-                    session_id,
+                    owner: crate::RuntimeOwner::Session(session_id),
                     engine_kind: "engine".to_string(),
                     definition: serde_json::Value::Null,
                     env_spec: None,
@@ -634,7 +646,7 @@ mod tests {
                         session_id.clone(),
                     )),
                     env_spec: None,
-                    session_id,
+                    owner: RuntimeOwner::Session(session_id),
                     draft: crate::TriggerSubscriptionDraft::for_process(
                         "subscription",
                         crate::ProcessExecutionEnvRef::new("env-ref"),
@@ -684,14 +696,17 @@ mod tests {
             ToolIntentKind::RegisterProcessDefinition,
             ToolIntentKind::RegisterTrigger,
         ] {
-            assert_eq!(sample_intent(kind).session_id(), "session");
+            assert_eq!(
+                sample_intent(kind).owner(),
+                &RuntimeOwner::Session(SessionId::from("session"))
+            );
         }
     }
 
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
         let identity = derive_tool_intent_identity(
-            &SessionId::from("session-fig1292"),
+            &crate::RuntimeOwner::Session(SessionId::from("session-fig1292")),
             "turn-7",
             &crate::ToolCallId::fixture("call-3"),
             2,
@@ -699,11 +714,11 @@ mod tests {
         assert_eq!(
             identity,
             ToolIntentIdentity {
-                session_id: SessionId::from("session-fig1292"),
+                owner: RuntimeOwner::Session(SessionId::from("session-fig1292")),
                 execution_scope_id: "turn-7".to_string(),
                 tool_call_id: crate::ToolCallId::fixture("call-3"),
                 intent_index: 2,
-                replay_key: "tool-intent:v2:blake3:14b5e52d354ed5bcc8493de4bc6842c1c102eb6fe0378fcab341522b8d0fb75f".to_string(),
+                replay_key: "tool-intent:v2:blake3:cbd4d128fc11551063487aa7d35bf25457d31f6d9acc95ec90996e74cd102a9d".to_string(),
                 minting_emission_replay_key: None,
             }
         );
@@ -713,14 +728,14 @@ mod tests {
     fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
         let call = crate::ToolCallId::fixture("call");
         let first = derive_tool_intent_identity_inner(
-            &SessionId::from("session"),
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
             "process",
             &call,
             0,
             Some("turn:7:child:0:call:attempt:1"),
         );
         let second = derive_tool_intent_identity_inner(
-            &SessionId::from("session"),
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
             "process",
             &call,
             0,
@@ -735,10 +750,24 @@ mod tests {
     #[test]
     fn intent_identity_is_distinct_across_turn_and_process_execution_scopes() {
         let call = crate::ToolCallId::fixture("call");
-        let turn_7 = derive_tool_intent_identity(&SessionId::from("session"), "turn-7", &call, 0);
-        let turn_8 = derive_tool_intent_identity(&SessionId::from("session"), "turn-8", &call, 0);
-        let process =
-            derive_tool_intent_identity(&SessionId::from("session"), "process-7", &call, 0);
+        let turn_7 = derive_tool_intent_identity(
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
+            "turn-7",
+            &call,
+            0,
+        );
+        let turn_8 = derive_tool_intent_identity(
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
+            "turn-8",
+            &call,
+            0,
+        );
+        let process = derive_tool_intent_identity(
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
+            "process-7",
+            &call,
+            0,
+        );
         assert_eq!(turn_7.execution_scope_id, "turn-7");
         assert_eq!(turn_8.execution_scope_id, "turn-8");
         assert_eq!(process.execution_scope_id, "process-7");
@@ -793,7 +822,7 @@ mod tests {
     fn derive_from(inputs: &(String, String, String, u32, Option<String>)) -> ToolIntentIdentity {
         let (session_id, execution_scope_id, tool_call_id, intent_index, minting) = inputs;
         derive_tool_intent_identity_inner(
-            &SessionId::from(session_id.clone()),
+            &RuntimeOwner::Session(SessionId::from(session_id.clone())),
             execution_scope_id,
             &crate::ToolCallId::fixture(tool_call_id),
             *intent_index,
@@ -862,7 +891,7 @@ mod tests {
         // reading would have gone unnoticed -- every mutation below must move
         // the key, or that field is no longer part of the identity.
         let honest = derive_tool_intent_identity_inner(
-            &SessionId::from("session"),
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
             "scope",
             &crate::ToolCallId::fixture("call"),
             1,
@@ -875,9 +904,9 @@ mod tests {
 
         let forgeries: Vec<(&str, ToolIntentIdentity)> = vec![
             (
-                "session_id",
+                "owner",
                 ToolIntentIdentity {
-                    session_id: SessionId::from("other"),
+                    owner: RuntimeOwner::Session(SessionId::from("other")),
                     ..honest.clone()
                 },
             ),

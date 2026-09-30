@@ -8,12 +8,20 @@ struct NoopTools;
 #[test]
 fn trigger_owner_scope_uses_root_session_or_explicit_host_binding() {
     assert_eq!(
-        resolve_trigger_owner_scope(&SessionId::from("root-session"), None).unwrap(),
+        resolve_trigger_owner_scope(
+            &crate::RuntimeOwner::Session(SessionId::from("root-session")),
+            None
+        )
+        .unwrap(),
         crate::TriggerOwnerScope::session("root-session")
     );
     let root = crate::ProcessOriginator::session(crate::SessionScope::new("root-session"));
     assert_eq!(
-        resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&root)).unwrap(),
+        resolve_trigger_owner_scope(
+            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
+            Some(&root)
+        )
+        .unwrap(),
         crate::TriggerOwnerScope::session("root-session")
     );
     let frame = crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
@@ -21,18 +29,26 @@ fn trigger_owner_scope_uses_root_session_or_explicit_host_binding() {
         crate::facade_support::frame_node_id(&SessionId::from("root-session"), "agent-frame"),
     ));
     assert_eq!(
-        resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&frame)).unwrap(),
+        resolve_trigger_owner_scope(
+            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
+            Some(&frame)
+        )
+        .unwrap(),
         crate::TriggerOwnerScope::session("root-session"),
         "agent frames inherit the root session namespace"
     );
     let named_host = crate::ProcessOriginator::host_scoped("automation-a");
     assert_eq!(
-        resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&named_host)).unwrap(),
+        resolve_trigger_owner_scope(
+            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
+            Some(&named_host)
+        )
+        .unwrap(),
         crate::TriggerOwnerScope::host("automation-a").unwrap()
     );
     assert!(
         resolve_trigger_owner_scope(
-            &SessionId::from("ignored"),
+            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
             Some(&crate::ProcessOriginator::host())
         )
         .unwrap_err()
@@ -100,12 +116,14 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: std::sync::Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+        attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -113,10 +131,9 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         process_originator: None,
     });
     let ctx = RuntimeExecutionContext::new(
-        SessionId::from("session"),
         dispatch,
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
+        Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
     );
@@ -172,12 +189,14 @@ fn test_execution_context_with_env_store(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: std::sync::Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+        attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -185,10 +204,9 @@ fn test_execution_context_with_env_store(
         process_originator: None,
     });
     RuntimeExecutionContext::new(
-        SessionId::from("session"),
         dispatch,
         env_store,
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
+        Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
     )

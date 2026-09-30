@@ -15,8 +15,8 @@
 use serde_json::Value;
 
 use lash_core::{
-    AttemptContext, SessionId, ToolAttemptOutcome, ToolCall, ToolDefinition, ToolIntent,
-    ToolIntents, ToolOutcome, ToolOutcomeDone,
+    AttemptContext, ToolAttemptOutcome, ToolCall, ToolDefinition, ToolIntent, ToolIntents,
+    ToolOutcome, ToolOutcomeDone,
 };
 use lash_tool_support::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt};
 
@@ -76,22 +76,33 @@ pub async fn execute_register_trigger_tool_call(
         Ok(prepared) => prepared,
         Err(error) => return refuse(error.to_string()),
     };
-    let session_id = SessionId::from(context.session_id());
-    let session_scope = lash_core::SessionScope::for_agent_frame(
-        session_id.clone(),
-        context.agent_frame_id().clone(),
-    );
+    let owner = context.owner().runtime_owner();
+    let session_scope = match context.owner() {
+        lash_core::ExecutionOwner::SessionFrame {
+            session_id,
+            agent_frame_id,
+        } => Some(lash_core::SessionScope::for_agent_frame(
+            session_id.clone(),
+            agent_frame_id.clone(),
+        )),
+        lash_core::ExecutionOwner::Process { .. } => None,
+    };
     // The subscription belongs to the authority that owns the caller: a
     // registration declared inside a durable process carries the chain's
     // originator and its wake target, and a session's own declaration carries
     // the session's. Same ruling the host-operation path applied (FIG-3116).
     let provenance = context.process_spawn_provenance().cloned();
-    let actor = provenance
-        .as_ref()
-        .map(|spawn| spawn.originator.clone())
-        .unwrap_or_else(|| lash_core::ProcessOriginator::session(session_scope.clone()));
+    let actor = match (provenance.as_ref(), session_scope.as_ref()) {
+        (Some(spawn), _) => spawn.originator.clone(),
+        (None, Some(session_scope)) => lash_core::ProcessOriginator::session(session_scope.clone()),
+        (None, None) => {
+            return refuse(format!(
+                "{owner} carries no spawn provenance for the trigger it registers"
+            ));
+        }
+    };
     let owner_scope = match lash_core::resolve_trigger_owner_scope(
-        &session_id,
+        &owner,
         provenance.as_ref().map(|spawn| &spawn.originator),
     ) {
         Ok(scope) => scope,
@@ -101,7 +112,7 @@ pub async fn execute_register_trigger_tool_call(
         .as_ref()
         .and_then(|spawn| spawn.wake_session_id.as_ref())
         .map(|session| lash_core::SessionScope::new(session.clone()))
-        .or(Some(session_scope));
+        .or(session_scope);
     // A process's env is already durable, so the draft names its reference
     // verbatim and the intent publishes nothing. A session's env is not, so
     // the draft names the content-addressed reference and the intent carries
@@ -129,7 +140,7 @@ pub async fn execute_register_trigger_tool_call(
         )),
         ToolIntents::v3(vec![ToolIntent::RegisterTrigger(Box::new(
             lash_core::RegisterTriggerIntent {
-                session_id,
+                owner,
                 owner_scope,
                 actor,
                 env_spec,

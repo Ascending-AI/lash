@@ -282,7 +282,9 @@ async fn update_trigger(
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let draft = prepared.into_draft(env_ref, ctx.trigger_registration_wake_target())?;
     let owner_scope = trigger_owner_scope(ctx)?;
-    let actor = ctx.trigger_actor();
+    let actor = ctx
+        .trigger_actor()
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let command = if revive {
         lash_core::TriggerCommand::Revive {
             owner_scope,
@@ -312,7 +314,9 @@ async fn set_trigger_enabled(
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
     let owner_scope = trigger_owner_scope(ctx)?;
-    let actor = ctx.trigger_actor();
+    let actor = ctx
+        .trigger_actor()
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let command = if enabled {
         lash_core::TriggerCommand::Enable {
             owner_scope,
@@ -340,7 +344,9 @@ async fn delete_trigger(
     let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
     let command = lash_core::TriggerCommand::Delete {
         owner_scope: trigger_owner_scope(ctx)?,
-        actor: ctx.trigger_actor(),
+        actor: ctx
+            .trigger_actor()
+            .map_err(|err| ExecutionHostError::new(err.to_string()))?,
         subscription_key,
         expected_revision,
     };
@@ -357,7 +363,9 @@ async fn prune_triggers(
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let command = lash_core::TriggerCommand::Prune {
         owner_scope: trigger_owner_scope(ctx)?,
-        actor: ctx.trigger_actor(),
+        actor: ctx
+            .trigger_actor()
+            .map_err(|err| ExecutionHostError::new(err.to_string()))?,
         subscription_keys: request.subscription_keys,
     };
     execute_trigger_command(ctx, effect_id, command, recorded).await

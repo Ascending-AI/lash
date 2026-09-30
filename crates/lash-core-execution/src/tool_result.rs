@@ -153,7 +153,7 @@ impl PartialEq for DeclaredStart {
 impl DeclaredStart {
     /// Validates the one start against the attempt that declares it.
     ///
-    /// The start must name the declaring session, and the attempt must have
+    /// The start must name the declaring owner, and the attempt must have
     /// a completion key: the key is what the launched
     /// child's terminal resolves, so a tool that returns a declared start
     /// answers `attempt_may_defer` for it.
@@ -161,8 +161,8 @@ impl DeclaredStart {
         context: &crate::AttemptContext<'_>,
         start: crate::StartProcessIntent,
     ) -> Result<Self, DeclaredStartRefused> {
-        if start.session_id.as_str() != context.session_id() {
-            return Err(DeclaredStartRefused::ForeignSession);
+        if start.owner != context.owner().runtime_owner() {
+            return Err(DeclaredStartRefused::ForeignOwner);
         }
         if context.completion_key().is_err() {
             return Err(DeclaredStartRefused::CompletionUnavailable);
@@ -189,21 +189,21 @@ impl DeclaredStart {
     /// it (ADR 0116 §3.1).
     ///
     /// A declared start is durable, so it decodes without its constructor,
-    /// and a decoded one names whatever session and identity its bytes say.
+    /// and a decoded one names whatever owner and identity its bytes say.
     /// `declaring` is the identity the runtime derived for index 0 from the
-    /// admitted call itself: its session, execution scope, `ToolCallId` and
+    /// admitted call itself: its owner, execution scope, `ToolCallId` and
     /// the attempt emission that minted the declaration. The start must name
-    /// that session, and its identity must be exactly that one, or the
-    /// launch would register a child under another call's key, another
-    /// session's, or one its own fields do not derive.
+    /// that owner, and its identity must be exactly that one, or the launch
+    /// would register a child under another call's key, another owner's, or
+    /// one its own fields do not derive.
     pub(crate) fn bound_to(
         &self,
         declaring: &crate::ToolIntentIdentity,
     ) -> Result<(), crate::ToolIntentRefusalReason> {
-        if self.start.session_id != declaring.session_id {
-            return Err(crate::ToolIntentRefusalReason::SessionMismatch {
-                expected: declaring.session_id.to_string(),
-                recorded: self.start.session_id.to_string(),
+        if self.start.owner != declaring.owner {
+            return Err(crate::ToolIntentRefusalReason::OwnerMismatch {
+                expected: declaring.owner.to_string(),
+                recorded: self.start.owner.to_string(),
             });
         }
         if *self.identity != *declaring {
@@ -244,8 +244,8 @@ impl DeclaredStart {
 /// Why [`DeclaredStart::new`] refused a start.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DeclaredStartRefused {
-    #[error("a declared start must name the declaring session")]
-    ForeignSession,
+    #[error("a declared start must name the declaring owner")]
+    ForeignOwner,
     #[error("a declared start needs a completion key")]
     CompletionUnavailable,
 }
@@ -798,7 +798,7 @@ mod tests {
     /// §3.7): the call answers the child's own value, never the envelope.
     fn declared_start() -> crate::PendingResolver {
         let start = crate::StartProcessIntent {
-            session_id: crate::SessionId::from("parent"),
+            owner: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
             declaration: crate::ProcessStartDeclaration::external(
                 crate::ProcessOriginator::host(),
                 serde_json::Value::Null,
@@ -806,7 +806,7 @@ mod tests {
             ),
         };
         let identity = crate::derive_tool_intent_identity_under(
-            &crate::SessionId::from("parent"),
+            &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
             "turn-1",
             &crate::ToolCallId::fixture("call-1"),
             0,
@@ -869,7 +869,7 @@ mod tests {
         };
         let derive = |session: &str, scope: &str, call: &str, index: u32| {
             crate::derive_tool_intent_identity_under(
-                &crate::SessionId::from(session),
+                &crate::RuntimeOwner::Session(crate::SessionId::from(session)),
                 scope,
                 &crate::ToolCallId::fixture(call),
                 index,
@@ -897,7 +897,7 @@ mod tests {
             (
                 "another minting emission",
                 crate::derive_tool_intent_identity_under(
-                    &crate::SessionId::from("parent"),
+                    &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
                     "turn-1",
                     &crate::ToolCallId::fixture("call-1"),
                     0,
@@ -924,13 +924,13 @@ mod tests {
         }
 
         let mut bytes = serde_json::to_value(&declared).expect("encode");
-        bytes["start"]["session_id"] = serde_json::json!("other");
+        bytes["start"]["owner"] = serde_json::json!({"session": "other"});
         let foreign: DeclaredStart = serde_json::from_value(bytes).expect("decode");
         assert_eq!(
             foreign.bound_to(&declaring),
-            Err(crate::ToolIntentRefusalReason::SessionMismatch {
-                expected: "parent".to_string(),
-                recorded: "other".to_string(),
+            Err(crate::ToolIntentRefusalReason::OwnerMismatch {
+                expected: "session:parent".to_string(),
+                recorded: "session:other".to_string(),
             }),
             "a start naming another session is refused"
         );
@@ -943,7 +943,7 @@ mod tests {
         };
         let start = DeclaredStart {
             start: Box::new(crate::StartProcessIntent {
-                session_id: start.start().session_id.clone(),
+                owner: start.start().owner.clone(),
                 declaration: start.start().declaration.clone().with_declared_identity(
                     crate::DeclaredProcessIdentity::labelled("subagent", None::<String>),
                 ),

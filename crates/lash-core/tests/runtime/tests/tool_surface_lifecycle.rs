@@ -266,7 +266,7 @@ fn plugin_catalog_names(runtime: &LashRuntime) -> Vec<String> {
     runtime
         .plugin_session()
         .expect("live plugin session")
-        .tool_catalog(&runtime.state().session_id)
+        .tool_catalog()
         .expect("live plugin tool catalog")
         .into_iter()
         .filter_map(|entry| {
@@ -862,7 +862,11 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let scope = || lash_core::ProcessOpScope::new(handler.scoped());
     let unknown_process_id = lash_core::ProcessId::fixture("host-unknown-process");
     let unknown_process = host_service
-        .cancel(&SessionId::from(session_id), &unknown_process_id, scope())
+        .cancel(
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
+            &unknown_process_id,
+            scope(),
+        )
         .await
         .expect_err("cancelling an unknown process must be refused");
     assert!(matches!(
@@ -889,14 +893,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let filtered_cancel = async {
         service
             .validate_visible(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &[ids["filtered-process"].clone()],
                 scope(),
             )
             .await?;
         service
             .cancel(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &ids["filtered-process"],
                 scope(),
             )
@@ -907,14 +911,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let filtered_signal = async {
         service
             .validate_visible(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &[ids["filtered-process"].clone()],
                 scope(),
             )
             .await?;
         service
             .signal_possessed(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &ids["filtered-process"],
                 "ready".to_string(),
                 "filter-signal".to_string(),
@@ -928,7 +932,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     for result in [
         service
             .validate_visible(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &[ids["filtered-process"].clone()],
                 scope(),
             )
@@ -949,7 +953,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     }
     let unobserved_error = service
         .validate_visible(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             &[lash_core::ProcessId::fixture("never-observed")],
             scope(),
         )
@@ -979,7 +983,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     );
     host_service
         .signal_possessed(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             &ids["filtered-process"],
             "ready".to_string(),
             "host-signal".to_string(),
@@ -990,7 +994,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .expect("host signal bypasses model-tool filter");
     host_service
         .cancel(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             &ids["filtered-cancel"],
             scope(),
         )
@@ -1118,7 +1122,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let scope = || lash_core::ProcessOpScope::new(handler.scoped());
     service
         .validate_visible(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             std::slice::from_ref(&process_id),
             scope(),
         )
@@ -1147,12 +1151,16 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
 
     for error in [
         service
-            .cancel(&SessionId::from(session_id), &process_id, scope())
+            .cancel(
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
+                &process_id,
+                scope(),
+            )
             .await
             .expect_err("cancel must return its tombstone outcome"),
         service
             .signal_possessed(
-                &SessionId::from(session_id),
+                &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
                 &process_id,
                 "ready".to_string(),
                 "previous-turn-signal".to_string(),
@@ -1730,11 +1738,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     .await
     .expect("broader child session");
     let surface = session
-        .pin_tool_surface(
-            &SessionId::from("broader-child"),
-            &lash_core::SessionToolAccess::default(),
-            None,
-        )
+        .pin_tool_surface(&lash_core::SessionToolAccess::default(), None)
         .expect("broader child request surface");
 
     assert!(
@@ -2276,7 +2280,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .expect("open the scope's handler");
     let recorded_refusal = service
         .start_from_recorded_intent(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             request("recorded-invalid", invalid_payload.clone()),
             payload_gated_scope(&handler),
         )
@@ -2325,7 +2329,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .expect("open the scope's handler");
     let recorded = service
         .start_from_recorded_intent(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             request("recorded-valid", valid_payload.clone()),
             payload_gated_scope(&handler),
         )
@@ -2392,7 +2396,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
         .expect("open the scope's handler");
     let recorded_error = service
         .start_from_recorded_intent(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             request("recorded-unregistered"),
             payload_gated_scope(&handler),
         )
@@ -2473,7 +2477,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .expect("open the scope's handler");
     let recorded_no_env = service
         .start_from_recorded_intent(
-            &SessionId::from(session_id),
+            &lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
             no_env("recorded-no-env"),
             payload_gated_scope(&handler),
         )

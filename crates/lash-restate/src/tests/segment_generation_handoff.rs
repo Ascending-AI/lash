@@ -375,12 +375,14 @@ impl Roll {
                 crate::services::LashServiceParts {
                     effect_host: &host,
                     ingress: ingress.clone(),
+                    attachments: Arc::clone(&sessions) as Arc<dyn lash_core::AttachmentReferrers>,
                     sessions: Arc::clone(&sessions),
                     process_workflow: LashProcessWorkflowImpl::new(
                         runner,
                         Arc::clone(&registry),
                         continuations,
                         ingress.clone(),
+                        Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                         test_restate_authority_id(),
                         generation(build),
                         &crate::services::DEFAULT_NAMESPACE,

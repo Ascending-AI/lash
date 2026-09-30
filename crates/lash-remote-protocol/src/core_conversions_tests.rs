@@ -31,7 +31,7 @@ fn runtime_replay_round_trip_retains_minting_emission_key() {
         key: "tool-intent:derived".to_string(),
         attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
             lash_core::ToolIntentIdentity {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: lash_core::ToolCallId::fixture("call"),
                 intent_index: 0,
@@ -1106,6 +1106,7 @@ fn remote_turn_result_maps_core_semantics() {
             output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
         }],
         omitted: None,
+        retained_outputs: Vec::new(),
         failure_evidence: Vec::new(),
         errors: Vec::new(),
     };
@@ -1119,7 +1120,7 @@ fn remote_turn_result_maps_core_semantics() {
     .expect("model call recorded activity");
     let intent_outcome = RemoteToolIntentExecutionOutcome::Executed {
         identity: RemoteToolIntentIdentity {
-            session_id: SessionId::from("session"),
+            owner: lash_sansio::RuntimeOwner::Session(SessionId::from("session")),
             execution_scope_id: "turn".to_string(),
             tool_call_id: lash_core::ToolCallId::fixture("exec-call"),
             intent_index: 0,
@@ -1275,6 +1276,7 @@ fn assert_terminal_call_record_converts_and_validates(
         llm_calls: vec![record],
         tool_calls: Vec::new(),
         omitted: None,
+        retained_outputs: Vec::new(),
         failure_evidence: Vec::new(),
         errors: Vec::new(),
     };

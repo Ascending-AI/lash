@@ -359,7 +359,7 @@ async fn record_cell_outputs(
 /// the witness — the encoding's first bytes and a notice naming the
 /// attachment — with its reference. `None` for a value history keeps inline.
 async fn retain_oversized_value(
-    attachments: &lash_core::facade_support::SessionAttachmentStore,
+    attachments: &lash_core::facade_support::RuntimeAttachmentStore,
     policy: lash_core::OutputRetentionPolicy,
     value: &serde_json::Value,
     label: &str,
@@ -897,7 +897,7 @@ async fn execute_code_inner(
 /// The environment of the frame this execution was admitted on: the
 /// referrer that holds every module the frame's globals reference.
 fn frame_environment(ctx: &RuntimeExecutionContext<'_>) -> Option<lash_core::FrameEnvironmentId> {
-    let scope = ctx.session_scope();
+    let scope = ctx.session_scope().ok()?;
     Some(lash_core::FrameEnvironmentId::new(
         scope.session_id,
         scope.agent_frame_id?,

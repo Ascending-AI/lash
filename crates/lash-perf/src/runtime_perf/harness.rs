@@ -812,7 +812,9 @@ fn benchmark_plugin_factories(
         factories.push(Arc::new(StaticPluginFactory::new(
             "runtime_perf_tool_catalog_observer",
             PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
-                composition_observer.observe_session_catalog_composition(&context.session_id)?;
+                if let Some(session_id) = context.owner.session_id() {
+                    composition_observer.observe_session_catalog_composition(session_id)?;
+                }
                 Ok(Default::default())
             })),
         )));
@@ -1141,9 +1143,8 @@ pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
-    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
-        postgres.session_store_factory_with_shared_process_registry(),
-    ));
+    let factory =
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(postgres.store()));
     let metrics = factory.metrics();
     (Arc::new(factory), metrics)
 }

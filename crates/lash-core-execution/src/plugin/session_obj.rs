@@ -194,7 +194,7 @@ pub(super) struct LiveSessionAuthority {
 pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) host: PluginHost,
-    pub(super) session_id: SessionId,
+    pub(super) owner: crate::RuntimeOwner,
     pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
@@ -215,8 +215,9 @@ pub struct PluginSession {
     pub(super) forked: bool,
 }
 impl PluginSession {
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    /// Who this plugin session was built for.
+    pub fn owner(&self) -> &crate::RuntimeOwner {
+        &self.owner
     }
 
     /// Returns a snapshot of the session's current resident tool authority.
@@ -902,7 +903,7 @@ impl PluginSession {
                 config,
                 seed_snapshot: Some(&snapshot),
             },
-            session_id: session_id.into(),
+            owner: crate::RuntimeOwner::Session(session_id.into()),
             parent_session_id: None,
         })
     }
@@ -930,8 +931,8 @@ impl PluginSession {
         default_to_current_session: bool,
     ) -> Result<Option<String>, PluginOperationInvokeError> {
         let effective_session = session_id.or_else(|| {
-            if default_to_current_session && !self.session_id.is_empty() {
-                Some(self.session_id.clone())
+            if default_to_current_session {
+                self.owner.session_id().cloned()
             } else {
                 None
             }
@@ -1175,14 +1176,13 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
 #[cfg(feature = "testing")]
 impl PluginSession {
     /// A state handle for `plugin_id` over this session's plugin-state
-    /// registry, bound to `session_id` the way the host binds the handle a
+    /// registry, bound to its owner the way the host binds the handle a
     /// plugin receives.
     pub(crate) fn plugin_state_store_for_testing(
         &self,
-        session_id: &SessionId,
         plugin_id: &str,
     ) -> super::PluginStateStore {
-        super::PluginStateStore::bind(session_id, plugin_id, Arc::clone(&self.state))
+        super::PluginStateStore::bind(&self.owner, plugin_id, Arc::clone(&self.state))
     }
 }
 
@@ -1237,7 +1237,7 @@ mod attachment_notice_order_tests {
         let presented = session
             .present_tool_result(
                 super::super::ToolResultProjectionContext {
-                    session_id: "notice-order-session".into(),
+                    owner: crate::RuntimeOwner::Session("notice-order-session".into()),
                     call_id: crate::ToolCallId::fixture("call"),
                     tool_id: crate::ToolId::new("fixture:id"),
                     tool_name: "fixture".into(),

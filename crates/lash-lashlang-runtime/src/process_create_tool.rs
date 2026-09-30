@@ -15,8 +15,8 @@
 use serde_json::Value;
 
 use lash_core::{
-    AttemptContext, SessionId, ToolAttemptOutcome, ToolCall, ToolDefinition, ToolIntent,
-    ToolIntents, ToolOutcome, ToolOutcomeDone,
+    AttemptContext, ToolAttemptOutcome, ToolCall, ToolDefinition, ToolIntent, ToolIntents,
+    ToolOutcome, ToolOutcomeDone,
 };
 use lash_tool_support::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt};
 
@@ -109,7 +109,7 @@ fn execute_process_create_tool_call(
         ToolOutcomeDone::ok(created.definition.clone()),
         ToolIntents::v3(vec![ToolIntent::RegisterProcessDefinition(Box::new(
             lash_core::RegisterProcessDefinitionIntent {
-                session_id: SessionId::from(context.session_id()),
+                owner: context.owner().runtime_owner(),
                 engine_kind: LASHLANG_ENGINE_KIND.to_string(),
                 definition: created.definition,
                 env_spec: None,

@@ -1,4 +1,3 @@
-use crate::SessionId;
 use std::collections::BTreeMap;
 
 use serde::de::{Error as DeError, MapAccess, Visitor};
@@ -114,7 +113,9 @@ crate::tool_intent_variants!(define_tool_intent_kind);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ToolIntentIdentity {
-    pub session_id: SessionId,
+    /// The runtime whose authority declared the intent: a session, or a
+    /// process runtime.
+    pub owner: crate::RuntimeOwner,
     /// The enclosing execution-scope id: a turn id for turn scope and a
     /// process id for process scope.
     pub execution_scope_id: String,
@@ -148,7 +149,7 @@ pub enum ToolIntentRefusalReason {
         actual: usize,
         maximum: usize,
     },
-    SessionMismatch {
+    OwnerMismatch {
         expected: String,
         recorded: String,
     },
@@ -188,7 +189,7 @@ impl ToolIntentRefusalReason {
             Self::CountBudgetExceeded { .. } => "count_budget_exceeded",
             Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded",
             Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded",
-            Self::SessionMismatch { .. } => "session_mismatch",
+            Self::OwnerMismatch { .. } => "owner_mismatch",
             Self::ForeignTriggerOwnerScope { .. } => "foreign_trigger_owner_scope",
             Self::ForeignTriggerActor { .. } => "foreign_trigger_actor",
             Self::CommandFailed { .. } => "command_failed",
@@ -223,8 +224,8 @@ impl ToolIntentRefusalReason {
                 "{code}: the attempt declared {actual} {} intents; at most {maximum} are admitted",
                 kind.as_str()
             ),
-            Self::SessionMismatch { expected, recorded } => format!(
-                "{code}: the intent names session `{recorded}`; the attempt ran in session `{expected}`"
+            Self::OwnerMismatch { expected, recorded } => format!(
+                "{code}: the intent names owner `{recorded}`; the attempt ran under owner `{expected}`"
             ),
             Self::ForeignTriggerOwnerScope { expected, recorded } => format!(
                 "{code}: the registration names owner scope {recorded}; the attempt resolves {expected}"
@@ -1314,6 +1315,9 @@ fn format_cancellation_message(cancellation: &ToolCancellation) -> String {
     }
 }
 
+#[path = "tool_output/attachment_adoption.rs"]
+mod attachment_adoption;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1402,6 +1406,64 @@ mod tests {
         assert_eq!(json[TAG_KEY], UNTRUSTED_JSON_TAG);
         assert_eq!(json[VALUE_KEY], foreign);
         assert_eq!(serde_json::from_value::<ToolValue>(json).unwrap(), value);
+    }
+
+    #[test]
+    fn adoption_types_only_the_adopted_claims_and_keeps_the_projection() {
+        let tagged = |id: &str| {
+            serde_json::json!({
+                TAG_KEY: ATTACHMENT_TAG,
+                SOURCE_KEY: serde_json::to_value(attachment_source(id)).unwrap(),
+            })
+        };
+        let untrusted = serde_json::json!({
+            "held": tagged("held"),
+            "other": [tagged("other"), 1],
+            "foreign": { TAG_KEY: "user", "inner": tagged("held") },
+        });
+        let value = ToolValue::untrusted_json(untrusted.clone());
+
+        let claims = value.untrusted_attachment_claims();
+        assert_eq!(
+            claims,
+            vec![attachment_source("held"), attachment_source("other")],
+            "a claim under a foreign reserved tag is not scanned"
+        );
+
+        let adopted = value.adopt_attachments(&[attachment_source("held")]);
+        assert_eq!(adopted.attachments(), vec![attachment_source("held")]);
+        assert_eq!(
+            adopted.to_json_value(),
+            untrusted,
+            "adoption leaves the projection unchanged"
+        );
+        let ToolValue::Object(entries) = &adopted else {
+            panic!("the adopted value splits around its attachment: {adopted:?}");
+        };
+        assert!(matches!(entries["other"], ToolValue::UntrustedJson(_)));
+        assert!(matches!(entries["foreign"], ToolValue::UntrustedJson(_)));
+        let encoded = serde_json::to_value(&adopted).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ToolValue>(encoded).unwrap(),
+            adopted
+        );
+    }
+
+    #[test]
+    fn adopting_nothing_keeps_the_value_untrusted() {
+        let forged = serde_json::json!({
+            TAG_KEY: ATTACHMENT_TAG,
+            SOURCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
+        });
+        let value = ToolValue::untrusted_json(forged.clone());
+
+        assert_eq!(
+            value
+                .clone()
+                .adopt_attachments(&[attachment_source("held")]),
+            value
+        );
+        assert!(value.attachments().is_empty());
     }
 
     #[test]

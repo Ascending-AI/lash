@@ -7,11 +7,3 @@ use super::{ProcessId, SessionId};
 pub fn process_child_session_id(process_id: &ProcessId) -> SessionId {
     SessionId::from(format!("session:process:{process_id}"))
 }
-
-/// Durable session stores owned exclusively by one process execution.
-pub fn process_runtime_session_ids(process_id: &ProcessId) -> [SessionId; 2] {
-    [
-        SessionId::from(format!("process-env:{process_id}")),
-        SessionId::from(format!("process-session-turn:{process_id}")),
-    ]
-}

@@ -13,7 +13,7 @@ fn owned_registration(id: &str) -> ProcessRegistration {
         lash_core::Lifetime::Detached,
     )
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-        "process-env:{id}"
+        "process-env:fixture-{id}"
     ))))
 }
 

@@ -28,9 +28,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
-            tool_catalog: session
-                .resolved_tool_catalog(&SessionId::from("parity"))
-                .unwrap(),
+            tool_catalog: session.resolved_tool_catalog().unwrap(),
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
@@ -96,7 +94,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
     let ambient = build("rlm-ambient", lash_core::SessionToolAccess::ambient());
     assert!(
         ambient
-            .resolved_tool_catalog(&SessionId::from("rlm-ambient"))
+            .resolved_tool_catalog()
             .expect("ambient RLM catalog")
             .has_callable_tool("continue_as")
     );
@@ -106,7 +104,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
         lash_core::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
     );
     let catalog = restricted
-        .resolved_tool_catalog(&SessionId::from("rlm-restricted-empty"))
+        .resolved_tool_catalog()
         .expect("restricted-empty RLM catalog");
     assert!(catalog.tools.is_empty());
     assert!(
@@ -733,9 +731,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             Default::default(),
         ))
         .unwrap();
-    let catalog = session
-        .resolved_tool_catalog(&SessionId::from("native-plugin"))
-        .unwrap();
+    let catalog = session.resolved_tool_catalog().unwrap();
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {

@@ -113,7 +113,7 @@ async fn process_run_context_captures_catalog_and_execution_route_together() {
     let old_surface = services
         .current
         .plugins
-        .pin_resolved_tool_surface(&services.current.session_id)
+        .pin_resolved_tool_surface()
         .expect("provider A surface");
     let old_entry = old_surface
         .catalog
@@ -141,7 +141,7 @@ async fn process_run_context_captures_catalog_and_execution_route_together() {
     let fresh_surface = services
         .current
         .plugins
-        .pin_resolved_tool_surface(&services.current.session_id)
+        .pin_resolved_tool_surface()
         .expect("provider B surface");
 
     assert_eq!(

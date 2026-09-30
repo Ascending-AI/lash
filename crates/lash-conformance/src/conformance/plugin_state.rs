@@ -64,7 +64,7 @@ impl SessionPlugin for MockPlugin {
         }
         self.handles
             .lock_recover()
-            .insert(state.session_id().into(), state.clone());
+            .insert(owner_key(state.owner()), state.clone());
         if self.writes_on_ready {
             registrar.turn().before(Arc::new(move |_| {
                 let state = state.clone();
@@ -79,11 +79,10 @@ impl SessionPlugin for MockPlugin {
         Ok(())
     }
     fn session_ready(&self, context: SessionReadyContext) -> Result<(), PluginError> {
-        self.ready_values.lock_recover().insert(
-            context.session_id.clone().to_string(),
-            context.state.get("counter"),
-        );
-        let registered = self.handles.lock_recover()[context.session_id.as_str()].clone();
+        self.ready_values
+            .lock_recover()
+            .insert(owner_key(&context.owner), context.state.get("counter"));
+        let registered = self.handles.lock_recover()[&owner_key(&context.owner)].clone();
         assert_eq!(registered.generation(), context.state.generation());
         assert_eq!(
             registered.get("counter"),
@@ -104,6 +103,15 @@ impl MockPlugin {
     }
     fn state(&self, id: &str) -> PluginStateStore {
         self.handles.lock_recover()[id].clone()
+    }
+}
+
+/// The fixture's key for a plugin session: the session id the laws look it up
+/// by, or the owner's own spelling for a process.
+fn owner_key(owner: &crate::RuntimeOwner) -> String {
+    match owner {
+        crate::RuntimeOwner::Session(session_id) => session_id.to_string(),
+        crate::RuntimeOwner::Process(_) => owner.to_string(),
     }
 }
 

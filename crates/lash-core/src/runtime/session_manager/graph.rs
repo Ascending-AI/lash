@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
-impl CurrentSessionCapability {
+impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn append_session_nodes(
         &self,
         usage: &UsageCapability,
@@ -14,13 +14,14 @@ impl CurrentSessionCapability {
                 "session graph append requires a non-empty stable operation_id".to_string(),
             ));
         }
-        if session_id != self.session_id {
+        let session = self.require_session("append_session_nodes")?;
+        if *session_id != session.session_id {
             return Err(crate::PluginError::Session(format!(
                 "unknown session `{session_id}`"
             )));
         }
 
-        let mut state = match &self.snapshot {
+        let mut state = match &session.snapshot {
             // A turn-scoped service never commits on its own: the append rides
             // the running turn's draft and lands with the turn's final commit.
             CurrentSnapshot::ReadModel { graph_appends, .. } => {
@@ -28,7 +29,7 @@ impl CurrentSessionCapability {
             }
             CurrentSnapshot::Owned(_) => self.current_snapshot_for_store_write().await?,
         };
-        let Some(store) = &self.store else {
+        let Some(store) = &session.store else {
             return Err(crate::PluginError::Session(
                 "session graph mutation requires a runtime store".to_string(),
             ));
@@ -95,10 +96,10 @@ impl CurrentSessionCapability {
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
         let commit_result = super::super::state::commit_in_lane_context(
-            self.held_drive_fence.as_ref(),
+            session.held_drive_fence.as_ref(),
             store.clone(),
             commit,
-            &self.resident_graph_head_stale,
+            &session.resident_graph_head_stale,
         )
         .await;
         let result = match commit_result {

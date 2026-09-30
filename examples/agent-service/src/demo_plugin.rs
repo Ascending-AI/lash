@@ -91,9 +91,13 @@ struct DemoTools {
 impl StaticToolExecute for DemoTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
+            // The board belongs to the chat session; a process has none.
+            let session_id = match call.context.session_id() {
+                Ok(session_id) => session_id.as_str(),
+                Err(err) => return ToolOutcome::err_fmt(err),
+            };
             match call.name() {
-                "read_board" => match load_chat_board_for_tool(&self.db, call.context.session_id())
-                {
+                "read_board" => match load_chat_board_for_tool(&self.db, session_id) {
                     Ok(board) => ToolOutcome::ok(board_snapshot(&board)),
                     Err(err) => ToolOutcome::err_fmt(err),
                 },
@@ -101,11 +105,7 @@ impl StaticToolExecute for DemoTools {
                     let Some(cell) = call.args.get("cell").and_then(|value| value.as_u64()) else {
                         return ToolOutcome::err_fmt("missing integer cell");
                     };
-                    match apply_agent_move_for_tool(
-                        &self.db,
-                        call.context.session_id(),
-                        cell as usize,
-                    ) {
+                    match apply_agent_move_for_tool(&self.db, session_id, cell as usize) {
                         Ok(output) => ToolOutcome::ok(output),
                         Err(err) => ToolOutcome::err_fmt(err),
                     }

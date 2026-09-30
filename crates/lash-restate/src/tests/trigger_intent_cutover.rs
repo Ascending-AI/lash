@@ -73,7 +73,9 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
                                 protocol_version: 2,
                                 intents: vec![lash_core::ToolIntent::EmitTrigger(
                                     lash_core::EmitTriggerIntent {
-                                        session_id: SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
+                                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                                            TRIGGER_INTENT_CUTOVER_SESSION,
+                                        )),
                                         request: lash_core::TriggerOccurrenceRequest::new(
                                             "intent.cutover.trigger",
                                             "trigger-intent-cutover-source",
@@ -226,13 +228,16 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
                 lash_core::StoreSet::module_artifacts(&stores),
                 stores.process_env_store(),
                 lash_core::StoreSet::process_definitions(&stores),
+                lash_core::StoreSet::attachment_referrers(&stores),
                 lash_core::StoreSet::artifact_cleanup(&stores),
                 Arc::new(lash_core::facade_support::SystemClock),
             ),
         );
         let env_ref = lash_core::testing::process_execution_env_fixture(env_store.as_ref()).await;
         let mut registration = lash_core::RegisterTriggerIntent {
-            session_id: SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
+            owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                TRIGGER_INTENT_CUTOVER_SESSION,
+            )),
             owner_scope: lash_core::TriggerOwnerScope::session(TRIGGER_INTENT_CUTOVER_SESSION),
             actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::for_agent_frame(
                 TRIGGER_INTENT_CUTOVER_SESSION,

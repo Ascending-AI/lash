@@ -15,10 +15,10 @@ use lash::durability::{
 };
 use lash::messages::{PartAttachment, SharedJsonValue};
 use lash::persistence::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
-    LiveReplayOutcome, LiveReplaySubscription, ProcessWakeSource, QueuedCheckpointTurnInput,
-    QueuedCheckpointWork, SessionCursorError, SessionNodePayload, SessionNodeProjection,
-    SessionNodeRecord, TurnInputAdmissionMode,
+    AttachmentReferrers, AttachmentWrite, LiveReplayOutcome, LiveReplaySubscription,
+    ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork, SessionCursorError,
+    SessionNodePayload, SessionNodeProjection, SessionNodeRecord, SessionReferrerState,
+    TurnInputAdmissionMode,
     queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey},
 };
 use lash::plugins::{

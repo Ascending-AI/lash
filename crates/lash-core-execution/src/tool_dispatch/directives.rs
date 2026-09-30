@@ -158,7 +158,7 @@ async fn emit_terminal_conflict(
         later_plugin_id,
         format!("{hook_name}.directive_conflict"),
         payload.clone(),
-        lash_trace::TraceContext::default().for_session(context.session_id.clone()),
+        crate::plugin::owner_trace_context(&context.owner.runtime_owner()),
     )
     .await
     {

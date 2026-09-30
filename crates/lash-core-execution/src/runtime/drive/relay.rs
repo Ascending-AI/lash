@@ -44,6 +44,10 @@ pub enum DeliveryFailure {
     /// §2.5). Settles as `Defer` at `now + policy.max_backoff_ms`. Never
     /// stalls.
     NotYet,
+    /// Not owed before a known instant: a guard whose authority ends it at
+    /// `due_at_ms` (an upload's expiry). Settles as `Defer` at that instant,
+    /// or at `now + policy.max_backoff_ms` if that comes first. Never stalls.
+    NotBefore { due_at_ms: u64 },
 }
 
 /// One kind's retry policy (ADR 0109 §1.4). A host lever (ADR 0014).
@@ -188,6 +192,9 @@ fn settlement_for(
         Ok(()) => ObligationSettlement::Delivered,
         Err(DeliveryFailure::NotYet) => ObligationSettlement::Defer {
             due_at_ms: started_ms.saturating_add(policy.max_backoff_ms),
+        },
+        Err(DeliveryFailure::NotBefore { due_at_ms }) => ObligationSettlement::Defer {
+            due_at_ms: due_at_ms.min(started_ms.saturating_add(policy.max_backoff_ms)),
         },
         Err(DeliveryFailure::Refused(error)) => ObligationSettlement::Stall {
             reason: StallReason::Refused,
@@ -744,6 +751,36 @@ mod tests {
                     due_at_ms: 1_000 + RelayPolicy::default().max_backoff_ms,
                 }
             )]
+        );
+    }
+
+    /// A guard not owed before a known instant defers to that instant, and
+    /// never past the maximum backoff.
+    #[test]
+    fn a_delivery_not_owed_before_an_instant_defers_to_it() {
+        let policy = RelayPolicy::default();
+        let claim = claimed("upload-guard", session_delete("s"));
+        assert_eq!(
+            settlement_for(
+                &policy,
+                &claim,
+                Err(DeliveryFailure::NotBefore { due_at_ms: 11_000 }),
+                10_000,
+            ),
+            ObligationSettlement::Defer { due_at_ms: 11_000 }
+        );
+        assert_eq!(
+            settlement_for(
+                &policy,
+                &claim,
+                Err(DeliveryFailure::NotBefore {
+                    due_at_ms: u64::MAX
+                }),
+                10_000,
+            ),
+            ObligationSettlement::Defer {
+                due_at_ms: 10_000 + policy.max_backoff_ms
+            }
         );
     }
 

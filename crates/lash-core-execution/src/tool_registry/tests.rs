@@ -90,7 +90,7 @@ fn test_tool_context() -> crate::ToolContext<'static> {
             crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
+        Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -848,7 +848,7 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
     );
 
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
-        SessionId::from("registry-test"),
+        crate::RuntimeOwner::Session(SessionId::from("registry-test")),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
         crate::ToolCallId::fixture("unknown-call"),
@@ -1154,7 +1154,7 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         .with_source_id("exact")
         .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
-        SessionId::from("registry-test"),
+        crate::RuntimeOwner::Session(SessionId::from("registry-test")),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
         crate::ToolCallId::fixture("grant-call"),
@@ -1385,7 +1385,7 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
 
         fn intent() -> crate::ToolIntent {
             crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                session_id: SessionId::from("registry-test"),
+                owner: crate::RuntimeOwner::Session(SessionId::from("registry-test")),
                 process_id: crate::process_id_for_test("pinned-process"),
                 event_type: "pinned.intent".to_string(),
                 payload: json!({ "route": "id" }),
@@ -1443,7 +1443,10 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         intent.process_id,
         crate::process_id_for_test("pinned-process")
     );
-    assert_eq!(intent.session_id, SessionId::from("registry-test"));
+    assert_eq!(
+        intent.owner,
+        crate::RuntimeOwner::Session(SessionId::from("registry-test"))
+    );
     assert_eq!(intent.payload, json!({ "route": "id" }));
 }
 

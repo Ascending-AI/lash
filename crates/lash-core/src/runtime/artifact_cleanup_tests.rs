@@ -466,6 +466,8 @@ fn harness() -> Harness {
         modules: Arc::new(Modules(Arc::clone(&applied))),
         definitions: Arc::new(Definitions(Arc::clone(&applied))),
         engines,
+        attachments: Arc::new(crate::attachments::NoopAttachmentReferrers),
+        clock: Arc::new(crate::runtime::SystemClock),
     });
     Harness {
         relay,

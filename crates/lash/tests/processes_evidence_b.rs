@@ -442,8 +442,8 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineRunContext::resolved_tool_catalog;
     // W0472: lash::plugins::ProcessEngineRunContext::scoped_effect_controller [function]
     let _ = lash::plugins::ProcessEngineRunContext::scoped_effect_controller;
-    // W0473: lash::plugins::ProcessEngineRunContext::session_id [function]
-    let _ = lash::plugins::ProcessEngineRunContext::session_id;
+    // W0473: lash::plugins::ProcessEngineRunContext::process_id [function]
+    let _ = lash::plugins::ProcessEngineRunContext::process_id;
     // W0474: lash::plugins::ProcessEngineRunContext::session_store_factory [function]
     let _ = lash::plugins::ProcessEngineRunContext::session_store_factory;
     // W0475: lash::plugins::ProcessEngineRunContext::store [function]

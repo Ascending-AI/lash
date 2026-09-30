@@ -170,6 +170,15 @@ async fn enqueue_queued_work_with_outcome_tx(
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+    let claim = lash_core_execution::ReferrerClaim::unguarded(
+        lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),
+    )
+    .map_err(|error| error.into_store_error("queued attachment referrer"))?;
+    crate::artifact_store::lock_referrer_tx(tx, claim.referrer())
+        .await
+        .map_err(store_sqlx_error)?;
+    crate::attachments::acquire_attachment_refs_tx(tx, &claim, &batch.stored_attachment_ids(), now)
+        .await?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;

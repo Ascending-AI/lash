@@ -26,6 +26,9 @@ impl RemoteTurnReport {
             // Omission accounting is an internal bounded-stream surface; the
             // remote protocol keeps its existing result shape.
             omitted: _,
+            // Retained outputs are what the turn's commit names; the remote
+            // result keeps its existing shape.
+            retained_outputs: _,
             // Failure evidence is a durable turn-receipt read surface, not a
             // duplicate remote execution-result payload.
             failure_evidence: _,
@@ -162,7 +165,7 @@ impl From<lash_core::facade_support::TurnExecutionMetrics> for RemoteTurnExecuti
 impl From<lash_core::ToolIntentIdentity> for RemoteToolIntentIdentity {
     fn from(value: lash_core::ToolIntentIdentity) -> Self {
         Self {
-            session_id: value.session_id,
+            owner: value.owner,
             execution_scope_id: value.execution_scope_id,
             tool_call_id: value.tool_call_id,
             intent_index: value.intent_index,
@@ -217,8 +220,8 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
                 actual,
                 maximum,
             },
-            Core::SessionMismatch { expected, recorded } => {
-                Self::SessionMismatch { expected, recorded }
+            Core::OwnerMismatch { expected, recorded } => {
+                Self::OwnerMismatch { expected, recorded }
             }
             Core::ForeignTriggerOwnerScope { expected, recorded } => {
                 Self::ForeignTriggerOwnerScope { expected, recorded }

@@ -162,19 +162,19 @@ pub use lash_core::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkBatchingConfig, Resolution, ResolveOutcome, SessionCreateRequest, SessionError,
-    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView,
-    TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
-    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
-    facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
-    facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
-    facade_support::TurnAttach, facade_support::TurnCancelOutcome,
-    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
-    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
-    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
-    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
-    facade_support::TurnWorkDriver,
+    QueuedWorkBatchingConfig, Resolution, ResolveOutcome, RuntimeOwner, SessionCreateRequest,
+    SessionError, SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint,
+    SessionView, TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
+    TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
+    facade_support::SessionCommand, facade_support::SessionCommandReceipt,
+    facade_support::SessionConfigPatch, facade_support::SessionSpec,
+    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
+    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
+    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
+    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
+    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
@@ -298,10 +298,10 @@ pub mod tools {
     pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
-        PendingCompletion, PendingResolver, PreparedToolCall, SignalProcessIntent,
-        StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
+        CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, ExecutionOwner,
+        PendingAnnouncement, PendingCompletion, PendingResolver, PreparedToolCall,
+        SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
+        TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
@@ -420,10 +420,8 @@ pub mod persistence {
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
     /// Artifact ownership supplied to protocol engines and effect controllers.
-    pub use lash_core::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
-    pub use lash_core::{
-        AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
-    };
+    pub use lash_core::{ArtifactName, ArtifactReferrer, ReferrerClaim, ResolvedArtifactCleanup};
+    pub use lash_core::{AttachmentReferrers, AttachmentWrite, SessionReferrerState};
     pub use lash_core::{RunSpecHash, SessionUsageTotals};
     /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
@@ -497,7 +495,7 @@ pub mod persistence {
         AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
         MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
         attachments::AttachmentReclamationFailure, facade_support::AttachmentGcFence,
-        facade_support::AttachmentReclamationReport, facade_support::SessionAttachmentStore,
+        facade_support::AttachmentReclamationReport, facade_support::RuntimeAttachmentStore,
         facade_support::reclaim_unreferenced_attachments,
     };
     /// The Lashlang module-artifact port a backend's store set supplies.

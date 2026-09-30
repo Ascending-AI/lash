@@ -177,7 +177,6 @@ async fn run_counted(
         process_id.clone(),
         lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
-        lash_core::SessionId::from("pre-cutover-session"),
         plugins,
         catalog,
         None,

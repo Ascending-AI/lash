@@ -4396,7 +4396,9 @@
                         "type": "host"
                       }
                     },
-                    "session_id": "session-001"
+                    "owner": {
+                      "session": "session-001"
+                    }
                   },
                   "kind": "start_process"
                 }
@@ -6972,7 +6974,9 @@
                         "type": "host"
                       }
                     },
-                    "session_id": "session-001"
+                    "owner": {
+                      "session": "session-001"
+                    }
                   },
                   "kind": "start_process"
                 }
@@ -8519,7 +8523,9 @@
                         "type": "host"
                       }
                     },
-                    "session_id": "session-003"
+                    "owner": {
+                      "session": "session-003"
+                    }
                   },
                   "kind": "start_process"
                 }
@@ -9772,7 +9778,9 @@
                         "type": "host"
                       }
                     },
-                    "session_id": "session-004"
+                    "owner": {
+                      "session": "session-004"
+                    }
                   },
                   "kind": "start_process"
                 }

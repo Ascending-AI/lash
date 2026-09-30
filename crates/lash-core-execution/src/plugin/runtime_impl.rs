@@ -1,4 +1,4 @@
-use crate::SessionId;
+use crate::{RuntimeOwner, SessionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
@@ -21,13 +21,15 @@ pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
-    sessions: Arc<StdMutex<BTreeMap<SessionId, Weak<PluginSession>>>>,
+    sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
 }
 
-/// Inputs shared by new-session creation and reconstruction from durable state.
+/// Inputs shared by new-session creation and reconstruction from durable
+/// state. `owner` names the runtime the plugin session serves: a session, or
+/// a process runtime, which is never a session.
 #[derive(Clone, Debug)]
 pub struct PluginSessionRequest<'a> {
-    pub session_id: SessionId,
+    pub owner: RuntimeOwner,
     pub parent_session_id: Option<SessionId>,
     pub materialization: PluginSessionMaterializationRequest<'a>,
     pub tool_catalog_overlay: ToolCatalogContribution,
@@ -37,7 +39,22 @@ pub struct PluginSessionRequest<'a> {
 impl<'a> PluginSessionRequest<'a> {
     pub fn creation(session_id: impl Into<SessionId>, config: SessionCreationConfig) -> Self {
         Self {
-            session_id: session_id.into(),
+            owner: RuntimeOwner::Session(session_id.into()),
+            parent_session_id: None,
+            materialization: PluginSessionMaterializationRequest::Creation {
+                config,
+                seed_snapshot: None,
+            },
+            tool_catalog_overlay: ToolCatalogContribution::default(),
+            tool_snapshot: None,
+        }
+    }
+
+    /// A process runtime's plugin session, built from the process's captured
+    /// execution environment. No session lookup finds it.
+    pub fn process_creation(process_id: crate::ProcessId, config: SessionCreationConfig) -> Self {
+        Self {
+            owner: RuntimeOwner::Process(process_id),
             parent_session_id: None,
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
@@ -54,7 +71,7 @@ impl<'a> PluginSessionRequest<'a> {
         config: RecordedSessionConfig,
     ) -> Self {
         Self {
-            session_id: session_id.into(),
+            owner: RuntimeOwner::Session(session_id.into()),
             parent_session_id: None,
             materialization: PluginSessionMaterializationRequest::Rematerialization {
                 snapshot,
@@ -212,7 +229,7 @@ impl PluginHost {
         request: PluginSessionRequest<'_>,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let PluginSessionRequest {
-            session_id,
+            owner,
             parent_session_id,
             materialization,
             tool_catalog_overlay,
@@ -239,7 +256,7 @@ impl PluginHost {
                 ),
             };
         let ctx = PluginSessionContext {
-            session_id,
+            owner,
             tool_access: authority.tool_access.clone(),
             subagent: authority.subagent.clone(),
             plugin_options: authority.plugin_options.clone(),
@@ -248,7 +265,7 @@ impl PluginHost {
             extensions: self.extensions.clone(),
             parent_session_id,
         };
-        let session_id = ctx.session_id.clone();
+        let owner = ctx.owner.clone();
         let BuiltSessionContributions {
             plugins,
             contributions,
@@ -266,7 +283,7 @@ impl PluginHost {
         let session = Arc::new(PluginSession {
             state,
             host: self.clone(),
-            session_id: ctx.session_id,
+            owner: ctx.owner,
             plugins,
             tools,
             tool_registry: registry,
@@ -286,17 +303,14 @@ impl PluginHost {
             contributions,
             forked,
         });
-        self.register_session(&session_id, &session)?;
+        self.register_session(&owner, &session)?;
         session.state.lock_recover().initialize(snapshot)?;
         for plugin in &session.plugins {
-            let state = PluginStateStore::bind(
-                &session.session_id,
-                plugin.id(),
-                Arc::clone(&session.state),
-            );
+            let state =
+                PluginStateStore::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
             let probe = state.retention_probe();
             plugin.session_ready(SessionReadyContext {
-                session_id: session.session_id.clone(),
+                owner: session.owner.clone(),
                 host: self.plugin_view(),
                 state,
             })?;
@@ -321,7 +335,7 @@ impl PluginHost {
             let plugin = factory.build(ctx)?;
             reg.registering_plugin_id = Some(plugin.id().to_string());
             reg.state = Some(PluginStateStore::bind(
-                &ctx.session_id,
+                &ctx.owner,
                 plugin.id(),
                 Arc::clone(&state),
             ));
@@ -370,7 +384,7 @@ impl PluginHost {
 
     pub fn build_core_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, PluginError> {
         let ctx = PluginSessionContext {
-            session_id: SessionId::from("lash-core-tool-catalog"),
+            owner: RuntimeOwner::Session(SessionId::from("lash-core-tool-catalog")),
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options: PluginOptions::default(),
@@ -385,28 +399,25 @@ impl PluginHost {
 
     fn register_session(
         &self,
-        session_id: &SessionId,
+        owner: &RuntimeOwner,
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
-        if let Some(existing) = sessions.get(session_id).and_then(Weak::upgrade) {
+        if let Some(existing) = sessions.get(owner).and_then(Weak::upgrade) {
             if !Arc::ptr_eq(&existing, session) {
                 return Err(PluginError::Session(format!(
-                    "session `{session_id}` is already registered on this plugin host"
+                    "plugin session for `{owner}` is already registered on this plugin host"
                 )));
             }
             return Ok(());
         }
-        sessions.insert(
-            SessionId::from(session_id.to_string()),
-            Arc::downgrade(session),
-        );
+        sessions.insert(owner.clone(), Arc::downgrade(session));
         Ok(())
     }
 
     pub fn unregister_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
-        sessions.remove(session_id);
+        sessions.remove(&RuntimeOwner::Session(session_id.clone()));
         Ok(())
     }
 
@@ -415,7 +426,8 @@ impl PluginHost {
         session_id: &SessionId,
     ) -> Result<Arc<PluginSession>, PluginOperationInvokeError> {
         let mut sessions = self.sessions.lock_recover();
-        let Some(weak) = sessions.get(session_id).cloned() else {
+        let owner = RuntimeOwner::Session(session_id.clone());
+        let Some(weak) = sessions.get(&owner).cloned() else {
             return Err(PluginOperationInvokeError::UnknownSession(
                 session_id.to_string(),
             ));
@@ -431,7 +443,7 @@ impl PluginHost {
                 }
             }
             None => {
-                sessions.remove(session_id);
+                sessions.remove(&owner);
                 Err(PluginOperationInvokeError::UnknownSession(
                     session_id.to_string(),
                 ))

@@ -1351,7 +1351,7 @@ mod tests {
             .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
             let registration = crate::tool_catalog::rlm_tool_catalog(
                 ToolCatalogContext {
-                    session_id: SessionId::from("session"),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                     tools: vec![tool.manifest()],
                     resolve_contract: None,
                     tool_access: lash_core::SessionToolAccess::default(),

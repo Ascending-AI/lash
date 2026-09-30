@@ -64,6 +64,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
             "https://restate.invalid",
             signal_transport.clone(),
         )),
+        Arc::new(lash_core::attachments::NoopAttachmentReferrers),
         test_restate_authority_id(),
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
         &crate::services::DEFAULT_NAMESPACE,
@@ -723,7 +724,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         // The wake append is journal-capable work: the attempt declares it and
         // the intent executor emits it once the attempt commits.
         let intent = lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-            session_id: SessionId::from(call.context.session_id()),
+            owner: call.context.owner().runtime_owner(),
             process_id: process_id.clone(),
             event_type: "process.wake".to_string(),
             payload: serde_json::json!({ "message": line, "wake_input": line }),
@@ -1333,12 +1334,9 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory)).await;
     let _root_store = lash_core::runtime::admit_session_view(
@@ -1427,12 +1425,9 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let observed = registry_b
         .list_observed_by(

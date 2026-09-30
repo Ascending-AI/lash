@@ -87,7 +87,7 @@ pub use model::{
     SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization, WaitKind,
     WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
     load_process_execution_env, mint_process_id, process_child_session_id,
-    process_runtime_session_ids, publish_process_execution_env,
+    publish_process_execution_env,
 };
 pub use model::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use observation::{

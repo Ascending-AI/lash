@@ -180,9 +180,12 @@ named definition's module alive.
 ### 1. Referrers and their canonical ids
 
 An artifact has one exact edge per (artifact, referrer) pair. A referrer is a
-durable reader. There are six kinds, and no other way to keep bytes alive.
-(This record first had a seventh, `definition_revision`, for the named
-definition registry. The FIG-4174 amendment withdraws it with the registry.)
+durable reader. There are six kinds that hold artifacts, and no other way to
+keep bytes alive. (This record first had a seventh, `definition_revision`,
+for the named definition registry. The FIG-4174 amendment withdraws it with
+the registry.) Two more kinds, `session` and `upload`, hold attachments only
+(ADR 0124); a referrer holds artifacts and attachments alike, and the six
+kinds here are the ones an artifact edge may name.
 
 ```rust
 // crates/lash-core-store/src/artifact_referrer.rs  (new)
@@ -194,13 +197,19 @@ pub enum ArtifactReferrerKind {
     Start,
     Execution,
     HostPin,
+    /// Holds attachments only (ADR 0124).
+    Session,
+    /// Holds attachments only (ADR 0124): one session upload.
+    Upload,
 }
 
 impl ArtifactReferrerKind {
-    pub const ALL: [Self; 6];
+    pub const ALL: [Self; 8];
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `execution`, `host_pin`.
+    /// `start`, `execution`, `host_pin`, `session`, `upload`.
     pub const fn as_str(self) -> &'static str;
+    /// `session`, `upload`, `execution`, `process_record` (ADR 0124).
+    pub const fn holds_attachments(self) -> bool;
     pub fn parse(text: &str) -> Result<Self, ArtifactReferrerError>;
 }
 
@@ -212,6 +221,8 @@ pub enum ArtifactReferrer {
     Start(StartKey),
     Execution(lash_sansio::EffectJournalIdentity),
     HostPin(HostArtifactPin),
+    Session(SessionId),
+    Upload(UploadReferrerId), // (session, upload id): ADR 0124
 }
 
 impl ArtifactReferrer {
@@ -289,6 +300,8 @@ text:
 | `start` | the start key (`process-start-key:v1:…`) |
 | `execution` | `EffectJournalIdentity::key()`, the journal's existing versioned JSON (`crates/lash-sansio/src/effect_identity.rs:277`) |
 | `host_pin` | the pin text |
+| `session` | the session id text |
+| `upload` | compact JSON array `["<session id>","upload:v1:<32 hex>"]` |
 
 JSON arrays are rendered by `serde_json::to_string` of the tuple, so
 re-encoding a decoded id reproduces it byte for byte.
@@ -331,12 +344,14 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
 
--- Permanent: one row per ended referrer, never deleted.
-CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind
+-- Permanent: one row per ended referrer, never deleted. One fence table
+-- serves artifact and attachment referrers alike (ADR 0124).
+CREATE TABLE IF NOT EXISTS referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind
         CHECK (referrer_kind IN ('frame_environment', 'process_record',
-            'subscription_revision', 'start', 'execution', 'host_pin')),
-    referrer_id   TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id
+            'subscription_revision', 'start', 'execution', 'host_pin',
+            'session', 'upload')),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id
         CHECK (length(referrer_id) > 0),
     ended_at_ms   INTEGER NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
@@ -344,7 +359,7 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
 ```
 
 **Storage, PostgreSQL** (`crates/lash-postgres-store/schema.sql`). The same
-tables as `lash_artifact_referrer_edges` and `lash_artifact_referrer_fences`,
+tables as `lash_artifact_referrer_edges` and `lash_referrer_fences`,
 with `lash_lashlang_artifacts` as the foreign-key target, the same CHECK names,
 `CHECK (char_length(referrer_id) > 0)`, `ended_at_ms BIGINT NOT NULL`, and
 the index `idx_lash_artifact_referrer_edges_referrer`. The open-time shape
@@ -508,6 +523,12 @@ pub enum ArtifactCleanupPlan {
     AwaitStart { starter: lash_sansio::EffectJournalIdentity },
     /// Guard of a subscription revision acquired before its mutation commits.
     AwaitSubscriptionRevision { creator: lash_sansio::EffectJournalIdentity },
+    /// Guard of an upload referrer (ADR 0124): ends once `expires_at_ms`
+    /// has passed, or once the upload's session is deleted or absent.
+    AwaitUploadExpiry { expires_at_ms: u64 },
+    /// Armed by session deletion for `session` (ADR 0124): ends once the
+    /// session is deleted and no untombstoned graph node of it remains.
+    AwaitSessionGraphRetired,
 }
 
 /// What one store applies once the executor has resolved the plan.
@@ -535,6 +556,11 @@ pub struct ResolvedArtifactCleanup {
    `crates/lash-postgres-store/src/postgres/artifact_store.rs:14-31`) and, on
    SQLite, the blob reclaim that checks every other root
    (`crates/lash-sqlite-store/src/blobs.rs:49`).
+
+An attachment end carries nothing: every delivery acquires the receiver's
+edge before the source may end (ADR 0124 §4), so `Ended.carries` names
+artifacts only, and the attachment store ends a referrer by fencing it and
+deleting its edges and pending writes (§2.5).
 
 Replaying an applied cleanup is a no-op. On PostgreSQL the transaction takes
 the referrer locks of the ended referrer and of every carry destination
@@ -633,6 +659,9 @@ pub enum DeliveryFailure {
     Undecodable(String),
     /// Settles as `Defer` at `now + policy.max_backoff_ms`. Never stalls.
     NotYet,
+    /// Owed at a known instant: settles as `Defer` at
+    /// `min(due_at_ms, now + policy.max_backoff_ms)`. Never stalls.
+    NotBefore { due_at_ms: u64 },
 }
 ```
 
@@ -654,9 +683,18 @@ own transaction. Its `deliver`:
      `ProcessRecord(record.id)`. No record means no carries once `starter` is
      `Settled`.
    - `AwaitSubscriptionRevision { creator }`: see §3.4.
+   - `AwaitUploadExpiry { expires_at_ms }` (ADR 0124): no carries once the
+     executor's clock reaches `expires_at_ms`, or once the upload's session
+     is not `Live`. Before that it answers `NotBefore { due_at_ms:
+     expires_at_ms }`, so an early visit never defers the row past the
+     expiry.
+   - `AwaitSessionGraphRetired` (ADR 0124): no carries once the session is
+     `DeletedRetired`.
 4. Call `end_process_env_referrer`, `end_module_referrer` and
    `ProcessEngineRegistry::end_artifact_referrer`, each with the carries for
-   its store.
+   its store. When the referrer's kind holds attachments, also call the
+   attachment port's `end_attachment_referrer` (ADR 0124); a store fault
+   there is `Retryable`, and a row this build cannot read is `Undecodable`.
 5. Answer `Ok` only after all of them succeed. The relay settles `Delivered`.
 
 A store fault anywhere is `Retryable`, and the next attempt repeats every step
@@ -865,6 +903,11 @@ law, `process_prune_retires_the_start_staging_owner`
 rewritten as acceptance test 10. Terminal
 completion ends nothing; the record keeps its inputs until prune, as ADR 0093
 did.
+
+The same end also ends the record's attachment edges: the executor calls the
+attachment port's `end_attachment_referrer` for `ProcessRecord(id)`, so
+everything the process put, received, published or was started with is
+released at prune (ADR 0124).
 
 #### 3.3 `start`: engine start and replay settlement
 

@@ -210,6 +210,8 @@ impl RuntimeErrorCode {
             Self::ProcessPanicked => Terminal,
             // the target process is outside the visible set.
             Self::ProcessNotVisible => Terminal,
+            // a process runtime has no session; the same owner is refused again.
+            Self::NotASessionRuntime => Terminal,
             // the target process is durably terminal.
             Self::ProcessAlreadyTerminal => Terminal,
             // the declared parent scope durably ended.

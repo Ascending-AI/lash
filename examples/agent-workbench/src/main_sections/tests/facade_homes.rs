@@ -118,7 +118,6 @@ fn workbench_plugin_observes_session_config_policy_transition() {
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
                 &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-                data_dir.join("lash-sessions"),
             )
             .await
             .expect("open config change process registry"),
@@ -191,7 +190,6 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
                 &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-                data_dir.join("lash-sessions"),
             )
             .await
             .expect("open context transform process registry"),

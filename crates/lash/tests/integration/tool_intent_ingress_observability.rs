@@ -56,7 +56,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
 
 fn cancel_intent_for(session_id: &SessionId, process: &ProcessId) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
-        session_id: SessionId::from(session_id.to_string()),
+        owner: lash::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
         process_id: process.clone(),
     })
 }
@@ -168,7 +168,7 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
     let observable_call_id = format!("tool_call_id={observable_call_id}");
     for field in [
         "tool_intent_ingress.submit",
-        "session_id=intent-ingress-observability-session",
+        "owner=session:intent-ingress-observability-session",
         "execution_scope_id=intent-ingress-observability-turn",
         &observable_call_id,
         "intent_index=0",

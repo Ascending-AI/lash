@@ -6,7 +6,6 @@
 //! suspension protocol — including the one-shot fusing of a context future that
 //! wakes synchronously and then returns `Pending`.
 
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
@@ -14,8 +13,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::{
-    AwaitEventWaitIdentity, ProcessAwaitOutput, ProcessExecutionContext, ProcessRegistration,
-    Resolution, ResolveOutcome,
+    AwaitEventWaitIdentity, ProcessExecutionContext, ProcessRegistration, Resolution,
+    ResolveOutcome,
 };
 use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::context::{
@@ -508,27 +507,6 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
             Ok(RestateTurnGatePeek::Open(resolution))
         })
     }
-
-    fn await_process_terminal<'run>(
-        &'run self,
-        namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-    ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
-    where
-        'ctx: 'run;
-
-    /// Race a process terminal wait against durable turn cancellation, or,
-    /// for a wait that observes no turn, against the awaiting process
-    /// segment's own cancel promise when `process_cancel` says so (FIG-3673).
-    fn await_process_terminal_or_turn_cancel<'run>(
-        &'run self,
-        namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_cancel: ProcessCancelRace,
-    ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-    where
-        'ctx: 'run;
 
     fn resolve_event<'run>(
         &'run self,
@@ -1249,104 +1227,6 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         send.await?;
                         Ok(())
-                    })
-                }
-
-                fn await_process_terminal<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    process_id: ProcessId,
-                ) -> crate::JournaledFuture<'run, ProcessAwaitOutput>
-                where
-                    'ctx: 'run,
-                {
-                    let call = crate::process::await_terminal_on_stable_root(self, namespace, process_id).call();
-                    Box::pin(async move {
-                        let output = call.await?.into_body();
-                        Ok(output)
-                    })
-                }
-
-                fn await_process_terminal_or_turn_cancel<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    process_id: ProcessId,
-                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        let Some(turn_cancel) = turn_cancel else {
-                            let terminal =
-                                crate::process::await_terminal_on_stable_root(self, namespace, process_id)
-                                    .call();
-                            let promise = match process_cancel {
-                                ProcessCancelRace::Raced => {
-                                    process_cancel_promise!($promises, $context, 'run, self)
-                                }
-                                ProcessCancelRace::NotRaced => None,
-                            };
-                            let Some(promise) = promise else {
-                                let output = terminal.await?.into_body();
-                                return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
-                            };
-                            // The terminal call's command, then the promise's.
-                            // A lost call is cancelled rather than left
-                            // parked on the child until the child ends.
-                            if let GateRaceWinner::Gate = first_of_gate_race(&terminal, &*promise).await?
-                                && crate::process::process_cancel_promise_verdict(Some(promise.await?))
-                            {
-                                restate_sdk::context::CallFuture::invocation_handle(&terminal)
-                                    .await?
-                                    .cancel();
-                                return Ok(RestateTurnCancelRaceOutcome::ProcessCancelled);
-                            }
-                            let output = terminal.await?.into_body();
-                            return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
-                        };
-                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
-                        else {
-                            return Err(TerminalError::new(
-                                "turn cancellation gate is missing its session id",
-                            ));
-                        };
-                        // `Request::call()` emits its CallCommand synchronously in
-                        // Restate SDK 0.10. Construct this call first so a suspended
-                        // pre-FIG-790 journal remains the exact prefix of every
-                        // redrive after the cancellation adjudicator was added.
-                        let process = crate::process::await_terminal_on_stable_root(
-                            self,
-                            namespace,
-                            process_id.clone(),
-                        );
-                        let process = erase_gate_wait(process.call());
-                        let outcome = race_turn_cancel_gate(
-                            self,
-                            namespace,
-                            &SessionId::from(session_id),
-                            turn_cancel,
-                            || gate_awakeable(self),
-                            move || process,
-                        )
-                        .await?;
-                        let winning_branch = match &outcome {
-                            RestateTurnCancelRaceOutcome::Completed(_) => "process_terminal",
-                            RestateTurnCancelRaceOutcome::TurnCancelled => "turn_cancelled",
-                            RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
-                                "session_revoked"
-                            }
-                            RestateTurnCancelRaceOutcome::ProcessCancelled => "process_cancelled",
-                        };
-                        tracing::info!(
-                            target: "lash::restate",
-                            event = "restate.process_await_adjudicated",
-                            process_id = %process_id,
-                            winning_branch,
-                            "Restate process-await adjudication"
-                        );
-                        Ok(outcome.map(|reply| Box::new(reply.into_body())))
                     })
                 }
 

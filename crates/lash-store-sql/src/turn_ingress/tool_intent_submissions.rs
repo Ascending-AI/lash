@@ -4,7 +4,7 @@
 pub const TABLE: &str = "tool_intent_submissions";
 
 /// Every column an insert writes.
-pub const INSERT_COLUMNS: &str = "replay_key, session_id, execution_scope_id, tool_call_id,
+pub const INSERT_COLUMNS: &str = "replay_key, owner, execution_scope_id, tool_call_id,
      intent_index, kind, payload_hash, submission_json";
 
 crate::statements! {

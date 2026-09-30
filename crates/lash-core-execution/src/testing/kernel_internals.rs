@@ -59,10 +59,9 @@ pub async fn serve_effect_controller_task_request(
 /// through between captures and commits.
 pub fn plugin_state_store(
     plugins: &crate::PluginSession,
-    session_id: &crate::SessionId,
     plugin_id: &str,
 ) -> crate::PluginStateStore {
-    plugins.plugin_state_store_for_testing(session_id, plugin_id)
+    plugins.plugin_state_store_for_testing(plugin_id)
 }
 
 /// `ToolDispatchContext::attempt_may_defer`: whether a call may park, from its

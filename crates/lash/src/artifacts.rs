@@ -46,6 +46,7 @@ impl HostArtifacts {
         modules: Arc<dyn ModuleArtifactStore>,
         process_env: Arc<dyn ProcessExecutionEnvStore>,
         definitions: Arc<dyn ProcessDefinitionStore>,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
         clock: Arc<dyn Clock>,
         engines: ProcessEngineRegistry,
@@ -54,6 +55,7 @@ impl HostArtifacts {
             Arc::clone(&modules),
             Arc::clone(&process_env),
             definitions,
+            attachments,
             Arc::clone(&cleanup),
             Arc::clone(&clock),
         );

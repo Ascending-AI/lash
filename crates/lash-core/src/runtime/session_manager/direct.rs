@@ -32,10 +32,10 @@ impl RuntimeSessionServices {
     /// what was lent — keeps it.
     fn bound_tool_child_services(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
     ) -> Option<Self> {
-        if *session_id != self.current.session_id {
+        if *owner != self.current.runtime_owner() {
             return None;
         }
         let mut services = self.clone();
@@ -114,16 +114,16 @@ impl DirectCompletionService for RuntimeSessionServices {
     /// child's call under the opener's session authority (ADR 0099 §3).
     fn bind_tool_child(
         self: Arc<Self>,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
     ) -> Option<Arc<dyn DirectCompletionService>> {
-        self.bound_tool_child_services(session_id, execution_env_spec)
+        self.bound_tool_child_services(owner, execution_env_spec)
             .map(|services| Arc::new(services) as Arc<dyn DirectCompletionService>)
     }
 }
 
 pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
-    current: &'a CurrentSessionCapability,
+    current: &'a CurrentOwnerCapability,
     usage_capability: &'a UsageCapability,
     effect_controller: crate::ScopedEffectController<'a>,
     turn_id: Option<&'a TurnId>,
@@ -245,7 +245,7 @@ impl DirectCompletionCapability {
             crate::runtime::causal::direct_request_discriminator(replay, caused_by, ordinal);
         let invocation = crate::runtime::causal::direct_effect_invocation(
             context.effect_controller.execution_scope(),
-            &current.session_id,
+            &current.runtime_owner(),
             &usage_source,
             discriminator,
             context.turn_id,
@@ -484,7 +484,10 @@ mod tests {
         );
 
         let rebound = services
-            .bound_tool_child_services(&crate::SessionId::from(SESSION_ID.to_string()), &child_env)
+            .bound_tool_child_services(
+                &crate::RuntimeOwner::Session(crate::SessionId::from(SESSION_ID.to_string())),
+                &child_env,
+            )
             .expect("the transport's own session binds");
         assert_eq!(
             rebound.current.policy, child_policy,
@@ -498,7 +501,7 @@ mod tests {
         assert!(
             services
                 .bound_tool_child_services(
-                    &crate::SessionId::from("a-foreign-session"),
+                    &crate::RuntimeOwner::Session(crate::SessionId::from("a-foreign-session")),
                     &child_env,
                 )
                 .is_none(),

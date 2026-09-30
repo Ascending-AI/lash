@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 54,
-  "cargo_target_count": 205,
+  "cargo_target_count": 206,
   "feature_lane_units": [
     {
       "features": [],
@@ -20704,6 +20704,122 @@
         "testing"
       ],
       "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_0e4045f5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_1f34e3b8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_394e50f3",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_42c8e8c8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_52def33c",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_52def33c",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_5e805f8c",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_8c513357",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_92a5f4e0",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_b397078b",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_bbd9f4dd",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_c1e46c47",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_c9708d8d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_d1bdef69",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachment_referrers_evidence__test__fv_f68d2810",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
       "label": "//crates/lash:attachments_evidence__test__fv_0e4045f5",
       "package": "lash-runtime"
     },
@@ -23266,7 +23382,7 @@
       "package": "lash-restate-postgres-workers-e2e"
     }
   ],
-  "generated_label_count": 272,
+  "generated_label_count": 273,
   "packages": [
     {
       "declared_features": [
@@ -26152,6 +26268,12 @@
           "tags": []
         },
         {
+          "cargo": "attachment_referrers_evidence",
+          "kind": "test",
+          "label": "//crates/lash:attachment_referrers_evidence__test",
+          "tags": []
+        },
+        {
           "cargo": "attachments_evidence",
           "kind": "test",
           "label": "//crates/lash:attachments_evidence__test",
@@ -26220,6 +26342,7 @@
         "label": "//crates/lash:test_batch",
         "members": [
           "//crates/lash:artifact_referrers_evidence__test",
+          "//crates/lash:attachment_referrers_evidence__test",
           "//crates/lash:attachments_evidence__test",
           "//crates/lash:integration__test",
           "//crates/lash:observation_admin_evidence__test",

@@ -7,11 +7,12 @@
 //! attempt records both commands and suspends, then a redrive completes both
 //! in each notification order and must take the branch the first completion
 //! names. The losing side is disposed of: a lost event wait is released
-//! `Cancelled`, a lost process await's call is cancelled.
+//! `Cancelled`. A direct process await is an event wait (ADR 0124), so the
+//! event law covers it.
 
 use super::endpoint_protocol::{
     encode_call_completion, encode_get_promise_completion, encode_input_command,
-    encode_invocation_id_completion, encode_start_message, protobuf_varint_field,
+    encode_start_message,
 };
 use super::*;
 use crate::controller::context::{ProcessCancelRace, RestateControllerContext};
@@ -23,7 +24,6 @@ use bytes::BytesMut;
 const PROBE: &str = "P16RaceProbe";
 const CALL_COMMAND: u16 = 0x040D;
 const GET_PROMISE_COMMAND: u16 = 0x0409;
-const SEND_SIGNAL_COMMAND: u16 = 0x0410;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct RaceProbeInput {
@@ -91,16 +91,6 @@ impl P16RaceProbe for P16RaceProbeImpl {
                 )
                 .await?,
             ),
-            "process" => race_label(
-                RestateControllerContext::await_process_terminal_or_turn_cancel(
-                    &ctx,
-                    &crate::services::DEFAULT_NAMESPACE,
-                    ProcessId::fixture("p16-race-probe-child"),
-                    None,
-                    ProcessCancelRace::Raced,
-                )
-                .await?,
-            ),
             other => return Err(TerminalError::new(format!("unknown probe wait `{other}`")).into()),
         };
         Ok(Json(label))
@@ -114,13 +104,9 @@ enum FirstCompletion {
 }
 
 /// The value that completes the guarded call of `wait`.
-fn guarded_completion(wait: &str) -> serde_json::Value {
-    match wait {
-        "process" => serde_json::to_value(process_success(serde_json::json!("child done")))
-            .expect("encode the child's terminal"),
-        _ => serde_json::to_value(Resolution::Ok(serde_json::json!("resolved")))
-            .expect("encode the wait's resolution"),
-    }
+fn guarded_completion(_wait: &str) -> serde_json::Value {
+    serde_json::to_value(Resolution::Ok(serde_json::json!("resolved")))
+        .expect("encode the wait's resolution")
 }
 
 /// The payload of a promise that holds an accepted cancel request.
@@ -162,17 +148,6 @@ async fn race_with(wait: &str, first: FirstCompletion) -> (String, Bytes) {
     ));
     for command in &commands {
         body.extend_from_slice(&command.frame);
-    }
-    if wait == "process" {
-        let invocation_id_index = u32::try_from(
-            protobuf_varint_field(call.frame.get(8..).expect("call payload"), 10)
-                .expect("the call's invocation-id index"),
-        )
-        .expect("invocation-id index fits u32");
-        body.extend_from_slice(&encode_invocation_id_completion(
-            invocation_id_index,
-            "inv_p16_race_probe_child",
-        ));
     }
     let guarded = encode_call_completion(
         call.completion_id.expect("the call's completion id"),
@@ -241,15 +216,6 @@ async fn assert_both_orders(wait: &str) {
             vec![("LashDurableWaitIndex", "resolve")],
             "event: the lost event wait is released"
         ),
-        "process" => {
-            assert!(calls.is_empty(), "process: no new call");
-            assert!(
-                restate_message_types(&promise_output)
-                    .expect("decode the redrive's frames")
-                    .contains(&SEND_SIGNAL_COMMAND),
-                "process: the lost await's call is cancelled"
-            );
-        }
         _ => assert!(calls.is_empty(), "{wait}: nothing to release"),
     }
 }
@@ -262,9 +228,4 @@ pub(super) async fn a_process_event_wait_race_takes_the_first_recorded_completio
 #[tokio::test]
 pub(super) async fn a_process_rank_wait_race_takes_the_first_recorded_completion() {
     assert_both_orders("rank").await;
-}
-
-#[tokio::test]
-pub(super) async fn a_process_await_race_takes_the_first_recorded_completion() {
-    assert_both_orders("process").await;
 }

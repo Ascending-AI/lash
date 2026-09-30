@@ -34,17 +34,6 @@ tombstone. Creating or forking to a deleted id fails with
 `StoreError::SessionDeleted`, whose message states that the id was used and
 deleted. Retention and vacuum never remove this identity evidence.
 
-Runtime-internal process session ids are lash-minted and hosts cannot address
-them, but they are used once on the same terms: process pruning deletes them,
-and a delete writes the same permanent tombstone. Pruning them without one was
-tried and does not hold. The deleted set is not only a reuse fence, it is the
-frontier a delete reads to reclaim tombstoned history rows whose owner is
-already gone — a node can be tombstoned after its owner's delete, and no
-session-scoped vacuum can reach it, because the owning id is unbindable either
-way. An untombstoned process id therefore strands rows in the store forever.
-Two rows of identity evidence per pruned process is the price of a store that
-drains; the alternative was unbounded leaked history.
-
 Creating an already-live id remains idempotent. Opening an existing id remains
 an explicit operation. `fork_at` already takes the new host-provided session id
 and uses the same permanent-tombstone admission path.
@@ -196,22 +185,12 @@ in the shared conformance law rather than papered over.
 - Session-owned effect rows retire by session id. Process-owner incarnation
   fencing and replay-stream incarnation ids are separate concepts and remain.
 - Hosts and third-party stores must implement the admission seam and preserve
-  every deletion tombstone permanently — host-facing ids and lash-minted
-  runtime-internal process session ids alike, whichever delete path wrote it.
-  A store that keeps only the host-facing half satisfies the reuse fence but
-  breaks reclaim: the delete arm reads the same set to decide which owners are
-  gone. Lash detects reuse at creation rather than relying on every downstream
+  every deletion tombstone permanently, whichever delete path wrote it. The
+  delete arm reads the same set to decide which owners are gone. Lash detects reuse at creation rather than relying on every downstream
   identity preimage to carry a lifetime discriminator.
-- A pruned process id is permanently unbindable as a session owner, and stays
-  so after `compact_process_tombstones` removes its process tombstone.
-  Compaction frees registry rows, never ids, and under minted ids a compacted
-  id is never registered again: a start key reused after prune mints a new
-  process id (ADR 0106), whose derived session ids were never bound and create
-  cleanly. What stays tombstoned for the store's life is the pruned
-  lifetime's own ids — `process-env:<pruned id>` and
-  `process-session-turn:<pruned id>` — which refuse every bind with
-  `StoreError::SessionDeleted`. Process ids are single-use for the store's
-  life.
+- Process ids are single-use for the store's life. Compaction frees registry
+  rows, never ids: a start key reused after prune mints a new process id
+  (ADR 0106).
 - Fork materialization followed by observer publication spans transaction
   domains. The fork relation retains the selected process ids as durable apply
   intent until every retryable observer publication succeeds and the intent

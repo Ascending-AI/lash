@@ -80,7 +80,11 @@ DROP TABLE IF EXISTS lash_session_root_inputs CASCADE;
 
 DROP TABLE IF EXISTS lash_control_intents CASCADE;
 
-DROP TABLE IF EXISTS lash_attachment_manifest CASCADE;
+DROP TABLE IF EXISTS lash_attachment_referrer_edges CASCADE;
+
+DROP TABLE IF EXISTS lash_attachment_pending_writes CASCADE;
+
+DROP TABLE IF EXISTS lash_attachment_uploads CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_condemnations CASCADE;
 
@@ -126,7 +130,7 @@ DROP TABLE IF EXISTS lash_lashlang_artifacts CASCADE;
 
 DROP TABLE IF EXISTS lash_artifact_referrer_edges CASCADE;
 
-DROP TABLE IF EXISTS lash_artifact_referrer_fences CASCADE;
+DROP TABLE IF EXISTS lash_referrer_fences CASCADE;
 
 DROP TABLE IF EXISTS lash_artifact_cleanup_obligations CASCADE;
 

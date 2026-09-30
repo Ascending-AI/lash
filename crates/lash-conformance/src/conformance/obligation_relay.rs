@@ -851,6 +851,8 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
         modules: fixture.stores.module_artifacts(),
         definitions: fixture.stores.process_definitions(),
         engines,
+        attachments: fixture.stores.attachment_referrers(),
+        clock: fixture.stores.clock(),
     });
     assert_eq!(
         deliver_now(&relay, &id, &TestClock::new(T0))

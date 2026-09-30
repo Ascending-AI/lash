@@ -25,12 +25,16 @@ impl lash_core::ToolProvider for FirstTurnProcessTool {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        let session_id = lash_core::SessionId::from(call.context.session_id());
+        let session_id = call
+            .context
+            .session_id()
+            .expect("the spawning call runs in a session")
+            .clone();
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "declared": "start" })),
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: session_id.clone(),
+                    owner: lash_core::RuntimeOwner::Session(session_id.clone()),
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host(),
                         serde_json::json!({ "source": "first child turn" }),
@@ -81,7 +85,13 @@ impl lash_core::ToolProvider for AttachmentWritingTool {
             Ok(reference) => reference,
             Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
-        lash_core::ToolOutcome::ok(json!({ "attachment_id": reference.id })).into()
+        // The output names the attachment typed, so the turn's commit holds
+        // it on the child session (ADR 0124 §4); a bare id would leave the put
+        // to die with the turn's execution.
+        lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
+        ))
+        .into()
     }
 }
 
@@ -407,31 +417,26 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         bytes.get(&id).await.expect("child attachment bytes").bytes,
         vec![4, 2, 4, 2]
     );
-    // Manifest ownership attributes liveness to the child (FIG-653), while
+    // The committing session holds what its turn wrote (FIG-653), while
     // reads resolve content addresses across sessions.
     let child_store = child_factory
         .store_for(&SessionId::from("attachment-child"))
         .expect("child store");
-    assert!(
-        lash_core::AttachmentManifest::list_all_refs(&*child_store)
-            .await
-            .map(|refs| refs.contains(&id))
-            .expect("child manifest lookup"),
-        "child session must hold the ref it wrote"
-    );
-    // The ref is the child's alone: once the child session is deleted, no
-    // session roots the blob.
-    backend
-        .session_store_factory()
-        .delete_session(&SessionId::from("attachment-child"))
+    let referrers = lash_core::AttachmentReferrers::attachment_referrers(&*child_store, &id)
         .await
-        .expect("delete the child session");
+        .expect("attachment referrers");
     assert!(
-        !lash_core::AttachmentManifest::list_all_refs(&*root_store)
-            .await
-            .map(|refs| refs.contains(&id))
-            .expect("root manifest lookup"),
-        "root session must not hold a ref for the child's attachment"
+        referrers.contains(&lash_core::ArtifactReferrer::Session(SessionId::from(
+            "attachment-child"
+        ))),
+        "child session must hold the ref it wrote: {referrers:?}"
+    );
+    // The ref is the child's alone: the root session does not hold it.
+    assert!(
+        !referrers.contains(&lash_core::ArtifactReferrer::Session(SessionId::from(
+            "root"
+        ))),
+        "root session must not hold a ref for the child's attachment: {referrers:?}"
     );
 }
 

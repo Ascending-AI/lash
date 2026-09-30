@@ -35,7 +35,7 @@ fn turn_context<'run>(
         .session_id("retention-session")
         .borrowed_effect_controller(scoped)
         .attachment_store(Arc::new(
-            crate::SessionAttachmentStore::ephemeral(backend.attachment_store())
+            crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
                 .with_output_retention(policy),
         ))
         .build()

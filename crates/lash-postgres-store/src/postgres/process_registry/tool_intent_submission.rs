@@ -22,7 +22,7 @@ pub(super) async fn admit(
             .sql(),
     )
     .bind(&submission.identity.replay_key)
-    .bind(submission.identity.session_id.as_str())
+    .bind(submission.identity.owner.to_string())
     .bind(&submission.identity.execution_scope_id)
     .bind(submission.identity.tool_call_id.as_str())
     .bind(i64::from(submission.identity.intent_index))

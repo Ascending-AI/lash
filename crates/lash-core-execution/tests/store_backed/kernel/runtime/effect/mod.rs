@@ -18,7 +18,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_effect_envelope_and_request_specs_round_trip_without_live_fields() {
         let backend = crate::support::memory_store_backend().await;
-        let attachment_store = crate::SessionAttachmentStore::ephemeral(backend.attachment_store());
+        let attachment_store = crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store());
         let llm_request = CoreLlmRequest {
             instructions: Some(Arc::from("I")),
             model: "model".to_string(),
@@ -78,7 +78,7 @@ mod tests {
 
         let invocation = crate::runtime::causal::direct_effect_invocation(
             &ExecutionScope::turn("session", "turn"),
-            &SessionId::from("session"),
+            &crate::RuntimeOwner::Session(SessionId::from("session")),
             "test",
             "request:direct".to_string(),
             Some(&TurnId::from("turn")),

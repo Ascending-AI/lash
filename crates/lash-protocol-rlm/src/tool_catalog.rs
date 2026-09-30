@@ -165,7 +165,7 @@ mod tests {
         let manifests = tools.iter().map(|tool| tool.manifest()).collect::<Vec<_>>();
         let contribution = rlm_tool_catalog(
             ToolCatalogContext {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: manifests.clone(),
                 resolve_contract: Some(Arc::new({
                     let contracts = contracts.clone();
@@ -306,7 +306,7 @@ mod tests {
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: vec![missing.manifest()],
                 resolve_contract: None,
                 tool_access: lash_core::SessionToolAccess::default(),
@@ -343,7 +343,7 @@ mod tests {
 
             let err = rlm_tool_catalog(
                 ToolCatalogContext {
-                    session_id: SessionId::from("session"),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                     tools: vec![unaddressable.manifest()],
                     resolve_contract: None,
                     tool_access: lash_core::SessionToolAccess::default(),
@@ -395,7 +395,7 @@ mod tests {
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: vec![retired_only.manifest()],
                 resolve_contract: None,
                 tool_access: lash_core::SessionToolAccess::default(),
@@ -448,7 +448,7 @@ mod tests {
         let manifests = vec![update_plan.manifest()];
         let contribution = rlm_tool_catalog(
             ToolCatalogContext {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: manifests.clone(),
                 resolve_contract: Some(Arc::new({
                     let contracts = contracts.clone();
@@ -519,7 +519,7 @@ mod tests {
         let name = tool.name().to_string();
         rlm_tool_catalog(
             ToolCatalogContext {
-                session_id: SessionId::from("session"),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: vec![tool.manifest()],
                 resolve_contract: Some(Arc::new(move |requested| {
                     (requested.name == name).then(|| Arc::clone(&contract))

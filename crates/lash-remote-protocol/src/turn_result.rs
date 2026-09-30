@@ -469,7 +469,8 @@ pub struct RemoteToolCallRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteToolIntentIdentity {
-    pub session_id: SessionId,
+    /// Who the intent was declared under: a session, or a process.
+    pub owner: lash_sansio::RuntimeOwner,
     pub execution_scope_id: String,
     pub tool_call_id: lash_sansio::ToolCallId,
     pub intent_index: u32,
@@ -519,7 +520,7 @@ pub enum RemoteToolIntentRefusalReason {
         actual: usize,
         maximum: usize,
     },
-    SessionMismatch {
+    OwnerMismatch {
         expected: String,
         recorded: String,
     },

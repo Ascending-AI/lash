@@ -124,16 +124,31 @@ async fn durable_attachment_context<'h>(
         .expect("create the manifest store");
     let persistence: Arc<dyn crate::RuntimeStore> = factory.clone();
     let backend: Arc<dyn crate::AttachmentStore> = backend.attachment_store();
-    let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
+    let attachment_store = Arc::new(crate::RuntimeAttachmentStore::new(
         Arc::clone(&backend),
-        Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
+        Arc::new(crate::attachments::PersistenceReferrersAdapter(Arc::clone(
             &persistence,
         ))),
-        request.session_id,
+        crate::RuntimeOwner::Session(request.session_id),
     ));
     let mut context = exact_dispatch_context_with_plugins(ports, plugins).await;
     context.attachment_store = attachment_store;
     (context, persistence, backend)
+}
+
+/// Whether neither probe digest has a referrer: no pending write and no
+/// edge was recorded for either.
+async fn no_attachment_referrers(persistence: &dyn crate::RuntimeStore) -> bool {
+    for bytes in [FIRST_BYTES, DENIED_BYTES] {
+        let referrers = persistence
+            .attachment_referrers(&crate::attachments::content_id(bytes))
+            .await
+            .unwrap();
+        if !referrers.is_empty() {
+            return false;
+        }
+    }
+    true
 }
 
 fn deny_probe_attachment(
@@ -162,12 +177,8 @@ async fn assert_policy_denial_left_no_attachment_state(
         "the final hook output must pass through attachment policy"
     );
     assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty(),
-        "authorization rejection must leave no write-ahead manifest intent"
+        no_attachment_referrers(persistence.as_ref()).await,
+        "authorization rejection must leave no pending write"
     );
     assert!(
         backend.list().await.unwrap().is_empty(),
@@ -196,12 +207,8 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         authorized: Arc::clone(&authorized),
     });
     assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty(),
-        "precondition: the manifest starts empty"
+        no_attachment_referrers(persistence.as_ref()).await,
+        "precondition: no digest has a referrer"
     );
     assert!(
         backend.list().await.unwrap().is_empty(),
@@ -224,12 +231,8 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         "precondition: policy reaches and denies the second source"
     );
     assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty(),
-        "authorization rejection must leave no write-ahead manifest intent"
+        no_attachment_referrers(persistence.as_ref()).await,
+        "authorization rejection must leave no pending write"
     );
     assert!(
         backend.list().await.unwrap().is_empty(),
@@ -261,13 +264,7 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
     )
     .await;
     let authorized = deny_probe_attachment(&mut context);
-    assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(no_attachment_referrers(persistence.as_ref()).await);
     assert!(backend.list().await.unwrap().is_empty());
 
     let outcome = dispatch_tool_call(
@@ -305,13 +302,7 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
     )
     .await;
     let authorized = deny_probe_attachment(&mut context);
-    assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(no_attachment_referrers(persistence.as_ref()).await);
     assert!(backend.list().await.unwrap().is_empty());
 
     let outcome = dispatch_tool_call(
@@ -343,12 +334,8 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     .await;
     let authorized = deny_probe_attachment(&mut context);
     assert!(
-        persistence
-            .list_uncommitted(u64::MAX)
-            .await
-            .unwrap()
-            .is_empty(),
-        "precondition: the deferred completion manifest starts empty"
+        no_attachment_referrers(persistence.as_ref()).await,
+        "precondition: no deferred completion digest has a referrer"
     );
     assert!(
         backend.list().await.unwrap().is_empty(),
@@ -356,7 +343,6 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     );
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
-        SessionId::from("session"),
         Arc::new(context),
         crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
@@ -435,24 +421,24 @@ impl TransientPublicationManifest {
 }
 
 #[async_trait::async_trait]
-impl crate::AttachmentManifest for TransientPublicationManifest {
+impl crate::AttachmentReferrers for TransientPublicationManifest {
     async fn begin_attachment_write(
         &self,
-        intent: crate::AttachmentIntent,
+        write: &crate::AttachmentWrite,
     ) -> Result<crate::AttachmentWriteFence, crate::StoreError> {
         if !self.fail_completion {
             return Err(self.failure());
         }
-        crate::AttachmentManifest::begin_attachment_write(
-            &crate::attachments::NoopAttachmentManifest,
-            intent,
+        crate::AttachmentReferrers::begin_attachment_write(
+            &crate::attachments::NoopAttachmentReferrers,
+            write,
         )
         .await
     }
 
     async fn complete_attachment_write(
         &self,
-        _intent: &crate::AttachmentIntent,
+        _write: &crate::AttachmentWrite,
         _permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
         Err(self.failure())
@@ -460,37 +446,47 @@ impl crate::AttachmentManifest for TransientPublicationManifest {
 
     async fn abort_attachment_write(
         &self,
-        _intent: &crate::AttachmentIntent,
+        _write: &crate::AttachmentWrite,
         _permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
         panic!("publication failure must not start a rollback retry")
     }
 
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        _session: &SessionId,
+        _claim: &crate::ReferrerClaim,
         _ids: &[crate::AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        panic!("unexpected commit_refs")
+        panic!("unexpected acquire_attachment_refs")
     }
 
-    async fn list_uncommitted(
+    async fn forget_attachment_ref(
         &self,
-        _cutoff: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        panic!("unexpected list_uncommitted")
-    }
-
-    async fn forget(
-        &self,
-        _session: &SessionId,
+        _referrer: &crate::ArtifactReferrer,
         _id: &crate::AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        panic!("unexpected forget")
+        panic!("unexpected forget_attachment_ref")
     }
 
-    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, crate::StoreError> {
-        panic!("unexpected list_all_refs")
+    async fn end_attachment_referrer(
+        &self,
+        _referrer: &crate::ArtifactReferrer,
+    ) -> Result<(), crate::StoreError> {
+        panic!("unexpected end_attachment_referrer")
+    }
+
+    async fn session_referrer_state(
+        &self,
+        _session: &SessionId,
+    ) -> Result<crate::SessionReferrerState, crate::StoreError> {
+        panic!("unexpected session_referrer_state")
+    }
+
+    async fn attachment_referrers(
+        &self,
+        _id: &crate::AttachmentId,
+    ) -> Result<Vec<crate::ArtifactReferrer>, crate::StoreError> {
+        panic!("unexpected attachment_referrers")
     }
 }
 
@@ -518,10 +514,10 @@ async fn transient_manifest_publication_failure_never_reexecutes_the_tool() {
             fail_completion,
             failures: AtomicUsize::new(0),
         });
-        context.attachment_store = Arc::new(crate::SessionAttachmentStore::new(
+        context.attachment_store = Arc::new(crate::RuntimeAttachmentStore::new(
             backend.attachment_store(),
             manifest.clone(),
-            SessionId::from("session"),
+            crate::RuntimeOwner::Session(SessionId::from("session")),
         ));
         let outcome = dispatch_tool_call(
             &context,

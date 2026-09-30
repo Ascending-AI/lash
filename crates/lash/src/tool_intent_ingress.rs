@@ -50,7 +50,7 @@ impl ToolIntentIngressKey {
     ) -> Self {
         let session_id = SessionId::from(session_id.as_ref());
         let identity = lash_core::derive_tool_intent_identity(
-            &session_id,
+            &lash_core::RuntimeOwner::Session(session_id),
             execution_scope_id.as_ref(),
             tool_call_id,
             intent_index,
@@ -324,7 +324,7 @@ impl ToolIntentIngress {
         let span = tracing::info_span!(
             target: "lash::tool_intent_ingress",
             "tool_intent_ingress.submit",
-            session_id = %identity.session_id,
+            owner = %identity.owner,
             execution_scope_id = %identity.execution_scope_id,
             tool_call_id = %identity.tool_call_id,
             intent_index = identity.intent_index,
@@ -408,7 +408,7 @@ impl ToolIntentIngress {
         };
         tracing::info!(
             target: "lash::tool_intent_ingress",
-            session_id = %identity.session_id,
+            owner = %identity.owner,
             execution_scope_id = %identity.execution_scope_id,
             tool_call_id = %identity.tool_call_id,
             intent_index = identity.intent_index,
@@ -461,10 +461,11 @@ impl ToolIntentIngress {
                 recorded_replay_key: identity.replay_key.clone(),
             });
         }
-        if identity.session_id != self.session_id {
+        let own = lash_core::RuntimeOwner::Session(self.session_id.clone());
+        if identity.owner != own {
             return Some(ToolIntentIngressRefusal::ForeignSession {
-                expected: self.session_id.to_string(),
-                recorded: identity.session_id.to_string(),
+                expected: own.to_string(),
+                recorded: identity.owner.to_string(),
             });
         }
         if identity.execution_scope_id != self.scope.id() {
@@ -473,10 +474,10 @@ impl ToolIntentIngress {
                 recorded: identity.execution_scope_id.clone(),
             });
         }
-        if intent.session_id() != self.session_id {
+        if *intent.owner() != own {
             return Some(ToolIntentIngressRefusal::IntentSessionMismatch {
-                expected: self.session_id.to_string(),
-                recorded: intent.session_id().to_string(),
+                expected: own.to_string(),
+                recorded: intent.owner().to_string(),
             });
         }
         if let lash_core::ToolIntent::RegisterTrigger(registration) = intent {
@@ -495,8 +496,11 @@ impl ToolIntentIngress {
         registration: &lash_core::RegisterTriggerIntent,
     ) -> Option<ToolIntentIngressRefusal> {
         // With no originator the ruling is infallible: the session's own scope.
-        let expected_owner = lash_core::resolve_trigger_owner_scope(&self.session_id, None)
-            .unwrap_or_else(|_| lash_core::TriggerOwnerScope::session(self.session_id.clone()));
+        let expected_owner = lash_core::resolve_trigger_owner_scope(
+            &lash_core::RuntimeOwner::Session(self.session_id.clone()),
+            None,
+        )
+        .unwrap_or_else(|_| lash_core::TriggerOwnerScope::session(self.session_id.clone()));
         if registration.owner_scope != expected_owner {
             return Some(ToolIntentIngressRefusal::ForeignTriggerOwnerScope {
                 expected: expected_owner,
@@ -1117,7 +1121,7 @@ impl ToolIntentIngress {
         }
         let existing = lash_core::process_registry::resolve_named_definition(
             registry.as_ref(),
-            &intent.session_id,
+            &self.session_id,
             name,
         )
         .await
@@ -1168,7 +1172,7 @@ impl ToolIntentIngress {
         let registration_result = registry
             .register_definition(
                 &identity.replay_key,
-                lash_core::TriggerOwnerScope::session(intent.session_id.clone()),
+                lash_core::TriggerOwnerScope::session(self.session_id.clone()),
                 name,
                 pinned,
                 expectation.as_ref(),
@@ -1311,6 +1315,7 @@ impl ToolIntentIngress {
                     registry,
                     std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
                 )
+                .with_process_attachments(self.core.backend.attachment_referrers())
                 .with_process_starts(
                     self.core
                         .backend

@@ -428,7 +428,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 outcome: ToolIntentExecutionOutcome::Executed {
                     identity: ToolIntentIdentity {
-                        session_id: SessionId::from("session-1"),
+                        owner: lash_core::RuntimeOwner::Session(SessionId::from("session-1")),
                         execution_scope_id: "turn-1".to_string(),
                         tool_call_id: lash_core::ToolCallId::fixture("call-1"),
                         intent_index: 0,
@@ -445,7 +445,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "outcome": {
                     "status": "executed",
                     "identity": {
-                        "session_id": "session-1",
+                        "owner": { "session": "session-1" },
                         "execution_scope_id": "turn-1",
                         "tool_call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                         "intent_index": 0,

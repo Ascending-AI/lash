@@ -170,7 +170,7 @@ impl From<RemoteRuntimeReplay> for lash_core::runtime::RuntimeReplay {
             attribution: attribution.map(|attribution| match attribution {
                 RemoteRuntimeReplayAttribution::ToolIntent(identity) => {
                     lash_core::RuntimeReplayAttribution::ToolIntent(lash_core::ToolIntentIdentity {
-                        session_id: identity.session_id,
+                        owner: identity.owner,
                         execution_scope_id: identity.execution_scope_id,
                         tool_call_id: identity.tool_call_id,
                         intent_index: identity.intent_index,
@@ -247,7 +247,7 @@ impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
                     RemoteRuntimeReplayAttribution::ToolIntent(identity) => {
                         lash_core::RuntimeReplayAttribution::ToolIntent(
                             lash_core::ToolIntentIdentity {
-                                session_id: identity.session_id,
+                                owner: identity.owner,
                                 execution_scope_id: identity.execution_scope_id,
                                 tool_call_id: identity.tool_call_id,
                                 intent_index: identity.intent_index,

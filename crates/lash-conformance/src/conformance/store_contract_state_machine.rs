@@ -563,7 +563,7 @@ fn registration(
             lash_core::Lifetime::Detached,
         )
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-            "process-env:{label}"
+            "process-env:fixture-{label}"
         ))))
     };
     registration

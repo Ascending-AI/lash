@@ -19,13 +19,21 @@
 //! the arming idempotent for free: a redrive of the parked turn re-sends the
 //! same invocation to the same workflow key, and Restate attaches to the run
 //! already in flight instead of starting a second waiter.
+//!
+//! Before it resolves the key, the workflow acquires the waiter's referrer
+//! edge on every stored attachment the terminal delivers, in a journaled step
+//! (ADR 0124): the waiter records the value only after it holds what the
+//! value names, so the process's own edges may end once the key resolves.
 
-use lash_core::{AwaitEventKey, ProcessId, Resolution};
+use std::sync::Arc;
+
+use lash_core::{AwaitEventKey, ProcessAwaitOutput, ProcessId, Resolution};
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::HandlerResult;
 use serde::{Deserialize, Serialize};
 
 use crate::compat::{Call, Reply};
+use crate::controller::RestateControllerContext as _;
 use crate::durable_wait::{
     LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
     durable_wait_index_object_key,
@@ -61,15 +69,28 @@ pub trait LashProcessAttach {
     async fn run(call: Call<RestateProcessAttachRequest>) -> HandlerResult<Reply<()>>;
 }
 
+/// The journaled step that acquires the waiter's edges on a terminal's
+/// delivered attachments before the key resolves.
+const PROCESS_ATTACH_ACQUIRE_STEP: &str = "process-attach-acquire";
+
 /// [`LashProcessAttach`] in one deployment's namespace (FIG-3898).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub(crate) struct LashProcessAttachImpl {
     namespace: crate::RestateNamespace,
+    /// The deployment's attachment referrers: the waiter's edges are
+    /// acquired here before the key resolves.
+    attachments: Arc<dyn lash_core::AttachmentReferrers>,
 }
 
 impl LashProcessAttachImpl {
-    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
-        Self { namespace }
+    pub(crate) fn new(
+        namespace: crate::RestateNamespace,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
+    ) -> Self {
+        Self {
+            namespace,
+            attachments,
+        }
     }
 }
 
@@ -96,7 +117,10 @@ impl LashProcessAttach for LashProcessAttachImpl {
         // this workflow could not observe at all becomes an error resolution,
         // so the parked call reports why instead of hanging.
         let resolution = match output {
-            Ok(reply) => match serde_json::to_value(reply.into_body()) {
+            Ok(reply) => match serde_json::to_value(
+                self.acquire_delivered(&ctx, &key, reply.into_body())
+                    .await?,
+            ) {
                 Ok(value) => Resolution::Ok(value),
                 Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
                     code: lash_core::TurnFailureCode::from_wire("process_terminal_encode").into(),
@@ -123,5 +147,37 @@ impl LashProcessAttach for LashProcessAttachImpl {
             .call()
             .await?;
         Ok(Reply::at(wire, ()))
+    }
+}
+
+impl LashProcessAttachImpl {
+    /// Acquire the waiter's referrer edge on every stored attachment
+    /// `output` delivers, in one journaled step, and answer the value the
+    /// key resolves with: `output`, or the typed source-gone failure when a
+    /// delivered attachment was already swept. A store fault ends the attempt
+    /// retryably and records nothing.
+    async fn acquire_delivered(
+        &self,
+        ctx: &WorkflowContext<'_>,
+        key: &AwaitEventKey,
+        output: ProcessAwaitOutput,
+    ) -> HandlerResult<ProcessAwaitOutput> {
+        let attachments = Arc::clone(&self.attachments);
+        let receiver = key.scope.clone();
+        let restate_sdk::serde::Json(delivered) = ctx
+            .run_json_or_retry_send::<ProcessAwaitOutput, _>(
+                PROCESS_ATTACH_ACQUIRE_STEP.to_string(),
+                async move {
+                    lash_core::runtime::attachment_delivery::deliver_output(
+                        attachments.as_ref(),
+                        &receiver,
+                        output,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())
+                },
+            )
+            .await?;
+        Ok(delivered)
     }
 }

@@ -158,7 +158,7 @@ lash_store_sql::statements! {
         /// Record submission `?1`, keeping an existing one under the same
         /// replay key: a replayed submission is the point of the ledger.
         insert_new = "INSERT INTO tool_intent_submissions (
-                 replay_key, session_id, execution_scope_id, tool_call_id,
+                 replay_key, owner, execution_scope_id, tool_call_id,
                  intent_index, kind, payload_hash, submission_json
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (replay_key) DO NOTHING";

@@ -1,84 +1,67 @@
 use super::*;
 
 #[lash::async_trait]
-impl AttachmentManifest for Integrator {
+impl AttachmentReferrers for Integrator {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<AttachmentWriteFence, StoreError> {
         unreachable!("external signature witness")
     }
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        session_id: &SessionId,
+        claim: &ReferrerClaim,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
-    async fn list_uncommitted(
+    async fn forget_attachment_ref(
         &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn forget_aged_uncommitted_intents(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
+        referrer: &ArtifactReferrer,
+        attachment_id: &AttachmentId,
     ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
-    async fn has_live_ref_for_id(
-        &self,
-        attachment_id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
+    async fn end_attachment_referrer(&self, referrer: &ArtifactReferrer) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
-    async fn forget(
+    async fn session_referrer_state(
         &self,
         session_id: &SessionId,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
+    ) -> Result<SessionReferrerState, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
+    async fn attachment_referrers(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, StoreError> {
         unreachable!("external signature witness")
     }
 }
 
 #[lash::async_trait]
 impl AttachmentRootSet for Integrator {
-    fn can_prove_process_owner_death(&self) -> bool {
-        unreachable!("external signature witness")
-    }
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, StoreError> {
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
     fn fence(&self) -> AttachmentGcFence {
@@ -96,7 +79,6 @@ impl AttachmentRootSet for Integrator {
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
         unreachable!("external signature witness")

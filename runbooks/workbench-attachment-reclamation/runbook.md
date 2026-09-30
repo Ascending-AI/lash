@@ -170,7 +170,7 @@ curl -s -X POST "http://127.0.0.1:$port/api/turn" \
   -H 'content-type: application/json' -d '{"text":"hello"}'
 sqlite3 "$work/data/lash-sessions/durable-core.db" \
   "SELECT (SELECT count(*) FROM attachment_blobs),
-          (SELECT count(*) FROM attachment_manifest WHERE committed_at_ms IS NOT NULL)"
+          (SELECT count(*) FROM attachment_referrers WHERE committed_at_ms IS NOT NULL)"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
@@ -221,7 +221,7 @@ curl -s -X POST "http://127.0.0.1:$port/api/turn" -H 'content-type: application/
 # /api/state.active_turns is empty and the attachment manifest row carries a
 # non-null committed_at_ms —
 #   sqlite3 "$work/data/lash-sessions/durable-core.db" \
-#     "SELECT committed_at_ms FROM attachment_manifest WHERE attachment_id = '<id>'"
+#     "SELECT committed_at_ms FROM attachment_referrers WHERE attachment_id = '<id>'"
 # (equivalently, until the attachment appears as a
 # graph_nodes reference). committed_at_ms is what promotes the blob to a root.
 # Waiting on the in-flight row instead produces a false Abort here.

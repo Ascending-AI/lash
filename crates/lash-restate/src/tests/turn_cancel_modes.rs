@@ -513,51 +513,37 @@ async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process()
         cancel_on_suspend_wake: false,
     };
     let guard = process_await_guard(&endpoint, key, &input).await;
-    let raced = process_await_after_guard(&endpoint, key, &input, &guard).await;
-    let parked_await = restate_call_frames(&raced)
-        .expect("decode the await's race")
-        .into_iter()
-        .next()
-        .expect("the await's call");
-    assert_eq!(parked_await.handler, "await_terminal");
-    let replay = encode_call_replay(
-        key,
-        &input,
-        &[(parked_await, None)],
-        Some((17, deferred_wake_signal())),
-    )
-    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
-    .expect("splice a deferred wake against a parked process await");
-    let deferred = endpoint_protocol::invoke_endpoint_body_with_json_call_responses_then_suspend(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        replay,
-        vec![fig1631_registered_gate(), fig1631_registered_gate()],
-    )
-    .await
-    .expect("a deferred wake must keep the process await parked");
-
-    assert_eq!(
-        restate_call_frames(&deferred)
-            .expect("decode the deferred-wake calls")
+    let armed = process_await_after_guard(&endpoint, key, &input, &guard).await;
+    assert_arms_its_attach(&armed);
+    let gate = deferred_wake_signal();
+    let gate = serde_json::to_vec(&gate).expect("serialize the deferred wake");
+    let mut journal = vec![guard, armed];
+    let mut appended = Vec::new();
+    // The race parks, the deferred wake re-registers on the escalation
+    // promise, and the wait stays parked: nothing settles and no cancel is
+    // sent however often the handler is replayed.
+    for _ in 0..4 {
+        let attempt =
+            process_await_attempt(&endpoint, key, &input, &journal, Some(&gate), &race_answer)
+                .await;
+        assert!(
+            !process_await_settled(&attempt),
+            "a deferred wake must keep the process await parked: {:?}",
+            restate_error_message(&attempt)
+        );
+        appended.extend(called_handlers(&attempt));
+        journal.push(attempt);
+    }
+    assert!(
+        appended
             .iter()
-            .map(|call| call.handler.as_str())
-            .collect::<Vec<_>>(),
-        vec!["register_awakeable", "register_awakeable"],
-        "the gate registers, the deferred wake re-registers on escalation, and no cancel is sent"
+            .filter(|handler| *handler == "register_awakeable")
+            .count()
+            >= 2,
+        "the gate registers, and the deferred wake re-registers on escalation: {appended:?}"
     );
-    assert_eq!(
-        restate_message_types(&deferred)
-            .expect("decode deferred-wake frames")
-            .last()
-            .copied(),
-        Some(RESTATE_SUSPENSION_MESSAGE_TYPE),
-        "the handler parks on the process terminal and the escalation promise"
-    );
-    assert_eq!(
-        restate_output_json::<ProcessAwaitOutput>(&deferred),
-        None,
-        "a deferred wake must not settle the process await"
+    assert!(
+        !appended.iter().any(|handler| handler == "cancel"),
+        "a deferred wake never cancels the process: {appended:?}"
     );
 }

@@ -170,7 +170,11 @@ impl LoadTools {
             )
             .await
             .context("put the synthetic blob")?;
-        let session_id = call.context.session_id().to_string();
+        let session_id = call
+            .context
+            .session_id()
+            .context("the load attachment tool runs in a session")?
+            .to_string();
         record_load_event(
             &self.witness,
             LoadEvent {

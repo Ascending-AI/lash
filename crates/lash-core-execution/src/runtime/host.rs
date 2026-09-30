@@ -44,10 +44,10 @@ pub struct RuntimeDurabilityConfig {
     /// The session-bound attachment facade every runtime consumer sees. Hosts
     /// supply a flat [`AttachmentStore`](crate::AttachmentStore) backend
     /// (`RuntimeHostConfig::new`, the builder); the runtime wraps it here in a
-    /// [`SessionAttachmentStore`](crate::SessionAttachmentStore) and rebinds it
+    /// [`RuntimeAttachmentStore`](crate::RuntimeAttachmentStore) and rebinds it
     /// to the live session (with a reference-tracking manifest) at session
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
-    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
 }
 
@@ -212,7 +212,7 @@ impl RuntimeHostConfig {
             durability: RuntimeDurabilityConfig {
                 commit_budget,
                 queued_work_batching,
-                attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(
+                attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(
                     attachment_store,
                 )),
                 process_env_store,
@@ -262,10 +262,12 @@ impl RuntimeHostConfig {
     /// still names exactly one backend (ADR 0102, D2).
     pub fn with_backend(mut self, backend: crate::Backend) -> Self {
         let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
+        let upload_expiry_ms = self.durability.attachment_store.upload_expiry_ms();
         let output_retention = self.durability.attachment_store.output_retention();
         self.durability.attachment_store = Arc::new(
-            crate::SessionAttachmentStore::ephemeral(backend.attachment_store())
+            crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
                 .with_max_attachment_bytes(max_attachment_bytes)
+                .with_upload_expiry_ms(upload_expiry_ms)
                 .with_output_retention(output_retention),
         );
         let mut config = self
@@ -319,6 +321,20 @@ impl RuntimeHostConfig {
             self.durability
                 .attachment_store
                 .reconfigured_max_attachment_bytes(max_attachment_bytes),
+        );
+        self
+    }
+
+    /// How long an unbound put's upload edge holds its bytes before the
+    /// cleanup executor may end it (ADR 0124). Every runtime this host
+    /// builds, session or process, inherits it.
+    pub fn with_attachment_upload_expiry_ms(mut self, upload_expiry_ms: u64) -> Self {
+        let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_max_attachment_bytes(max_attachment_bytes)
+                .with_upload_expiry_ms(upload_expiry_ms),
         );
         self
     }
@@ -590,12 +606,7 @@ impl RuntimeHost {
         session_id: &SessionId,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::SessionError> {
-        let provider_id = policy.recorded_provider_id();
-        let mut binding = self
-            .core
-            .providers
-            .provider_resolver
-            .resolve_provider_binding(provider_id)
+        self.resolve_policy_binding(policy)
             .map_err(|err| match err {
                 crate::ProviderResolutionError::MissingProviderId => {
                     crate::SessionError::ProviderUnconfigured {
@@ -615,7 +626,40 @@ impl RuntimeHost {
                         session_id: SessionId::from(session_id.to_string()),
                     }
                 }
-            })?;
+            })
+    }
+
+    /// Resolve `policy`'s provider binding for `owner`: a session's through
+    /// [`Self::resolve_session_policy`], a process runtime's directly, with
+    /// its failures named by the process.
+    pub fn resolve_owner_policy(
+        &self,
+        owner: &crate::RuntimeOwner,
+        policy: crate::SessionPolicy,
+    ) -> Result<crate::RuntimeSessionPolicy, crate::PluginError> {
+        match owner {
+            crate::RuntimeOwner::Session(session_id) => self
+                .resolve_session_policy(session_id, policy)
+                .map_err(|err| crate::PluginError::Session(err.to_string())),
+            crate::RuntimeOwner::Process(process_id) => {
+                self.resolve_policy_binding(policy).map_err(|err| {
+                    crate::PluginError::Session(format!(
+                        "process `{process_id}` cannot resolve its provider: {err}"
+                    ))
+                })
+            }
+        }
+    }
+
+    fn resolve_policy_binding(
+        &self,
+        policy: crate::SessionPolicy,
+    ) -> Result<crate::RuntimeSessionPolicy, crate::ProviderResolutionError> {
+        let mut binding = self
+            .core
+            .providers
+            .provider_resolver
+            .resolve_provider_binding(policy.recorded_provider_id())?;
         binding.provider = binding.provider.with_clock(Arc::clone(&self.core.clock));
         Ok(crate::RuntimeSessionPolicy::new(policy, binding))
     }

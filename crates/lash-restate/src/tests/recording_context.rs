@@ -338,6 +338,30 @@ impl RecordingContext {
         self.process_terminal_notify(process_id).notify_waiters();
     }
 
+    /// The terminal the test published for `process_id`, as the attach
+    /// workflow resolves a direct await's wait with it.
+    async fn published_terminal(&self, process_id: &ProcessId) -> Resolution {
+        let key = restate_process_terminal_await_key(&test_restate_authority_id(), process_id)
+            .expect("terminal await key");
+        let notify = self.process_terminal_notify(process_id);
+        let resolution = loop {
+            let notified = notify.notified();
+            if let Some(resolution) = self
+                .awaited_events
+                .lock_recover()
+                .get(&key.promise_key())
+                .cloned()
+            {
+                break resolution;
+            }
+            notified.await;
+        };
+        let output = crate::process::restate_process_terminal_output(process_id, resolution)
+            .expect("a published terminal decodes");
+        crate::process::restate_process_terminal_resolution(&output)
+            .expect("a published terminal encodes")
+    }
+
     fn durable_event_notify(&self, workflow_key: &str) -> Arc<tokio::sync::Notify> {
         self.durable_event_notifies
             .lock_recover()
@@ -397,6 +421,21 @@ impl RecordingContext {
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveOutcome {
         self.resolved_events.lock_recover().push(request.clone());
+        self.settle_durable_event(request)
+    }
+
+    /// Settle a wait as the attach workflow does from its own journal: the
+    /// controller under test resolved nothing, so `resolved_events` does not
+    /// record it.
+    fn settle_attached_terminal(&self, request: RestateDurableWaitResolveRequest) {
+        self.turn_cancel_gate.resolve(
+            &request.key,
+            RestateTurnCancelWake::for_gate_resolution(&request.resolution),
+        );
+        self.settle_durable_event(request);
+    }
+
+    fn settle_durable_event(&self, request: RestateDurableWaitResolveRequest) -> ResolveOutcome {
         let address = request.address();
         let mut events = self.durable_events.lock_recover();
         if let Some(terminal) = events.get(&address.workflow_key) {
@@ -439,7 +478,29 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
-        self.process_attachments.lock_recover().push(request);
+        let direct_await = matches!(
+            &request.key.wait,
+            lash_core::AwaitEventWaitIdentity::Custom { key } if key.starts_with("process-await:")
+        );
+        self.process_attachments
+            .lock_recover()
+            .push(request.clone());
+        if direct_await {
+            // Stand in for the attach workflow of a direct await: its
+            // terminal call, then the wait resolved with the terminal the
+            // test publishes. A parked call's attach is resolved by its test.
+            self.process_command_log
+                .lock_recover()
+                .push(format!("call:{}", request.process_id));
+            let context = Arc::clone(self);
+            tokio::spawn(async move {
+                let resolution = context.published_terminal(&request.process_id).await;
+                context.settle_attached_terminal(RestateDurableWaitResolveRequest {
+                    key: request.key,
+                    resolution,
+                });
+            });
+        }
         Box::pin(async move { Ok(()) })
     }
 
@@ -842,58 +903,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         Box::pin(async move { Ok(resolution) })
     }
 
-    fn await_process_terminal<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.process_command_log
-            .lock_recover()
-            .push(format!("call:{process_id}"));
-        let context = Arc::clone(self);
-        Box::pin(async move {
-            let key = restate_process_terminal_await_key(&test_restate_authority_id(), &process_id)
-                .map_err(TerminalError::from_error)?;
-            let notify = context.process_terminal_notify(&process_id);
-            let resolution = loop {
-                let notified = notify.notified();
-                if let Some(resolution) = context
-                    .awaited_events
-                    .lock_recover()
-                    .get(&key.promise_key())
-                    .cloned()
-                {
-                    break resolution;
-                }
-                notified.await;
-            };
-            restate_process_terminal_output(&process_id, resolution)
-                .map_err(TerminalError::from_error)
-        })
-    }
-
-    fn await_process_terminal_or_turn_cancel<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-    where
-        'ctx: 'run,
-    {
-        test_await_process_terminal_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            process_id,
-            turn_cancel,
-            None,
-        )
-    }
-
     fn resolve_event<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -1093,9 +1102,9 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                             intents: lash_core::ToolIntents::v3(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
-                                        session_id: SessionId::from(
+                                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
                                             TOOL_INTENT_CORPUS_SESSION.to_string(),
-                                        ),
+                                        )),
                                         process_id: tool_intent_corpus_target(),
                                         signal_name: "resume".to_string(),
                                         payload: serde_json::json!({
@@ -2375,42 +2384,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             Ok(resolution)
         };
         Box::pin(async move { resolution })
-    }
-
-    fn await_process_terminal<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.events
-            .await_process_terminal(&crate::services::DEFAULT_NAMESPACE, process_id)
-    }
-
-    fn await_process_terminal_or_turn_cancel<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-    where
-        'ctx: 'run,
-    {
-        let race = test_await_process_terminal_or_turn_cancel(
-            self,
-            &self.events.turn_cancel_gate,
-            process_id,
-            turn_cancel,
-            self.test_process_cancel(process_cancel),
-        );
-        Box::pin(async move {
-            let outcome = race.await;
-            self.record_process_cancel_race(process_cancel, &outcome);
-            outcome
-        })
     }
 
     fn resolve_event<'run>(

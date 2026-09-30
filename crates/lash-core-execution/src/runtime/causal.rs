@@ -418,14 +418,14 @@ pub(crate) fn trigger_occurrence_invocation(
 )]
 pub fn direct_effect_invocation(
     execution_scope: &ExecutionScope,
-    session_id: &SessionId,
+    owner: &crate::RuntimeOwner,
     usage_source: &str,
     replay_discriminator: String,
     turn_id: Option<&TurnId>,
     caused_by: Option<CausalRef>,
 ) -> RuntimeEffectInvocation {
     let replay_preimage = direct_effect_replay_preimage(
-        session_id,
+        owner,
         turn_id.filter(|value| !value.is_empty()),
         usage_source,
         &replay_discriminator,
@@ -438,9 +438,12 @@ pub fn direct_effect_invocation(
     RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), replay_key)
             .expect("direct effect uses the already admitted controller scope"),
+        // A turn is attributed only under the session that ran it: a
+        // process owner's direct call carries its starter's turn in the
+        // replay preimage, never as attribution without a session.
         RuntimeAttribution {
-            session_id: Some(SessionId::from(session_id.to_string())),
-            turn_id: turn_id.cloned(),
+            session_id: owner.session_id().cloned(),
+            turn_id: owner.session_id().and(turn_id).cloned(),
             turn_index: None,
             protocol_iteration: None,
         },
@@ -454,7 +457,7 @@ pub fn direct_effect_invocation(
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(
-    session_id: &SessionId,
+    owner: &crate::RuntimeOwner,
     turn_id: Option<&TurnId>,
     usage_source: &str,
     replay_discriminator: &str,
@@ -463,7 +466,13 @@ fn direct_effect_replay_preimage(
         "lash.direct-effect-replay-key",
         DIRECT_EFFECT_FAMILY_VERSION,
     );
-    identity.string(session_id);
+    // A session owner keeps its bare id; a process owner is spelled
+    // `process:<id>`. The effect address carries the execution scope too, so
+    // the two owners' keys never share an address either way.
+    match owner {
+        crate::RuntimeOwner::Session(session_id) => identity.string(session_id),
+        crate::RuntimeOwner::Process(_) => identity.string(&owner.to_string()),
+    }
     identity.optional(turn_id, |identity, turn_id| identity.string(turn_id));
     identity.string(usage_source);
     identity.string(replay_discriminator);
@@ -846,7 +855,7 @@ mod tests {
 
         let discriminator = direct_request_discriminator(None, None, 1);
         let preimage = direct_effect_replay_preimage(
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &discriminator,
@@ -858,7 +867,7 @@ mod tests {
         assert_eq!(
             direct_effect_invocation(
                 &ExecutionScope::turn("s", "t"),
-                &SessionId::from("s"),
+                &crate::RuntimeOwner::Session(SessionId::from("s")),
                 "u",
                 discriminator,
                 Some(&TurnId::from("t")),
@@ -877,7 +886,7 @@ mod tests {
             0,
         );
         let first_preimage = direct_effect_replay_preimage(
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &first_discriminator,
@@ -888,7 +897,7 @@ mod tests {
         );
         let first = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             "u",
             first_discriminator,
             Some(&TurnId::from("t")),
@@ -900,7 +909,7 @@ mod tests {
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u:direct:v2:caller:21:x",
             &second_discriminator,
@@ -911,7 +920,7 @@ mod tests {
         );
         let second = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             "u:direct:v2:caller:21:x",
             second_discriminator,
             Some(&TurnId::from("t")),

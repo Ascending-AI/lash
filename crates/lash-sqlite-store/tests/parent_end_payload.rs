@@ -37,12 +37,9 @@ fn inject(dir: &std::path::Path, kind: &str, id: &str, payload: &str) {
 async fn a_ledger_row_decodes_its_typed_payload() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            &dir.path().join("sessions"),
-        )
-        .await
-        .expect("process registry"),
+        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+            .await
+            .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
     let process_parent = registry
@@ -78,12 +75,9 @@ async fn a_ledger_row_decodes_its_typed_payload() {
 async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            &dir.path().join("sessions"),
-        )
-        .await
-        .expect("process registry"),
+        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+            .await
+            .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
     // The pre-FIG-3418 row: a `ParentScope` serialized without the version
@@ -122,12 +116,9 @@ async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
 async fn a_parent_scope_row_is_refused_as_malformed() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            &dir.path().join("sessions"),
-        )
-        .await
-        .expect("process registry"),
+        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+            .await
+            .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
     let scope = turn_scope("v2-session", "v2-turn");
@@ -157,12 +148,9 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
 async fn an_unsupported_payload_version_is_refused() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            &dir.path().join("sessions"),
-        )
-        .await
-        .expect("process registry"),
+        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+            .await
+            .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
     let scope = turn_scope("version-session", "version-turn");
@@ -194,12 +182,9 @@ async fn an_unsupported_payload_version_is_refused() {
 async fn a_payload_that_disagrees_with_its_projection_is_refused() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            &dir.path().join("sessions"),
-        )
-        .await
-        .expect("process registry"),
+        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+            .await
+            .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
 
     let scope = turn_scope("mismatch-session", "mismatch-turn");

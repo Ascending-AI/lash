@@ -34,7 +34,7 @@ pub(super) async fn cross_owner_attachment_adoption(
             )) as Arc<dyn lash_core::AttachmentStore>
         });
         Box::pin(
-            lash_conformance::cross_owner_attachment_adoption_conformance(factory, make_bytes),
+            lash_conformance::cross_session_attachment_adoption_conformance(factory, make_bytes),
         )
         .await;
     }
@@ -127,7 +127,7 @@ impl BackendRunner {
         );
         assert!(
             self.factory()
-                .live_attachment_refs(0)
+                .live_attachment_refs()
                 .await?
                 .contains(&differential_attachment_id())
         );
@@ -193,7 +193,7 @@ impl BackendRunner {
             StoreOperation::Rewind => {
                 let attachment_rooted = self
                     .factory()
-                    .live_attachment_refs(0)
+                    .live_attachment_refs()
                     .await?
                     .contains(&differential_attachment_id());
                 let node_id = self
@@ -227,7 +227,7 @@ impl BackendRunner {
                 if attachment_rooted {
                     assert!(
                         self.factory()
-                            .live_attachment_refs(0)
+                            .live_attachment_refs()
                             .await?
                             .contains(&differential_attachment_id()),
                         "FIG-2501: surviving fork retains the deleted parent's attachment root"
@@ -321,7 +321,7 @@ pub(super) async fn selected_observer_intents(
     use lash_core::ProcessEventLogTestSupport as _;
     let root = sqlite_root.join("selected-observer-sessions");
     let path = sqlite_root.join("selected-observer-processes.db");
-    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path, &root)
+    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path)
         .await
         .expect("SQLite observer registry");
     let memory = lash_sqlite_store::SqliteStoreSet::memory()

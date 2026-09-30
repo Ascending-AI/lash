@@ -372,7 +372,7 @@ mod tests {
         let key = crate::StartKey::for_tool_intent(
             crate::StartKeyDerivation::LASH_START_PATHS,
             &crate::derive_tool_intent_identity(
-                &crate::SessionId::from("session"),
+                &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
                 "runtime",
                 &lash_core_execution::ToolCallId::fixture("crashed-start"),
                 0,

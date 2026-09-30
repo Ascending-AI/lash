@@ -45,8 +45,7 @@ mod tests {
                 Default::default(),
             ))
             .unwrap();
-        let handle =
-            crate::plugin_state_store(&plugins, &SessionId::from("generation-gate"), "mock");
+        let handle = crate::plugin_state_store(&plugins, "mock");
         let store = session_store("generation-gate").await;
         let mut state = crate::RuntimeSessionState {
             session_id: "generation-gate".into(),
@@ -91,7 +90,7 @@ mod tests {
                 Default::default(),
             ))
             .unwrap();
-        let handle = crate::plugin_state_store(&plugins, &SessionId::from("capture-race"), "mock");
+        let handle = crate::plugin_state_store(&plugins, "mock");
         let store = session_store("capture-race").await;
         let mut state = crate::RuntimeSessionState {
             session_id: "capture-race".into(),

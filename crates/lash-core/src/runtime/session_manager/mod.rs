@@ -80,34 +80,160 @@ impl CurrentSnapshot {
     }
 }
 
+/// The session a session runtime's services resolve: its id, the state
+/// they read, and the store and lane their writes go through.
 #[derive(Clone)]
-pub(in crate::runtime) struct CurrentSessionCapability {
+pub(in crate::runtime) struct CurrentSession {
     pub(in crate::runtime) session_id: SessionId,
     snapshot: CurrentSnapshot,
-    policy: SessionPolicy,
-    pub(in crate::runtime) host: RuntimeHost,
-    plugins: Arc<crate::PluginSession>,
     store: Option<crate::store::SessionStore>,
-    runtime_lease_owner: crate::LeaseOwnerIdentity,
-    runtime_lease_executor_id: String,
     /// Explicit lane context for services scoped to a running parent turn.
     /// `None` identifies a lane-less host/service call and selects the fresh
     /// acquisition path at the persistence call site.
     held_drive_fence: Option<DriveFence>,
     resident_graph_head_stale: Arc<AtomicBool>,
+}
+
+/// Who the services run for. A process runtime is keyed by its minted id and
+/// carries its captured environment: it has no session state, no session
+/// store and no frame, and every session-only service refuses it with
+/// `PluginError::NotASessionRuntime`.
+#[derive(Clone)]
+pub(in crate::runtime) enum CurrentOwner {
+    Session(Box<CurrentSession>),
+    Process {
+        process_id: crate::ProcessId,
+        /// The environment an engine or tool-call process captured at its
+        /// start; a session-turn process captured none.
+        environment: Option<Box<crate::ProcessExecutionEnvSpec>>,
+    },
+}
+
+#[derive(Clone)]
+pub(in crate::runtime) struct CurrentOwnerCapability {
+    pub(in crate::runtime) owner: CurrentOwner,
+    policy: SessionPolicy,
+    pub(in crate::runtime) host: RuntimeHost,
+    plugins: Arc<crate::PluginSession>,
+    runtime_lease_owner: crate::LeaseOwnerIdentity,
+    runtime_lease_executor_id: String,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 
-impl CurrentSessionCapability {
+impl CurrentOwnerCapability {
     /// The fleet-format generation this capability's durable writers emit —
     /// the `F` the bound session's store recorded (FIG-3796). A capability
     /// holding no store writes nothing durable, so the build's own generation
     /// is the only honest answer it can give.
     pub(in crate::runtime) fn fleet_format(&self) -> crate::FleetFormat {
-        self.store
-            .as_ref()
+        self.session()
+            .and_then(|session| session.store.as_ref())
             .map(|store| store.fleet_format())
             .unwrap_or_else(crate::FleetFormat::current)
+    }
+
+    pub(in crate::runtime) fn runtime_owner(&self) -> crate::RuntimeOwner {
+        match &self.owner {
+            CurrentOwner::Session(session) => {
+                crate::RuntimeOwner::Session(session.session_id.clone())
+            }
+            CurrentOwner::Process { process_id, .. } => {
+                crate::RuntimeOwner::Process(process_id.clone())
+            }
+        }
+    }
+
+    /// The session these services resolve, when a session owns them.
+    pub(in crate::runtime) fn session(&self) -> Option<&CurrentSession> {
+        match &self.owner {
+            CurrentOwner::Session(session) => Some(session.as_ref()),
+            CurrentOwner::Process { .. } => None,
+        }
+    }
+
+    /// The session these services resolve, or `NotASessionRuntime` naming
+    /// `operation` for a process runtime.
+    pub(in crate::runtime) fn require_session(
+        &self,
+        operation: &'static str,
+    ) -> Result<&CurrentSession, crate::PluginError> {
+        match &self.owner {
+            CurrentOwner::Session(session) => Ok(session.as_ref()),
+            CurrentOwner::Process { process_id, .. } => {
+                Err(crate::PluginError::NotASessionRuntime {
+                    operation: operation.to_string(),
+                    process_id: process_id.clone(),
+                })
+            }
+        }
+    }
+
+    /// Whether `session_id` is the session these services resolve.
+    pub(in crate::runtime) fn is_current_session(&self, session_id: &SessionId) -> bool {
+        self.session()
+            .is_some_and(|session| session.session_id == *session_id)
+    }
+
+    /// The runtime store of the session these services resolve; a process
+    /// runtime has none.
+    pub(in crate::runtime) fn session_runtime_store(&self) -> Option<Arc<dyn crate::RuntimeStore>> {
+        self.session()
+            .and_then(|session| session.store.as_ref())
+            .map(|store| Arc::clone(store.store()))
+    }
+
+    /// Who a dispatch built from these services runs for: the session on its
+    /// current agent frame, or the process.
+    pub(in crate::runtime) fn execution_owner(
+        &self,
+    ) -> Result<crate::ExecutionOwner, crate::PluginError> {
+        match &self.owner {
+            CurrentOwner::Session(session) => {
+                let agent_frame_id = session
+                    .snapshot
+                    .to_runtime_state()
+                    .current_frame_node_id
+                    .ok_or_else(|| {
+                        crate::PluginError::Session(format!(
+                            "session `{}` has no initialized agent frame",
+                            session.session_id
+                        ))
+                    })?;
+                Ok(crate::ExecutionOwner::SessionFrame {
+                    session_id: session.session_id.clone(),
+                    agent_frame_id,
+                })
+            }
+            CurrentOwner::Process { process_id, .. } => Ok(crate::ExecutionOwner::Process {
+                process_id: process_id.clone(),
+            }),
+        }
+    }
+
+    /// The execution environment a start captures from these services: the
+    /// session's current one, or the process's captured one. A session-turn
+    /// process captured none, and refuses.
+    pub(in crate::runtime) fn execution_env_spec(
+        &self,
+    ) -> Result<crate::ProcessExecutionEnvSpec, crate::PluginError> {
+        match &self.owner {
+            CurrentOwner::Session(session) => Ok(
+                crate::facade_support::RuntimeSessionStateFacadeOps::process_execution_env_spec(
+                    &session.snapshot.to_runtime_state(),
+                    &self.policy,
+                ),
+            ),
+            CurrentOwner::Process {
+                environment: Some(environment),
+                ..
+            } => Ok(environment.as_ref().clone()),
+            CurrentOwner::Process {
+                process_id,
+                environment: None,
+            } => Err(crate::PluginError::Session(format!(
+                "process `{process_id}` runs a session turn and captured no execution environment"
+            ))),
+        }
     }
 }
 
@@ -131,9 +257,22 @@ struct ProcessCapability {
 #[derive(Clone, Default)]
 struct DirectCompletionCapability;
 
+/// What a process runtime's services are built from.
+pub(in crate::runtime) struct ProcessServicesPorts {
+    pub(in crate::runtime) process_id: crate::ProcessId,
+    pub(in crate::runtime) environment: Option<crate::ProcessExecutionEnvSpec>,
+    /// The captured environment's policy, or the deployment's default policy
+    /// for a session-turn process.
+    pub(in crate::runtime) policy: SessionPolicy,
+    pub(in crate::runtime) host: RuntimeHost,
+    pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
+    pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
+    pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+}
+
 #[derive(Clone)]
 pub struct RuntimeSessionServices {
-    current: CurrentSessionCapability,
+    current: CurrentOwnerCapability,
     processes: ProcessCapability,
     usage: UsageCapability,
     direct: DirectCompletionCapability,
@@ -185,7 +324,7 @@ impl ProcessVisibility {
     }
 }
 
-impl CurrentSessionCapability {
+impl CurrentOwnerCapability {
     fn snapshot_meta_with_frame_root(state: &RuntimeSessionState) -> RuntimeSessionState {
         let frame_root = state
             .current_frame_node_id
@@ -231,26 +370,30 @@ impl CurrentSessionCapability {
         held_drive_fence: Option<&DriveFence>,
     ) -> Self {
         Self {
-            session_id: runtime.state.session_id.clone(),
-            snapshot: match turn_graph_appends {
-                None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
-                Some(graph_appends) => {
-                    let read_model = runtime.state.read_model();
-                    CurrentSnapshot::ReadModel {
-                        meta: Self::snapshot_meta_with_frame_root(&runtime.state),
-                        messages: read_model.messages,
-                        graph_appends: graph_appends.clone(),
+            owner: CurrentOwner::Session(Box::new(CurrentSession {
+                session_id: runtime.state.session_id.clone(),
+                snapshot: match turn_graph_appends {
+                    None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
+                    Some(graph_appends) => {
+                        let read_model = runtime.state.read_model();
+                        CurrentSnapshot::ReadModel {
+                            meta: Self::snapshot_meta_with_frame_root(&runtime.state),
+                            messages: read_model.messages,
+                            graph_appends: graph_appends.clone(),
+                        }
                     }
-                }
-            },
+                },
+                store: runtime.services.store.clone(),
+                held_drive_fence: held_drive_fence.cloned(),
+                resident_graph_head_stale: Arc::clone(
+                    runtime.resident_session.graph_head_stale_flag(),
+                ),
+            })),
             policy: runtime.state.effective_policy().clone(),
             host: runtime.host.clone(),
             plugins,
-            store: runtime.services.store.clone(),
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
             runtime_lease_executor_id: runtime.runtime_lease_executor_id.clone(),
-            held_drive_fence: held_drive_fence.cloned(),
-            resident_graph_head_stale: Arc::clone(runtime.resident_session.graph_head_stale_flag()),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
         }
     }
@@ -261,7 +404,7 @@ impl CurrentSessionCapability {
     // host wiring faults and stay as plugin errors.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
-            .resolve_session_policy(&self.session_id, self.policy.clone())
+            .resolve_owner_policy(&self.runtime_owner(), self.policy.clone())
             .map_err(|err| crate::PluginError::Session(err.to_string()))
     }
 }
@@ -409,12 +552,49 @@ impl RuntimeSessionServices {
         Self::with_scope(runtime, None, held_drive_fence)
     }
 
-    #[doc(hidden)]
-    pub fn for_worker(
-        runtime: &LashRuntime,
-        persist_usage_to_store: bool,
-    ) -> Result<Self, PluginOperationInvokeError> {
-        Self::new(runtime, persist_usage_to_store, None)
+    /// The services a process runtime runs its body through, keyed by the
+    /// process's minted id: built from the host, the process's own plugin
+    /// session and its captured environment, with no session state. Usage
+    /// its direct calls record stays in its own ledger: a process has no
+    /// session store to persist it to.
+    pub(in crate::runtime) fn for_process(ports: ProcessServicesPorts) -> Self {
+        let ProcessServicesPorts {
+            process_id,
+            environment,
+            policy,
+            host,
+            plugins,
+            runtime_lease_owner,
+            turn_phase_probe,
+        } = ports;
+        Self {
+            current: CurrentOwnerCapability {
+                policy,
+                owner: CurrentOwner::Process {
+                    process_id,
+                    environment: environment.map(Box::new),
+                },
+                host,
+                plugins,
+                runtime_lease_owner,
+                runtime_lease_executor_id: uuid::Uuid::new_v4().to_string(),
+                turn_phase_probe,
+            },
+            processes: ProcessCapability {
+                sync_needed: Arc::new(AtomicBool::new(false)),
+            },
+            usage: UsageCapability {
+                token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
+                persist_to_store: false,
+            },
+            direct: DirectCompletionCapability,
+            direct_replay_ordinals: Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )),
+            direct_unkeyed_in_flight: Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeSet::new(),
+            )),
+        }
     }
 
     /// Turn-scoped services: usage stays in the shared ledger and graph
@@ -439,7 +619,7 @@ impl RuntimeSessionServices {
         };
         let persist_usage_to_store = turn_graph_appends.is_none();
         Ok(Self {
-            current: CurrentSessionCapability::new(
+            current: CurrentOwnerCapability::new(
                 runtime,
                 Arc::clone(session.plugins()),
                 turn_graph_appends,
@@ -1130,7 +1310,7 @@ mod process_visibility_tests {
                     Operation::ListVisibleForAttempt => {
                         let records = crate::ProcessService::list_visible_for_attempt(
                             &service,
-                            &SessionId::from(SESSION_ID),
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
                             crate::ProcessListMode::Live,
                         )
                         .await
@@ -1144,7 +1324,7 @@ mod process_visibility_tests {
                         let handler = operation_scope(&double).await;
                         let result = crate::ProcessService::validate_visible(
                             &service,
-                            &SessionId::from(SESSION_ID),
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
                             std::slice::from_ref(&hidden_process_id),
                             crate::ProcessOpScope::new(handler.scoped()),
                         )
@@ -1158,7 +1338,7 @@ mod process_visibility_tests {
                         let handler = operation_scope(&double).await;
                         crate::ProcessService::signal_possessed(
                             &service,
-                            &SessionId::from(SESSION_ID),
+                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
                             &hidden_process_id,
                             "ready".to_string(),
                             uuid::Uuid::new_v4().to_string(),

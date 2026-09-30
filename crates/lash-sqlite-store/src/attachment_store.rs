@@ -6,7 +6,7 @@
 //! (`attachments.rs`), in the `attachment_blobs` table. The store is the flat,
 //! content-addressed [`AttachmentStore`] the port asks for and nothing more:
 //! the session boundary, the write-ahead intents and reclamation stay one layer
-//! up, in `SessionAttachmentStore` and the manifest, exactly as they do over a
+//! up, in `RuntimeAttachmentStore` and the manifest, exactly as they do over a
 //! file or S3 backend.
 //!
 //! The store reaches the catalog through the connection of the [`SqliteStore`] it is

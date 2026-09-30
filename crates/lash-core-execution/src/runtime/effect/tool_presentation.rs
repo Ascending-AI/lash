@@ -84,17 +84,17 @@ impl ToolPresentation {
 
 /// The [`crate::plugin::ToolPresentationArtifacts`] implementation the runtime
 /// binds onto a presentation context: retains bytes into the session's
-/// content-addressed [`SessionAttachmentStore`](crate::SessionAttachmentStore)
+/// content-addressed [`RuntimeAttachmentStore`](crate::RuntimeAttachmentStore)
 /// (manifest-referenced, so mark-and-sweep GC retains them) and collects the
 /// returned refs for the journaled outcome.
 pub struct SessionPresentationArtifacts {
-    store: Arc<crate::SessionAttachmentStore>,
+    store: Arc<crate::RuntimeAttachmentStore>,
     retained: std::sync::Mutex<Vec<crate::AttachmentRef>>,
     failure: std::sync::Mutex<Option<String>>,
 }
 
 impl SessionPresentationArtifacts {
-    pub fn new(store: Arc<crate::SessionAttachmentStore>) -> Self {
+    pub fn new(store: Arc<crate::RuntimeAttachmentStore>) -> Self {
         Self {
             store,
             retained: std::sync::Mutex::new(Vec::new()),

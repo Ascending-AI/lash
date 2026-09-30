@@ -11,7 +11,7 @@ use crate::InputItem;
 
 pub async fn normalize_input_items(
     items: &[InputItem],
-    attachment_store: &crate::SessionAttachmentStore,
+    attachment_store: &crate::RuntimeAttachmentStore,
     attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<Vec<NormalizedItem>, String> {
     let mut out: Vec<NormalizedItem> = Vec::new();

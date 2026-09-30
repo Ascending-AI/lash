@@ -10,41 +10,69 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-fn attachment_uri(attachment_id: &AttachmentId) -> String {
-    format!("lash-attachment://blake3/{attachment_id}")
-}
-
 fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 
-use crate::store::{AttachmentIntent, AttachmentManifest, AttachmentWriteFence};
+use crate::store::{AttachmentReferrers, AttachmentWriteFence};
+use crate::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, RuntimeOwner};
 use lash_sansio::{AttachmentTypeMetadata, MediaType};
 
+fn session_owner(session_id: &str) -> RuntimeOwner {
+    RuntimeOwner::Session(SessionId::from(session_id))
+}
+
+fn session_claim(session_id: &str) -> ReferrerClaim {
+    ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(session_id)))
+        .expect("a session claim is unguarded")
+}
+
+/// In-memory referrer edges and upload evidence: each digest's live
+/// referrers, a pending write's claim included.
 #[derive(Default)]
-struct RecordingManifest {
-    entries: Mutex<HashMap<(SessionId, AttachmentId), crate::AttachmentManifestEntry>>,
+struct RecordingReferrers {
+    edges: Mutex<HashMap<AttachmentId, Vec<ArtifactReferrer>>>,
+    evidence: Mutex<BTreeSet<AttachmentId>>,
+}
+
+fn hold(referrers: &mut Vec<ArtifactReferrer>, referrer: &ArtifactReferrer) {
+    if !referrers.contains(referrer) {
+        referrers.push(referrer.clone());
+    }
+}
+
+impl RecordingReferrers {
+    fn live_ids(&self) -> BTreeSet<AttachmentId> {
+        self.edges
+            .lock_recover()
+            .iter()
+            .filter(|(_, referrers)| !referrers.is_empty())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Ends every upload edge, as the cleanup executor does once an upload's
+    /// expiry passes.
+    fn end_uploads(&self) {
+        for referrers in self.edges.lock_recover().values_mut() {
+            referrers.retain(|referrer| !matches!(referrer, ArtifactReferrer::Upload(_)));
+        }
+    }
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for RecordingManifest {
+impl AttachmentReferrers for RecordingReferrers {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<crate::AttachmentWriteFence, crate::StoreError> {
-        let key = (intent.session_id.clone(), intent.attachment_id.clone());
-        self.entries
-            .lock_recover()
-            .entry(key)
-            .or_insert(crate::AttachmentManifestEntry {
-                attachment_id: intent.attachment_id,
-                session_id: intent.session_id,
-                canonical_uri: intent.canonical_uri,
-                intent_at_epoch_ms: intent.intent_at_epoch_ms,
-                written_at_epoch_ms: None,
-                committed_at_epoch_ms: None,
-                owner: intent.owner,
-            });
+        hold(
+            self.edges
+                .lock_recover()
+                .entry(write.attachment_id.clone())
+                .or_default(),
+            write.claim.referrer(),
+        );
         Ok(crate::AttachmentWriteFence::Granted(
             crate::AttachmentWritePermit::new(crate::AttachmentWriteToken::new()),
         ))
@@ -52,105 +80,105 @@ impl AttachmentManifest for RecordingManifest {
 
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         _permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        let key = (intent.session_id.clone(), intent.attachment_id.clone());
-        if let Some(entry) = self.entries.lock_recover().get_mut(&key) {
-            entry.written_at_epoch_ms.get_or_insert(1);
-        }
+        self.evidence
+            .lock_recover()
+            .insert(write.attachment_id.clone());
         Ok(())
     }
 
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         _permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        let key = (intent.session_id.clone(), intent.attachment_id.clone());
-        self.entries.lock_recover().remove(&key);
-        Ok(())
-    }
-
-    async fn commit_refs(
-        &self,
-        session_id: &SessionId,
-        attachment_ids: &[AttachmentId],
-    ) -> Result<(), crate::StoreError> {
-        let mut entries = self.entries.lock_recover();
-        for attachment_id in attachment_ids {
-            if let Some(entry) = entries.get_mut(&(
-                SessionId::from(session_id.to_string()),
-                attachment_id.clone(),
-            )) {
-                entry.committed_at_epoch_ms.get_or_insert(1);
-            }
+        if let Some(referrers) = self.edges.lock_recover().get_mut(&write.attachment_id) {
+            referrers.retain(|held| held != write.claim.referrer());
         }
         Ok(())
     }
 
-    async fn list_uncommitted(
+    async fn acquire_attachment_refs(
         &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        Ok(self
-            .entries
-            .lock_recover()
-            .values()
-            .filter(|entry| {
-                entry.committed_at_epoch_ms.is_none()
-                    && entry.intent_at_epoch_ms <= older_than_epoch_ms
-            })
-            .cloned()
-            .collect())
-    }
-
-    async fn forget(
-        &self,
-        session_id: &SessionId,
-        attachment_id: &AttachmentId,
+        claim: &ReferrerClaim,
+        attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        self.entries.lock_recover().remove(&(
-            SessionId::from(session_id.to_string()),
-            attachment_id.clone(),
-        ));
+        let evidence = self.evidence.lock_recover();
+        if let Some(digest) = attachment_ids.iter().find(|id| !evidence.contains(*id)) {
+            return Err(crate::StoreError::UnknownAttachment {
+                digest: digest.clone(),
+            });
+        }
+        let mut edges = self.edges.lock_recover();
+        for attachment_id in attachment_ids {
+            hold(
+                edges.entry(attachment_id.clone()).or_default(),
+                claim.referrer(),
+            );
+        }
         Ok(())
     }
 
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+    async fn forget_attachment_ref(
+        &self,
+        referrer: &ArtifactReferrer,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        if let Some(referrers) = self.edges.lock_recover().get_mut(attachment_id) {
+            referrers.retain(|held| held != referrer);
+        }
+        Ok(())
+    }
+
+    async fn end_attachment_referrer(
+        &self,
+        referrer: &ArtifactReferrer,
+    ) -> Result<(), crate::StoreError> {
+        for referrers in self.edges.lock_recover().values_mut() {
+            referrers.retain(|held| held != referrer);
+        }
+        Ok(())
+    }
+
+    async fn session_referrer_state(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<crate::SessionReferrerState, crate::StoreError> {
+        Ok(crate::SessionReferrerState::Live)
+    }
+
+    async fn attachment_referrers(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, crate::StoreError> {
         Ok(self
-            .entries
+            .edges
             .lock_recover()
-            .values()
-            .map(|entry| entry.attachment_id.clone())
-            .collect())
+            .get(attachment_id)
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
-/// Root set backed by a set of [`RecordingManifest`]s — the in-memory
-/// analogue of a factory unioning its sessions' refs.
+/// Root set backed by a set of [`RecordingReferrers`]: the in-memory analogue
+/// of a durable core's attachment edges.
 struct RecordingRootSet {
-    manifests: Vec<Arc<RecordingManifest>>,
+    manifests: Vec<Arc<RecordingReferrers>>,
 }
 
 struct UnavailableRootSet;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnavailableRootSet {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
         Err(crate::StoreError::Backend(
             "root enumeration unavailable".to_string(),
         ))
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
+    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
         Err(crate::StoreError::Backend(
             "targeted root probe unavailable".to_string(),
         ))
@@ -159,64 +187,44 @@ impl AttachmentRootSet for UnavailableRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for RecordingRootSet {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
-        let mut refs = BTreeSet::new();
-        for manifest in &self.manifests {
-            // This test root set contains only ownerless host puts, whose
-            // documented fallback remains age-only reconciliation.
-            for aged in manifest
-                .list_uncommitted(intent_grace_cutoff_epoch_ms)
-                .await?
-            {
-                manifest
-                    .forget(&aged.session_id, &aged.attachment_id)
-                    .await?;
-            }
-            refs.extend(manifest.list_all_refs().await?);
-        }
-        Ok(refs)
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+        Ok(self
+            .manifests
+            .iter()
+            .flat_map(|manifest| manifest.live_ids())
+            .collect())
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
-        for manifest in &self.manifests {
-            if manifest
-                .has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)
-                .await?
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, crate::StoreError> {
+        Ok(self
+            .manifests
+            .iter()
+            .any(|manifest| manifest.live_ids().contains(id)))
     }
 }
 
+/// A pending write is a root: its claim holds the digest before any bytes
+/// land, with no age and no clock.
 #[tokio::test]
-async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
-    let manifest = Arc::new(RecordingManifest::default());
-    let id = content_id(b"aged-targeted-probe-root");
+async fn recording_probe_sees_a_pending_write() {
+    let manifest = Arc::new(RecordingReferrers::default());
+    let id = content_id(b"pending-write-root");
     manifest
-        .begin_attachment_write(AttachmentIntent {
+        .begin_attachment_write(&AttachmentWrite {
             attachment_id: id.clone(),
-            session_id: SessionId::from("targeted-probe"),
-            canonical_uri: attachment_uri(&id),
-            intent_at_epoch_ms: 1,
-            owner: None,
+            claim: session_claim("targeted-probe"),
         })
         .await
-        .expect("record intent");
+        .expect("record pending write");
     let roots = RecordingRootSet {
         manifests: vec![Arc::clone(&manifest)],
     };
 
-    assert!(roots.has_live_attachment_ref(&id, 1).await.unwrap());
-    assert_eq!(manifest.list_all_refs().await.unwrap(), vec![id]);
+    assert!(roots.has_live_attachment_ref(&id).await.unwrap());
+    assert_eq!(
+        manifest.attachment_referrers(&id).await.unwrap(),
+        vec![ArtifactReferrer::Session(SessionId::from("targeted-probe"))]
+    );
 }
 
 fn meta() -> AttachmentCreateMeta {
@@ -246,17 +254,21 @@ async fn committed_factory_attachment() -> (
         .await
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
-    let session = SessionAttachmentStore::new(
+    let session = RuntimeAttachmentStore::new(
         backend.clone(),
-        Arc::new(PersistenceManifestAdapter(Arc::clone(store.store()))),
-        request.session_id.clone(),
+        Arc::new(PersistenceReferrersAdapter(Arc::clone(store.store()))),
+        RuntimeOwner::Session(request.session_id.clone()),
     );
     let reference = session
         .put(vec![8, 8, 1], meta())
         .await
         .expect("put factory attachment");
     store
-        .commit_refs(std::slice::from_ref(&reference.id))
+        .store()
+        .acquire_attachment_refs(
+            &session_claim("explicit-root-factory"),
+            std::slice::from_ref(&reference.id),
+        )
         .await
         .expect("commit factory attachment ref");
     (factory, backend, reference.id)
@@ -294,18 +306,11 @@ struct EmptySnapshotFactoryRoots<'a> {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
         Ok(BTreeSet::new())
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
+    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
         Ok(false)
     }
 
@@ -329,16 +334,9 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &crate::AttachmentSweepGeneration,
     ) -> Result<crate::AttachmentCondemnation, crate::StoreError> {
-        AttachmentRootSet::condemn_attachment(
-            self.factory,
-            id,
-            intent_grace_cutoff_epoch_ms,
-            generation,
-        )
-        .await
+        AttachmentRootSet::condemn_attachment(self.factory, id, generation).await
     }
 
     async fn arm_attachment_delete(
@@ -481,7 +479,7 @@ async fn gc_all_deletes_failed_is_incomplete() {
 }
 
 #[tokio::test]
-async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagnostic() {
+async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
     let backend = crate::testing::memory_store_set().await.attachment_store();
 
     let report = reclaim_unreferenced_attachments(
@@ -499,9 +497,11 @@ async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagno
     assert_eq!(report.reclaimed_count, 0);
     assert!(report.failed_ids.is_empty());
     assert!(report.condemn_deferred_ids.is_empty());
+    // Nothing was scanned, so nothing was left undone: the unavailable root
+    // set is reported as a diagnostic, not as an incomplete sweep.
     assert_eq!(
         crate::store::MaintenanceReport::sweep(&report),
-        crate::store::MaintenanceSweep::Incomplete
+        crate::store::MaintenanceSweep::NothingToDo
     );
     assert_eq!(
         report.root_enumeration_failure.as_deref(),
@@ -643,23 +643,24 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
 async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest = Arc::new(RecordingManifest::default());
-    let session = SessionAttachmentStore::new(
+    let manifest = Arc::new(RecordingReferrers::default());
+    let session = RuntimeAttachmentStore::new(
         Arc::clone(&backend),
-        manifest.clone() as Arc<dyn AttachmentManifest>,
-        "healthy-sweep",
+        manifest.clone() as Arc<dyn AttachmentReferrers>,
+        session_owner("healthy-sweep"),
     );
     let live = session
         .put(vec![4, 2, 4, 9], meta())
         .await
         .expect("put live blob");
     manifest
-        .commit_refs(
-            &SessionId::from("healthy-sweep"),
+        .acquire_attachment_refs(
+            &session_claim("healthy-sweep"),
             std::slice::from_ref(&live.id),
         )
         .await
         .expect("commit live ref");
+    manifest.end_uploads();
     let orphan = backend
         .put(vec![4, 2, 5, 0], meta())
         .await
@@ -691,9 +692,17 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
 async fn facade_get_resolves_content_addresses_across_sessions() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
-    let session_a = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-a");
-    let session_b = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-b");
+    let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
+    let session_a = RuntimeAttachmentStore::new(
+        backend.clone(),
+        manifest.clone(),
+        session_owner("session-a"),
+    );
+    let session_b = RuntimeAttachmentStore::new(
+        backend.clone(),
+        manifest.clone(),
+        session_owner("session-b"),
+    );
 
     let reference = session_a.put(vec![7, 7, 7], meta()).await.expect("put a");
     // Session A holds the ref and resolves the blob.
@@ -701,7 +710,7 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
         session_a.get(&reference.id).await.expect("a reads").bytes,
         vec![7, 7, 7]
     );
-    // FIG-653: manifest ownership is liveness, not read authorization.
+    // FIG-653: holding a referrer edge is liveness, not read authorization.
     assert_eq!(
         session_b
             .get(&reference.id)
@@ -721,8 +730,9 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
 async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
-    let session = SessionAttachmentStore::new(backend.clone(), manifest, "session-1");
+    let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
+    let session =
+        RuntimeAttachmentStore::new(backend.clone(), manifest, session_owner("session-1"));
 
     let reference = session.put(vec![9, 9], meta()).await.expect("put");
     session.delete(&reference.id).await.expect("delete ref");
@@ -750,39 +760,35 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest_a = Arc::new(RecordingManifest::default());
-    let manifest_b = Arc::new(RecordingManifest::default());
-    let session_a = SessionAttachmentStore::new(
+    let manifest_a = Arc::new(RecordingReferrers::default());
+    let manifest_b = Arc::new(RecordingReferrers::default());
+    let session_a = RuntimeAttachmentStore::new(
         backend.clone(),
-        manifest_a.clone() as Arc<dyn AttachmentManifest>,
-        "session-a",
+        manifest_a.clone() as Arc<dyn AttachmentReferrers>,
+        session_owner("session-a"),
     );
-    let session_b = SessionAttachmentStore::new(
+    let session_b = RuntimeAttachmentStore::new(
         backend.clone(),
-        manifest_b.clone() as Arc<dyn AttachmentManifest>,
-        "session-b",
+        manifest_b.clone() as Arc<dyn AttachmentReferrers>,
+        session_owner("session-b"),
     );
 
-    // Two sessions put identical bytes: ONE physical blob. Commit both refs
-    // so they are stable committed roots (not grace-gated intents), letting
-    // this test exercise ref-driven collection independently of intent aging.
+    // Two sessions put identical bytes: ONE physical blob. Each session
+    // acquires its own edge and its upload ends, so the session edges are the
+    // only roots and this test exercises edge-driven collection alone.
     let ref_a = session_a.put(vec![5, 5, 5], meta()).await.expect("put a");
     let ref_b = session_b.put(vec![5, 5, 5], meta()).await.expect("put b");
     assert_eq!(ref_a.id, ref_b.id);
     manifest_a
-        .commit_refs(
-            &SessionId::from("session-a"),
-            std::slice::from_ref(&ref_a.id),
-        )
+        .acquire_attachment_refs(&session_claim("session-a"), std::slice::from_ref(&ref_a.id))
         .await
         .expect("commit a");
     manifest_b
-        .commit_refs(
-            &SessionId::from("session-b"),
-            std::slice::from_ref(&ref_b.id),
-        )
+        .acquire_attachment_refs(&session_claim("session-b"), std::slice::from_ref(&ref_b.id))
         .await
         .expect("commit b");
+    manifest_a.end_uploads();
+    manifest_b.end_uploads();
     assert_eq!(backend.list().await.expect("list").len(), 1);
 
     let root_set = RecordingRootSet {
@@ -827,18 +833,17 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
 }
 
 #[tokio::test]
-async fn gc_spares_fresh_in_flight_intents_as_refs() {
+async fn gc_spares_a_blob_its_upload_still_holds() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest = Arc::new(RecordingManifest::default());
-    let session = SessionAttachmentStore::new(
+    let manifest = Arc::new(RecordingReferrers::default());
+    let session = RuntimeAttachmentStore::new(
         backend.clone(),
-        manifest.clone() as Arc<dyn AttachmentManifest>,
-        "session-1",
+        manifest.clone() as Arc<dyn AttachmentReferrers>,
+        session_owner("session-1"),
     );
 
-    // Fresh ownerless host intent: the legacy fallback retains it through
-    // the grace window.
+    // A put outside any turn is held by its upload until cleanup ends it.
     let reference = session.put(vec![3, 1, 4], meta()).await.expect("put");
     let root_set = RecordingRootSet {
         manifests: vec![manifest.clone()],
@@ -854,31 +859,31 @@ async fn gc_spares_fresh_in_flight_intents_as_refs() {
     )
     .await
     .expect("sweep");
-    assert_eq!(report.reclaimed_count, 0, "a fresh intent is a live ref");
+    assert_eq!(report.reclaimed_count, 0, "an upload edge is a live ref");
     assert_eq!(
         backend.get(&reference.id).await.expect("kept").bytes,
         vec![3, 1, 4]
     );
 }
 
-// Ownerless host puts have no durable liveness proof, so their fallback is
-// age-only: an old intent is reconciled and a fresh one survives.
+// A put nobody acquired is garbage once its upload ends: cleanup ends the
+// edge at expiry, and the next sweep collects the bytes.
 #[tokio::test]
-async fn gc_collects_aged_uncommitted_intent_orphan() {
+async fn gc_collects_a_blob_whose_upload_ended() {
     let backend: Arc<dyn AttachmentStore> =
         crate::testing::memory_store_set().await.attachment_store();
-    let manifest = Arc::new(RecordingManifest::default());
-    let session = SessionAttachmentStore::new(
+    let manifest = Arc::new(RecordingReferrers::default());
+    let session = RuntimeAttachmentStore::new(
         backend.clone(),
-        manifest.clone() as Arc<dyn AttachmentManifest>,
-        "session-1",
+        manifest.clone() as Arc<dyn AttachmentReferrers>,
+        session_owner("session-1"),
     );
 
-    // With a zero grace window the ownerless intent is already eligible.
     let orphan = session
         .put(vec![9, 9, 9], meta())
         .await
         .expect("put orphan");
+    manifest.end_uploads();
     let root_set = RecordingRootSet {
         manifests: vec![manifest.clone()],
     };
@@ -894,14 +899,13 @@ async fn gc_collects_aged_uncommitted_intent_orphan() {
     .expect("sweep");
     assert_eq!(
         report.reclaimed_count, 1,
-        "an aged, never-committed intent is a collectable orphan"
+        "a blob no referrer holds is a collectable orphan"
     );
     assert!(matches!(
         backend.get(&orphan.id).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
-    // The intent row was reconciled away too, so it is no longer a root.
-    assert!(manifest.list_all_refs().await.expect("refs").is_empty());
+    assert!(manifest.live_ids().is_empty());
 }
 
 // Fix C: the GC delete-time re-check. A blob looks unreferenced and stale in
@@ -1039,18 +1043,11 @@ struct ScriptedRootSet {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for ScriptedRootSet {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
         Ok(BTreeSet::new())
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
+    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
         Ok(self.answers.lock_recover().pop_front().unwrap_or(false))
     }
 }
@@ -1210,7 +1207,7 @@ struct FencedFixture {
     factory: Arc<dyn crate::DeploymentStore>,
     store: crate::store::SessionStore,
     backend: Arc<dyn AttachmentStore>,
-    session: Arc<SessionAttachmentStore>,
+    session: Arc<RuntimeAttachmentStore>,
     /// Every fence outcome the facade observed, in order.
     fence_attempts:
         Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
@@ -1232,13 +1229,13 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         .expect("create attachment-aware store");
     let backend = substrate.attachment_store();
     let (attempts, fence_attempts) = tokio::sync::mpsc::unbounded_channel();
-    let session = Arc::new(SessionAttachmentStore::new(
+    let session = Arc::new(RuntimeAttachmentStore::new(
         Arc::clone(&backend) as Arc<dyn AttachmentStore>,
         Arc::new(SignalingManifest {
-            inner: Arc::new(PersistenceManifestAdapter(Arc::clone(store.store()))),
+            inner: Arc::new(PersistenceReferrersAdapter(Arc::clone(store.store()))),
             attempts,
         }),
-        session_id.to_string(),
+        RuntimeOwner::Session(session_id.clone()),
     ));
     FencedFixture {
         factory,
@@ -1261,7 +1258,7 @@ fn collecting_policy() -> AttachmentReclamationPolicy {
 /// waits for the writer's first fence outcome, and — when that outcome is a
 /// grant — for the bytes to land. No sleeps, no scheduling luck.
 fn window_writer(
-    session: Arc<SessionAttachmentStore>,
+    session: Arc<RuntimeAttachmentStore>,
     bytes: Vec<u8>,
     attempts: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
     handle_slot: WindowWriterSlot,
@@ -1300,62 +1297,76 @@ fn window_writer(
 /// Manifest wrapper that reports each fence acquisition the facade makes, so a
 /// window hook can wait for the writer instead of racing it.
 struct SignalingManifest {
-    inner: Arc<dyn AttachmentManifest>,
+    inner: Arc<dyn AttachmentReferrers>,
     attempts: tokio::sync::mpsc::UnboundedSender<AttachmentWriteFence>,
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for SignalingManifest {
+impl AttachmentReferrers for SignalingManifest {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<AttachmentWriteFence, crate::StoreError> {
-        let fence = self.inner.begin_attachment_write(intent).await?;
+        let fence = self.inner.begin_attachment_write(write).await?;
         let _ = self.attempts.send(fence);
         Ok(fence)
     }
 
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.complete_attachment_write(intent, permit).await
+        self.inner.complete_attachment_write(write, permit).await
     }
 
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.abort_attachment_write(intent, permit).await
+        self.inner.abort_attachment_write(write, permit).await
     }
 
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        session_id: &SessionId,
+        claim: &ReferrerClaim,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        self.inner.commit_refs(session_id, attachment_ids).await
+        self.inner
+            .acquire_attachment_refs(claim, attachment_ids)
+            .await
     }
 
-    async fn list_uncommitted(
+    async fn forget_attachment_ref(
         &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        self.inner.list_uncommitted(older_than_epoch_ms).await
-    }
-
-    async fn forget(
-        &self,
-        session_id: &SessionId,
+        referrer: &ArtifactReferrer,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        self.inner.forget(session_id, attachment_id).await
+        self.inner
+            .forget_attachment_ref(referrer, attachment_id)
+            .await
     }
 
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
-        self.inner.list_all_refs().await
+    async fn end_attachment_referrer(
+        &self,
+        referrer: &ArtifactReferrer,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.end_attachment_referrer(referrer).await
+    }
+
+    async fn session_referrer_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionReferrerState, crate::StoreError> {
+        self.inner.session_referrer_state(session_id).await
+    }
+
+    async fn attachment_referrers(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, crate::StoreError> {
+        self.inner.attachment_referrers(attachment_id).await
     }
 }
 
@@ -1411,11 +1422,11 @@ async fn same_content_put_inside_the_delete_window_survives() {
         bytes
     );
     assert!(
-        crate::AttachmentManifest::list_all_refs(fixture.store.store().as_ref())
+        !crate::AttachmentReferrers::attachment_referrers(fixture.store.store().as_ref(), &id)
             .await
-            .map(|refs| refs.contains(&id))
-            .expect("manifest probe"),
-        "the surviving bytes are rooted by the writer's intent"
+            .expect("referrer probe")
+            .is_empty(),
+        "the surviving bytes are rooted by the writer's upload"
     );
     assert!(
         report.deleted_while_referenced.is_empty(),
@@ -1502,13 +1513,13 @@ async fn a_live_peers_condemnation_defers_and_a_dead_peers_is_adopted() {
         .await
         .expect("peer pass");
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0, &peer)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, &peer)
             .await
             .expect("first condemn"),
         crate::AttachmentCondemnation::Condemned
     );
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0, &peer)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, &peer)
             .await
             .expect("second condemn"),
         crate::AttachmentCondemnation::AlreadyCondemned,
@@ -1553,12 +1564,19 @@ async fn a_live_peers_condemnation_defers_and_a_dead_peers_is_adopted() {
     );
 }
 
-/// A stuck intent is a root: a turn-owned intent whose turn never commits keeps
-/// the blob, and the condemn CAS is what refuses — no age, no clock.
+/// A stuck execution is a root: a put under a turn whose journal never settles
+/// keeps the blob, and the condemn CAS is what refuses — no age, no clock.
 #[tokio::test]
-async fn a_stuck_intent_retains_the_blob() {
+async fn a_stuck_execution_retains_the_blob() {
     let fixture = fenced_fixture(&SessionId::from("stuck-intent")).await;
-    let binding = fixture.session.bind_turn_scoped("turn-that-never-commits");
+    let binding = fixture
+        .session
+        .bind_execution_scoped(
+            crate::ExecutionScope::turn("stuck-intent", "turn-that-never-commits")
+                .journal_identity()
+                .expect("a valid turn scope"),
+        )
+        .expect("a session runtime binds its execution");
     let reference = fixture
         .session
         .put(vec![4, 4], meta())
@@ -1570,16 +1588,11 @@ async fn a_stuck_intent_retains_the_blob() {
         .await
         .expect("pass");
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(
-            fixture.factory.as_ref(),
-            &reference.id,
-            u64::MAX,
-            &pass
-        )
-        .await
-        .expect("condemn"),
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &reference.id, &pass)
+            .await
+            .expect("condemn"),
         crate::AttachmentCondemnation::RootPresent,
-        "an uncommitted intent whose owner was never superseded is a live root"
+        "an execution edge whose journal never settled is a live root"
     );
 
     let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
@@ -1599,87 +1612,77 @@ async fn a_stuck_intent_retains_the_blob() {
         .backend
         .get(&reference.id)
         .await
-        .expect("the blob a stuck intent roots survives");
+        .expect("the blob a stuck execution roots survives");
 }
 
 #[tokio::test]
-async fn session_facade_records_bound_owner_on_put() {
-    let manifest = Arc::new(RecordingManifest::default());
-    let store = Arc::new(SessionAttachmentStore::new(
+async fn a_bound_execution_holds_its_puts_and_an_unbound_put_its_upload() {
+    let manifest = Arc::new(RecordingReferrers::default());
+    let store = Arc::new(RuntimeAttachmentStore::new(
         crate::testing::memory_store_set().await.attachment_store(),
         manifest.clone(),
-        "session-1",
+        session_owner("session-1"),
     ));
-    let binding = store.bind_turn_scoped("turn-1");
+    let journal = crate::ExecutionScope::turn("session-1", "turn-1")
+        .journal_identity()
+        .expect("a valid turn scope");
+    let binding = store
+        .bind_execution_scoped(journal.clone())
+        .expect("a session runtime binds its execution");
 
     let reference = store.put(vec![8, 9, 10], meta()).await.expect("put");
-    {
-        let entries = manifest.entries.lock_recover();
-        let entry = entries
-            .get(&(SessionId::from("session-1"), reference.id))
-            .expect("manifest entry");
-        assert_eq!(
-            entry.owner,
-            Some(crate::AttachmentOwner::Turn {
-                id: "turn-1".to_string()
-            })
-        );
-    }
+    assert_eq!(
+        manifest.attachment_referrers(&reference.id).await.unwrap(),
+        vec![ArtifactReferrer::Execution(journal.clone())]
+    );
+    assert_eq!(
+        store.recorded_execution_puts(&journal),
+        [reference.id.clone()].into_iter().collect()
+    );
 
     drop(binding);
     let host_reference = store.put(vec![11, 12], meta()).await.expect("host put");
-    let entries = manifest.entries.lock_recover();
-    let host_entry = entries
-        .get(&(SessionId::from("session-1"), host_reference.id))
-        .expect("host manifest entry");
-    assert_eq!(host_entry.owner, None);
+    let referrers = manifest
+        .attachment_referrers(&host_reference.id)
+        .await
+        .unwrap();
+    assert!(
+        matches!(referrers.as_slice(), [ArtifactReferrer::Upload(upload)]
+            if upload.session_id().as_str() == "session-1"),
+        "an unbound put is held by a fresh upload of its session: {referrers:?}"
+    );
 }
 
 #[tokio::test]
-async fn nested_owner_binding_restores_the_previous_owner() {
-    let manifest = Arc::new(RecordingManifest::default());
-    let store = Arc::new(SessionAttachmentStore::new(
+async fn a_process_runtime_put_is_held_by_its_record() {
+    let manifest = Arc::new(RecordingReferrers::default());
+    let process_id = crate::ProcessId::fixture("process-1");
+    let store = Arc::new(RuntimeAttachmentStore::new(
         crate::testing::memory_store_set().await.attachment_store(),
         manifest.clone(),
-        "session-1",
+        RuntimeOwner::Process(process_id.clone()),
     ));
-    let process_binding = store.bind_process_scoped(crate::ProcessId::fixture("process-1"));
-    let turn_binding = store.bind_turn_scoped("turn-1");
-
-    let turn_ref = store.put(vec![1], meta()).await.expect("turn put");
-    drop(turn_binding);
-    let process_id = store.put(vec![2], meta()).await.expect("process put");
-    drop(process_binding);
-    let host_ref = store.put(vec![3], meta()).await.expect("host put");
-
-    let entries = manifest.entries.lock_recover();
-    let turn = entries
-        .get(&(SessionId::from("session-1"), turn_ref.id))
-        .expect("turn entry");
-    assert_eq!(
-        turn.owner,
-        Some(crate::AttachmentOwner::Turn {
-            id: "turn-1".to_string()
-        })
+    assert!(
+        store
+            .bind_execution_scoped(
+                crate::ExecutionScope::turn("session-1", "turn-1")
+                    .journal_identity()
+                    .expect("a valid turn scope"),
+            )
+            .is_err(),
+        "only a session runtime binds an execution"
     );
-    let process = entries
-        .get(&(SessionId::from("session-1"), process_id.id))
-        .expect("process entry");
+
+    let reference = store.put(vec![2], meta()).await.expect("process put");
     assert_eq!(
-        process.owner,
-        Some(crate::AttachmentOwner::Process {
-            process_id: crate::ProcessId::fixture("process-1"),
-        })
+        manifest.attachment_referrers(&reference.id).await.unwrap(),
+        vec![ArtifactReferrer::ProcessRecord(process_id)]
     );
-    let host = entries
-        .get(&(SessionId::from("session-1"), host_ref.id))
-        .expect("host entry");
-    assert_eq!(host.owner, None);
 }
 
 #[tokio::test]
 async fn ephemeral_facade_passes_reads_through_without_a_guard() {
-    let store = SessionAttachmentStore::ephemeral(
+    let store = RuntimeAttachmentStore::ephemeral(
         crate::testing::memory_store_set().await.attachment_store(),
     );
     let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
@@ -1693,36 +1696,31 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 async fn persistence_manifest_adapter_forwards_root_tracking() {
     let runtime: Arc<dyn crate::store::RuntimeStore> =
         Arc::new(crate::testing::unbound_recording_store().await);
-    let adapter = PersistenceManifestAdapter(runtime);
+    let adapter = PersistenceReferrersAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
-    let intent = AttachmentIntent {
+    let write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: SessionId::from("adapter-session"),
-        canonical_uri: attachment_uri(&attachment_id),
-        intent_at_epoch_ms: 10,
-        owner: None,
+        claim: session_claim("adapter-session"),
     };
     let crate::AttachmentWriteFence::Granted(permit) = adapter
-        .begin_attachment_write(intent.clone())
+        .begin_attachment_write(&write)
         .await
         .expect("begin attachment write")
     else {
         panic!("expected a granted write fence");
     };
     adapter
-        .complete_attachment_write(&intent, permit)
+        .complete_attachment_write(&write, permit)
         .await
         .expect("complete attachment write");
-    assert!(
-        adapter
-            .list_all_refs()
-            .await
-            .map(|refs| refs.contains(&attachment_id))
-            .expect("holds ref")
-    );
     assert_eq!(
-        adapter.list_all_refs().await.expect("list all refs"),
-        vec![attachment_id]
+        adapter
+            .attachment_referrers(&attachment_id)
+            .await
+            .expect("list referrers"),
+        vec![ArtifactReferrer::Session(SessionId::from(
+            "adapter-session"
+        ))]
     );
 }
 
@@ -2022,61 +2020,75 @@ fn backend_failure_class_drives_retry_and_operator_verdicts() {
 /// A manifest whose durable work takes real time, standing in for a Postgres or
 /// SQLite round trip.
 struct SlowManifest {
-    inner: NoopAttachmentManifest,
+    inner: NoopAttachmentReferrers,
     delay: std::time::Duration,
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for SlowManifest {
+impl AttachmentReferrers for SlowManifest {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<AttachmentWriteFence, crate::StoreError> {
         tokio::time::sleep(self.delay).await;
-        self.inner.begin_attachment_write(intent).await
+        self.inner.begin_attachment_write(write).await
     }
 
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.complete_attachment_write(intent, permit).await
+        self.inner.complete_attachment_write(write, permit).await
     }
 
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.abort_attachment_write(intent, permit).await
+        self.inner.abort_attachment_write(write, permit).await
     }
 
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        session_id: &SessionId,
+        claim: &ReferrerClaim,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        self.inner.commit_refs(session_id, attachment_ids).await
+        self.inner
+            .acquire_attachment_refs(claim, attachment_ids)
+            .await
     }
 
-    async fn list_uncommitted(
+    async fn forget_attachment_ref(
         &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        self.inner.list_uncommitted(older_than_epoch_ms).await
-    }
-
-    async fn forget(
-        &self,
-        session_id: &SessionId,
+        referrer: &ArtifactReferrer,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        self.inner.forget(session_id, attachment_id).await
+        self.inner
+            .forget_attachment_ref(referrer, attachment_id)
+            .await
     }
 
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
-        self.inner.list_all_refs().await
+    async fn end_attachment_referrer(
+        &self,
+        referrer: &ArtifactReferrer,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.end_attachment_referrer(referrer).await
+    }
+
+    async fn session_referrer_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionReferrerState, crate::StoreError> {
+        self.inner.session_referrer_state(session_id).await
+    }
+
+    async fn attachment_referrers(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, crate::StoreError> {
+        self.inner.attachment_referrers(attachment_id).await
     }
 }
 
@@ -2120,13 +2132,13 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
         // manifest call runs. Driving it from the `block_on` thread instead
         // would leave the worker free and prove nothing.
         let worker = crate::task::spawn(async move {
-            let session = SessionAttachmentStore::new(
+            let session = RuntimeAttachmentStore::new(
                 crate::testing::memory_store_set().await.attachment_store(),
                 Arc::new(SlowManifest {
-                    inner: NoopAttachmentManifest,
+                    inner: NoopAttachmentReferrers,
                     delay: std::time::Duration::from_millis(300),
                 }),
-                "runtime-liveness",
+                session_owner("runtime-liveness"),
             );
             let reference = session
                 .put(vec![4, 2], meta())

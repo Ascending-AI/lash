@@ -98,6 +98,11 @@ pub struct AssembledTurn {
     /// Typed accounting for tool calls omitted from the bounded record view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub omitted: Option<crate::OmittedToolCalls>,
+    /// Outputs the turn's code cells retained out of history (FIG-1643):
+    /// history keeps each one's witness and reference, and the turn's commit
+    /// holds each referenced attachment for the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_outputs: Vec<crate::RetainedOutput>,
     /// Bounded, non-transcript evidence retained when host charge-safety
     /// policy refuses regeneration of a failed provider generation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

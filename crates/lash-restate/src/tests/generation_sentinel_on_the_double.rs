@@ -122,6 +122,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
                 Arc::clone(&registry),
                 Arc::clone(&stores.continuations),
                 ingress.clone(),
+                Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                 test_restate_authority_id(),
                 lash_core::engine::BuildGeneration::for_test(generation),
                 &crate::services::DEFAULT_NAMESPACE,

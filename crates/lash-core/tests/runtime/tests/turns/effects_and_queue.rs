@@ -453,7 +453,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
         .expect("stream turn succeeds");
     handler.close().await.expect("close the scope's handler");
 
-    assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
+    assert_turn_owned_attachment(store.as_ref()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

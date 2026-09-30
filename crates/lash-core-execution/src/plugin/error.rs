@@ -201,6 +201,19 @@ pub enum PluginError {
     ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 },
     #[error("process handle `{process_id}` is not live or visible in this session")]
     ProcessNotVisible { process_id: ProcessId },
+    /// A session-only operation ran under a process runtime. A process has
+    /// no session and no agent frame of its own, and is never handed its
+    /// originator's session as a stand-in.
+    #[error("`{operation}` needs a session runtime, but process `{process_id}` owns this one")]
+    NotASessionRuntime {
+        operation: String,
+        process_id: ProcessId,
+    },
+    /// An external or host completion named a stored attachment that has no
+    /// upload evidence: its source was ended and swept, so the output would
+    /// reference bytes nothing can read. Nothing is recorded.
+    #[error("process output attachment `{digest}` is no longer available")]
+    ProcessOutputAttachmentUnavailable { digest: crate::AttachmentId },
     /// An operation referenced a process id that the registry never knew.
     #[error("unknown process `{process_id}`")]
     ProcessUnknown { process_id: ProcessId },
@@ -375,6 +388,8 @@ impl PluginError {
             | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::ProcessNotVisible { .. }
+            | Self::NotASessionRuntime { .. }
+            | Self::ProcessOutputAttachmentUnavailable { .. }
             | Self::ProcessUnknown { .. }
             | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
@@ -440,6 +455,8 @@ impl PluginError {
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessHandedOver { .. }
+            | Self::NotASessionRuntime { .. }
+            | Self::ProcessOutputAttachmentUnavailable { .. }
             | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }

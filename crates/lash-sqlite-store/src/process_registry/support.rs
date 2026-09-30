@@ -317,18 +317,11 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    /// Open a process registry whose terminal-retention prune removes the two
-    /// process-owned session stores from `session_store_root` before the process
-    /// row. The root is required and explicit; no sibling-directory convention
-    /// is inferred.
-    pub async fn open(
-        path: &Path,
-        session_store_root: impl Into<PathBuf>,
-    ) -> tokio_rusqlite::Result<Self> {
+    /// Open a process registry.
+    pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_with_clock(
             path,
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            session_store_root,
         )
         .await
     }
@@ -336,15 +329,11 @@ impl SqliteProcessRegistry {
     pub async fn open_with_clock(
         path: &Path,
         clock: Arc<dyn lash_core_execution::Clock>,
-        session_store_root: impl Into<PathBuf>,
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
         Self::open_at(
             &DatabaseLocation::standalone_file(path),
             clock,
-            DatabaseLocation::standalone_file(
-                &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
-            ),
             #[cfg(feature = "testing")]
             None,
         )
@@ -354,27 +343,21 @@ impl SqliteProcessRegistry {
     #[cfg(feature = "testing")]
     pub async fn open_with_fault_injector_for_testing(
         path: &Path,
-        session_store_root: impl Into<PathBuf>,
         fault_injector: crate::testing::SqliteFaultInjector,
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
         Self::open_at(
             &DatabaseLocation::standalone_file(path),
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            DatabaseLocation::standalone_file(
-                &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
-            ),
             Some(fault_injector),
         )
         .await
     }
 
-    /// The registry at `location`, pruning process-owned sessions out of
-    /// `process_session_catalog`.
+    /// The registry at `location`.
     pub(crate) async fn open_at(
         location: &DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
-        process_session_catalog: DatabaseLocation,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -391,7 +374,6 @@ impl SqliteProcessRegistry {
         Ok(Self {
             conn,
             clock,
-            process_session_catalog,
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),

@@ -648,10 +648,11 @@ pub async fn run_lashlang_process(
         // The run's terminal batch (FIG-3571): its pending occurrences, then
         // its omission record, ahead of the terminal event the runner commits
         // in the same transaction.
-        if let lash_core::ProcessRunOutcome::Terminal { prelude, .. } = &mut output {
+        if let lash_core::ProcessRunOutcome::Terminal { prelude, output } = &mut output {
             *prelude = host
                 .effect_summary
                 .terminal_prelude(host.identities.effect_omissions(), host.ctx.fleet_format());
+            adopt_held_attachments(&host, output).await?;
         }
     }
     drop(env);
@@ -1653,6 +1654,10 @@ struct LashlangProcessTraceIdentity {
 
 #[path = "process/execution_trace.rs"]
 mod execution_trace;
+
+#[path = "process/terminal_attachments.rs"]
+mod terminal_attachments;
+use terminal_attachments::adopt_held_attachments;
 
 fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option<SessionId> {
     match originator {

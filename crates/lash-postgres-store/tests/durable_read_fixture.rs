@@ -238,17 +238,18 @@ async fn normalize_fixture_rows(storage: &PostgresStorage) {
 /// rewritten afterwards instead. The row must exist and must be the only one,
 /// or the fixture no longer matches what this generator believes it wrote.
 async fn pin_attachment_write_token(storage: &PostgresStorage) {
-    let rewritten =
-        sqlx::query("UPDATE lash_attachment_manifest SET write_id = $1 WHERE attachment_id = $2")
-            .bind(fixture::FIXTURE_ATTACHMENT_WRITE_ID)
-            .bind(fixture::FIXTURE_ATTACHMENT_ID)
-            .execute(storage.pool())
-            .await
-            .expect("pin the Postgres fixture attachment write token")
-            .rows_affected();
+    let rewritten = sqlx::query(
+        "UPDATE lash_attachment_pending_writes SET write_id = $1 WHERE attachment_id = $2",
+    )
+    .bind(fixture::FIXTURE_ATTACHMENT_WRITE_ID)
+    .bind(fixture::FIXTURE_ATTACHMENT_ID)
+    .execute(storage.pool())
+    .await
+    .expect("pin the Postgres fixture attachment write token")
+    .rows_affected();
     assert_eq!(
         rewritten, 1,
-        "the fixture seeds exactly one attachment manifest row to pin; {rewritten} were rewritten"
+        "the fixture seeds exactly one pending attachment write to pin; {rewritten} were rewritten"
     );
 }
 

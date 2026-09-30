@@ -1,4 +1,3 @@
-use crate::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -11,10 +10,9 @@ pub struct ResolvedToolSurface {
 }
 
 impl PluginSession {
-    pub fn pin_resolved_tool_surface(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<ResolvedToolSurface, PluginError> {
+    /// Pin this plugin session's resolved tool surface: its registry and the
+    /// catalog its owner's calls resolve against.
+    pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {
         let registry = Arc::new(self.tool_registry.pin_session_surface(Vec::new()).map_err(
             |error| PluginError::Session(format!("failed to pin direct tool surface: {error}")),
         )?);
@@ -27,7 +25,7 @@ impl PluginSession {
             });
         let authority = self.live_authority();
         let catalog = self.resolve_tool_catalog(ToolCatalogContext {
-            session_id: SessionId::from(session_id.to_string()),
+            owner: self.owner.clone(),
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
             tool_access: authority.tool_access,
@@ -41,20 +39,14 @@ impl PluginSession {
         })
     }
 
-    pub fn resolved_tool_catalog(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Arc<crate::ToolCatalog>, PluginError> {
-        Ok(self.pin_resolved_tool_surface(session_id)?.catalog)
+    pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, PluginError> {
+        Ok(self.pin_resolved_tool_surface()?.catalog)
     }
 
     /// Project every Tool Catalog member to a JSON record for host-owned
     /// discovery (e.g. the production `tools.search` path in agent-workbench).
-    pub fn tool_catalog(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        let catalog = self.resolved_tool_catalog(session_id)?;
+    pub fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
+        let catalog = self.resolved_tool_catalog()?;
         Ok(crate::tool_registry::project_tool_catalog(
             catalog.tools.iter().cloned(),
         ))
@@ -67,7 +59,6 @@ impl PluginSession {
     /// and by a group tool child's recorded admission alike (FIG-3725).
     pub fn resolve_live_tool_catalog(
         &self,
-        session_id: &SessionId,
         tools: Arc<dyn crate::ToolProvider>,
         tool_access: crate::SessionToolAccess,
         subagent: Option<crate::SubagentSessionContext>,
@@ -76,7 +67,7 @@ impl PluginSession {
         let resolve_contract: lash_sansio::ToolContractResolver =
             Arc::new(move |manifest: &ToolManifest| tools.resolve_contract_by_id(&manifest.id));
         self.resolve_tool_catalog(ToolCatalogContext {
-            session_id: session_id.clone(),
+            owner: self.owner.clone(),
             tools: manifests,
             resolve_contract: Some(resolve_contract),
             tool_access,
@@ -92,7 +83,7 @@ impl PluginSession {
         let mut contributions = collect_owned_sync(
             &self.contributions.tool_catalog_contributors,
             ToolCatalogContext {
-                session_id: ctx.session_id.clone(),
+                owner: ctx.owner.clone(),
                 tools: ctx.tools.clone(),
                 resolve_contract: ctx.resolve_contract.clone(),
                 tool_access: ctx.tool_access.clone(),

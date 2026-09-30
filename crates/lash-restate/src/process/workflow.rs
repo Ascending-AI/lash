@@ -226,6 +226,10 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// The port an ended process's parent-end application delivers its
     /// children's cancels through (FIG-3822).
     parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
+    /// The deployment's attachment referrers: a terminal's delivered
+    /// attachments are acquired by the process record before the registry
+    /// records it (ADR 0124).
+    attachments: Arc<dyn lash_core::AttachmentReferrers>,
     authority_id: crate::RestateAuthorityId,
     /// The drain generation of the build this workflow's segments admit
     /// under (FIG-3795 S1): each start marker, handover and park stamps it,
@@ -294,6 +298,7 @@ impl<R> Clone for LashProcessWorkflowImpl<R> {
             retry_max_attempts: self.retry_max_attempts,
             cancel_ingress: self.cancel_ingress.clone(),
             parent_end_delivery: Arc::clone(&self.parent_end_delivery),
+            attachments: Arc::clone(&self.attachments),
             authority_id: self.authority_id.clone(),
             build_generation: self.build_generation.clone(),
             route: self.route.clone(),
@@ -307,11 +312,13 @@ impl<R> LashProcessWorkflowImpl<R> {
     /// Build a Restate process workflow whose segments stop their step bodies
     /// on a cancel through a live watch of their cancel promise over the
     /// ingress (execution-side only; the drive never reads it).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         runner: Arc<R>,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: RestateIngressClient,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
         authority_id: crate::RestateAuthorityId,
         build_generation: lash_core::engine::BuildGeneration,
         namespace: &crate::RestateNamespace,
@@ -328,6 +335,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             continuations,
             Some(cancel_ingress),
             parent_end_delivery,
+            attachments,
             authority_id,
             build_generation,
             namespace,
@@ -349,6 +357,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             continuations,
             None,
             parent_end_delivery,
+            Arc::new(lash_core::attachments::NoopAttachmentReferrers),
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
             &crate::RestateNamespace::default(),
@@ -362,6 +371,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: Option<RestateIngressClient>,
         parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
         authority_id: crate::RestateAuthorityId,
         build_generation: lash_core::engine::BuildGeneration,
         namespace: &crate::RestateNamespace,
@@ -374,6 +384,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             retry_max_attempts: super::PROCESS_HANDLER_MAX_ATTEMPTS,
             cancel_ingress,
             parent_end_delivery,
+            attachments,
             authority_id,
             build_generation,
             route: namespace.stable(LashService::ProcessWorkflow),
@@ -627,12 +638,21 @@ where
         proposal: TerminalProposal,
     ) -> Result<ProcessAwaitOutput, HandlerError> {
         let registry = &self.registry;
+        let attachments = self.attachments.as_ref();
         let Json(stored) = journal
             .run_json_or_retry_send::<Result<ProcessAwaitOutput, String>, _>(
                 COMPLETE_STEP.to_string(),
                 async move {
                     let TerminalProposal::Output { output, prelude } = proposal;
-                    match complete_process_outcome(registry, process_id, *output, prelude).await {
+                    match complete_process_outcome(
+                        registry,
+                        attachments,
+                        process_id,
+                        *output,
+                        prelude,
+                    )
+                    .await
+                    {
                         Ok(stored) => Ok(Ok(stored)),
                         Err(error) => step_fault(error),
                     }
@@ -696,7 +716,14 @@ where
         process_id: &ProcessId,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        complete_process_outcome(&self.registry, process_id, proposed, Vec::new()).await
+        complete_process_outcome(
+            &self.registry,
+            self.attachments.as_ref(),
+            process_id,
+            proposed,
+            Vec::new(),
+        )
+        .await
     }
 
     /// [`run_registration`](Self::run_registration) for a test that drives a
@@ -735,10 +762,15 @@ where
             }
             SegmentRunEnd::Terminal(proposal) => {
                 let TerminalProposal::Output { output, prelude } = proposal;
-                let stored =
-                    complete_process_outcome(&self.registry, &process_id, *output, prelude)
-                        .await
-                        .map_err(handler_error_from_plugin)?;
+                let stored = complete_process_outcome(
+                    &self.registry,
+                    self.attachments.as_ref(),
+                    &process_id,
+                    *output,
+                    prelude,
+                )
+                .await
+                .map_err(handler_error_from_plugin)?;
                 Ok(stored.into())
             }
         }
@@ -953,10 +985,20 @@ where
 /// registry kept: this one, or the one an earlier writer committed.
 pub(crate) async fn complete_process_outcome(
     registry: &Arc<dyn ProcessRegistry>,
+    attachments: &dyn lash_core::AttachmentReferrers,
     process_id: &ProcessId,
     proposed: ProcessAwaitOutput,
     prelude: Vec<lash_core::ProcessEventAppendRequest>,
 ) -> Result<ProcessAwaitOutput, PluginError> {
+    // The record holds what its terminal delivers before the registry
+    // records it (ADR 0124 §8.5); a swept source publishes the typed
+    // source-gone failure instead.
+    let proposed = lash_core::runtime::attachment_delivery::publish_process_terminal(
+        attachments,
+        process_id,
+        proposed,
+    )
+    .await?;
     let completion = registry
         .complete_process_with_prelude(
             process_id,

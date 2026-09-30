@@ -590,7 +590,7 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
             serde_json::json!({"account": "a"}),
         ),
         subscription_key: key.to_string(),
-        env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:{session_id}")),
+        env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:fixture-{session_id}")),
         wake_target: Some(SessionScope::new(session_id)),
         name: Some("worker".to_string()),
         source_type: "ui.button.pressed".to_string(),

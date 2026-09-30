@@ -6,8 +6,9 @@
 //! key mints a new process id. This law watches the Restate tier that start
 //! lands on: the successor submits its own `LashProcessWorkflow` key — the
 //! minted id — rather than coalescing onto the retired workflow's key, its
-//! body executes exactly once, it reaches its own terminal, and its engine
-//! sees none of the pruned lifetime's session stores.
+//! body executes exactly once, it reaches its own terminal, and neither
+//! lifetime binds a session of its own: a process runtime is keyed by its
+//! minted id and owns no session store (ADR 0124).
 //!
 //! Red before the registration cutover, where the process's name was its
 //! identity: the successor re-derived the retired workflow key, and Restate
@@ -34,11 +35,10 @@ const ENGINE_KIND: &str = "fig-3611-successor-recorder";
 const SESSION: &str = "fig-3611-successor-after-prune";
 
 /// One engine kind for both lifetimes. `run` records the minted process id
-/// it executed as and probes the session-store factory the worker hands it:
-/// whether the pruned lifetime's session ids carry state it could read, and
-/// whether its own derived ids are tombstoned. A successor that coalesced
-/// onto the retired workflow never runs its body at all, so the record is
-/// the coalescing detector.
+/// it executed as and probes the session catalog the worker hands it for any
+/// session named after that id. A successor that coalesced onto the retired
+/// workflow never runs its body at all, so the record is the coalescing
+/// detector.
 struct RecordingEngine {
     runs: Mutex<Vec<String>>,
 }
@@ -78,69 +78,20 @@ impl lash_core::ProcessEngine for RecordingEngine {
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
         let process_id = context.process_id().clone();
         let factory = context.session_store_factory();
-        let mut predecessor_sessions_visible = Vec::new();
-        let mut predecessor_bound_not_deleted = Vec::new();
         let mut own_sessions_bound = Vec::new();
-        let mut own_sessions_tombstoned = Vec::new();
         if let Some(factory) = factory.as_ref() {
-            for session_id in payload
-                .get("predecessor_sessions")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-            {
-                let session_id = lash_core::SessionId::from(session_id.to_string());
-                if matches!(
-                    lash_core::SessionCommitStore::load_session_head_meta(
-                        factory.as_ref(),
-                        &session_id
-                    )
-                    .await,
-                    Ok(Some(_))
-                ) {
-                    predecessor_sessions_visible.push(session_id.to_string());
-                }
-            }
-            // `predecessor_bound` names only the ids the first lifetime
-            // actually bound; every one of them must stay tombstoned.
-            for session_id in payload
-                .get("predecessor_bound")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-            {
-                let session_id = lash_core::SessionId::from(session_id.to_string());
-                if matches!(
-                    lash_core::SessionCatalogStore::lookup_session(factory.as_ref(), &session_id)
-                        .await,
-                    Ok(lash_core::store::SessionLookup::Live(_)
-                        | lash_core::store::SessionLookup::Absent)
-                ) {
-                    predecessor_bound_not_deleted.push(session_id.to_string());
-                }
-            }
-            // The durable catalog is the bound-or-tombstoned truth: the head
-            // read answers `None` for a bound id that has not committed yet,
-            // and the lookup answers `Absent`, not `Deleted`, for an id that
-            // was never bound.
+            // The durable catalog is the bound-or-tombstoned truth: a session
+            // the worker bound for this process, live or deleted, is listed.
             let catalog = factory
                 .list_sessions(&lash_core::SessionListFilter::default())
                 .await
                 .unwrap_or_default();
-            for session_id in lash_core::facade_support::process_runtime_session_ids(&process_id) {
-                match catalog
+            own_sessions_bound.extend(
+                catalog
                     .iter()
-                    .find(|summary| summary.session_id == session_id)
-                {
-                    Some(summary) if summary.deleted => {
-                        own_sessions_tombstoned.push(session_id.to_string())
-                    }
-                    Some(_) => own_sessions_bound.push(session_id.to_string()),
-                    None => {}
-                }
-            }
+                    .filter(|summary| summary.session_id.as_str().contains(process_id.as_str()))
+                    .map(|summary| summary.session_id.to_string()),
+            );
         }
         self.runs
             .lock()
@@ -155,10 +106,7 @@ impl lash_core::ProcessEngine for RecordingEngine {
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("unknown"),
                     "session_store_factory": factory.is_some(),
-                    "predecessor_sessions_visible": predecessor_sessions_visible,
-                    "predecessor_bound_not_deleted": predecessor_bound_not_deleted,
                     "own_sessions_bound": own_sessions_bound,
-                    "own_sessions_tombstoned": own_sessions_tombstoned,
                 })),
             )),
             prelude: Vec::new(),
@@ -389,25 +337,13 @@ async fn a_same_start_key_successor_after_prune_runs_its_own_workflow() {
         "the first lifetime reached its own terminal"
     );
     assert_eq!(
-        first_payload["own_sessions_tombstoned"],
+        first_payload["own_sessions_bound"],
         serde_json::json!([]),
-        "the first lifetime ran on live session ids"
-    );
-    assert!(
-        first_payload["own_sessions_bound"]
-            .as_array()
-            .is_some_and(|bound| !bound.is_empty()),
-        "the first lifetime bound at least its own process-env session: {first_payload}"
+        "the first lifetime bound no session of its own"
     );
 
     // Retire it: the row leaves retention, its scope fence lands, and its
     // completed `LashProcessWorkflow` invocation stays on the server.
-    let first_sessions: Vec<String> =
-        lash_core::facade_support::process_runtime_session_ids(&first_id)
-            .into_iter()
-            .map(|session_id| session_id.to_string())
-            .collect();
-    let first_bound = first_payload["own_sessions_bound"].clone();
     let report = core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
@@ -427,11 +363,7 @@ async fn a_same_start_key_successor_after_prune_runs_its_own_workflow() {
         &session,
         "turn-start-2",
         START_KEY,
-        serde_json::json!({
-            "lifetime": "successor",
-            "predecessor_sessions": first_sessions,
-            "predecessor_bound": first_bound,
-        }),
+        serde_json::json!({"lifetime": "successor"}),
     )
     .await;
     assert_ne!(
@@ -456,22 +388,9 @@ async fn a_same_start_key_successor_after_prune_runs_its_own_workflow() {
         "the run had its session-store factory"
     );
     assert_eq!(
-        second_payload["predecessor_sessions_visible"],
+        second_payload["own_sessions_bound"],
         serde_json::json!([]),
-        "the successor sees none of the pruned lifetime's session state"
-    );
-    assert_eq!(
-        second_payload["own_sessions_tombstoned"],
-        serde_json::json!([]),
-        "none of the successor's derived session ids is tombstoned"
-    );
-
-    // Every session id the first lifetime bound stayed tombstoned through
-    // the prune.
-    assert_eq!(
-        second_payload["predecessor_bound_not_deleted"],
-        serde_json::json!([]),
-        "every session id the first lifetime bound stayed deleted"
+        "the successor bound no session of its own"
     );
 
     // Restate saw two distinct process workflows, each run once: the

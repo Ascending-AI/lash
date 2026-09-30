@@ -6,7 +6,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct ToolCatalogContext {
-    pub session_id: SessionId,
+    pub owner: crate::RuntimeOwner,
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<lash_sansio::ToolContractResolver>,
     pub tool_access: SessionToolAccess,

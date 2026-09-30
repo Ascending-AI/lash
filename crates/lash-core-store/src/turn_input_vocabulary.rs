@@ -868,7 +868,7 @@ impl AdmittedTurnInputs {
     pub async fn materialize_checkpoint_turn_input(
         &self,
         turn_id: &crate::TurnId,
-        attachment_store: &crate::SessionAttachmentStore,
+        attachment_store: &crate::RuntimeAttachmentStore,
         attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
     ) -> Result<QueuedCheckpointTurnInput, String> {
         let mut messages = Vec::new();
@@ -975,7 +975,7 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
 async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
     turn_id: &crate::TurnId,
-    attachment_store: &crate::SessionAttachmentStore,
+    attachment_store: &crate::RuntimeAttachmentStore,
     attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<Option<crate::Message>, String> {
     let normalized = crate::input_normalization::normalize_input_items(
@@ -1169,6 +1169,21 @@ turn_input_wire!(TurnInputStateKind, pub, as_str, from_wire_str {
 });
 
 impl TurnInput {
+    /// Stored attachments this input carries, sorted and deduplicated.
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                InputItem::Text { .. } => None,
+                InputItem::Attachment { source } => {
+                    source.stored_ref().map(|reference| reference.id.clone())
+                }
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// The part of this input a durable acceptance row can carry.
     ///
     /// The live `TurnContext` (a child turn's process correlation and

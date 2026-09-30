@@ -3,8 +3,6 @@
 //! wired, and the trigger-owner-scope ruling shared by the context's
 //! trigger accessors.
 
-use super::SessionId;
-
 pub(super) fn missing_process_execution_error() -> crate::RuntimeEffectControllerError {
     crate::RuntimeEffectControllerError::new(
         crate::RuntimeErrorCode::ProcessRegistryUnavailable,
@@ -12,13 +10,14 @@ pub(super) fn missing_process_execution_error() -> crate::RuntimeEffectControlle
     )
 }
 
-/// The owner scope a trigger command issued from `root_session_id` belongs
-/// under, given the originator of the process execution it runs inside (when
-/// it runs inside one). The registration tool and the host-operation path
+/// The owner scope a trigger command issued by `owner` belongs under, given
+/// the originator of the process execution it runs inside (when it runs
+/// inside one). A process always runs under its originator; a process with
+/// none has no session to own the subscription and is refused. The registration tool and the host-operation path
 /// resolve through this one ruling so a subscription owns the same scope
 /// whichever route declared it.
 pub fn resolve_trigger_owner_scope(
-    root_session_id: &SessionId,
+    owner: &crate::RuntimeOwner,
     originator: Option<&crate::ProcessOriginator>,
 ) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
     match originator {
@@ -32,6 +31,13 @@ pub fn resolve_trigger_owner_scope(
         Some(crate::ProcessOriginator::Session { session_id, .. }) => {
             Ok(crate::TriggerOwnerScope::session(session_id.clone()))
         }
-        None => Ok(crate::TriggerOwnerScope::session(root_session_id)),
+        None => match owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                Ok(crate::TriggerOwnerScope::session(session_id))
+            }
+            crate::RuntimeOwner::Process(process_id) => Err(
+                crate::runtime::not_a_session_runtime("trigger_owner_scope", process_id),
+            ),
+        },
     }
 }

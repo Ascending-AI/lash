@@ -143,7 +143,7 @@ fn pending_tool() -> crate::tool_dispatch::PendingToolDispatchOutcome {
         },
         pending: crate::PendingCompletion::default(),
         declaring_identity: crate::derive_tool_intent_identity(
-            &SessionId::from("test-session"),
+            &crate::RuntimeOwner::Session(SessionId::from("test-session")),
             "turn-1",
             &crate::ToolCallId::fixture("call"),
             0,

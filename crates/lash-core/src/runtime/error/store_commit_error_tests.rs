@@ -31,7 +31,7 @@ fn commit_budget_errors_preserve_the_budget_kind_and_limits() {
         session_config_bytes: 0,
         graph_delta_bytes: 900_000,
         checkpoint_bytes: 150_000,
-        attachment_manifest_bytes: 1,
+        attachment_referrer_bytes: 1,
         follow_on_bytes: 0,
         agent_frame_bytes: 0,
         usage_delta_bytes: 0,

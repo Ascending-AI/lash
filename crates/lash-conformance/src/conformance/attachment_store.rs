@@ -40,7 +40,7 @@ where
     const MAX_ATTACHMENT_BYTES: u64 = 4;
 
     let bounded_backend = make();
-    let bounded = crate::SessionAttachmentStore::ephemeral(Arc::clone(&bounded_backend))
+    let bounded = crate::RuntimeAttachmentStore::ephemeral(Arc::clone(&bounded_backend))
         .with_max_attachment_bytes(Some(MAX_ATTACHMENT_BYTES));
     let error = bounded
         .put(vec![1; 5], attachment_meta())
@@ -71,7 +71,7 @@ where
         .expect("an attachment exactly at the host limit must succeed");
     assert_eq!(at_limit.byte_len, MAX_ATTACHMENT_BYTES);
 
-    let unbounded = crate::SessionAttachmentStore::ephemeral(make());
+    let unbounded = crate::RuntimeAttachmentStore::ephemeral(make());
     let default_put = unbounded
         .put(vec![3; 5], attachment_meta())
         .await

@@ -125,7 +125,6 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
                 &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
-                data_dir.join("lash-sessions"),
             )
             .await
             .expect("open tool control process registry"),

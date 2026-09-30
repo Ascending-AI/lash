@@ -3,7 +3,6 @@
 //! Examples are written in TypeScript, the sole RLM language (ADR 0096).
 //! Prompt prose is tuned for schema-first results and binding subagent output.
 
-use lash_sansio::SessionId;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,11 +72,12 @@ impl RlmSubagentToolsProvider {
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let seed = lash_protocol_rlm::RlmSeed::from_tool_args(args)
             .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
+        let parent = spawn_parent(context)?;
         let current_snapshot = context
-            .session_snapshot()
+            .snapshot_session(&parent.session_id)
             .await
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
-        let parent_session_id = SessionId::from(context.session_id());
+        let parent_session_id = parent.session_id;
         let mut create_request = build_spawn_create_request(SpawnCreateRequestInput {
             registry: &self.registry,
             parent_session_id: &parent_session_id,
@@ -89,10 +89,7 @@ impl RlmSubagentToolsProvider {
             output_schema: output_schema.clone(),
             seed,
             parent_subagent: self.parent_subagent.as_ref(),
-            caused_by: Some(lash_core::CausalRef::ToolCall {
-                session_id: parent_session_id.clone(),
-                call_id: context.call_id().clone(),
-            }),
+            caused_by: Some(parent.caused_by),
         })
         .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         // A `ParentFork` peer initializes from this spawn-time capture alone;
@@ -102,6 +99,15 @@ impl RlmSubagentToolsProvider {
             create_request.plugin_source,
             lash_core::SessionPluginSource::ParentFork
         ) {
+            if let lash_core::RuntimeOwner::Process(process_id) = context.owner() {
+                return Err(spawn_refusal(
+                    SPAWN_PARENT_FORK_IN_PROCESS,
+                    format!(
+                        "spawn_agent: a `ParentFork` capability forks its parent's conversation, \
+                         and process `{process_id}` has none to fork"
+                    ),
+                ));
+            }
             let plugin_init = context
                 .session_plugin_init()
                 .await
@@ -139,16 +145,27 @@ impl RlmSubagentToolsProvider {
         // context. The decision rides the declaration; a redrive presents the
         // same key and gets the retained child back.
         let lifetime = (self.lifetime)(&context.start_cx().map_err(|err| err.to_string())?);
-        let session_id = SessionId::from(context.session_id());
+        let owner = context.owner().runtime_owner();
         // A child spawned from inside a running process belongs to the chain
         // that started the process; any other spawn belongs to the session
         // that authored the call, which then observes it.
-        let originator = match context.process_spawn_provenance() {
-            Some(spawn) => spawn.originator.clone(),
-            None => lash_core::ProcessOriginator::Session {
+        let originator = match (context.process_spawn_provenance(), context.owner()) {
+            (Some(spawn), _) => spawn.originator.clone(),
+            (
+                None,
+                lash_core::ExecutionOwner::SessionFrame {
+                    session_id,
+                    agent_frame_id,
+                },
+            ) => lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
-                agent_frame_id: Some(context.agent_frame_id().clone()),
+                agent_frame_id: Some(agent_frame_id.clone()),
             },
+            (None, lash_core::ExecutionOwner::Process { process_id }) => {
+                return Err(format!(
+                    "spawn_agent: process `{process_id}` carries no spawn provenance for its child"
+                ));
+            }
         };
         let declaration = lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::SessionTurn {
@@ -168,10 +185,7 @@ impl RlmSubagentToolsProvider {
         ));
         let start = lash_core::DeclaredStart::new(
             context,
-            lash_core::StartProcessIntent {
-                session_id,
-                declaration,
-            },
+            lash_core::StartProcessIntent { owner, declaration },
         )
         .map_err(|err| format!("spawn_agent could not declare its child: {err}"))?;
         let mut pending = lash_core::PendingCompletion::new();
@@ -182,6 +196,55 @@ impl RlmSubagentToolsProvider {
             pending.resolved_by_declared_start(start),
         ))
     }
+}
+
+/// The session a spawned child parents under, and what caused the spawn.
+struct SpawnParent {
+    session_id: lash_core::SessionId,
+    caused_by: lash_core::CausalRef,
+}
+
+/// A spawn from a session parents its child under that session. A spawn
+/// from inside a durable process parents it under the session that
+/// originated the process chain: the process has no session of its own and
+/// never stands one in. A chain a host originated names no session, so its
+/// spawn is refused.
+fn spawn_parent(context: &ToolPrepareContext) -> Result<SpawnParent, ToolOutcome> {
+    match context.owner() {
+        lash_core::RuntimeOwner::Session(session_id) => Ok(SpawnParent {
+            session_id: session_id.clone(),
+            caused_by: lash_core::CausalRef::ToolCall {
+                session_id: session_id.clone(),
+                call_id: context.call_id().clone(),
+            },
+        }),
+        lash_core::RuntimeOwner::Process(process_id) => match context.process_originator() {
+            Some(lash_core::ProcessOriginator::Session { session_id, .. }) => Ok(SpawnParent {
+                session_id: session_id.clone(),
+                caused_by: lash_core::CausalRef::Process {
+                    process_id: process_id.clone(),
+                },
+            }),
+            Some(lash_core::ProcessOriginator::Host { .. }) | None => Err(spawn_refusal(
+                SPAWN_HOST_ORIGINATED_PROCESS,
+                format!(
+                    "spawn_agent: process `{process_id}` was originated by the host, \
+                     so no session can parent its subagent"
+                ),
+            )),
+        },
+    }
+}
+
+/// A spawn from a host-originated process: no session parents the child.
+pub const SPAWN_HOST_ORIGINATED_PROCESS: &str = "subagent_spawn_host_originated_process";
+/// A `ParentFork` spawn from a process: there is no conversation to fork.
+pub const SPAWN_PARENT_FORK_IN_PROCESS: &str = "subagent_spawn_parent_fork_in_process";
+
+fn spawn_refusal(code: &str, message: String) -> ToolOutcome {
+    ToolOutcome::from_output(lash_core::ToolCallOutput::failure(
+        lash_core::ToolFailure::runtime(lash_core::ToolFailureClass::InvalidRequest, code, message),
+    ))
 }
 
 /// The definition key of a spawned child's SessionTurn process.
@@ -342,3 +405,6 @@ fn capability_name_from_args(
 #[cfg(test)]
 #[path = "outcome_tests.rs"]
 mod outcome_tests;
+#[cfg(test)]
+#[path = "spawn_parent_tests.rs"]
+mod spawn_parent_tests;

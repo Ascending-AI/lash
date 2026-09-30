@@ -3,7 +3,7 @@ use crate::plugin::PluginSessionRequest;
 
 fn store() -> PluginStateStore {
     PluginStateStore::bind(
-        &SessionId::from("session"),
+        &crate::RuntimeOwner::Session(SessionId::from("session")),
         "mock",
         Arc::new(Mutex::new(PluginStateRegistry::default())),
     )
@@ -114,7 +114,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
                 config: SessionCreationConfig::default(),
                 seed_snapshot: Some(&init.plugin_state),
             },
-            session_id: ("child").into(),
+            owner: crate::RuntimeOwner::Session("child".into()),
         })
         .unwrap();
     assert!(child.forked_plugins());
@@ -422,8 +422,16 @@ fn live_hydration_refuses_generation_rewind_and_preserves_bound_namespaces() {
 #[test]
 fn state_handle_debug_does_not_expose_other_namespaces() {
     let registry = Arc::new(Mutex::new(PluginStateRegistry::default()));
-    let first = PluginStateStore::bind(&SessionId::from("session"), "first", registry.clone());
-    let second = PluginStateStore::bind(&SessionId::from("session"), "private-neighbor", registry);
+    let first = PluginStateStore::bind(
+        &crate::RuntimeOwner::Session(SessionId::from("session")),
+        "first",
+        registry.clone(),
+    );
+    let second = PluginStateStore::bind(
+        &crate::RuntimeOwner::Session(SessionId::from("session")),
+        "private-neighbor",
+        registry,
+    );
     second
         .set("secret", serde_json::json!("neighbor-value"))
         .unwrap();
@@ -447,7 +455,11 @@ fn register_remove_rebuilt_generation_five() {
     let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(
         &snapshot,
     ))));
-    let state = PluginStateStore::bind(&SessionId::from("rebuilt"), "mock", registry.clone());
+    let state = PluginStateStore::bind(
+        &crate::RuntimeOwner::Session(SessionId::from("rebuilt")),
+        "mock",
+        registry.clone(),
+    );
     state.remove("seed").unwrap();
     registry.lock_recover().initialize(Some(&snapshot)).unwrap();
     assert_eq!(

@@ -256,7 +256,7 @@ mod tests {
 
         for tool_name in ["continue_as", "renamed_control_tool", "arbitrary_tool_name"] {
             let context = lash_core::plugin::ToolCallHookContext::new(
-                lash_sansio::SessionId::from("session"),
+                lash_core::RuntimeOwner::Session(lash_sansio::SessionId::from("session")),
                 tool_name.to_string(),
                 args.clone(),
                 policy.clone(),

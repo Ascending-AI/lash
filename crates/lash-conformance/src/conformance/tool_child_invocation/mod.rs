@@ -422,7 +422,10 @@ impl crate::ToolProvider for LawLeafProvider {
         self.observation.record(
             &name,
             call.tool_id(),
-            context.session_id(),
+            context
+                .owner()
+                .session_id()
+                .map_or("", crate::SessionId::as_str),
             context.attempt_number(),
             context.tool_execution_binding().clone(),
             context.enclosing_process().map(crate::ProcessId::as_str),
@@ -497,7 +500,7 @@ impl crate::ToolProvider for LawLeafProvider {
                     let start = match crate::DeclaredStart::new(
                         context,
                         crate::StartProcessIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({"lane": "declared-pending"}),
@@ -540,7 +543,7 @@ impl crate::ToolProvider for LawLeafProvider {
             name if name == LEAF_INTENTS.trim_start_matches("tool:") => {
                 let mut intents = vec![
                     crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                        session_id: self.session_id.clone(),
+                        owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                         declaration: crate::ProcessStartDeclaration::external(
                             crate::ProcessOriginator::host(),
                             self.start_metadata.clone(),
@@ -548,7 +551,7 @@ impl crate::ToolProvider for LawLeafProvider {
                         ),
                     })),
                     crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                        session_id: self.session_id.clone(),
+                        owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                         process_id: self.intent_target.clone(),
                         event_type: "law.intent-event".to_string(),
                         payload: serde_json::json!({ "leaf": "intents" }),
@@ -571,7 +574,7 @@ impl crate::ToolProvider for LawLeafProvider {
                     ),
                     crate::ToolIntents::v3(vec![
                         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "commit", "call_id": call_id }),
@@ -579,7 +582,7 @@ impl crate::ToolProvider for LawLeafProvider {
                             ),
                         })),
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             process_id: self.intent_target.clone(),
                             event_type: "law.intent-event".to_string(),
                             payload: serde_json::json!({ "leaf": "commit", "call_id": call_id }),
@@ -609,7 +612,7 @@ impl crate::ToolProvider for LawLeafProvider {
                     ),
                     crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
                         crate::StartProcessIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "spend-commit", "call_id": call_id }),
@@ -632,7 +635,7 @@ impl crate::ToolProvider for LawLeafProvider {
                     ),
                     crate::ToolIntents::v3(vec![
                         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "fence", "call_id": call_id }),
@@ -640,14 +643,14 @@ impl crate::ToolProvider for LawLeafProvider {
                             ),
                         })),
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                            session_id: self.session_id.clone(),
+                            owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                             process_id: self.intent_target.clone(),
                             event_type: "law.intent-event".to_string(),
                             payload: serde_json::json!({ "leaf": "fence", "call_id": call_id }),
                         }),
                         crate::ToolIntent::RegisterProcessDefinition(Box::new(
                             crate::RegisterProcessDefinitionIntent {
-                                session_id: self.session_id.clone(),
+                                owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                                 engine_kind: admission_fence::LAW_FENCE_ENGINE_KIND.to_string(),
                                 definition: serde_json::json!({
                                     "program": "law-fence",
@@ -848,7 +851,7 @@ struct OpenerExtras {
     plugin_factories: Vec<Arc<dyn crate::plugin::PluginFactory>>,
     /// The session attachment store the dispatch binds; `None` binds no
     /// attachment port, so a put is refused.
-    attachment_store: Option<Arc<crate::SessionAttachmentStore>>,
+    attachment_store: Option<Arc<crate::RuntimeAttachmentStore>>,
     /// The clock the lent dispatch runs on; `None` keeps the builder's.
     clock: Option<Arc<dyn crate::Clock>>,
 }
@@ -1171,7 +1174,7 @@ struct GatedProcessService {
 impl crate::ProcessService for GatedProcessService {
     async fn start_from_recorded_intent(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -1190,7 +1193,7 @@ impl crate::ProcessService for GatedProcessService {
         self.sink.record_landed(&call_id, "start", &identity);
         let started = self
             .inner
-            .start_from_recorded_intent(session_id, request, scope)
+            .start_from_recorded_intent(owner, request, scope)
             .await?;
         self.sink
             .confirm_landed(&call_id, "start", &identity, started.process_id.to_string());
@@ -1199,7 +1202,7 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &crate::ProcessId,
         event_type: String,
         replay_key: String,
@@ -1215,9 +1218,7 @@ impl crate::ProcessService for GatedProcessService {
         self.sink.record_landed(&call_id, "event", &identity);
         let event = self
             .inner
-            .emit_event_recorded_intent(
-                session_id, process_id, event_type, replay_key, payload, scope,
-            )
+            .emit_event_recorded_intent(owner, process_id, event_type, replay_key, payload, scope)
             .await?;
         self.sink.confirm_landed(
             &call_id,
@@ -1230,10 +1231,10 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn list_visible_for_attempt(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.inner.list_visible_for_attempt(session_id, mode).await
+        self.inner.list_visible_for_attempt(owner, mode).await
     }
 
     async fn start_from_request(
@@ -1319,33 +1320,31 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_ids: &[crate::ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        self.inner
-            .validate_visible(session_id, process_ids, scope)
-            .await
+        self.inner.validate_visible(owner, process_ids, scope).await
     }
 
     async fn cancel(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner.cancel(session_id, process_id, scope).await
+        self.inner.cancel(owner, process_id, scope).await
     }
 
     async fn cancel_recorded_intent(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &crate::ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.inner
-            .cancel_recorded_intent(session_id, process_id, identity, scope)
+            .cancel_recorded_intent(owner, process_id, identity, scope)
             .await
     }
 
@@ -1359,7 +1358,7 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &crate::ProcessId,
         signal_name: String,
         signal_id: String,
@@ -1367,14 +1366,7 @@ impl crate::ProcessService for GatedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         self.inner
-            .signal_recorded_intent(
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
+            .signal_recorded_intent(owner, process_id, signal_name, signal_id, payload, scope)
             .await
     }
 
@@ -1396,7 +1388,7 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &crate::ProcessId,
         signal_name: String,
         signal_id: String,
@@ -1404,14 +1396,7 @@ impl crate::ProcessService for GatedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         self.inner
-            .signal_possessed(
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
+            .signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
             .await
     }
 
@@ -1516,8 +1501,10 @@ fn leaf_request(
             opener: crate::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),
             admitted_scope: admitted,
-            session_id: session_id.clone(),
-            agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: session_id.clone(),
+                agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
+            },
         },
         cancellation,
         env_ref.clone(),

@@ -38,7 +38,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
     host.durability.attachment_store = Arc::new(
-        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+        lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
@@ -152,7 +152,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
     host.durability.attachment_store = Arc::new(
-        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+        lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
@@ -349,7 +349,7 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
                     lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
                     lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
                         lash_core::SignalProcessIntent {
-                            session_id: SessionId::from(call.context.session_id()),
+                            owner: call.context.owner().runtime_owner(),
                             process_id: restate_recorded_intent_target(),
                             signal_name: "resume".to_string(),
                             payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
@@ -472,7 +472,7 @@ finish(await handle);
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
     host.durability.attachment_store = Arc::new(
-        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+        lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );

@@ -136,7 +136,10 @@ async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
     };
     let session_id = {
         let call = attempt_context(None);
-        lash_core::SessionId::from(call.session_id())
+        call.owner()
+            .session_id()
+            .expect("the fixture call runs in a session")
+            .clone()
     };
     assert_eq!(
         intent.declaration.wake_session_id.as_ref(),

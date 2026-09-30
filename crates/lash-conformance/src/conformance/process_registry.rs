@@ -432,7 +432,7 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
         lash_core::Lifetime::Detached,
     )
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-        "process-env:{id}"
+        "process-env:fixture-{id}"
     ))))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(
@@ -1097,7 +1097,7 @@ async fn refolded_process_record_matches_stored_projection(
                 lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-                "process-env:{case}"
+                "process-env:fixture-{case}"
             ))))
             .with_extra_event_types([plain_event_type("signal.ready")]),
         )
@@ -2369,13 +2369,17 @@ pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processe
         output: settled_success(serde_json::json!({"backend":"authoritative"})),
         waits: std::sync::atomic::AtomicUsize::new(0),
     });
+    let receiver = crate::ExecutionScope::runtime_operation("work-wait-seam");
     let await_backend = || {
         crate::RuntimeEffectLocalExecutor::processes(registry.clone(), port.clone())
             .into_process()
             .expect("production process executor")
-            .execute(crate::ProcessCommand::Await {
-                process_id: port.process_id.clone(),
-            })
+            .execute(
+                &receiver,
+                crate::ProcessCommand::Await {
+                    process_id: port.process_id.clone(),
+                },
+            )
     };
     assert!(matches!(
         await_backend().await.expect("reattached terminal"),

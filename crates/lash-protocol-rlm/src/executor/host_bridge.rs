@@ -1289,7 +1289,7 @@ pub(super) struct CollectedExecutionOutput {
 
 async fn collect_printed_images(
     value: &FlowValue,
-    attachment_store: &lash_core::facade_support::SessionAttachmentStore,
+    attachment_store: &lash_core::facade_support::RuntimeAttachmentStore,
 ) -> Result<Vec<AttachmentRef>, ExecutionHostError> {
     let mut seen = BTreeSet::new();
     let mut images = Vec::new();
@@ -1299,7 +1299,7 @@ async fn collect_printed_images(
 
 fn collect_printed_images_inner<'a>(
     value: &'a FlowValue,
-    attachment_store: &'a lash_core::facade_support::SessionAttachmentStore,
+    attachment_store: &'a lash_core::facade_support::RuntimeAttachmentStore,
     seen: &'a mut BTreeSet<String>,
     images: &'a mut Vec<AttachmentRef>,
 ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), ExecutionHostError>> {
@@ -1391,7 +1391,7 @@ mod mcp_media_tests {
     #[tokio::test]
     async fn printing_an_mcp_content_block_attaches_its_stored_media() {
         let directory = tempfile::tempdir().expect("attachment directory");
-        let store = lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+        let store = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(directory.path()),
         ));
         let reference = store

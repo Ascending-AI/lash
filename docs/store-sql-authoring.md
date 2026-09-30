@@ -42,10 +42,10 @@ is not a membership class.
 ## 2. Write the shared table module
 
 ```rust
-//! `attachment_manifest`: one row per attachment intent in a session.
+//! `attachment_referrers`: one row per attachment intent in a session.
 
 /// The table's unprefixed name.
-pub const TABLE: &str = "attachment_manifest";
+pub const TABLE: &str = "attachment_referrers";
 
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str = "attachment_id, session_id, canonical_uri, …";
@@ -57,10 +57,10 @@ pub const INSERT_COLUMNS: &str = "attachment_id, session_id, canonical_uri, …"
 pub const ENTRY_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms, …";
 
 lash_store_sql::statements! {
-    /// `attachment_manifest` statements both backends issue verbatim.
-    pub struct ManifestStatements @ "attachment_manifest" {
+    /// `attachment_referrers` statements both backends issue verbatim.
+    pub struct ManifestStatements @ "attachment_referrers" {
         /// Every digest the manifest still roots.
-        select_rooted_ids = "SELECT DISTINCT attachment_id FROM attachment_manifest";
+        select_rooted_ids = "SELECT DISTINCT attachment_id FROM attachment_referrers";
     }
 }
 ```
@@ -221,18 +221,12 @@ Same macro, same family prefix, in the backend's table module:
 
 ```rust
 lash_store_sql::statements! {
-    /// `lash_attachment_manifest` statements only PostgreSQL issues.
-    pub(crate) struct ManifestPostgresStatements @ "attachment_manifest" {
-        /// Every uncommitted intent older than `?1`.
-        ///
-        /// The ordering is the fork: PostgreSQL reports digest order, SQLite
-        /// reports oldest intent first. Both are total and neither caller
-        /// depends on the other's, so the two orders are left exactly as they
-        /// stand rather than unified inside a refactor.
-        select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                 committed_at_ms, owner_kind, owner_id, written_at_ms
-             FROM attachment_manifest
-             WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
+    /// Attachment statements only PostgreSQL issues.
+    pub(crate) struct AttachmentPostgresStatements @ "attachment_referrers" {
+        /// Every pending write of the referrer `?1`, `?2`, in digest order.
+        select_referrer_pending_writes = "SELECT attachment_id, write_id
+             FROM attachment_pending_writes
+             WHERE referrer_kind = ?1 AND referrer_id = ?2
              ORDER BY attachment_id ASC";
     }
 }
@@ -264,10 +258,10 @@ layout** it can be issued under and picks at the call site:
 ```rust
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     let catalog = Dialect::sqlite(CATALOG);
-    let beside_registry = Dialect::sqlite(CATALOG_BESIDE_REGISTRY);
+    let with_registry = Dialect::sqlite(CATALOG_WITH_REGISTRY);
     AttachmentSql {
         manifest: ManifestStatements::render(catalog),
-        manifest_process_owner: ManifestProcessOwnerStatements::render(beside_registry),
+        catalog_registry: CatalogRegistryStatements::render(with_registry),
         …
     }
 });
@@ -287,7 +281,7 @@ statement's reported name for tracing and store metrics.
 A SQLite `Dialect` carries a [`TableLayout`]: an ordered list of the databases
 this connection reaches and the tables each one holds. The renderer resolves
 **each table name separately**, so one statement can join
-`main.attachment_manifest` to `process_registry.processes`:
+`main.attachment_referrer_edges` to `process_registry.processes`:
 
 ```rust
 const CATALOG_TABLES: &[&str] = &[
@@ -299,7 +293,7 @@ const CATALOG_TABLES: &[&str] = &[
 ];
 
 /// The session catalog with a bound process registry attached.
-const CATALOG_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
+const CATALOG_WITH_REGISTRY: TableLayout = TableLayout::new(&[
     SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES),
     SchemaTables::new(Schema::ProcessRegistry.qualifier(), &["processes"]),
 ]);

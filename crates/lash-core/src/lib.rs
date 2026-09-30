@@ -9,12 +9,13 @@
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
 //! provide the driver implementation.
 
-/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// Re-exported so `impl_noop_attachment_referrers!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
 pub use async_trait::async_trait;
 
+pub use lash_core_execution::ExecutionOwner;
 pub use lash_core_execution::admitted_scope_wire;
 pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;
@@ -35,7 +36,7 @@ pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::impl_current_fleet_format;
-pub use lash_core_store::impl_noop_attachment_manifest;
+pub use lash_core_store::impl_noop_attachment_referrers;
 pub use lash_core_store::protocol_turn_options::{
     PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions, ProtocolTurnOptionsError,
 };
@@ -166,7 +167,7 @@ pub mod facade_support {
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::EmptyRootSetPolicy;
     pub use crate::attachments::FileAttachmentStore;
-    pub use crate::attachments::SessionAttachmentStore;
+    pub use crate::attachments::RuntimeAttachmentStore;
     pub use crate::attachments::reclaim_unreferenced_attachments;
     pub use crate::chronological::BorrowedChronologicalEntry;
     pub use crate::chronological::BorrowedChronologicalMessage;
@@ -366,7 +367,6 @@ pub mod facade_support {
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::process_child_session_id;
-    pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
@@ -595,9 +595,10 @@ pub use triggers::{
 pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
-    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
-    SubscriptionRevisionId, artifact_referrer_ended, trigger_incarnation,
+    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
+    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
+    ResolvedArtifactCleanup, RuntimeOwner, SubscriptionRevisionId, UploadReferrerId,
+    artifact_referrer_ended, trigger_incarnation,
 };
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
@@ -812,24 +813,23 @@ pub use store::{
     AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
-    AttachmentDeleteStallReason, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwner, AttachmentOwnerKind, AttachmentSettlementOutcome, AttachmentSweepGeneration,
-    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, BlobRef,
-    CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit,
-    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
+    AttachmentDeleteStallReason, AttachmentReferrers, AttachmentSettlementOutcome,
+    AttachmentSweepGeneration, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
+    AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor,
+    CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage,
+    DurableSurface, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
+    GcReport, HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
     MAX_ATTACHMENT_DELETE_ATTEMPTS, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimeStore,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     ScanCoverage, SemanticBoundaryOperation, SessionAdmission, SessionBinding,
     SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
-    SessionLookup, SessionMeta, SessionStateAdmission, SessionStore, StoreBackend,
-    StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
-    StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore, VacuumReport, WriterPin,
-    compare_releases, release_stamp_advances,
+    SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
+    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
+    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
+    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
@@ -852,7 +852,7 @@ pub use tool_provider::{
 };
 #[doc(hidden)]
 pub mod core_internal {
-    pub use crate::runtime::RuntimeSessionServices;
+    pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
     pub use lash_core_execution::core_internal::{
         StartKeyDerivation, attach_process_invocation_correlation,
         clear_process_invocation_correlation,

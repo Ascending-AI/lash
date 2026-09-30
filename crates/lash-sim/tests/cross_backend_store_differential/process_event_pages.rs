@@ -79,12 +79,9 @@ pub(super) async fn compare_bounded_process_event_pages(
     };
 
     let sqlite_path = sqlite_root.join("process-event-pages.db");
-    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(
-        &sqlite_path,
-        sqlite_root.join("process-event-page-sessions"),
-    )
-    .await
-    .expect("open SQLite process-event page fixture");
+    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&sqlite_path)
+        .await
+        .expect("open SQLite process-event page fixture");
     let (sqlite_mint, postgres_mint) = paired_process_id_mints();
     let sqlite = sqlite.with_process_id_mint_for_testing(sqlite_mint);
     let postgres_registry = postgres

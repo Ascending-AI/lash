@@ -253,14 +253,14 @@ async fn open_runtime(
         Arc::new(SingleProviderResolver::new(provider(script)));
     let mut runtime_host = EmbeddedRuntimeHost::new(host_config);
     runtime_host.core.durability.attachment_store =
-        Arc::new(lash_core::facade_support::SessionAttachmentStore::new(
+        Arc::new(lash_core::facade_support::RuntimeAttachmentStore::new(
             attachments.clone(),
             Arc::new(
-                lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                lash_core::testing::conformance_support::PersistenceReferrersAdapter(Arc::clone(
                     store.store(),
                 )),
             ),
-            state.session_id.clone(),
+            lash_core::RuntimeOwner::Session(state.session_id.clone()),
         ));
     let services = PersistentRuntimeServices::new(
         plugins,
@@ -445,14 +445,14 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                 puts: AtomicUsize::new(0),
                 gets: AtomicUsize::new(0),
             });
-            let facade = Arc::new(lash_core::facade_support::SessionAttachmentStore::new(
+            let facade = Arc::new(lash_core::facade_support::RuntimeAttachmentStore::new(
                 attachments.clone(),
                 Arc::new(
-                    lash_core::testing::conformance_support::PersistenceManifestAdapter(
+                    lash_core::testing::conformance_support::PersistenceReferrersAdapter(
                         Arc::clone(store.store()),
                     ),
                 ),
-                session_id.clone(),
+                lash_core::RuntimeOwner::Session(session_id.clone()),
             ));
             let renderer = Arc::new(SwitchingRenderer {
                 mode: AtomicUsize::new(0),

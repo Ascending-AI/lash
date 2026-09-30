@@ -515,14 +515,17 @@ impl HandOff {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress: ingress.clone(),
+                attachments: Arc::clone(sessions) as Arc<dyn lash_core::AttachmentReferrers>,
                 sessions: Arc::clone(sessions),
                 process_workflow: LashProcessWorkflowImpl::new(
                     Arc::new(crate::process::RestateCoreProcessRunner::new(worker)),
                     Arc::clone(registry),
                     Arc::clone(continuations),
                     ingress.clone(),
+                    Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                     test_restate_authority_id(),
-                    generation.clone(), &crate::services::DEFAULT_NAMESPACE
+                    generation.clone(),
+                    &crate::services::DEFAULT_NAMESPACE,
                 )
                 // A held segment keeps retrying for as long as a law holds
                 // it — through a lease's lapse, too — and never pauses.

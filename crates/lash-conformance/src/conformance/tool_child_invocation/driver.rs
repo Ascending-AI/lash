@@ -108,17 +108,17 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         .expect("the provider has not been lent yet")
         .additional_intents = vec![
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-            session_id: session_id.clone(),
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
             process_id: scenario.intent_target.clone(),
             signal_name: "law_intent_signal".to_string(),
             payload: serde_json::json!({"signal": true}),
         }),
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-            session_id: session_id.clone(),
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
             process_id: scenario.intent_target.clone(),
         }),
         crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
-            session_id: session_id.clone(),
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
             request: crate::TriggerOccurrenceRequest::new(
                 "law",
                 "key",
@@ -128,7 +128,7 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         }),
         crate::ToolIntent::RegisterProcessDefinition(Box::new(
             crate::RegisterProcessDefinitionIntent {
-                session_id: session_id.clone(),
+                owner: crate::RuntimeOwner::Session(session_id.clone()),
                 engine_kind: "law".to_string(),
                 definition: serde_json::Value::Null,
                 env_spec: None,
@@ -139,7 +139,7 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             },
         )),
         crate::ToolIntent::RegisterTrigger(Box::new(crate::RegisterTriggerIntent {
-            session_id: session_id.clone(),
+            owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
             actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id.clone())),
             env_spec: None,
@@ -337,7 +337,10 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             other => panic!("unexpected vocabulary result at index {index}: {other:?}"),
         };
         assert_eq!(identity.intent_index as usize, index);
-        assert_eq!(identity.session_id, session_id);
+        assert_eq!(
+            identity.owner,
+            crate::RuntimeOwner::Session(session_id.clone())
+        );
         assert_eq!(
             identity.tool_call_id,
             leaf_call_id(&format!("{group_key}-call-4"))
@@ -415,7 +418,10 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         );
     };
     assert_eq!(*kind, crate::ToolIntentKind::StartProcess);
-    assert_eq!(identity.session_id, session_id);
+    assert_eq!(
+        identity.owner,
+        crate::RuntimeOwner::Session(session_id.clone())
+    );
     assert_eq!(
         identity.tool_call_id,
         leaf_call_id(&format!("{group_key}-call-7"))

@@ -579,34 +579,19 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for SqliteStore {
-    fn can_prove_process_owner_death(&self) -> bool {
-        self.process_registry.is_some()
-    }
     async fn live_attachment_refs(
         &self,
-        intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<
         std::collections::BTreeSet<lash_core_execution::AttachmentId>,
         lash_core_execution::StoreError,
     > {
-        let catalog = self.location.target();
-        if !catalog.exists() {
-            return Err(lash_core_execution::StoreError::Backend(format!(
-                "attachment GC aborted: durable-core catalog {catalog} does not exist, so live attachment refs cannot be enumerated"
+        if !self.location.target().exists() {
+            return Err(StoreError::Backend(format!(
+                "attachment catalog {} does not exist",
+                self.location.target()
             )));
         }
-        let store = self;
-        lash_core_execution::AttachmentManifest::forget_aged_uncommitted_intents(
-            store,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await?;
-        Ok(
-            lash_core_execution::AttachmentManifest::list_all_refs(store)
-                .await?
-                .into_iter()
-                .collect(),
-        )
+        self.rooted_attachment_ids().await
     }
     async fn list_condemnations(
         &self,
@@ -620,15 +605,8 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
     async fn has_live_attachment_ref(
         &self,
         id: &lash_core_execution::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core_execution::StoreError> {
-        let store = self;
-        lash_core_execution::AttachmentManifest::has_live_ref_for_id(
-            store,
-            id,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+        self.has_attachment_root(id).await
     }
     fn fence(&self) -> lash_core_execution::AttachmentGcFence {
         lash_core_execution::AttachmentGcFence::Fenced
@@ -649,10 +627,9 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
     async fn condemn_attachment(
         &self,
         id: &lash_core_execution::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
-        SqliteStore::condemn_attachment(self, id, intent_grace_cutoff_epoch_ms, generation).await
+        SqliteStore::condemn_attachment(self, id, generation).await
     }
     async fn arm_attachment_delete(
         &self,

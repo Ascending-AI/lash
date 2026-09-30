@@ -275,7 +275,6 @@ pub(crate) async fn standalone_process_registry(
     let registry = lash_sqlite_store::SqliteProcessRegistry::open_with_clock(
         &sessions.join(format!("standalone-registry-{}.db", uuid::Uuid::new_v4())),
         clock,
-        sessions.clone(),
     )
     .await
     .expect("open a standalone process registry");

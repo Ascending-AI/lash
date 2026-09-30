@@ -59,7 +59,7 @@ pub use lash_core_execution::testing::kernel_internals::{
 pub mod causal {
     pub fn direct_effect_invocation(
         execution_scope: &crate::ExecutionScope,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         usage_source: &str,
         replay_discriminator: String,
         turn_id: Option<&crate::TurnId>,
@@ -67,7 +67,7 @@ pub mod causal {
     ) -> crate::RuntimeEffectInvocation {
         crate::runtime::causal::direct_effect_invocation(
             execution_scope,
-            session_id,
+            owner,
             usage_source,
             replay_discriminator,
             turn_id,

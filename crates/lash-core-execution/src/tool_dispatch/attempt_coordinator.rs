@@ -1061,7 +1061,7 @@ mod projection_tests {
     ) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
-                session_id: SessionId::from("session"),
+                owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: crate::ToolCallId::fixture("call"),
                 intent_index,

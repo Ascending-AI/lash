@@ -453,13 +453,15 @@ fn tool_context_with_provider<'run>(
             lash_core::PluginOptions::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from(SESSION.to_string()),
-        agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
+        owner: lash_core::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from(SESSION.to_string()),
+            agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: lash_core::engine::NullObservationSink::arc(),
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(
-            lash_core::facade_support::SessionAttachmentStore::unavailable(),
+            lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
         ),
         attachment_source_policy: Arc::new(lash_core::attachments::OpenAttachmentSourcePolicy),
         turn_context: lash_core::TurnContext::default(),
@@ -524,7 +526,13 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.name(), "attempt_atomicity");
         // The sealed attempt projection a body receives.
-        assert_eq!(call.context.session_id(), SESSION);
+        assert_eq!(
+            call.context
+                .session_id()
+                .expect("the call runs in a session")
+                .as_str(),
+            SESSION
+        );
         assert_eq!(
             call.context.call_id(),
             &lash_core::ToolCallId::fixture(CALL_ID)
@@ -883,7 +891,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
 
         let intents = lash_core::ToolIntents::v3(vec![
             lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                session_id: SessionId::from(SESSION.to_string()),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
                 declaration: lash_core::ProcessStartDeclaration::external(
                     lash_core::ProcessOriginator::host_scoped("intent-test"),
                     serde_json::json!({"step": "start"}),
@@ -891,19 +899,19 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
                 ),
             })),
             lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                session_id: SessionId::from(SESSION.to_string()),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 signal_name: "resume".to_string(),
                 payload: serde_json::json!({"step": "signal"}),
             }),
             lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-                session_id: SessionId::from(SESSION.to_string()),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 event_type: "attempt.atomicity.note".to_string(),
                 payload: serde_json::json!({"step": "event"}),
             }),
             lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-                session_id: SessionId::from(SESSION.to_string()),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
             }),
         ]);
@@ -917,10 +925,10 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         .expect("execute intent batch");
         assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
         let literal_ids = [
-            "tool-intent:v2:blake3:272e4e3c22008c4aff390c9b25429a355cce415dac84a254a399e0cf0ec628a1",
-            "tool-intent:v2:blake3:416d06856ee35512429c47dabf453d34aa1800a4620073d764291d3a59b4536f",
-            "tool-intent:v2:blake3:9200f8dc6746be4c2ae58b2c942d9cbfdaaa43f76e222d82eae17e2715cf129e",
-            "tool-intent:v2:blake3:a4386a925e26ef9042805543b6ff568675fdf3d7ddacf0d58f163b92fc60b2da",
+            "tool-intent:v2:blake3:0b4dd51f5a5da7e167e266ea6e0cc9a638091805010e859f7e34cdbd813b8c9f",
+            "tool-intent:v2:blake3:ede3bbe05962c7849d7e99e040936187cfe2dd1db33e267cc50cb7b3c8bc05c0",
+            "tool-intent:v2:blake3:efd014fdec9b03262454c733dd6b2097a8e96b7397295a7cca990e251fc504f4",
+            "tool-intent:v2:blake3:1486ba313e4e36256cf57e1d82d4b51389a2f20865ae8852ae37f89294a3f47d",
         ];
         let actual_ids = outcomes
             .iter()
@@ -973,7 +981,9 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
             (0..=lash_core::TOOL_INTENT_MAX_COUNT)
                 .map(|index| {
                     lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                        session_id: SessionId::from(SESSION.to_string()),
+                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                            SESSION.to_string(),
+                        )),
                         process_id: fixtures.live.clone(),
                         signal_name: "resume".to_string(),
                         payload: serde_json::json!({"index": index}),
@@ -1036,7 +1046,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         let ledger = NestedJournalLedger::new();
         let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
         let identity = lash_core::derive_tool_intent_identity(
-            &SessionId::from(SESSION),
+            &lash_core::RuntimeOwner::Session(SessionId::from(SESSION)),
             TURN,
             &lash_core::ToolCallId::fixture(CALL_ID),
             9,
@@ -1149,7 +1159,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         let dispatch = tool.dispatch.as_ref().clone();
         let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
             lash_core::SignalProcessIntent {
-                session_id: SessionId::from(SESSION.to_string()),
+                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 signal_name: "resume".to_string(),
                 payload: serde_json::json!({"recorded": "payload"}),
@@ -1808,10 +1818,9 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
         let tool = raw_client_probe(&sentinel, &fixtures, &provider);
         let dispatch = Arc::clone(&tool.dispatch);
         let execution_context = lash_core::RuntimeExecutionContext::new(
-            SessionId::from(SESSION.to_string()),
             dispatch,
             fixtures.backend_handle.process_env_store(),
-            Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
+            Arc::new(lash_core::facade_support::RuntimeAttachmentStore::unavailable()),
             Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
             lash_core::TurnContext::default(),
         );

@@ -23,7 +23,7 @@ pub struct EmbeddedRuntimeBuilder {
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
     store: Option<crate::store::SessionStore>,
-    attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
+    attachment_referrers_store: Option<Arc<dyn crate::store::RuntimeStore>>,
     // Keep the work wiring off the async build frame.
     work: Box<RuntimeWork>,
 }
@@ -42,7 +42,7 @@ impl EmbeddedRuntimeBuilder {
             plugin_source: PluginSource::Host(PluginHost::empty()),
             core,
             store: None,
-            attachment_manifest_store: None,
+            attachment_referrers_store: None,
             work: Box::new(RuntimeWork::sessions_only(Arc::new(
                 crate::NoSessionWork::new(),
             ))),
@@ -146,13 +146,13 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_attachment_manifest_store(
+    pub fn with_attachment_referrers_store(
         mut self,
         store: Arc<dyn crate::store::RuntimeStore>,
     ) -> Self {
         // Runtime state still uses `self.store`; only attachment intent
         // persistence is redirected to this store.
-        self.attachment_manifest_store = Some(store);
+        self.attachment_referrers_store = Some(store);
         self
     }
 
@@ -298,8 +298,8 @@ impl EmbeddedRuntimeBuilder {
         let state = self.resolve_state().await?;
         let plugins = self.resolve_plugins(&state)?;
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);
-        if let Some(manifest_store) = self.attachment_manifest_store {
-            persistence = persistence.with_attachment_manifest_store(manifest_store);
+        if let Some(manifest_store) = self.attachment_referrers_store {
+            persistence = persistence.with_attachment_referrers_store(manifest_store);
         }
         let embedded_host = EmbeddedRuntimeHost::new(self.core);
         // `assemble_runtime` owns the (store, registry) wiring + residency so the

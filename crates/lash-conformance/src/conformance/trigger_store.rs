@@ -542,7 +542,7 @@ fn sample_draft(
             serde_json::json!({"account": "a"}),
         ),
         subscription_key: subscription_key.to_string(),
-        env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:{session_id}")),
+        env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:fixture-{session_id}")),
         wake_target: Some(crate::SessionScope::new(session_id)),
         name: Some(process_name.to_string()),
         source_type: "ui.button.pressed".to_string(),

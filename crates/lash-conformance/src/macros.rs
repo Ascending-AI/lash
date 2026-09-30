@@ -135,9 +135,8 @@ macro_rules! runtime_persistence_tests {
             (session_metadata_round_trips, "root"),
             (head_and_window_reads_agree_for_each_named_session, "read-agreement"),
             (session_metadata_relation_is_write_once, "root"),
-            (attachment_manifest_records_intent_and_commit_stamps, "root"),
-            (attachment_manifest_keeps_same_content_ownership_per_session, "root"),
-            (attachment_manifest_reference_tracking_and_gc_root_set, "root"),
+            (attachment_writes_keep_independent_referrers, "root"),
+            (attachment_acquisition_preserves_receiving_referrer, "root"),
             (final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash, "root"),
             (append_request_receipt_replays_after_head_advance, "root"),
             (append_request_receipt_rejects_changed_content, "root"),
@@ -805,13 +804,11 @@ macro_rules! attachment_adoption_tests {
     ($fixture:block) => {
         $crate::attachment_adoption_tests!(@catalogue $fixture;
             bytes [
-                (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
-                (attachment_prefix_pin_survives_owner_delete_then_reclaims_after_unpin, "attachment-prefix-pin"),
+                (cross_session_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
                 (concurrent_adoption_deletes_once, "attachment-condemnation-concurrent-adoption"),
             ]
             roots [
                 (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),
-                (attachment_owner_identity_round_trips_conformance, "attachment-owner-identity-round-trip"),
             ]
         );
     };
@@ -1232,10 +1229,7 @@ macro_rules! __process_prune_reclaim_register {
 macro_rules! process_prune_reclaim_tests {
     ($fixture:block) => {
         $crate::process_prune_reclaim_tests!(@catalogue $fixture; [
-            (process_prune_reclaims_tombstones_owned_by_deleted_sessions, "process-prune-tombstone-reclaim", registry),
-            (process_prune_records_deletions_for_later_reclaim, "process-prune-records-deletions", registry),
-            (process_prune_reclaims_checkpoint_blobs_and_propagates_failure, "process-prune-checkpoint-blob-reclaim", blob),
-            (process_prune_reclaims_content_aliased_checkpoint_roots, "process-prune-content-alias", blob),
+            (process_prune_preserves_independent_session_checkpoint_roots, "process-prune-independent-checkpoints", blob),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
@@ -1628,9 +1622,8 @@ macro_rules! session_failure_evidence_tests {
 macro_rules! process_prune_session_store_tests {
     ($fixture:block) => {
         $crate::process_prune_session_store_tests!(@catalogue $fixture; [
-            (process_prune_deletes_owned_session_stores, "process-prune-session-store-cleanup"),
-            (a_same_start_key_successor_after_prune_owns_fresh_session_stores, "same-key-successor-after-prune"),
-            (compacted_process_tombstone_never_reopens_derived_sessions, "compacted-derived-sessions"),
+            (ended_process_record_has_no_attachment_edges, "process-prune-session-store-cleanup"),
+            (a_same_start_key_successor_after_prune_has_independent_attachment_referrers, "same-key-successor-after-prune"),
             (reclaim_races_fork_and_unpin_without_using_process_roots, "reclaim-fork-unpin-race"),
         ]);
     };
@@ -1833,66 +1826,6 @@ macro_rules! abandoned_attachment_recovery_tests {
                 let _ = $label;
                 let (factory, make_bytes, reopen) = make().await;
                 $crate::registration_macro_support::$law(factory, make_bytes, reopen).await;
-            }
-        )*
-    };
-}
-
-/// Register cold attachment-owner replay.
-#[macro_export]
-macro_rules! attachment_owner_cold_replay_tests {
-    ($fixture:block) => {
-        $crate::attachment_owner_cold_replay_tests!(@catalogue $fixture; [
-            (attachment_owner_cold_replay, "attachment-owner-cold-replay"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, backend) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! attachment_owner_degraded_tests {
-    ($fixture:block) => {
-        $crate::attachment_owner_degraded_tests!(@catalogue $fixture; [
-            (attachment_owner_degraded_proof, "attachment-owner-degraded-proof"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, factory, attachments) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(factory, attachments).await;
-            }
-        )*
-    };
-}
-
-/// Register the retained-output crash-before-commit law (FIG-1643) over a
-/// fixture yielding `(guard, deployment store, attachment backend)`.
-#[macro_export]
-macro_rules! retained_output_reclamation_tests {
-    ($fixture:block) => {
-        $crate::retained_output_reclamation_tests!(@catalogue $fixture; [
-            (retained_output_crash_before_commit_is_reclaimed, "retained-output-crash-before-commit"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, factory, attachments) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(factory, attachments).await;
             }
         )*
     };
@@ -2144,6 +2077,27 @@ macro_rules! effect_host_await_event_witness_tests {
             );
         )*
     };
+}
+
+/// Register each durable attachment-referrer law independently.
+#[macro_export]
+macro_rules! attachment_referrer_tests {
+    ($fixture:block) => { $crate::attachment_referrer_tests!(@laws $fixture; [
+        ended_process_record_refuses_attachment_writes_and_acquisitions,
+        upload_staging_identities_are_distinct_guarded_and_fenced_independently,
+        commit_and_enqueue_acquire_session_edges_all_or_nothing,
+        retained_output_is_held_by_its_execution_until_a_commit_names_it,
+        attachment_prefix_pin_keeps_the_session_edge_until_unpin,
+        session_referrer_waits_for_graph_retirement,
+        condemnation_needs_no_edge_and_no_pending_write,
+    ]); };
+    (@laws $fixture:block; [$($law:ident),* $(,)?]) => { $(
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, handles) = $fixture;
+            $crate::$law(handles).await;
+        }
+    )* };
 }
 
 /// Register the durable queue's post-mutation observation recovery law.

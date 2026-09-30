@@ -43,10 +43,15 @@ pub(super) fn agent_frame_switch_materializes(
         )
 }
 
+/// Every stored attachment the turn's commit makes history reference: tool
+/// outputs, omitted calls, message parts, the outputs a tool result retained
+/// out of history, and the outputs the turn's code cells retained (FIG-1643).
+/// The commit acquires the session's edge on each one.
 pub(super) fn committed_attachment_ids(
     state: &RuntimeSessionState,
     tool_calls: &[ToolCallRecord],
     omitted: Option<&OmittedToolCalls>,
+    retained_outputs: &[crate::RetainedOutput],
 ) -> Vec<crate::AttachmentId> {
     let mut attachment_ids = BTreeSet::new();
     for call in tool_calls {
@@ -72,7 +77,13 @@ pub(super) fn committed_attachment_ids(
             {
                 attachment_ids.insert(attachment_ref.id.clone());
             }
+            for retained in part.retained_outputs() {
+                attachment_ids.insert(retained.reference.id.clone());
+            }
         }
+    }
+    for retained in retained_outputs {
+        attachment_ids.insert(retained.reference.id.clone());
     }
     attachment_ids.into_iter().collect()
 }
@@ -158,13 +169,49 @@ mod tests {
             )),
         }];
 
-        let ids = committed_attachment_ids(&state, &tool_calls, None);
+        let ids = committed_attachment_ids(&state, &tool_calls, None, &[]);
 
         assert_eq!(
             ids,
             vec![
                 crate::AttachmentId::parse("message-ref").expect("valid attachment id"),
                 crate::AttachmentId::parse("tool-output").expect("valid attachment id"),
+            ]
+        );
+    }
+
+    /// FIG-1643: a retained output's attachment is history's, whether a tool
+    /// result in a message retained it or a code cell did, and the commit
+    /// names both.
+    #[test]
+    fn committed_attachment_ids_include_retained_outputs() {
+        let retained = |id: &str| crate::RetainedOutput {
+            reference: attachment_ref(id),
+            witness: "witness".to_string(),
+        };
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let message = crate::Message {
+            id: "result".to_string(),
+            role: crate::MessageRole::User,
+            parts: std::sync::Arc::new(vec![crate::Part::tool_result(
+                "result.p0".to_string(),
+                vec![crate::ModelToolReturnPart::Retained(retained(
+                    "retained-tool-result",
+                ))],
+                crate::ToolCallId::fixture("call-1"),
+                "oversized".to_string(),
+            )]),
+            origin: None,
+        };
+        state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
+
+        let ids = committed_attachment_ids(&state, &[], None, &[retained("retained-cell-print")]);
+
+        assert_eq!(
+            ids,
+            vec![
+                crate::AttachmentId::parse("retained-cell-print").expect("valid attachment id"),
+                crate::AttachmentId::parse("retained-tool-result").expect("valid attachment id"),
             ]
         );
     }
@@ -180,7 +227,7 @@ mod tests {
             ))],
         };
 
-        let ids = committed_attachment_ids(&state, &[], Some(&omitted));
+        let ids = committed_attachment_ids(&state, &[], Some(&omitted), &[]);
 
         assert_eq!(
             ids,

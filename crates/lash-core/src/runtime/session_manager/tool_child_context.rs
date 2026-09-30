@@ -2,7 +2,6 @@
 //! builds it (FIG-3712): the session's own wiring, with no opener to lend it.
 
 use super::*;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl RuntimeSessionServices {
     /// This session's tool-execution context for a group tool child whose
@@ -19,14 +18,11 @@ impl RuntimeSessionServices {
         self: &Arc<Self>,
         lent_controller: crate::ScopedEffectController<'static>,
     ) -> Result<crate::tool_dispatch::ToolDispatchContext<'static>, crate::PluginError> {
-        let tool_surface = self
-            .current
-            .plugins
-            .pin_resolved_tool_surface(&self.current.session_id)?;
+        let tool_surface = self.current.plugins.pin_resolved_tool_surface()?;
         let effect_controller = lent_controller;
         let direct_completions = self.direct_completion_client(effect_controller.clone(), None);
-        let state = self.current.snapshot.to_runtime_state();
-        let execution_env_spec = state.process_execution_env_spec(&self.current.policy);
+        let execution_env_spec = self.current.execution_env_spec()?;
+        let owner = self.current.execution_owner()?;
         // Never read: the driver points the observer at its recorder.
         let observer = crate::engine::NullObservationSink::arc();
         Ok(crate::tool_dispatch::ToolDispatchContext {
@@ -46,12 +42,7 @@ impl RuntimeSessionServices {
             parent_invocation: None,
             observation_call_key: None,
             execution_env_spec,
-            session_id: self.current.session_id.clone(),
-            agent_frame_id: state.current_frame_node_id.clone().ok_or_else(|| {
-                crate::PluginError::Session(
-                    "a tool child's session has no initialized agent frame".to_string(),
-                )
-            })?,
+            owner,
             observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

@@ -145,7 +145,6 @@ fn realistic_commit(
             AttachmentId::parse(format!("{session_id}:attachment:{index:08}"))
                 .expect("valid attachment id")
         })
-        .step_by(2)
         .collect::<Vec<_>>();
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
@@ -226,70 +225,35 @@ fn adopted_attachment_ids(commit: &RuntimeCommit) -> impl Iterator<Item = Attach
     })
 }
 
-fn sqlite_seed_attachment_intents(database_path: &std::path::Path, commit: &RuntimeCommit) {
-    let turn_id = commit
-        .turn_commit
-        .operation
-        .turn_id()
-        .expect("benchmark commit has a turn owner");
+fn sqlite_seed_attachment_uploads(database_path: &std::path::Path, commit: &RuntimeCommit) {
     let mut connection = Connection::open(database_path).expect("open SQLite benchmark fixture");
-    let transaction = connection
-        .transaction()
-        .expect("begin SQLite benchmark fixture transaction");
-    {
-        let mut statement = transaction
-            .prepare(
-                "INSERT INTO attachment_manifest
-                    (attachment_id, session_id, canonical_uri, intent_at_ms,
-                     committed_at_ms, owner_kind, owner_id)
-                 VALUES (?1, ?2, ?3, 1, NULL, 'turn', ?4)",
+    let transaction = connection.transaction().expect("begin fixture");
+    for id in adopted_attachment_ids(commit) {
+        transaction
+            .execute(
+                "INSERT INTO attachment_uploads (attachment_id, written_at_ms) VALUES (?1, 1)",
+                params![id.as_str()],
             )
-            .expect("prepare SQLite benchmark intent insert");
-        for attachment_id in adopted_attachment_ids(commit) {
-            statement
-                .execute(params![
-                    attachment_id.as_str(),
-                    commit.session_id.as_str(),
-                    format!("lash-attachment://blake3/{attachment_id}"),
-                    turn_id.as_str(),
-                ])
-                .expect("insert SQLite benchmark attachment intent");
-        }
+            .expect("seed upload evidence");
     }
-    transaction
-        .commit()
-        .expect("commit SQLite benchmark fixture transaction");
+    transaction.commit().expect("commit fixture");
 }
 
-async fn postgres_seed_attachment_intents(pool: &sqlx::PgPool, commit: &RuntimeCommit) {
+async fn postgres_seed_attachment_uploads(pool: &sqlx::PgPool, commit: &RuntimeCommit) {
     if commit.adopted_intent_rows == 0 {
         return;
     }
-    let turn_id = commit
-        .turn_commit
-        .operation
-        .turn_id()
-        .expect("benchmark commit has a turn owner");
     let mut query = QueryBuilder::<sqlx::Postgres>::new(
-        "INSERT INTO lash_attachment_manifest (
-            attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-            owner_kind, owner_id
-         ) ",
+        "INSERT INTO lash_attachment_uploads (attachment_id, written_at_ms) ",
     );
-    query.push_values(adopted_attachment_ids(commit), |mut row, attachment_id| {
-        row.push_bind(attachment_id.to_string())
-            .push_bind(commit.session_id.as_str())
-            .push_bind(format!("lash-attachment://blake3/{attachment_id}"))
-            .push_bind(1_i64)
-            .push_bind(None::<i64>)
-            .push_bind("turn")
-            .push_bind(turn_id.as_str());
+    query.push_values(adopted_attachment_ids(commit), |mut row, id| {
+        row.push_bind(id.to_string()).push_bind(1_i64);
     });
     query
         .build()
         .execute(pool)
         .await
-        .expect("insert PostgreSQL benchmark attachment intents");
+        .expect("seed upload evidence");
 }
 
 async fn time_commit(store: Arc<dyn RuntimeStore>, commit: RuntimeCommit) -> Duration {
@@ -347,7 +311,7 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
-            attachment_manifest_bytes,
+            attachment_referrer_bytes,
             follow_on_bytes,
             agent_frame_bytes,
             usage_delta_bytes,
@@ -357,7 +321,7 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
         }) if session_config_bytes == expected.session_config_bytes
             && graph_delta_bytes == expected.graph_delta_bytes
             && checkpoint_bytes == expected.checkpoint_bytes
-            && attachment_manifest_bytes == expected.attachment_manifest_bytes
+            && attachment_referrer_bytes == expected.attachment_referrer_bytes
             && follow_on_bytes == expected.follow_on_bytes
             && agent_frame_bytes == expected.agent_frame_bytes
             && usage_delta_bytes == expected.usage_delta_bytes
@@ -467,9 +431,9 @@ async fn measured_commit_size_curve() {
                 assert_eq!(sample_measurement.total_rows, case.rows.total());
                 assert_reference_admission(&commit);
                 match backend {
-                    "sqlite" => sqlite_seed_attachment_intents(&sqlite_database_path, &commit),
+                    "sqlite" => sqlite_seed_attachment_uploads(&sqlite_database_path, &commit),
                     "postgres" => {
-                        postgres_seed_attachment_intents(&postgres_fixture_pool, &commit).await
+                        postgres_seed_attachment_uploads(&postgres_fixture_pool, &commit).await
                     }
                     _ => unreachable!(),
                 }

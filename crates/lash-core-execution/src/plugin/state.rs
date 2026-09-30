@@ -67,10 +67,8 @@ pub enum PluginStateEdit {
 /// writes become durable only at the next runtime boundary commit.
 #[derive(Clone)]
 pub struct PluginStateStore {
-    // Typed rather than `Arc<str>` so the accessor below can hand back a
-    // borrowed `SessionId`: a shared string here would force every caller to
-    // re-mint the identity it already had.
-    session_id: SessionId,
+    /// Who the plugin session this store belongs to was built for.
+    owner: crate::RuntimeOwner,
     plugin_id: Arc<str>,
     state: Arc<Mutex<PluginStateRegistry>>,
 }
@@ -78,7 +76,7 @@ pub struct PluginStateStore {
 impl std::fmt::Debug for PluginStateStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginStateStore")
-            .field("session_id", &self.session_id)
+            .field("owner", &self.owner)
             .field("plugin_id", &self.plugin_id)
             .finish_non_exhaustive()
     }
@@ -92,7 +90,7 @@ impl PluginStateStore {
     }
 
     pub(super) fn bind(
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
@@ -103,13 +101,13 @@ impl PluginStateStore {
             .entry(plugin_id.to_owned())
             .or_default();
         Self {
-            session_id: session_id.clone(),
+            owner: owner.clone(),
             plugin_id: plugin_id.into(),
             state,
         }
     }
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
+    pub fn owner(&self) -> &crate::RuntimeOwner {
+        &self.owner
     }
     pub fn plugin_id(&self) -> &str {
         &self.plugin_id
@@ -350,8 +348,12 @@ impl PluginStateRegistry {
                 source: None,
             }));
             for (id, edits) in log {
-                PluginStateStore::bind(&SessionId::from(""), &id, candidate.clone())
-                    .apply(edits)?;
+                PluginStateStore::bind(
+                    &crate::RuntimeOwner::Session(SessionId::from("")),
+                    &id,
+                    candidate.clone(),
+                )
+                .apply(edits)?;
             }
             let mut hydrated = candidate.lock_recover().data.clone();
             for id in self.data.plugins.keys() {

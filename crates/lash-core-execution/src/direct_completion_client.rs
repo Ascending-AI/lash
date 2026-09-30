@@ -38,17 +38,17 @@ pub trait DirectCompletionService: Send + Sync {
     /// service that cannot prove it executes under those facts is refused
     /// rather than lent the opener's (ADR 0099 §3).
     ///
-    /// `session_id` is the session the child attributes its work to and
-    /// `execution_env_spec` is the environment resolved from the child's
-    /// recorded `ProcessExecutionEnvRef` — an implementation bound to a
-    /// different session returns `None`, and a returned service must resolve
-    /// policy under `execution_env_spec`, not whatever the opener is running.
+    /// `owner` is who the child's work runs for and `execution_env_spec` is
+    /// the environment resolved from the child's recorded
+    /// `ProcessExecutionEnvRef` — an implementation bound to a different
+    /// owner returns `None`, and a returned service must resolve policy under
+    /// `execution_env_spec`, not whatever the opener is running.
     fn bind_tool_child(
         self: Arc<Self>,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
     ) -> Option<Arc<dyn DirectCompletionService>> {
-        let _ = (session_id, execution_env_spec);
+        let _ = (owner, execution_env_spec);
         None
     }
 
@@ -220,8 +220,8 @@ impl<'run> DirectCompletionClient<'run> {
     /// What is lent is the live completion transport; what is rebound is
     /// everything that decides whose call it is:
     ///
-    /// * `session_id` — the session the child's work is attributed to, which a
-    ///   process opener's child need not share with its opener;
+    /// * `owner` — who the child's work runs for: the session and frame it
+    ///   recorded, or its process;
     /// * `execution_env_spec` — the environment resolved from the child's
     ///   recorded `ProcessExecutionEnvRef`, which a runtime-backed service
     ///   must rebind its policy resolution to or be refused;
@@ -232,12 +232,12 @@ impl<'run> DirectCompletionClient<'run> {
     /// * `usage_ledger` — the child's own accumulator, so every provider
     ///   attempt's spend lands on the child's settlement.
     ///
-    /// A service that cannot prove it executes under the recorded session and
+    /// A service that cannot prove it executes under the recorded owner and
     /// environment makes this a typed refusal rather than a silent authority
     /// leak.
     pub fn bind_tool_child<'child>(
         &self,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
         effect_controller: crate::runtime::ScopedEffectController<'child>,
         turn_id: Option<crate::TurnId>,
@@ -249,13 +249,13 @@ impl<'run> DirectCompletionClient<'run> {
                 let service = source
                     .service
                     .clone()
-                    .bind_tool_child(session_id, execution_env_spec)
+                    .bind_tool_child(owner, execution_env_spec)
                     .ok_or_else(|| {
                         crate::runtime::RuntimeEffectControllerError::new(
                             crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
                             format!(
                                 "the opener's direct-completion service cannot prove it executes \
-                                 under session `{session_id}` and the child's recorded \
+                                 for `{owner}` and the child's recorded \
                                  environment; a managed-LLM call is refused rather than journaled \
                                  under the opener's authority"
                             ),

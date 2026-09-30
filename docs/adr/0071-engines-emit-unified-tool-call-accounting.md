@@ -58,9 +58,10 @@ Owner promotion intentionally commits attachment scratch created by a turn even
 when core cannot inspect the opaque state that retains it. Failed or superseded
 turns are not promoted: their uncommitted rows remain live through recovery and
 become reclaimable only after durable supersession proof plus the retention
-window. Explicit `SessionAttachmentStore::delete()` and session deletion
-release eligible roots, while committed roots remain if retained history keeps
-their owner alive. Attachment GC reclaims bytes only after the final root ends.
+window. Explicit `RuntimeAttachmentStore::delete()` releases the holder's own
+edge, and session deletion ends the session's referrer once retained history
+no longer keeps it alive. Attachment GC reclaims bytes only after the final
+referrer ends.
 
 ## Shared-history retention
 

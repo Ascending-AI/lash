@@ -4,7 +4,7 @@ use crate::{AttachmentCreateMeta, AttachmentRef, AttachmentStoreError};
 
 #[derive(Clone)]
 pub struct ToolAttachmentClient {
-    pub(super) store: Arc<crate::SessionAttachmentStore>,
+    pub(super) store: Arc<crate::RuntimeAttachmentStore>,
 }
 
 impl ToolAttachmentClient {

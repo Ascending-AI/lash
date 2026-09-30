@@ -379,9 +379,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_tool_intent_submissions (
-             replay_key, session_id, execution_scope_id, tool_call_id,
+             replay_key, owner, execution_scope_id, tool_call_id,
              intent_index, kind, payload_hash, submission_json
-         ) VALUES ('bad-tool-kind', 'session', 'scope', 'call', 0,
+         ) VALUES ('bad-tool-kind', 'session:session', 'scope', 'call', 0,
                    'restart_process', 'hash', '{}')",
         "ck_tool_intent_submissions_kind",
     )

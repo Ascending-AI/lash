@@ -48,7 +48,7 @@ async fn register_test_subscription_record(
             )),
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
                 subscription_key,
-                lash::process::ProcessExecutionEnvRef::new(format!("process-env:{source_key}")),
+                lash::process::ProcessExecutionEnvRef::new(format!("execution-env:{source_key}")),
                 source_type,
                 source_key,
                 lash::process::ProcessInput::Engine {

@@ -191,7 +191,7 @@ async fn prepare_authorized_tool_call_with_context(
     let directives = match context
         .plugins
         .before_tool_call(ToolCallHookContext::new(
-            context.session_id.clone(),
+            context.owner.runtime_owner(),
             tool_name.clone(),
             args.clone(),
             manifest.argument_projection.clone(),
@@ -253,12 +253,14 @@ async fn prepare_authorized_tool_call_with_context(
         .map(|grant| grant.execution_binding.clone())
         .unwrap_or(serde_json::Value::Null);
     let prepare_context = ToolPrepareContext::with_execution_binding(
-        context.session_id.clone(),
+        context.owner.runtime_owner(),
         Arc::clone(&context.sessions),
         context.turn_context.clone(),
         pending.call_id.clone(),
         execution_binding,
-    );
+    )
+    .with_dispatch_catalog(Arc::clone(&context.tool_catalog))
+    .with_process_originator(context.process_originator.clone());
     let prepare_context = match grant {
         Some(grant) => prepare_context.with_granted_source_id(grant.source_id.clone()),
         None => prepare_context,

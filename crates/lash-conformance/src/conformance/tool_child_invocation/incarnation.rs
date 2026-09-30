@@ -48,8 +48,10 @@ fn process_leaf_request(
             ))
             .expect("a process scope derives an opener"),
             admitted_scope: crate::AdmittedScope::new(scope.clone()),
-            session_id: session_id.clone(),
-            agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: session_id.clone(),
+                agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
+            },
         },
         cancellation,
         env_ref.clone(),

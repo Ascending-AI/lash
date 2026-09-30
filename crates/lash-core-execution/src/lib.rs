@@ -10,7 +10,7 @@
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
 //! provide the driver implementation.
 
-/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// Re-exported so `impl_noop_attachment_referrers!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
@@ -23,19 +23,21 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::artifact_referrer::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
-    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
-    SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
+    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
+    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
+    ResolvedArtifactCleanup, SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
+    UploadReferrerId,
 };
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::compat;
 pub use lash_core_store::impl_current_fleet_format;
-pub use lash_core_store::impl_noop_attachment_manifest;
+pub use lash_core_store::impl_noop_attachment_referrers;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_store::process_id_for_test;
 pub use lash_core_store::process_identity::process_id_from_handle_json;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
+pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::surface_format;
 mod backend;
 pub use backend::{Backend, EffectEngine, StoreBindingId, StoreSet};
@@ -157,7 +159,7 @@ pub mod facade_support {
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::EmptyRootSetPolicy;
     pub use crate::attachments::FileAttachmentStore;
-    pub use crate::attachments::SessionAttachmentStore;
+    pub use crate::attachments::RuntimeAttachmentStore;
     pub use crate::attachments::reclaim_unreferenced_attachments;
     pub use crate::chronological::BorrowedChronologicalEntry;
     pub use crate::chronological::BorrowedChronologicalMessage;
@@ -342,7 +344,6 @@ pub mod facade_support {
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::process_child_session_id;
-    pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
@@ -745,6 +746,7 @@ pub use process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
     ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
+pub use runtime::ExecutionOwner;
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
 /// Intent realization publishes the execution environment a declared trigger
@@ -860,24 +862,23 @@ pub use store::{
     AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
-    AttachmentDeleteStallReason, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwner, AttachmentOwnerKind, AttachmentSettlementOutcome, AttachmentSweepGeneration,
-    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, BlobRef,
-    CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit,
-    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
+    AttachmentDeleteStallReason, AttachmentReferrers, AttachmentSettlementOutcome,
+    AttachmentSweepGeneration, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
+    AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor,
+    CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage,
+    DurableSurface, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
+    GcReport, HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
     MAX_ATTACHMENT_DELETE_ATTEMPTS, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimeStore,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     ScanCoverage, SemanticBoundaryOperation, SessionAdmission, SessionBinding,
     SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
-    SessionLookup, SessionMeta, SessionStateAdmission, SessionStore, StoreBackend,
-    StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
-    StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore, VacuumReport, WriterPin,
-    compare_releases, release_stamp_advances,
+    SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
+    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
+    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
+    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

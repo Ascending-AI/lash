@@ -25,10 +25,10 @@ deliveries, attachment owners, effect openers, trace keys and three wire
 formats, and the registration fingerprint existed only to decide whether a
 repeat under the same name was "the same" start.
 
-It also broke recovery after prune (FIG-3611 L4/L5): a re-registered name
-reused the pruned process's derived sessions (`process-env:{name}`,
-`process-session-turn:{name}`), which prune had tombstoned, so the new
-lifetime could not create them.
+Historically, it also broke recovery after prune (FIG-3611 L4/L5): a
+re-registered name reused the synthetic sessions derived from the pruned
+process's name, which prune had tombstoned, so the new lifetime could not
+create them. A process runtime has no sessions since ADR 0124.
 
 ## Decision
 
@@ -38,8 +38,8 @@ lifetime could not create them.
 process registrar mints one, inside the transaction that registers the
 process. There is no construction from an arbitrary string: an id is minted
 or parsed back from bytes a registrar minted, and deserialization validates
-the spelling. Every derived identity (the process's sessions, its effect
-opener, its attachment owner, its trace graph key, its handle) is derived
+the spelling. Every derived identity (its effect opener, its attachment
+referrer (`process_record`), its trace graph key, its handle) is derived
 from the minted id, so no two lifetimes can share one.
 
 `ProcessIncarnation`, `ProcessRef`, `resolve_process_ref`, every `*_ref`

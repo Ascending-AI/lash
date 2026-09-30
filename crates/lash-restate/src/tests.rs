@@ -24,8 +24,8 @@ use crate::durable_wait::{
 };
 use crate::process::{
     boundary_must_be_declined, handler_error_from_plugin, process_segment_workflow_key,
-    restate_process_terminal_await_key, restate_process_terminal_output,
-    restate_process_terminal_resolution, workflow_key_authority,
+    restate_process_terminal_await_key, restate_process_terminal_resolution,
+    workflow_key_authority,
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -752,10 +752,12 @@ fn restate_run_future_cross_thread_closure_wake_does_not_mask_the_terminal_park(
 /// Restate service-protocol message types used by the FIG-779/FIG-790 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
 /// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
-/// `CallCommand = 0x040D`, `CompletePromiseCommand = 0x040B`,
+/// `CallCommand = 0x040D`, `OneWayCallCommand = 0x040E`,
+/// `CompletePromiseCommand = 0x040B`,
 /// `OutputCommand = 0x0401`, `End = 0x0003`).
 const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
 const RESTATE_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040D;
+const RESTATE_ONE_WAY_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040E;
 const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
 const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
 const RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x0409;
@@ -1522,7 +1524,6 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
     }
 }
 
-mod attachment_owner_cold_replay_on_the_double;
 mod cancellation_and_effects;
 mod cancelled_turn_withheld_input_on_the_double;
 mod commit_retry_store;

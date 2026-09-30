@@ -21,7 +21,7 @@
 //! | --- | --- | --- |
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `usage_deltas`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
 //! | Session retention | `node_anchors`, `deleted_sessions` | `fork_points`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
-//! | Attachments | `attachment_manifest`, SQLite `artifact_refs`, PostgreSQL's artifact table | Manifest listing plus process-execution-environment reference recovery |
+//! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
@@ -74,8 +74,8 @@ use lash_core::runtime::{
     publish_process_execution_env,
 };
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, DeploymentStore,
-    ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
+    ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, BoundaryReason, Clock,
+    DeploymentStore, ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
     ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
@@ -83,13 +83,14 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
-    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand,
-    TriggerCommandOutcome, TriggerDeliveryReservation, TriggerDeliveryReservationOutcome,
-    TriggerInputBinding, TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest,
-    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TurnInput, TurnInputIngress, WaitKind, WaitState,
+    ProtocolTurnOptions, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover,
+    SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
+    SessionScope, SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -124,7 +125,7 @@ pub const FIXTURE_AWAIT_EVENT_SIGNING_SECRET: [u8; 32] = [0x88; 32];
 /// [`FIXTURE_AWAIT_EVENT_SIGNING_SECRET`] for why it is pinned.
 pub const FIXTURE_ATTACHMENT_WRITE_ID: &str = "88888888888848888888888888888888";
 
-/// The attachment whose manifest row carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
+/// The attachment whose pending write carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
 pub const FIXTURE_ATTACHMENT_ID: &str = "durable-read-attachment";
 /// The seed registers its three processes in this order on a registry
 /// minting sequentially (`ProcessIdMint::sequential_for_testing`), so each id
@@ -310,24 +311,34 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("commit identity-bearing fixture append");
 
     let attachment_id = AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id");
-    let attachment_intent = AttachmentIntent {
+    let attachment_write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment".to_string(),
-        intent_at_epoch_ms: 100,
-        owner: None,
+        claim: ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(SESSION_ID)))
+            .expect("fixture session attachment claim"),
     };
-    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = session
-        .begin_attachment_write(attachment_intent.clone())
+    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
+        .store
+        .begin_attachment_write(&attachment_write)
         .await
         .expect("begin fixture attachment write")
     else {
         panic!("the fixture digest must grant its writer");
     };
-    session
-        .complete_attachment_write(&attachment_intent, attachment_permit)
+    handles
+        .store
+        .complete_attachment_write(&attachment_write, attachment_permit)
         .await
         .expect("stamp fixture attachment upload");
+    // Keep an independent pending attempt for the fixture generators' token
+    // normalization and the durable pending-write shape, alongside the evidence.
+    assert!(matches!(
+        handles
+            .store
+            .begin_attachment_write(&attachment_write)
+            .await
+            .expect("begin fixture pending attachment write"),
+        lash_core::AttachmentWriteFence::Granted(_)
+    ));
 
     let mut loaded = load_fixture_state(&session).await;
     loaded.turn_index = 7;
@@ -777,12 +788,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         },
         "durable fixture semantic drift: usage ledger totals changed"
     );
-    assert!(
-        AttachmentManifest::list_all_refs(handles.store.as_ref())
-            .await
-            .expect("read fixture attachment manifest")
-            .contains(&AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id")),
-        "durable fixture semantic drift: committed attachment disappeared"
+    assert_eq!(
+        AttachmentReferrers::attachment_referrers(
+            handles.store.as_ref(),
+            &AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id"),
+        )
+        .await
+        .expect("read fixture attachment referrers"),
+        vec![ArtifactReferrer::Session(SessionId::from(SESSION_ID))],
+        "durable fixture semantic drift: committed session attachment edge disappeared"
     );
 
     let pinned = handles

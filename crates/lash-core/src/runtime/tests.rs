@@ -29,11 +29,11 @@ pub(crate) mod helpers {
             .expect("the recording factory holds the admitted session");
         let backend = sqlite.attachment_store();
         let attachment_backend: Arc<dyn crate::AttachmentStore> = backend.clone();
-        let manifest: Arc<dyn crate::AttachmentManifest> = store.clone();
-        let session = crate::SessionAttachmentStore::new(
+        let manifest: Arc<dyn crate::AttachmentReferrers> = store.clone();
+        let session = crate::RuntimeAttachmentStore::new(
             attachment_backend,
             manifest,
-            request.session_id.clone(),
+            crate::RuntimeOwner::Session(request.session_id.clone()),
         );
         let attachment = session
             .put(
@@ -46,18 +46,20 @@ pub(crate) mod helpers {
             )
             .await
             .expect("put attachment");
-        crate::AttachmentManifest::commit_refs(
+        let session_referrer = crate::ArtifactReferrer::Session(request.session_id.clone());
+        crate::AttachmentReferrers::acquire_attachment_refs(
             store.as_ref(),
-            &request.session_id,
+            &crate::ReferrerClaim::unguarded(session_referrer.clone())
+                .expect("a session claim is unguarded"),
             std::slice::from_ref(&attachment.id),
         )
         .await
         .expect("commit attachment ref");
-        assert_eq!(
-            crate::AttachmentManifest::list_all_refs(store.as_ref())
+        assert!(
+            crate::AttachmentReferrers::attachment_referrers(store.as_ref(), &attachment.id)
                 .await
-                .unwrap(),
-            vec![attachment.id.clone()]
+                .unwrap()
+                .contains(&session_referrer)
         );
 
         let report = crate::reclaim_unreferenced_attachments(

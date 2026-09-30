@@ -21,7 +21,7 @@ pub enum PluginOperationInvokeError {
 pub struct RuntimeServices {
     pub plugins: Arc<PluginSession>,
     pub tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
-    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub clock: Arc<dyn crate::Clock>,
     /// The session's view of the store it persists through.
@@ -29,7 +29,7 @@ pub struct RuntimeServices {
     /// Manifest persistence may differ from runtime-state persistence for
     /// ephemeral process runtimes whose manifest rows belong to a parent
     /// session's store.
-    pub attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
+    pub attachment_referrers_store: Option<Arc<dyn crate::store::RuntimeStore>>,
 }
 
 #[derive(Clone)]
@@ -62,7 +62,7 @@ impl RuntimeServices {
     /// a runtime with no session store still takes both ports from its host.
     pub fn new(
         plugins: Arc<PluginSession>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
         Self {
@@ -72,7 +72,7 @@ impl RuntimeServices {
             process_env_store,
             clock: Arc::new(crate::SystemClock),
             store: None,
-            attachment_manifest_store: None,
+            attachment_referrers_store: None,
         }
     }
 
@@ -93,7 +93,7 @@ impl RuntimeServices {
     /// session-scoped facade its host wraps around the backend's port.
     pub fn with_attachment_store(
         mut self,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
     ) -> Self {
         self.attachment_store = attachment_store;
         self
@@ -114,7 +114,7 @@ impl PersistentRuntimeServices {
     pub fn new(
         plugins: Arc<PluginSession>,
         store: crate::store::SessionStore,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
@@ -123,16 +123,16 @@ impl PersistentRuntimeServices {
             attachment_store,
             process_env_store,
             clock: Arc::new(crate::SystemClock),
-            attachment_manifest_store: Some(Arc::clone(store.store())),
+            attachment_referrers_store: Some(Arc::clone(store.store())),
             store: Some(store),
         })
     }
 
-    pub fn with_attachment_manifest_store(
+    pub fn with_attachment_referrers_store(
         mut self,
         store: Arc<dyn crate::store::RuntimeStore>,
     ) -> Self {
-        self.0.attachment_manifest_store = Some(store);
+        self.0.attachment_referrers_store = Some(store);
         self
     }
 

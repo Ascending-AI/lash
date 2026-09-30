@@ -167,7 +167,7 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
 impl crate::ProcessService for RuntimeSessionProcessService {
     async fn list_visible_for_attempt(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         if self
@@ -176,16 +176,12 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         {
             self.services
                 .processes
-                .list_model_tool_process_handles_for_attempt(
-                    &self.services.current,
-                    session_id,
-                    mode,
-                )
+                .list_model_tool_process_handles_for_attempt(&self.services.current, owner, mode)
                 .await
         } else {
             self.services
                 .processes
-                .list_process_handles_for_attempt(&self.services.current, session_id, mode)
+                .list_process_handles_for_attempt(&self.services.current, owner, mode)
                 .await
         }
     }
@@ -214,14 +210,14 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn start_from_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let record = self
             .services
             .processes
-            .start_process_from_recorded_intent(&self.services.current, session_id, request, scope)
+            .start_process_from_recorded_intent(&self.services.current, owner, request, scope)
             .await?;
         Ok(crate::ProcessHandleView::from_record(record))
     }
@@ -367,7 +363,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
@@ -377,36 +373,31 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         {
             self.services
                 .processes
-                .validate_model_tool_process_handles(&self.services.current, session_id, handle_ids)
+                .validate_model_tool_process_handles(&self.services.current, owner, handle_ids)
                 .await
         } else {
             self.services
                 .processes
-                .validate_process_handles_observed(
-                    &self.services.current,
-                    session_id,
-                    handle_ids,
-                    scope,
-                )
+                .validate_process_handles_observed(&self.services.current, owner, handle_ids, scope)
                 .await
         }
     }
 
     async fn cancel(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
             .processes
-            .cancel_process(&self.services.current, session_id, process_id, scope)
+            .cancel_process(&self.services.current, owner, process_id, scope)
             .await
     }
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
@@ -419,7 +410,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -464,7 +455,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         event_type: String,
         replay_key: String,
@@ -486,7 +477,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -497,7 +488,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .processes
             .signal_possessed_process(
                 &self.services.current,
-                session_id,
+                owner,
                 process_id,
                 signal_name,
                 signal_id,

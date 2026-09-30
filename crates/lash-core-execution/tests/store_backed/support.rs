@@ -116,7 +116,7 @@ pub fn plugin_host(
 /// handler that lent the controller.
 pub struct DispatchPorts<'h> {
     pub controller: crate::runtime::ScopedEffectController<'h>,
-    pub attachment_store: std::sync::Arc<crate::SessionAttachmentStore>,
+    pub attachment_store: std::sync::Arc<crate::RuntimeAttachmentStore>,
 }
 
 /// The runtime-operation scope a hand-built dispatch context's attempts run
@@ -177,7 +177,7 @@ pub fn double_dispatch_ports<'h>(
 ) -> DispatchPorts<'h> {
     DispatchPorts {
         controller: handler.scoped(),
-        attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
+        attachment_store: std::sync::Arc::new(crate::RuntimeAttachmentStore::ephemeral(
             double.lash_backend().attachment_store(),
         )),
     }
@@ -196,7 +196,7 @@ pub async fn controller_dispatch_ports(
             crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
+        attachment_store: std::sync::Arc::new(crate::RuntimeAttachmentStore::ephemeral(
             memory_store_backend().await.attachment_store(),
         )),
     }

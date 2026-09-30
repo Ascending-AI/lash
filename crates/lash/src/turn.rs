@@ -239,6 +239,9 @@ impl TurnReport {
             llm_calls,
             tool_calls,
             omitted,
+            // The turn's commit names each retained output; history holds
+            // its witness and reference, which the report's state carries.
+            retained_outputs: _,
             failure_evidence,
             errors,
         } = turn;
@@ -279,6 +282,7 @@ impl TurnReport {
             llm_calls: self.llm_calls.clone(),
             tool_calls: self.tool_calls.clone(),
             omitted: self.omitted.clone(),
+            retained_outputs: Vec::new(),
             failure_evidence: self.failure_evidence.clone(),
             errors: self.errors.clone(),
         };

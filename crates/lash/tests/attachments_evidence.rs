@@ -176,16 +176,16 @@ fn drain_area_witnesses() {
             let _ = source;
         }
     });
-    // W0038: lash::persistence::AttachmentStoreError::ManifestOperationFailed [variant]
+    // W0038: lash::persistence::AttachmentStoreError::ReferrersOperationFailed [variant]
     variant_witness(|value: &lash::persistence::AttachmentStoreError| {
         matches!(
             value,
-            lash::persistence::AttachmentStoreError::ManifestOperationFailed { .. }
+            lash::persistence::AttachmentStoreError::ReferrersOperationFailed { .. }
         )
     });
     // W0039: the manifest failure retains its operation, attachment id and typed cause.
     field_witness(|value: &lash::persistence::AttachmentStoreError| {
-        if let lash::persistence::AttachmentStoreError::ManifestOperationFailed {
+        if let lash::persistence::AttachmentStoreError::ReferrersOperationFailed {
             operation,
             attachment_id,
             source,
@@ -251,44 +251,44 @@ fn drain_area_witnesses() {
         Vec<lash::attachments::AttachmentId>,
     ) -> lash::persistence::RuntimeCommit =
         lash::persistence::RuntimeCommit::with_committed_attachments;
-    // W0049: lash::persistence::SessionAttachmentStore [struct]
-    type_witness::<lash::persistence::SessionAttachmentStore>();
-    // W0050: lash::persistence::SessionAttachmentStore::backend [function]
-    let _ = lash::persistence::SessionAttachmentStore::backend;
-    // W0051: lash::persistence::SessionAttachmentStore::delete [function]
-    let _ = lash::persistence::SessionAttachmentStore::delete;
-    // W0052: lash::persistence::SessionAttachmentStore::ephemeral [function]
-    let _ = lash::persistence::SessionAttachmentStore::ephemeral;
-    // W0053: lash::persistence::SessionAttachmentStore::get [function]
-    let _ = lash::persistence::SessionAttachmentStore::get;
-    // W0055: lash::persistence::SessionAttachmentStore::manifest [function]
-    let _ = lash::persistence::SessionAttachmentStore::manifest;
-    // W0056: lash::persistence::SessionAttachmentStore::new [function]
+    // W0049: lash::persistence::RuntimeAttachmentStore [struct]
+    type_witness::<lash::persistence::RuntimeAttachmentStore>();
+    // W0050: lash::persistence::RuntimeAttachmentStore::backend [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::backend;
+    // W0051: lash::persistence::RuntimeAttachmentStore::delete [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::delete;
+    // W0052: lash::persistence::RuntimeAttachmentStore::ephemeral [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::ephemeral;
+    // W0053: lash::persistence::RuntimeAttachmentStore::get [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::get;
+    // W0055: lash::persistence::RuntimeAttachmentStore::referrers [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::referrers;
+    // W0056: lash::persistence::RuntimeAttachmentStore::new [function]
     let _: fn(
         std::sync::Arc<dyn lash::persistence::AttachmentStore>,
-        std::sync::Arc<dyn lash::persistence::AttachmentManifest>,
-        String,
-    ) -> lash::persistence::SessionAttachmentStore = lash::persistence::SessionAttachmentStore::new;
-    // W0057: lash::persistence::SessionAttachmentStore::persistence [function]
-    let _ = lash::persistence::SessionAttachmentStore::persistence;
-    // W0058: lash::persistence::SessionAttachmentStore::put [function]
-    let _ = lash::persistence::SessionAttachmentStore::put;
-    // W0059: lash::persistence::SessionAttachmentStore::session_id [function]
-    let _ = lash::persistence::SessionAttachmentStore::session_id;
+        std::sync::Arc<dyn lash::persistence::AttachmentReferrers>,
+        lash::RuntimeOwner,
+    ) -> lash::persistence::RuntimeAttachmentStore = lash::persistence::RuntimeAttachmentStore::new;
+    // W0057: lash::persistence::RuntimeAttachmentStore::persistence [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::persistence;
+    // W0058: lash::persistence::RuntimeAttachmentStore::put [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::put;
+    // W0059: lash::persistence::RuntimeAttachmentStore::holder [function]
+    let _ = lash::persistence::RuntimeAttachmentStore::holder;
     // W0060: lash::persistence::StoreError::CheckpointComponentMissing::blob_ref [field]
     field_witness(|value: &lash::persistence::StoreError| {
         if let lash::persistence::StoreError::CheckpointComponentMissing { blob_ref, .. } = value {
             let _ = blob_ref;
         }
     });
-    // W0061: lash::persistence::StoreError::CommitByteBudgetExceeded::attachment_manifest_bytes [field]
+    // W0061: lash::persistence::StoreError::CommitByteBudgetExceeded::attachment_referrer_bytes [field]
     field_witness(|value: &lash::persistence::StoreError| {
         if let lash::persistence::StoreError::CommitByteBudgetExceeded {
-            attachment_manifest_bytes,
+            attachment_referrer_bytes,
             ..
         } = value
         {
-            let _ = attachment_manifest_bytes;
+            let _ = attachment_referrer_bytes;
         }
     });
     // W0062: lash::persistence::StoredBlobRef [struct]
@@ -333,84 +333,54 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::tracing::TraceContentBlock| {
         matches!(value, lash::tracing::TraceContentBlock::Attachment { .. })
     });
-    // W0083: lash::persistence::AttachmentIntent [struct]
-    type_witness::<lash::persistence::AttachmentIntent>();
-    // W0084: lash::persistence::AttachmentIntent::attachment_id [field]
-    field_witness(|value: &lash::persistence::AttachmentIntent| {
+    // W0083: lash::persistence::AttachmentWrite [struct]
+    type_witness::<lash::persistence::AttachmentWrite>();
+    // W0084: lash::persistence::AttachmentWrite::attachment_id [field]
+    field_witness(|value: &lash::persistence::AttachmentWrite| {
         let _ = &value.attachment_id;
     });
-    // W0085: lash::persistence::AttachmentIntent::canonical_uri [field]
-    field_witness(|value: &lash::persistence::AttachmentIntent| {
-        let _ = &value.canonical_uri;
+    // W0085: lash::persistence::AttachmentWrite::claim [field]
+    field_witness(|value: &lash::persistence::AttachmentWrite| {
+        let _ = &value.claim;
     });
-    // W0086: lash::persistence::AttachmentIntent::intent_at_epoch_ms [field]
-    field_witness(|value: &lash::persistence::AttachmentIntent| {
-        let _ = &value.intent_at_epoch_ms;
-    });
-    // W0089: lash::persistence::AttachmentIntent::session_id [field]
-    field_witness(|value: &lash::persistence::AttachmentIntent| {
-        let _ = &value.session_id;
-    });
-    // W0090: lash::persistence::AttachmentManifest [trait]
-    fn trait_witness_0090<T: lash::persistence::AttachmentManifest>() {}
-    // W0091: lash::persistence::AttachmentManifest::commit_refs [function]
-    fn meth_0091<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::commit_refs;
+    // W0090: lash::persistence::AttachmentReferrers [trait]
+    fn trait_witness_0090<T: lash::persistence::AttachmentReferrers>() {}
+    // W0091: lash::persistence::AttachmentReferrers::acquire_attachment_refs [function]
+    fn meth_0091<T: lash::persistence::AttachmentReferrers>(_: &T) {
+        let _ = T::acquire_attachment_refs;
     }
-    // W0092: lash::persistence::AttachmentManifest::forget [function]
-    fn meth_0092<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::forget;
+    // W0092: lash::persistence::AttachmentReferrers::forget_attachment_ref [function]
+    fn meth_0092<T: lash::persistence::AttachmentReferrers>(_: &T) {
+        let _ = T::forget_attachment_ref;
     }
-    // W0093: lash::persistence::AttachmentManifest::forget_aged_uncommitted_intents [function]
-    fn meth_0093<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::forget_aged_uncommitted_intents;
+    // W0093: lash::persistence::AttachmentReferrers::end_attachment_referrer [function]
+    fn meth_0093<T: lash::persistence::AttachmentReferrers>(_: &T) {
+        let _ = T::end_attachment_referrer;
     }
-    // W0094: lash::persistence::AttachmentManifest::has_live_ref_for_id [function]
-    fn meth_0094<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::has_live_ref_for_id;
+    // W0094: lash::persistence::AttachmentReferrers::session_referrer_state [function]
+    fn meth_0094<T: lash::persistence::AttachmentReferrers>(_: &T) {
+        let _ = T::session_referrer_state;
     }
-    // W0096: lash::persistence::AttachmentManifest::list_all_refs [function]
-    fn meth_0096<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::list_all_refs;
+    // W0096: lash::persistence::AttachmentReferrers::attachment_referrers [function]
+    fn meth_0096<T: lash::persistence::AttachmentReferrers>(_: &T) {
+        let _ = T::attachment_referrers;
     }
-    // W0097: lash::persistence::AttachmentManifest::list_uncommitted [function]
-    fn meth_0097<T: lash::persistence::AttachmentManifest>(_: &T) {
-        let _ = T::list_uncommitted;
-    }
-    // W0099: lash::persistence::AttachmentManifestEntry [struct]
-    type_witness::<lash::persistence::AttachmentManifestEntry>();
-    // W0100: lash::persistence::AttachmentManifestEntry::attachment_id [field]
-    field_witness(|value: &lash::persistence::AttachmentManifestEntry| {
-        let _ = &value.attachment_id;
+    // W0107: lash::persistence::SessionReferrerState [enum]
+    type_witness::<lash::persistence::SessionReferrerState>();
+    // W0108: lash::persistence::SessionReferrerState::DeletedRetained [variant]
+    variant_witness(|value: &lash::persistence::SessionReferrerState| {
+        matches!(
+            value,
+            lash::persistence::SessionReferrerState::DeletedRetained
+        )
     });
-    // W0101: lash::persistence::AttachmentManifestEntry::canonical_uri [field]
-    field_witness(|value: &lash::persistence::AttachmentManifestEntry| {
-        let _ = &value.canonical_uri;
+    // W0109: lash::persistence::SessionReferrerState::DeletedRetired [variant]
+    variant_witness(|value: &lash::persistence::SessionReferrerState| {
+        matches!(
+            value,
+            lash::persistence::SessionReferrerState::DeletedRetired
+        )
     });
-    // W0102: lash::persistence::AttachmentManifestEntry::committed_at_epoch_ms [field]
-    field_witness(|value: &lash::persistence::AttachmentManifestEntry| {
-        let _ = &value.committed_at_epoch_ms;
-    });
-    // W0103: lash::persistence::AttachmentManifestEntry::intent_at_epoch_ms [field]
-    field_witness(|value: &lash::persistence::AttachmentManifestEntry| {
-        let _ = &value.intent_at_epoch_ms;
-    });
-    // W0106: lash::persistence::AttachmentManifestEntry::session_id [field]
-    field_witness(|value: &lash::persistence::AttachmentManifestEntry| {
-        let _ = &value.session_id;
-    });
-    // W0107: lash::persistence::AttachmentOwnerKind [enum]
-    type_witness::<lash::persistence::AttachmentOwnerKind>();
-    // W0108: lash::persistence::AttachmentOwnerKind::Process [variant]
-    variant_witness(|value: &lash::persistence::AttachmentOwnerKind| {
-        matches!(value, lash::persistence::AttachmentOwnerKind::Process)
-    });
-    // W0109: lash::persistence::AttachmentOwnerKind::Turn [variant]
-    variant_witness(|value: &lash::persistence::AttachmentOwnerKind| {
-        matches!(value, lash::persistence::AttachmentOwnerKind::Turn)
-    });
-    // W0110: lash::persistence::AttachmentOwnerKind::as_str [function]
-    let _ = lash::persistence::AttachmentOwnerKind::as_str;
     // W0111: lash::messages::PartAttachment [struct]
     type_witness::<lash::messages::PartAttachment>();
     // W0112: lash::messages::PartAttachment::source [field]
@@ -486,8 +456,8 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::persistence::AttachmentDeleteArming| {
         matches!(value, lash::persistence::AttachmentDeleteArming::Revoked)
     });
-    // W0132: lash::persistence::AttachmentManifest::begin_attachment_write [function]
-    fn meth_0132<T: lash::persistence::AttachmentManifest>(_: &T) {
+    // W0132: lash::persistence::AttachmentReferrers::begin_attachment_write [function]
+    fn meth_0132<T: lash::persistence::AttachmentReferrers>(_: &T) {
         let _ = T::begin_attachment_write;
     }
     // W0133: lash::persistence::AttachmentWriteFence [enum]
@@ -505,6 +475,6 @@ fn drain_area_witnesses() {
     });
     // W0136: lash::persistence::AttachmentReclamationFailure [type_alias]
     type_witness::<lash::persistence::AttachmentReclamationFailure>();
-} // W0120: lash_core::impl_noop_attachment_manifest [macro]
+} // W0120: lash_core::impl_noop_attachment_referrers [macro]
 struct NoopManifestWitness;
-lash_core::impl_noop_attachment_manifest!(NoopManifestWitness);
+lash_core::impl_noop_attachment_referrers!(NoopManifestWitness);

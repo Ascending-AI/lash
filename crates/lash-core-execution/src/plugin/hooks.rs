@@ -258,7 +258,8 @@ impl TurnHookReport {
 
 #[derive(Clone)]
 pub struct ToolCallHookContext {
-    pub session_id: SessionId,
+    /// Who the call runs for: a session, or a process runtime.
+    pub owner: crate::RuntimeOwner,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -268,7 +269,7 @@ pub struct ToolCallHookContext {
 
 impl ToolCallHookContext {
     pub fn new(
-        session_id: SessionId,
+        owner: crate::RuntimeOwner,
         tool_name: String,
         args: serde_json::Value,
         argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -276,7 +277,7 @@ impl ToolCallHookContext {
         sessions: Arc<dyn SessionStateService>,
     ) -> Self {
         Self {
-            session_id,
+            owner,
             tool_name,
             args,
             argument_projection,
@@ -285,8 +286,12 @@ impl ToolCallHookContext {
         }
     }
 
+    /// A snapshot of the session the call runs in; a process runtime has
+    /// none and is refused.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(&self.session_id).await
+        self.sessions
+            .snapshot_session(require_session_owner(&self.owner, "hook_session_snapshot")?)
+            .await
     }
 
     pub async fn set_tool_membership(
@@ -295,14 +300,19 @@ impl ToolCallHookContext {
         present: bool,
     ) -> Result<u64, PluginError> {
         self.sessions
-            .set_tool_membership(&self.session_id, names, present)
+            .set_tool_membership(
+                require_session_owner(&self.owner, "hook_set_tool_membership")?,
+                names,
+                present,
+            )
             .await
     }
 }
 
 #[derive(Clone)]
 pub struct ToolResultHookContext {
-    pub session_id: SessionId,
+    /// Who the call runs for: a session, or a process runtime.
+    pub owner: crate::RuntimeOwner,
     /// The durable identity of the prepared call this observation belongs to:
     /// the same value the attempt body saw as [`crate::AttemptContext::call_id`]
     /// and the executed-call record carries as [`crate::ToolCallRecord::call_id`].
@@ -322,7 +332,7 @@ pub struct ToolResultHookContext {
 impl ToolResultHookContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        session_id: SessionId,
+        owner: crate::RuntimeOwner,
         call_id: crate::ToolCallId,
         tool_name: String,
         args: serde_json::Value,
@@ -332,7 +342,7 @@ impl ToolResultHookContext {
         sessions: Arc<dyn SessionStateService>,
     ) -> Self {
         Self {
-            session_id,
+            owner,
             call_id,
             tool_name,
             args,
@@ -343,8 +353,12 @@ impl ToolResultHookContext {
         }
     }
 
+    /// A snapshot of the session the call runs in; a process runtime has
+    /// none and is refused.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(&self.session_id).await
+        self.sessions
+            .snapshot_session(require_session_owner(&self.owner, "hook_session_snapshot")?)
+            .await
     }
 
     pub async fn set_tool_membership(
@@ -353,14 +367,19 @@ impl ToolResultHookContext {
         present: bool,
     ) -> Result<u64, PluginError> {
         self.sessions
-            .set_tool_membership(&self.session_id, names, present)
+            .set_tool_membership(
+                require_session_owner(&self.owner, "hook_set_tool_membership")?,
+                names,
+                present,
+            )
             .await
     }
 }
 
 #[derive(Clone)]
 pub struct ToolResultProjectionContext {
-    pub session_id: SessionId,
+    /// Who the call runs for: a session, or a process runtime.
+    pub owner: crate::RuntimeOwner,
     pub call_id: crate::ToolCallId,
     pub tool_id: crate::ToolId,
     pub tool_name: String,
@@ -442,4 +461,29 @@ pub enum AssistantStreamFinishReason {
 pub struct AssistantStreamFinishedContext {
     pub session_id: SessionId,
     pub reason: AssistantStreamFinishReason,
+}
+
+/// The session `owner` names, or [`PluginError::NotASessionRuntime`] naming
+/// `operation` for a process runtime.
+pub fn require_session_owner<'a>(
+    owner: &'a crate::RuntimeOwner,
+    operation: &'static str,
+) -> Result<&'a SessionId, PluginError> {
+    match owner {
+        crate::RuntimeOwner::Session(session_id) => Ok(session_id),
+        crate::RuntimeOwner::Process(process_id) => {
+            Err(crate::runtime::not_a_session_runtime(operation, process_id))
+        }
+    }
+}
+
+/// The trace context of work `owner` does: its session, or none for a
+/// process runtime.
+pub(crate) fn owner_trace_context(owner: &crate::RuntimeOwner) -> lash_trace::TraceContext {
+    match owner {
+        crate::RuntimeOwner::Session(session_id) => {
+            lash_trace::TraceContext::default().for_session(session_id.clone())
+        }
+        crate::RuntimeOwner::Process(_) => lash_trace::TraceContext::default(),
+    }
 }

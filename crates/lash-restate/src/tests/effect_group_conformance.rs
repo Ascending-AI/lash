@@ -650,6 +650,7 @@ impl LiveConformanceHarness {
                 effect_host: &host,
                 ingress,
                 sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
+                attachments: stores.session_store_factory() as Arc<dyn lash_core::AttachmentReferrers>,
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&process_runner),
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,

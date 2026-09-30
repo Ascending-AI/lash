@@ -170,6 +170,11 @@ pub struct ArtifactCleanupPorts {
     /// Every installed engine: a start's engine names, and each engine's own
     /// store.
     pub engines: ProcessEngineRegistry,
+    /// Attachment edges: the fourth store `apply` ends a referrer in, and
+    /// the session state an upload or session guard resolves against.
+    pub attachments: Arc<dyn crate::AttachmentReferrers>,
+    /// Resolves `AwaitUploadExpiry`.
+    pub clock: Arc<dyn crate::runtime::Clock>,
 }
 
 /// The `ArtifactCleanup` relay.
@@ -185,6 +190,9 @@ enum Resolution {
     Carry(Vec<ArtifactCarry>),
     /// The referrer's authority has not ended it yet.
     NotYet,
+    /// The referrer's authority ends it at this instant, unless it ends
+    /// sooner.
+    NotBefore(u64),
 }
 
 impl ArtifactCleanupRelay {
@@ -273,11 +281,43 @@ impl ArtifactCleanupRelay {
                 }
                 Ok(settled_or_not_yet(self.journal_settled(creator).await?))
             }
+            (
+                ArtifactCleanupPlan::AwaitUploadExpiry { expires_at_ms },
+                ArtifactReferrer::Upload(upload),
+            ) => {
+                if self.ports.clock.timestamp_ms() >= *expires_at_ms {
+                    return Ok(Resolution::Carry(Vec::new()));
+                }
+                let state = self.session_state(upload.session_id()).await?;
+                Ok(if state == crate::SessionReferrerState::Live {
+                    Resolution::NotBefore(*expires_at_ms)
+                } else {
+                    Resolution::Carry(Vec::new())
+                })
+            }
+            (ArtifactCleanupPlan::AwaitSessionGraphRetired, ArtifactReferrer::Session(session)) => {
+                let state = self.session_state(session).await?;
+                Ok(settled_or_not_yet(
+                    state == crate::SessionReferrerState::DeletedRetired,
+                ))
+            }
             (plan, referrer) => Err(DeliveryFailure::Undecodable(format!(
                 "`{}` is not a guard of referrer `{referrer}`",
                 plan.label()
             ))),
         }
+    }
+
+    /// Where `session` stands for its upload and session guards.
+    async fn session_state(
+        &self,
+        session: &crate::SessionId,
+    ) -> Result<crate::SessionReferrerState, DeliveryFailure> {
+        self.ports
+            .attachments
+            .session_referrer_state(session)
+            .await
+            .map_err(attachment_store_failure)
     }
 
     /// A registered start's carries: the retained record's environment and
@@ -485,7 +525,15 @@ impl ArtifactCleanupRelay {
                 carries: engine_carries,
             })
             .await
-            .map_err(store_failure("engine store"))
+            .map_err(store_failure("engine store"))?;
+        if referrer.kind().holds_attachments() {
+            self.ports
+                .attachments
+                .end_attachment_referrer(referrer)
+                .await
+                .map_err(attachment_store_failure)?;
+        }
+        Ok(())
     }
 }
 
@@ -508,6 +556,17 @@ fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> Delive
             DeliveryFailure::Undecodable(format!("{context}: {error}"))
         }
         other => DeliveryFailure::Retryable(format!("{context}: {other}")),
+    }
+}
+
+/// An attachment-store fault is retried, except a row this build cannot read,
+/// which no retry repairs.
+fn attachment_store_failure(error: crate::StoreError) -> DeliveryFailure {
+    match error {
+        crate::StoreError::Incompatible { .. } | crate::StoreError::StoredDataCorrupt { .. } => {
+            DeliveryFailure::Undecodable(format!("attachment store: {error}"))
+        }
+        other => DeliveryFailure::Retryable(format!("attachment store: {other}")),
     }
 }
 
@@ -555,6 +614,9 @@ impl ObligationRelay for ArtifactCleanupRelay {
         let carries = match self.resolve(&cleanup).await? {
             Resolution::Carry(carries) => carries,
             Resolution::NotYet => return Err(DeliveryFailure::NotYet),
+            Resolution::NotBefore(due_at_ms) => {
+                return Err(DeliveryFailure::NotBefore { due_at_ms });
+            }
         };
         // 4 and 5. Every store applies its share; only then is it delivered.
         self.apply(&cleanup.referrer, &carries).await

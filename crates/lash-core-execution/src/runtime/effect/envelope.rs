@@ -1367,7 +1367,7 @@ impl LlmRequestSpec {
 
     pub async fn from_request(
         request: &CoreLlmRequest,
-        attachment_store: &crate::SessionAttachmentStore,
+        attachment_store: &crate::RuntimeAttachmentStore,
     ) -> Result<Self, RuntimeEffectControllerError> {
         let mut messages = request.messages.clone();
         for message in &mut messages {
@@ -1438,7 +1438,7 @@ impl LlmRequestSpec {
 
 async fn durable_attachment_source(
     attachment: &AttachmentSource,
-    attachment_store: &crate::SessionAttachmentStore,
+    attachment_store: &crate::RuntimeAttachmentStore,
 ) -> Result<AttachmentSource, RuntimeEffectControllerError> {
     let source = match attachment {
         AttachmentSource::Inline { media_type, bytes } => {

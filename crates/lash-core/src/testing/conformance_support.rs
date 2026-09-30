@@ -1,6 +1,6 @@
 //! Kernel primitives used by external backend certification fixtures.
 
-pub use crate::attachments::PersistenceManifestAdapter;
+pub use crate::attachments::PersistenceReferrersAdapter;
 pub use crate::runtime::default_queued_drain_policy;
 pub use crate::runtime::effect::GroupExecutors;
 pub use crate::runtime::state::RuntimeCheckpointComponents;

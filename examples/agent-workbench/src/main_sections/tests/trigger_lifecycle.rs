@@ -423,7 +423,7 @@ fn workbench_receipt_register_command(session_id: &SessionId) -> lash::triggers:
             source_capture: lash::triggers::TriggerSourceCapture::untyped(),
             subscription_key: "workbench-receipt-prune".to_string(),
             env_ref: lash::process::ProcessExecutionEnvRef::new(format!(
-                "process-env:{session_id}"
+                "execution-env:{session_id}"
             )),
             wake_target: Some(lash::process::SessionScope::new(session_id)),
             name: Some("receipt prune demo".to_string()),

@@ -184,9 +184,11 @@ impl DeclaringProbe {
             Forge::None => return Ok(Some(declared)),
             Forge::ForeignSession => {
                 let mut identity = context.intent_identity(0);
-                identity.session_id = SessionId::from(FOREIGN_SESSION);
+                let foreign = crate::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION));
+                identity.owner = foreign.clone();
                 let identity = crate::rederive_tool_intent_identity(&identity);
-                bytes["start"]["session_id"] = serde_json::json!(FOREIGN_SESSION);
+                bytes["start"]["owner"] =
+                    serde_json::to_value(&foreign).map_err(|e| e.to_string())?;
                 bytes["identity"] = serde_json::to_value(identity).map_err(|e| e.to_string())?;
             }
             Forge::NonzeroIndex => {
@@ -218,7 +220,14 @@ impl DeclaringProbe {
         context: &crate::AttemptContext<'_>,
         probe: Probe,
     ) -> Result<crate::StartProcessIntent, String> {
-        let session_id = SessionId::from(context.session_id());
+        let session_id = context
+            .session_id()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let agent_frame_id = context
+            .agent_frame_id()
+            .map_err(|error| error.to_string())?
+            .clone();
         let lifetime = if probe.detached {
             crate::Lifetime::Detached
         } else {
@@ -227,7 +236,7 @@ impl DeclaringProbe {
         let declaration = crate::ProcessStartDeclaration::external(
             crate::ProcessOriginator::Session {
                 session_id: session_id.clone(),
-                agent_frame_id: Some(context.agent_frame_id().clone()),
+                agent_frame_id: Some(agent_frame_id),
             },
             serde_json::json!({
                 PROBE_MARKER: session_id.as_str(),
@@ -240,7 +249,7 @@ impl DeclaringProbe {
             None::<String>,
         ));
         Ok(crate::StartProcessIntent {
-            session_id,
+            owner: crate::RuntimeOwner::Session(session_id),
             declaration,
         })
     }
@@ -1933,11 +1942,15 @@ pub async fn declared_start_rejects_foreign_or_reused_serialized_identity_before
             };
             assert_eq!(
                 (
-                    &identity.session_id,
+                    &identity.owner,
                     &identity.tool_call_id,
                     identity.intent_index
                 ),
-                (&world.session_id, &record.call_id, 0),
+                (
+                    &crate::RuntimeOwner::Session(world.session_id.clone()),
+                    &record.call_id,
+                    0
+                ),
                 "{name}: the refusal names the admitted call's own identity"
             );
             assert_eq!(
@@ -1948,12 +1961,16 @@ pub async fn declared_start_rejects_foreign_or_reused_serialized_identity_before
             match (name, refusal) {
                 (
                     "foreign-session",
-                    crate::ToolIntentRefusalReason::SessionMismatch { expected, recorded },
+                    crate::ToolIntentRefusalReason::OwnerMismatch { expected, recorded },
                 ) => {
                     assert_eq!(
-                        (expected.as_str(), recorded.as_str()),
-                        (world.session_id.as_str(), FOREIGN_SESSION),
-                        "foreign-session: the refusal names both sessions"
+                        (expected.clone(), recorded.clone()),
+                        (
+                            crate::RuntimeOwner::Session(world.session_id.clone()).to_string(),
+                            crate::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION))
+                                .to_string()
+                        ),
+                        "foreign-session: the refusal names both owners"
                     );
                 }
                 (

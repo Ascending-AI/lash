@@ -53,7 +53,7 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
         .expect("build session from recovered authority");
     assert!(
         session
-            .resolved_tool_catalog(&SessionId::from(session_id))
+            .resolved_tool_catalog()
             .expect("resolve catalog from recovered authority")
             .tools
             .is_empty(),

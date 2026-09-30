@@ -353,7 +353,7 @@ pub async fn finalize_tool_result_with_execution_context(
     match context
         .plugins
         .after_tool_call(ToolResultHookContext::new(
-            context.session_id.clone(),
+            context.owner.runtime_owner(),
             call_id.clone(),
             tool_name.to_string(),
             args.clone(),

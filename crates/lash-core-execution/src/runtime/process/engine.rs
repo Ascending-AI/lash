@@ -1,5 +1,4 @@
 use crate::ProcessId;
-use crate::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -359,7 +358,6 @@ pub struct ProcessEngineRunContext<'run> {
     process_id: ProcessId,
     execution_context: ProcessExecutionContext,
     processes: ProcessEngineProcessContext,
-    session_id: SessionId,
     plugins: Arc<crate::PluginSession>,
     tool_catalog: Arc<crate::ToolCatalog>,
     store: Option<Arc<dyn crate::RuntimeStore>>,
@@ -384,7 +382,6 @@ impl<'run> ProcessEngineRunContext<'run> {
         process_id: ProcessId,
         execution_context: ProcessExecutionContext,
         process_work: crate::ProcessWorkWiring,
-        session_id: SessionId,
         plugins: Arc<crate::PluginSession>,
         tool_catalog: Arc<crate::ToolCatalog>,
         store: Option<Arc<dyn crate::RuntimeStore>>,
@@ -418,7 +415,6 @@ impl<'run> ProcessEngineRunContext<'run> {
             process_id,
             execution_context,
             processes,
-            session_id,
             plugins,
             tool_catalog,
             store,
@@ -455,12 +451,6 @@ impl<'run> ProcessEngineRunContext<'run> {
     /// process.
     pub fn processes(&self) -> ProcessEngineProcessContext {
         self.processes.clone()
-    }
-
-    /// Exposes session id to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn session_id(&self) -> &str {
-        &self.session_id
     }
 
     /// Exposes plugins to protocol and process-engine implementors while running a durable process.

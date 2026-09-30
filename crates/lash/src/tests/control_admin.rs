@@ -1659,7 +1659,7 @@ async fn a_host_rail_refuses_a_derived_family_start_key() -> Result<()> {
     let intent_key = lash_core::StartKey::for_tool_intent(
         lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS,
         &lash_core::derive_tool_intent_identity(
-            &SessionId::from("model-session"),
+            &lash_core::RuntimeOwner::Session(SessionId::from("model-session")),
             "turn-1",
             &lash_core::ToolCallId::fixture("call-1"),
             0,

@@ -33,13 +33,14 @@ pub trait ProcessToolVisibilityFilter: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait ProcessService: Send + Sync {
-    /// Controller-free read view used by recorded leaf attempts.
+    /// Controller-free read view used by recorded leaf attempts. A session
+    /// sees the processes it observes; a process sees the ones it started.
     async fn list_visible_for_attempt(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let _ = (session_id, mode);
+        let _ = (owner, mode);
         Err(PluginError::Session(
             "controller-free process reads are unavailable in this service".to_string(),
         ))
@@ -70,7 +71,7 @@ pub trait ProcessService: Send + Sync {
     /// does outside that boundary by the same identity.
     async fn start_from_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError>;
@@ -190,16 +191,18 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
+    /// A session may address the processes it observes; a process, the ones
+    /// whose recorded ancestry names it as their immediate starter.
     async fn validate_visible(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
 
     async fn cancel(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
@@ -207,7 +210,7 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
@@ -221,13 +224,14 @@ pub trait ProcessService: Send + Sync {
         let entries = self
             .list_visible(session_id, ProcessListMode::Live, scope.clone())
             .await?;
+        let owner = crate::RuntimeOwner::Session(session_id.clone());
         let mut cancelled = Vec::new();
         for record in entries {
             if record.is_terminal() {
                 continue;
             }
             cancelled.push(
-                self.cancel(session_id, &record.id, scope.clone())
+                self.cancel(&owner, &record.id, scope.clone())
                     .await
                     .and_then(ProcessCancelReceipt::from_record)?,
             );
@@ -238,7 +242,7 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first signal used only by the recorded intent protocol.
     async fn signal_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -269,7 +273,7 @@ pub trait ProcessService: Send + Sync {
     /// outside that boundary is keyed by the replay key.
     async fn emit_event_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         event_type: String,
         replay_key: String,
@@ -279,7 +283,7 @@ pub trait ProcessService: Send + Sync {
 
     async fn signal_possessed(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -302,7 +306,7 @@ pub struct UnavailableProcessService;
 impl ProcessService for UnavailableProcessService {
     async fn start_from_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _request: ProcessStartRequest,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError> {
@@ -346,7 +350,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn validate_visible(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_ids: &[ProcessId],
         _scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -357,7 +361,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
@@ -368,7 +372,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _identity: crate::ToolIntentIdentity,
         _scope: ProcessOpScope<'_>,
@@ -380,7 +384,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
@@ -394,7 +398,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
@@ -408,7 +412,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _event_type: String,
         _replay_key: String,
@@ -504,7 +508,7 @@ mod tests {
     impl ProcessService for RecordingProcessService {
         async fn start_from_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             _request: ProcessStartRequest,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessHandleView, PluginError> {
@@ -540,7 +544,7 @@ mod tests {
 
         async fn validate_visible(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             process_ids: &[ProcessId],
             _scope: ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
@@ -560,7 +564,7 @@ mod tests {
 
         async fn cancel(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             process_id: &ProcessId,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
@@ -578,7 +582,7 @@ mod tests {
 
         async fn cancel_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             process_id: &ProcessId,
             identity: crate::ToolIntentIdentity,
             _scope: ProcessOpScope<'_>,
@@ -596,7 +600,7 @@ mod tests {
 
         async fn signal_possessed(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
@@ -608,27 +612,20 @@ mod tests {
 
         async fn signal_recorded_intent(
             &self,
-            session_id: &SessionId,
+            owner: &crate::RuntimeOwner,
             process_id: &ProcessId,
             signal_name: String,
             signal_id: String,
             payload: serde_json::Value,
             scope: ProcessOpScope<'_>,
         ) -> Result<ProcessEvent, PluginError> {
-            self.signal_possessed(
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
-            .await
+            self.signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
+                .await
         }
 
         async fn emit_event_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &crate::RuntimeOwner,
             _process_id: &ProcessId,
             _event_type: String,
             _replay_key: String,

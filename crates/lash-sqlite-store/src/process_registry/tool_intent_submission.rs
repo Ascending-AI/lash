@@ -23,7 +23,7 @@ pub(super) async fn admit(
                             .sql(),
                         params![
                             replay_key,
-                            submission.identity.session_id.as_str(),
+                            submission.identity.owner.to_string(),
                             submission.identity.execution_scope_id.as_str(),
                             submission.identity.tool_call_id.as_str(),
                             i64::from(submission.identity.intent_index),

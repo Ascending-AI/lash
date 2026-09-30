@@ -1,4 +1,3 @@
-use crate::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -14,7 +13,7 @@ pub async fn execute_final_tool_intents(
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
         return Ok(Vec::new());
     }
-    if let Some(refusal) = admit_batch(&context.session_id, intents) {
+    if let Some(refusal) = admit_batch(&context.owner.runtime_owner(), intents) {
         return Ok(refuse_all(
             context,
             &execution_scope_id,
@@ -58,7 +57,7 @@ pub async fn execute_final_tool_intents(
         let span = tracing::info_span!(
             target: "lash::tool_intent",
             "tool_intent.execute",
-            session_id = %identity.session_id,
+            owner = %identity.owner,
             execution_scope_id = %identity.execution_scope_id,
             tool_call_id = %identity.tool_call_id,
             intent_index = identity.intent_index,
@@ -145,7 +144,7 @@ pub(crate) async fn realize_declared_start(
     let scope = scope.with_parent_invocation(parent);
     let kind = crate::ToolIntentKind::StartProcess;
     match processes
-        .start_from_recorded_intent(&start.start().session_id, start.request(), scope)
+        .start_from_recorded_intent(&start.start().owner, start.request(), scope)
         .await
     {
         Ok(handle) => {
@@ -220,7 +219,7 @@ pub(crate) fn declared_start_fault(
 }
 
 fn admit_batch(
-    session_id: &SessionId,
+    owner: &crate::RuntimeOwner,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
     if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V3 {
@@ -256,10 +255,10 @@ fn admit_batch(
                 maximum: crate::TOOL_INTENT_MAX_PER_KIND,
             });
         }
-        if intent.session_id() != session_id {
-            return Some(crate::ToolIntentRefusalReason::SessionMismatch {
-                expected: session_id.to_string(),
-                recorded: intent.session_id().to_string(),
+        if intent.owner() != owner {
+            return Some(crate::ToolIntentRefusalReason::OwnerMismatch {
+                expected: owner.to_string(),
+                recorded: intent.owner().to_string(),
             });
         }
     }
@@ -277,7 +276,7 @@ fn refuse_all(
         let span = tracing::info_span!(
             target: "lash::tool_intent",
             "tool_intent.execute",
-            session_id = %context.session_id,
+            owner = %context.owner.runtime_owner(),
             execution_scope_id,
             tool_call_id = %tool_call_id,
             intent_index = tracing::field::Empty,
@@ -302,7 +301,7 @@ fn refuse_all(
             let span = tracing::info_span!(
                 target: "lash::tool_intent",
                 "tool_intent.execute",
-                session_id = %context.session_id,
+                owner = %context.owner.runtime_owner(),
                 execution_scope_id,
                 tool_call_id = %tool_call_id,
                 intent_index = index,
@@ -324,7 +323,7 @@ pub(crate) fn declaring_identity(
     minting_emission: &crate::RuntimeInvocation,
 ) -> crate::ToolIntentIdentity {
     crate::derive_tool_intent_identity_under(
-        &context.session_id,
+        &context.owner.runtime_owner(),
         context.effect_controller.scope_id(),
         tool_call_id,
         0,
@@ -341,7 +340,7 @@ fn derive_identity(
     let intent_index = u32::try_from(intent_index)
         .map_err(|_| crate::ToolIntentRefusalReason::IntentIndexOverflow)?;
     Ok(crate::derive_tool_intent_identity_under(
-        &context.session_id,
+        &context.owner.runtime_owner(),
         execution_scope_id,
         tool_call_id,
         intent_index,
@@ -376,7 +375,7 @@ fn validate_trigger_registration_authority(
     intent: &crate::RegisterTriggerIntent,
 ) -> Option<crate::ToolIntentRefusalReason> {
     let expected_owner = match crate::resolve_trigger_owner_scope(
-        &context.session_id,
+        &context.owner.runtime_owner(),
         context.process_originator.as_ref(),
     ) {
         Ok(owner) => owner,
@@ -393,12 +392,26 @@ fn validate_trigger_registration_authority(
             recorded: format!("{:?}", intent.owner_scope),
         });
     }
-    let expected_actor = context.process_originator.clone().unwrap_or_else(|| {
-        crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
-            context.session_id.clone(),
-            context.agent_frame_id.clone(),
-        ))
-    });
+    let expected_actor = match (&context.process_originator, &context.owner) {
+        (Some(originator), _) => originator.clone(),
+        (
+            None,
+            crate::ExecutionOwner::SessionFrame {
+                session_id,
+                agent_frame_id,
+            },
+        ) => crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
+            session_id.clone(),
+            agent_frame_id.clone(),
+        )),
+        (None, crate::ExecutionOwner::Process { process_id }) => {
+            let error = crate::runtime::not_a_session_runtime("trigger_actor", process_id);
+            return Some(crate::ToolIntentRefusalReason::CommandFailed {
+                code: error_code(&error),
+                message: error_message(&error),
+            });
+        }
+    };
     (intent.actor != expected_actor).then(|| crate::ToolIntentRefusalReason::ForeignTriggerActor {
         expected: format!("{expected_actor:?}"),
         recorded: format!("{:?}", intent.actor),
@@ -454,7 +467,7 @@ async fn execute_one(
     ));
     let scope = crate::ProcessOpScope::new(context.effect_controller.clone())
         .with_parent_invocation(Some(parent))
-        .with_agent_frame_id(Some(context.agent_frame_id.clone()))
+        .with_agent_frame_id(context.owner.agent_frame_id().cloned())
         .with_process_lineage(context.process_lineage.clone());
 
     match intent {
@@ -465,7 +478,7 @@ async fn execute_one(
             let request = intent.into_request(identity);
             let summary = context
                 .processes
-                .start_from_recorded_intent(&intent.session_id, request, scope)
+                .start_from_recorded_intent(&intent.owner, request, scope)
                 .await?;
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
@@ -480,7 +493,7 @@ async fn execute_one(
             let event = context
                 .processes
                 .signal_recorded_intent(
-                    &intent.session_id,
+                    &intent.owner,
                     &intent.process_id,
                     intent.signal_name.clone(),
                     identity.replay_key.clone(),
@@ -493,12 +506,7 @@ async fn execute_one(
         crate::ToolIntent::CancelProcess(intent) => {
             let record = context
                 .processes
-                .cancel_recorded_intent(
-                    &intent.session_id,
-                    &intent.process_id,
-                    identity.clone(),
-                    scope,
-                )
+                .cancel_recorded_intent(&intent.owner, &intent.process_id, identity.clone(), scope)
                 .await?;
             Ok(
                 serde_json::to_value(crate::ProcessCancelReceipt::from_record(record)?)
@@ -509,7 +517,7 @@ async fn execute_one(
             let event = context
                 .processes
                 .emit_event_recorded_intent(
-                    &intent.session_id,
+                    &intent.owner,
                     &intent.process_id,
                     intent.event_type.clone(),
                     identity.replay_key.clone(),
@@ -660,15 +668,23 @@ async fn realize_register_process_definition(
             )
         })?;
     crate::process_registry::validate_process_definition_name(name)?;
+    // A named definition belongs to a session's registry slot; a process
+    // runtime has no session to name it under.
+    let session_id = match &intent.owner {
+        crate::RuntimeOwner::Session(session_id) => session_id,
+        crate::RuntimeOwner::Process(process_id) => {
+            return Err(crate::runtime::not_a_session_runtime(
+                "register_named_process_definition",
+                process_id,
+            ));
+        }
+    };
     // A name resolves once, at intent execution. An existing slot under this
     // name resolves its pinned record; a fresh registration resolves through
     // the engine directly.
-    let existing = crate::process_registry::resolve_named_definition(
-        registry.as_ref(),
-        &intent.session_id,
-        name,
-    )
-    .await?;
+    let existing =
+        crate::process_registry::resolve_named_definition(registry.as_ref(), session_id, name)
+            .await?;
     let pinned = match existing.as_ref() {
         Some(existing) => {
             if existing.definition.engine_kind.as_str() != intent.engine_kind {
@@ -748,7 +764,7 @@ async fn realize_register_process_definition(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::process(crate::ProcessCommand::RegisterDefinition {
-                    owner_scope: crate::TriggerOwnerScope::session(intent.session_id.clone()),
+                    owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
                     name: name.to_string(),
                     pinned,
                     expectation,
@@ -859,6 +875,7 @@ fn error_code(error: &crate::PluginError) -> String {
         crate::PluginError::StoreRefusal(error) => error.code().as_str().to_string(),
         crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
+        crate::PluginError::NotASessionRuntime { .. } => "not_a_session_runtime".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
         crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
         crate::PluginError::StartKeyConflict { .. } => "process_start_key_conflict".to_string(),
@@ -905,9 +922,13 @@ mod tests {
 
     use super::*;
 
-    fn signal(session_id: &SessionId, payload: serde_json::Value) -> crate::ToolIntent {
+    fn session(id: &str) -> crate::RuntimeOwner {
+        crate::RuntimeOwner::Session(crate::SessionId::from(id))
+    }
+
+    fn signal(owner: &crate::RuntimeOwner, payload: serde_json::Value) -> crate::ToolIntent {
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-            session_id: SessionId::from(session_id.to_string()),
+            owner: owner.clone(),
             process_id: crate::process_id_for_test("process-1"),
             signal_name: "continue".to_string(),
             payload,
@@ -919,13 +940,10 @@ mod tests {
         for recorded in [0, 1, 2, 4] {
             let intents = crate::ToolIntents {
                 protocol_version: recorded,
-                intents: vec![signal(
-                    &SessionId::from("session"),
-                    serde_json::json!({"value": 1}),
-                )],
+                intents: vec![signal(&session("session"), serde_json::json!({"value": 1}))],
             };
             assert_eq!(
-                admit_batch(&SessionId::from("session"), &intents),
+                admit_batch(&session("session"), &intents),
                 Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
             );
         }
@@ -935,16 +953,11 @@ mod tests {
     fn admission_is_all_or_nothing_for_total_count_overflow() {
         let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_COUNT)
-                .map(|index| {
-                    signal(
-                        &SessionId::from("session"),
-                        serde_json::json!({"index": index}),
-                    )
-                })
+                .map(|index| signal(&session("session"), serde_json::json!({"index": index})))
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&SessionId::from("session"), &intents),
+            admit_batch(&session("session"), &intents),
             Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
                 actual: 33,
                 maximum: 32,
@@ -956,16 +969,11 @@ mod tests {
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
         let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_PER_KIND)
-                .map(|index| {
-                    signal(
-                        &SessionId::from("session"),
-                        serde_json::json!({"index": index}),
-                    )
-                })
+                .map(|index| signal(&session("session"), serde_json::json!({"index": index})))
                 .collect(),
         );
         assert_eq!(
-            admit_batch(&SessionId::from("session"), &intents),
+            admit_batch(&session("session"), &intents),
             Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: crate::ToolIntentKind::SignalProcess,
                 actual: 17,
@@ -977,11 +985,11 @@ mod tests {
     #[test]
     fn admission_is_all_or_nothing_for_canonical_byte_overflow() {
         let intents = crate::ToolIntents::v3(vec![signal(
-            &SessionId::from("session"),
+            &session("session"),
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
         )]);
         assert!(matches!(
-            admit_batch(&SessionId::from("session"), &intents),
+            admit_batch(&session("session"), &intents),
             Some(
                 crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -1003,7 +1011,7 @@ mod tests {
             ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-            session_id: SessionId::from("session"),
+            owner: session("session"),
             declaration: crate::ProcessStartDeclaration::new(
                 crate::ProcessInput::Engine {
                     kind: "lashlang".to_string(),
@@ -1034,7 +1042,7 @@ mod tests {
                 > crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
             "the batch as recorded carries the whole captured env"
         );
-        assert_eq!(admit_batch(&SessionId::from("session"), &intents), None);
+        assert_eq!(admit_batch(&session("session"), &intents), None);
     }
 
     /// The same bytes in what the start declares are the attempt's, and the
@@ -1046,7 +1054,7 @@ mod tests {
             String::new(),
         )]);
         assert!(matches!(
-            admit_batch(&SessionId::from("session"), &intents),
+            admit_batch(&session("session"), &intents),
             Some(
                 crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -1057,19 +1065,16 @@ mod tests {
     }
 
     #[test]
-    fn admission_refuses_the_entire_batch_on_session_mismatch() {
+    fn admission_refuses_the_entire_batch_on_owner_mismatch() {
         let intents = crate::ToolIntents::v3(vec![
-            signal(&SessionId::from("session"), serde_json::json!({"index": 0})),
-            signal(
-                &SessionId::from("other-session"),
-                serde_json::json!({"index": 1}),
-            ),
+            signal(&session("session"), serde_json::json!({"index": 0})),
+            signal(&session("other-session"), serde_json::json!({"index": 1})),
         ]);
         assert_eq!(
-            admit_batch(&SessionId::from("session"), &intents),
-            Some(crate::ToolIntentRefusalReason::SessionMismatch {
-                expected: "session".to_string(),
-                recorded: "other-session".to_string(),
+            admit_batch(&session("session"), &intents),
+            Some(crate::ToolIntentRefusalReason::OwnerMismatch {
+                expected: "session:session".to_string(),
+                recorded: "session:other-session".to_string(),
             })
         );
     }
@@ -1078,7 +1083,7 @@ mod tests {
     fn outcome_model_addenda_have_literal_stable_text() {
         let executed = crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
-                session_id: SessionId::from("session"),
+                owner: session("session"),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: crate::ToolCallId::fixture("call"),
                 intent_index: 4,

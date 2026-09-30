@@ -1496,7 +1496,9 @@ mod revision_column_tests {
             ),
             draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
                 key,
-                lash_core_execution::ProcessExecutionEnvRef::new(format!("process-env:{owner}")),
+                lash_core_execution::ProcessExecutionEnvRef::new(format!(
+                    "process-env:fixture-{owner}"
+                )),
                 source_type,
                 source_key,
                 lash_core_execution::ProcessInput::Engine {

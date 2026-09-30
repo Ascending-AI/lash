@@ -1,14 +1,14 @@
 use super::*;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 use std::sync::Arc;
 
-#[async_trait::async_trait]
-impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
+impl RuntimeSessionServices {
+    /// Run an admitted process under these process-owned services; the
+    /// [`crate::ProcessRuntimeContext`] is the runner that calls it.
     #[expect(
         clippy::expect_used,
         reason = "the process worker installs the write authority"
     )]
-    async fn run_process(
+    pub(in crate::runtime) async fn run_admitted_process(
         &self,
         admitted: crate::runtime::effect::AdmittedProcess,
         execution_context: crate::ProcessExecutionContext,
@@ -108,13 +108,8 @@ impl RuntimeSessionServices {
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessEngineRunContext<'run>, crate::PluginError> {
-        let session_id = self.current.session_id.clone();
         let plugins = Arc::clone(&self.current.plugins);
-        let store = self
-            .current
-            .store
-            .as_ref()
-            .map(|store| Arc::clone(store.store()));
+        let store = self.current.session_runtime_store();
         let session_store_factory = Some(self.current.host.core.session_store_factory());
         let queued_work = Arc::clone(self.current.host.queued_work());
         let process_registry_available = self.current.host.process_registry().is_some();
@@ -136,7 +131,7 @@ impl RuntimeSessionServices {
         let process_work_for_runtime = process_work.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
-        let tool_surface = plugins.pin_resolved_tool_surface(&session_id)?;
+        let tool_surface = plugins.pin_resolved_tool_surface()?;
         let tool_catalog = Arc::clone(&tool_surface.catalog);
         let builder = Box::new(move |requested_catalog: Arc<crate::ToolCatalog>| {
             if !Arc::ptr_eq(&requested_catalog, &tool_surface.catalog) {
@@ -156,11 +151,7 @@ impl RuntimeSessionServices {
             let event_context = crate::RuntimeExecutionProcessEventContext {
                 execution_write_authority: execution_write_authority.clone(),
                 process_work: process_work_for_runtime.clone(),
-                store: services
-                    .current
-                    .store
-                    .as_ref()
-                    .map(|store| Arc::clone(store.store())),
+                store: services.current.session_runtime_store(),
                 session_store_factory: Some(services.current.host.core.session_store_factory()),
                 queued_work: Arc::clone(services.current.host.queued_work()),
                 process_wake_delivery_policy: services
@@ -172,14 +163,13 @@ impl RuntimeSessionServices {
                 clock: Arc::clone(&services.current.host.core.clock),
             };
             let mut context = crate::RuntimeExecutionContext::new(
-                services.current.session_id.clone(),
                 Arc::clone(&dispatch),
                 Arc::clone(&services.current.host.core.durability.process_env_store),
                 Arc::clone(&services.current.host.core.durability.attachment_store),
                 Arc::new(crate::ChronologicalProjection::default()),
                 crate::TurnContext::default(),
             )
-            .with_execution_env_spec(current_execution_env_spec(&services.current))
+            .with_execution_env_spec(services.current.execution_env_spec()?)
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(
                 process_id_for_runtime.clone(),
@@ -220,7 +210,6 @@ impl RuntimeSessionServices {
             process_id,
             execution_context,
             process_work,
-            session_id,
             plugins,
             tool_catalog,
             store,
@@ -236,11 +225,4 @@ impl RuntimeSessionServices {
             builder,
         ))
     }
-}
-
-fn current_execution_env_spec(
-    current: &CurrentSessionCapability,
-) -> crate::ProcessExecutionEnvSpec {
-    let state = current.snapshot.to_runtime_state();
-    state.process_execution_env_spec(&current.policy)
 }

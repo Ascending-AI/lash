@@ -397,7 +397,7 @@ async fn start_marker_key(
     let start_key = |session: &SessionId, call_id: lash_core::ToolCallId, call_key: &str| {
         let minting = format!("{call_key}:{call_id}:attempt:1");
         let identity = crate::rederive_tool_intent_identity(&crate::ToolIntentIdentity {
-            session_id: session.clone(),
+            owner: crate::RuntimeOwner::Session(session.clone()),
             execution_scope_id: turn_id.as_str().to_string(),
             tool_call_id: call_id,
             intent_index: 0,

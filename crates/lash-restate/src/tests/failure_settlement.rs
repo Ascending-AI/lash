@@ -72,7 +72,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
     host.durability.attachment_store = Arc::new(
-        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+        lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );

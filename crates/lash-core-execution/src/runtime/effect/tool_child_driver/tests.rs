@@ -93,8 +93,10 @@ fn request_with_identity(identity: ToolAttemptLineage) -> ToolChildRequest {
         ToolChildScope {
             opener: crate::EffectOpener::turn("child-session", "turn"),
             admitted_scope: crate::AdmittedScope::turn("child-session", "turn"),
-            session_id: SessionId::from("child-session"),
-            agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("child-session"),
+                agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
+            },
         },
         crate::TurnControlBindingId::new("recorded-authority").expect("a valid binding id"),
         ProcessExecutionEnvRef::new("env-ref"),
@@ -153,12 +155,14 @@ fn lent_with_direct_completions(
         parent_invocation: Some(invocation("opener-parent")),
         observation_call_key: None,
         execution_env_spec: spec(9),
-        session_id: SessionId::from("opener-session"),
-        agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("opener-session"),
+            agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
+        },
         observer: Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+        attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
@@ -194,13 +198,13 @@ fn rebound(request: &ToolChildRequest) -> ToolDispatchContext<'static> {
 #[test]
 fn the_child_is_attributed_to_its_recorded_session_not_the_opener_s() {
     assert_eq!(
-        lent().session_id,
-        SessionId::from("opener-session"),
+        lent().owner.session_id(),
+        Some(&SessionId::from("opener-session")),
         "the lent value must be wrong for this test to prove anything"
     );
     assert_eq!(
-        rebound(&request()).session_id,
-        SessionId::from("child-session")
+        rebound(&request()).owner.session_id(),
+        Some(&SessionId::from("child-session"))
     );
 }
 
@@ -208,8 +212,17 @@ fn the_child_is_attributed_to_its_recorded_session_not_the_opener_s() {
 /// opener's current frame would attribute its work to the wrong one.
 #[test]
 fn the_child_keeps_its_recorded_agent_frame() {
-    assert_eq!(lent().agent_frame_id.as_str(), "opener-frame");
-    assert_eq!(rebound(&request()).agent_frame_id.as_str(), "child-frame");
+    assert_eq!(
+        lent().owner.agent_frame_id().map(|frame| frame.as_str()),
+        Some("opener-frame")
+    );
+    assert_eq!(
+        rebound(&request())
+            .owner
+            .agent_frame_id()
+            .map(|frame| frame.as_str()),
+        Some("child-frame")
+    );
 }
 
 /// Ruling 1 (ADR 0099 §3 amendment 1): a reopen may not consult the live Tool
@@ -498,7 +511,7 @@ fn opener_derivation_names_every_admitted_opener_scope() {
 /// call.
 #[derive(Default)]
 struct CompletionProbe {
-    binds: std::sync::Mutex<Vec<(SessionId, ProcessExecutionEnvSpec)>>,
+    binds: std::sync::Mutex<Vec<(crate::RuntimeOwner, ProcessExecutionEnvSpec)>>,
     completes: std::sync::Mutex<Vec<(ExecutionScope, Option<crate::TurnId>, bool)>>,
 }
 
@@ -575,13 +588,13 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
 
     fn bind_tool_child(
         self: Arc<Self>,
-        session_id: &crate::SessionId,
+        owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
     ) -> Option<Arc<dyn crate::direct_completion_client::DirectCompletionService>> {
         self.probe
             .binds
             .lock_recover()
-            .push((session_id.clone(), execution_env_spec.clone()));
+            .push((owner.clone(), execution_env_spec.clone()));
         self.bindable.then(|| {
             Arc::new(ProbedCompletionService {
                 probe: Arc::clone(&self.probe),
@@ -691,7 +704,10 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
         let binds = probe.binds.lock_recover();
         assert_eq!(
             binds.as_slice(),
-            &[(SessionId::from("child-session"), spec(3))],
+            &[(
+                crate::RuntimeOwner::Session(SessionId::from("child-session")),
+                spec(3)
+            )],
             "the service binds the recorded session and environment"
         );
     }

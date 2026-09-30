@@ -120,10 +120,27 @@ impl ToolChildContextSource for CoreToolChildContextSource {
                 self.process_lifecycle_available,
             )
             .map_err(|error| PluginError::Session(error.to_string()))?;
-        env.plugin_host = Some(Arc::new(plugin_host));
+        let plugin_host = Arc::new(plugin_host);
+        env.plugin_host = Some(Arc::clone(&plugin_host));
         let (process, queued) = (self.work_ports)().await;
         env = env.with_work_ports(process, queued);
-        let session_id = request.scope.session_id.clone();
+        // A child a process opened runs under that process's runtime, keyed
+        // by its id: it has no session to open.
+        let session_id = match &request.scope.owner {
+            lash_core::ExecutionOwner::SessionFrame { session_id, .. } => session_id.clone(),
+            lash_core::ExecutionOwner::Process { process_id } => {
+                let runtime = lash_core::core_internal::ProcessRuntimeContext::for_tool_child(
+                    &env,
+                    plugin_host,
+                    process_id.clone(),
+                    execution_env.clone(),
+                    self.drive_owner.clone(),
+                )?;
+                let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
+                dispatch.process_lineage = enclosing_lineage(&env, request).await?;
+                return Ok(DeploymentToolChildContext::new(dispatch, Arc::new(runtime)));
+            }
+        };
         let policy = execution_env.policy.clone();
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
@@ -151,29 +168,37 @@ impl ToolChildContextSource for CoreToolChildContextSource {
             ))
         })?;
         let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
-        // A child a process body opened runs inside that process: its starts
-        // record the process's lineage, read back from the process's own row
-        // since no live body lends it here (FIG-3607 R2).
-        if let Some(process_id) = request.enclosing_process.as_ref() {
-            let registry = env.process_registry().ok_or_else(|| {
-                PluginError::Session(format!(
-                    "tool child `{}` runs inside process `{process_id}` and this deployment has \
-                     no process registry to read its lineage from",
-                    request.call.call_id
-                ))
-            })?;
-            let enclosing = registry.get_process(process_id).await?.ok_or_else(|| {
-                PluginError::Session(format!(
-                    "tool child `{}` runs inside process `{process_id}`, which has no row to \
-                     read its lineage from",
-                    request.call.call_id
-                ))
-            })?;
-            dispatch.process_lineage = Some(enclosing.lineage());
-        }
+        dispatch.process_lineage = enclosing_lineage(&env, request).await?;
         Ok(DeploymentToolChildContext::new(
             dispatch,
             Arc::new(std::sync::Mutex::new(runtime)),
         ))
     }
+}
+
+/// A child a process body opened runs inside that process: its starts record
+/// the process's lineage, read back from the process's own row since no live
+/// body lends it here (FIG-3607 R2). `None` for a child no process encloses.
+async fn enclosing_lineage(
+    env: &RuntimeEnvironment,
+    request: &lash_core::facade_support::ToolChildRequest,
+) -> Result<Option<lash_core::ProcessLineage>, PluginError> {
+    let Some(process_id) = request.enclosing_process.as_ref() else {
+        return Ok(None);
+    };
+    let registry = env.process_registry().ok_or_else(|| {
+        PluginError::Session(format!(
+            "tool child `{}` runs inside process `{process_id}` and this deployment has \
+             no process registry to read its lineage from",
+            request.call.call_id
+        ))
+    })?;
+    let enclosing = registry.get_process(process_id).await?.ok_or_else(|| {
+        PluginError::Session(format!(
+            "tool child `{}` runs inside process `{process_id}`, which has no row to \
+             read its lineage from",
+            request.call.call_id
+        ))
+    })?;
+    Ok(Some(enclosing.lineage()))
 }

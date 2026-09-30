@@ -29,14 +29,9 @@
 //! | SQLite | `?1` | `main.processes` |
 //! | PostgreSQL | `$1` | `lash_processes` |
 //!
-//! The SQLite schema qualifier is a property of the **table**, resolved from
-//! the [`TableLayout`] the dialect carries: the attachment GC joins
-//! `main.attachment_manifest` to
-//! `process_registry.processes`. A statement set is rendered once per
-//! deployment layout rather than rebuilt with `format!` per call, and a table
-//! the layout does not place is a startup refusal — which is how a statement
-//! that only a connection with a process registry attached may issue fails to
-//! render for the layout that has none.
+//! SQLite schema qualifiers are resolved from the [`TableLayout`] the dialect
+//! carries. Statement sets render once per deployment layout. A table absent
+//! from the layout is a startup refusal.
 //!
 //! Rendering runs through a tokenizer that understands string literals, quoted
 //! identifiers and comments, so a `?` inside `'…'` and a `$1` inside `--` are
@@ -107,7 +102,9 @@ pub const TABLES: &[&str] = &[
     artifact::refs::TABLE,
     attachment::blob::TABLE,
     attachment::condemnation::TABLE,
-    attachment::manifest::TABLE,
+    attachment::edges::TABLE,
+    attachment::pending_writes::TABLE,
+    attachment::uploads::TABLE,
     attachment::sweep_clock::TABLE,
     draining_generations::TABLE,
     process::abandoned_consumer_holds::TABLE,
@@ -178,8 +175,9 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         artifact::cleanup_obligations::CleanupObligationLedgerStatements::NEUTRAL,
     );
-    statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
-    statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::edges::AttachmentEdgeStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::pending_writes::PendingWriteStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::uploads::UploadStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(attachment::sweep_clock::SweepClockStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);

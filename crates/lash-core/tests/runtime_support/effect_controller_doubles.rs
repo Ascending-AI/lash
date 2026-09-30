@@ -614,7 +614,10 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     .await
             }
             RuntimeEffectCommand::Process { command } => {
-                let result = local_executor.into_process()?.execute(*command).await?;
+                let result = local_executor
+                    .into_process()?
+                    .execute(envelope.invocation.execution_scope(), *command)
+                    .await?;
                 Ok(RuntimeEffectOutcome::Process { result })
             }
             RuntimeEffectCommand::Trigger { command } => {

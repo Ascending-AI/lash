@@ -125,7 +125,7 @@ implement segments, never the aliases.
 // crates/lash-core-store/src/store/mod.rs
 pub trait RuntimeStore:
     FleetFormatStore
-    + AttachmentManifest
+    + AttachmentReferrers
     + SessionCatalogStore
     + SessionCommitStore
     + SessionHistoryStore
@@ -139,7 +139,7 @@ pub trait RuntimeStore:
 
 impl<T> RuntimeStore for T where
     T: FleetFormatStore
-        + AttachmentManifest
+        + AttachmentReferrers
         + SessionCatalogStore
         + SessionCommitStore
         + SessionHistoryStore
@@ -170,20 +170,19 @@ returns it.
 request whose type already carries the id. `RuntimeCommit`, `ClaimAuthority`,
 `WorkClaim<_>`, `TurnAddress`, `TurnCancelRequest`,
 `TurnCancelClosureAuthorization`, `PendingTurnInputBatch`,
-`QueuedWorkBatchDraft`, `AdmitRootRequest`, `TurnParkWrite`, `SessionMeta`
-and `AttachmentIntent` all do. An operation that spans the catalog says so
+`QueuedWorkBatchDraft`, `AdmitRootRequest`, `TurnParkWrite` and
+`SessionMeta` all do. An operation that spans the catalog says so
 in its doc and takes no session.
 
 **Unchanged segments.** `FleetFormatStore`
-(`crates/lash-core-store/src/store/mod.rs:2012`), `AttachmentManifest`
-(`crates/lash-core-store/src/store/attachment_manifest.rs:429`),
+(`crates/lash-core-store/src/store/mod.rs:2012`), `AttachmentReferrers`
+(`crates/lash-core-store/src/store/attachment_referrers.rs:429`),
 `DriveEpochStore` (`crates/lash-core-store/src/store/drive_fence.rs:249`) and
 `QueuedWorkStore` (`crates/lash-core-store/src/store/mod.rs:1781`) keep their
 signatures verbatim, with one exception: `QueuedWorkStore` gains
-`has_admissible_queued_work` (below). `AttachmentManifest`'s four
-session-free reads (`list_uncommitted`, `forget_aged_uncommitted_intents`,
-`has_live_ref_for_id`, `list_all_refs`) are catalog-wide by their existing
-contract. `RootStore` (`crates/lash-core-store/src/store/root.rs:328`) keeps
+`has_admissible_queued_work` (below). `AttachmentReferrers` is keyed by
+referrer, not by session, and is catalog-wide (ADR 0124). `RootStore`
+(`crates/lash-core-store/src/store/root.rs:328`) keeps
 its signatures, and `admit_root` loses its unsupported default.
 
 #### 1.1 `SessionCatalogStore` (new)
@@ -323,7 +322,7 @@ pub trait SessionCommitStore: Send + Sync {
 Every method keeps today's documented semantics
 (`crates/lash-core-store/src/store/mod.rs:1034-1325`), with its session now
 explicit. `load_session`, `load_session_at`, `load_node` and
-`admit_and_bind_session` are deleted. So is the `AttachmentManifest`
+`admit_and_bind_session` are deleted. So is the `AttachmentReferrers`
 supertrait, because `RuntimeStore` composes both. `read_session_state_version`,
 `retain_admission_base`, `committed_turn_exists`, `drain_end_exists`,
 `record_turn_park` and `load_turn_park` lose their defaults.

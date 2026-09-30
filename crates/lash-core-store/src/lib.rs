@@ -12,7 +12,7 @@
     reason = "FIG-2784 pass 1, a later PR in the chain"
 )]
 
-/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// Re-exported so `impl_noop_attachment_referrers!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
@@ -38,6 +38,8 @@ pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod run_spec;
+pub mod runtime_owner;
+pub use runtime_owner::RuntimeOwner;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
@@ -103,15 +105,14 @@ pub(crate) type SessionHistoryRecord =
 
 // Items the moved modules name at the crate root because `lash-core`'s
 // `lib.rs` re-exported them there.
-pub(crate) use attachments::SessionAttachmentStore;
+pub(crate) use attachments::RuntimeAttachmentStore;
 pub(crate) use queued_drain_policy::{QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest};
 pub(crate) use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use store::{
-    AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
-    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, OperationId,
-    RuntimeStore, SessionMeta, StoreError,
+    AppendRequestIdentity, BlobRef, CheckpointComponentDescriptor, GraphAppend,
+    HydratedCheckpointComponent, OperationId, RuntimeStore, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{
@@ -250,8 +251,8 @@ pub(crate) use session_graph::{
 #[allow(unused_imports)]
 pub(crate) use session_graph_integrity::graph_node_indices;
 #[allow(unused_imports)]
-pub(crate) use store::attachment_manifest::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
+pub(crate) use store::attachment_referrers::{
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentReferrers, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit,
 };
 #[allow(unused_imports)]

@@ -43,6 +43,11 @@ impl LashCoreBuilder {
         if let Some(max) = self.max_attachment_bytes.take() {
             core = core.with_max_attachment_bytes(max);
         }
+        if let Some(expiry) = self.attachment_upload_expiry.take() {
+            core = core.with_attachment_upload_expiry_ms(
+                u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
+            );
+        }
         if let Some(policy) = self.output_retention.take() {
             core = core.with_output_retention(policy);
         }

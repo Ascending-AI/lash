@@ -332,7 +332,7 @@ fn execute_benchmark_mail_send(
     let idempotency_key = format!("{call_id}:mail.received:{account}");
     let _phase = call.context.named_phase("trigger.occurrence_to_delivery");
     let intent = lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
-        session_id: SessionId::from(call.context.session_id()),
+        owner: call.context.owner().runtime_owner(),
         request: TriggerOccurrenceRequest::new(
             BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
             source_key,

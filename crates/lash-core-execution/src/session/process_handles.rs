@@ -48,7 +48,7 @@ impl RuntimeExecutionContext<'_> {
         self.dispatch
             .processes
             .validate_visible(
-                &self.session_id,
+                &self.dispatch.owner.runtime_owner(),
                 std::slice::from_ref(process_id),
                 self.process_scope(self.parent_invocation.clone()),
             )
@@ -152,7 +152,7 @@ impl RuntimeExecutionContext<'_> {
             .dispatch
             .processes
             .signal_possessed(
-                &self.session_id,
+                &self.dispatch.owner.runtime_owner(),
                 &process_id,
                 signal_name,
                 signal_id,
@@ -189,7 +189,7 @@ impl RuntimeExecutionContext<'_> {
             .dispatch
             .processes
             .cancel(
-                &self.session_id,
+                &self.dispatch.owner.runtime_owner(),
                 &process_id,
                 self.process_scope(self.parent_invocation.clone()),
             )

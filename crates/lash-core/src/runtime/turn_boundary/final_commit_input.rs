@@ -10,6 +10,10 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) returned_state: crate::SessionSnapshot,
     pub(super) tool_calls: &'a [ToolCallRecord],
     pub(super) omitted: Option<&'a OmittedToolCalls>,
+    /// Outputs the turn's code cells retained out of history (FIG-1643):
+    /// their references live in protocol history, which the commit cannot
+    /// read, so the commit names them from here.
+    pub(super) retained_outputs: &'a [crate::RetainedOutput],
     pub(super) plugins: Option<&'a PluginSession>,
     pub(super) execution_state_update: ExecutionStateUpdate,
     pub(super) agent_frame_switch_materializes: bool,

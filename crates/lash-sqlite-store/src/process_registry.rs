@@ -1309,7 +1309,6 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
         Some(Arc::new(Self {
             conn: self.conn.clone(),
             clock,
-            process_session_catalog: self.process_session_catalog.clone(),
             wake_delivery_config: self.wake_delivery_config,
             scope_fence_hosts: self.scope_fence_hosts.clone(),
             location: self.location.clone(),

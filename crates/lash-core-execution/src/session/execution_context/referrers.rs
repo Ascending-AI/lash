@@ -33,11 +33,23 @@ impl RuntimeExecutionContext<'_> {
     /// that frame references until the frame ends. Only a turn admitted on
     /// the frame writes it, and a write after the frame's switch commit fails
     /// `ReferrerEnded`.
-    pub fn frame_referrer(&self) -> crate::ArtifactReferrer {
-        crate::ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
-            self.session_id.clone(),
-            self.dispatch.agent_frame_id.clone(),
-        ))
+    ///
+    /// # Errors
+    ///
+    /// [`crate::PluginError::NotASessionRuntime`] inside a process, which has
+    /// no frame.
+    pub fn frame_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+        match &self.dispatch.owner {
+            crate::ExecutionOwner::SessionFrame {
+                session_id,
+                agent_frame_id,
+            } => Ok(crate::ArtifactReferrer::FrameEnvironment(
+                crate::FrameEnvironmentId::new(session_id.clone(), agent_frame_id.clone()),
+            )),
+            crate::ExecutionOwner::Process { process_id } => Err(
+                crate::runtime::not_a_session_runtime("frame_referrer", process_id),
+            ),
+        }
     }
 
     /// The claim of [`Self::frame_referrer`]; a frame is unguarded, because
@@ -45,9 +57,10 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// # Errors
     ///
-    /// Never for a frame referrer; the error is the claim constructor's.
+    /// [`crate::PluginError::NotASessionRuntime`] inside a process; otherwise
+    /// never for a frame referrer, and the error is the claim constructor's.
     pub fn frame_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
-        crate::ReferrerClaim::unguarded(self.frame_referrer())
+        crate::ReferrerClaim::unguarded(self.frame_referrer()?)
             .map_err(|error| crate::PluginError::Session(error.to_string()))
     }
 

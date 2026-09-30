@@ -54,7 +54,7 @@ fn attempt(
         let responses = Arc::clone(&responses);
         Box::pin(async move {
             let attachments = Arc::new(
-                lash_core::facade_support::SessionAttachmentStore::ephemeral(
+                lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
                     backend.attachment_store(),
                 )
                 .with_output_retention(policy),

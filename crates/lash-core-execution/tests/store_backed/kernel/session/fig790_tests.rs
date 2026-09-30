@@ -274,7 +274,7 @@ impl EffectBackedProcessService {
 impl crate::ProcessService for EffectBackedProcessService {
     async fn start_from_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _request: crate::ProcessStartRequest,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -327,7 +327,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn validate_visible(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_ids: &[ProcessId],
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
@@ -338,7 +338,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -361,7 +361,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
@@ -385,7 +385,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
@@ -399,7 +399,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
@@ -413,7 +413,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _event_type: String,
         _replay_key: String,
@@ -472,7 +472,7 @@ async fn fig790_process_await_context(
             Default::default(),
         ))
         .expect("FIG-790 plugin session");
-    let attachment_store = Arc::new(crate::SessionAttachmentStore::unavailable());
+    let attachment_store = Arc::new(crate::RuntimeAttachmentStore::unavailable());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools: Arc::new(NoopTools),
@@ -499,8 +499,10 @@ async fn fig790_process_await_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("fig790-session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("fig790-session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -512,7 +514,6 @@ async fn fig790_process_await_context(
         process_originator: None,
     });
     RuntimeExecutionContext::new(
-        SessionId::from("fig790-session"),
         dispatch,
         backend.process_env_store(),
         attachment_store,

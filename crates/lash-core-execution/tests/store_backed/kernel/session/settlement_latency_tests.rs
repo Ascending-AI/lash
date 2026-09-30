@@ -249,11 +249,9 @@ fn probe_context_with<'run>(
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
-    let attachment_store: Arc<crate::SessionAttachmentStore> =
-        Arc::new(crate::SessionAttachmentStore::unavailable());
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
+    let attachment_store: Arc<crate::RuntimeAttachmentStore> =
+        Arc::new(crate::RuntimeAttachmentStore::unavailable());
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -275,8 +273,10 @@ fn probe_context_with<'run>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -293,7 +293,6 @@ fn probe_context_with<'run>(
     let host: Arc<dyn crate::EffectHost> = backend.effect_host();
     let wiring = crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &host);
     let mut context = crate::RuntimeExecutionContext::new(
-        SessionId::from("session"),
         dispatch,
         process_env_store,
         attachment_store,

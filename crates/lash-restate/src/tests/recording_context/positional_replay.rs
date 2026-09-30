@@ -183,36 +183,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         Box::pin(async { Ok(None) })
     }
 
-    fn await_process_terminal<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _process_id: ProcessId,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(std::future::pending())
-    }
-
-    fn await_process_terminal_or_turn_cancel<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        process_id: ProcessId,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
-    where
-        'ctx: 'run,
-    {
-        test_await_process_terminal_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            process_id,
-            turn_cancel,
-            None,
-        )
-    }
-
     fn resolve_event<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,

@@ -124,12 +124,12 @@ mod tests {
             .expect("create real in-memory manifest store");
         let persistence: Arc<dyn crate::RuntimeStore> = factory.clone();
         let attachment_backend = backend.attachment_store();
-        let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
+        let attachment_store = Arc::new(crate::RuntimeAttachmentStore::new(
             Arc::clone(&attachment_backend),
-            Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
+            Arc::new(crate::attachments::PersistenceReferrersAdapter(Arc::clone(
                 &persistence,
             ))),
-            request.session_id.clone(),
+            crate::RuntimeOwner::Session(request.session_id.clone()),
         ));
         let policy = Arc::new(DenyProcessAwaitAttachments::default());
         let dispatch = Arc::new(ToolDispatchContext {
@@ -158,8 +158,10 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: request.session_id.clone(),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: request.session_id.clone(),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -171,19 +173,11 @@ mod tests {
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
-            request.session_id,
             dispatch,
             backend.process_env_store(),
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
-        );
-        assert!(
-            persistence
-                .list_uncommitted(u64::MAX)
-                .await
-                .unwrap()
-                .is_empty()
         );
         assert!(attachment_backend.list().await.unwrap().is_empty());
         let handle = RuntimeExecutionContext::process_handle_json(&process.id.clone());
@@ -197,7 +191,7 @@ mod tests {
     }
 
     async fn assert_external_process_attachment_denied(source: crate::AttachmentSource) {
-        let (reply, persistence, attachment_backend, policy) =
+        let (reply, _persistence, attachment_backend, policy) =
             await_external_process_attachment(source.clone()).await;
         let record = reply.record.expect("external process await is recorded");
         assert_eq!(
@@ -218,13 +212,6 @@ mod tests {
                 source,
             )],
             "the completed process attachment must be authorized as await_process output"
-        );
-        assert!(
-            persistence
-                .list_uncommitted(u64::MAX)
-                .await
-                .unwrap()
-                .is_empty()
         );
         assert!(attachment_backend.list().await.unwrap().is_empty());
     }
@@ -363,12 +350,14 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -376,10 +365,9 @@ mod tests {
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
-            SessionId::from("session"),
             dispatch,
             backend.process_env_store(),
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         );
@@ -475,12 +463,14 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -488,10 +478,9 @@ mod tests {
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
-            SessionId::from("session"),
             dispatch,
             backend.process_env_store(),
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         );
@@ -638,12 +627,14 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -651,10 +642,9 @@ mod tests {
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
-            SessionId::from("session"),
             dispatch,
             backend.process_env_store(),
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         );
@@ -1003,12 +993,14 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -1016,10 +1008,9 @@ mod tests {
             process_originator: None,
         });
         let context = RuntimeExecutionContext::new(
-            SessionId::from("session"),
             dispatch,
             backend.process_env_store(),
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         );
@@ -1047,7 +1038,7 @@ mod tests {
         );
 
         let identity = crate::ToolIntentIdentity {
-            session_id: SessionId::from("session"),
+            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
             execution_scope_id: "session".to_string(),
             tool_call_id: lash_core_execution::ToolCallId::fixture("start-child"),
             intent_index: 0,

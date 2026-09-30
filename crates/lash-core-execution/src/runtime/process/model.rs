@@ -184,6 +184,16 @@ impl PartialEq for ProcessInput {
 }
 
 impl ProcessInput {
+    /// Stored attachments this input carries, sorted and deduplicated: a
+    /// `SessionTurn`'s turn input. Engine payloads are opaque JSON and carry
+    /// no typed attachments (ADR 0124).
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        match self {
+            Self::SessionTurn { turn_input, .. } => turn_input.stored_attachment_ids(),
+            Self::Engine { .. } | Self::Definition { .. } | Self::External { .. } => Vec::new(),
+        }
+    }
+
     /// Exposes engine kind to store and process-engine implementors while persisting and coordinating durable process execution.
     pub fn engine_kind(&self) -> &'static str {
         match self {

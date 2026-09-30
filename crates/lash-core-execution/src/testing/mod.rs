@@ -288,7 +288,7 @@ pub struct RuntimeCommitBudgetMeasurement {
     /// Named-MessagePack size of the hydrated checkpoint.
     pub checkpoint_bytes: usize,
     /// Raw UTF-8 byte length of the committed attachment ids.
-    pub attachment_manifest_bytes: usize,
+    pub attachment_referrer_bytes: usize,
     pub follow_on_bytes: usize,
     /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
@@ -312,7 +312,7 @@ pub fn measure_runtime_commit_budget(
         session_config_bytes: measurement.session_config_bytes,
         graph_delta_bytes: measurement.graph_delta_bytes,
         checkpoint_bytes: measurement.checkpoint_bytes,
-        attachment_manifest_bytes: measurement.attachment_manifest_bytes,
+        attachment_referrer_bytes: measurement.attachment_referrer_bytes,
         follow_on_bytes: measurement.follow_on_bytes,
         agent_frame_bytes: measurement.agent_frame_bytes,
         usage_delta_bytes: measurement.usage_delta_bytes,
@@ -626,7 +626,7 @@ impl ToolCallFixture<'static> {
                     crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
                 )
                 .expect("valid test runtime scope"),
-                Arc::new(crate::SessionAttachmentStore::unavailable()),
+                Arc::new(crate::RuntimeAttachmentStore::unavailable()),
                 direct_completions,
             )
             .build(),
@@ -654,9 +654,9 @@ impl<'run> ToolCallFixture<'run> {
         }
     }
 
-    /// The session the call runs in.
-    pub fn session_id(&self) -> &str {
-        self.context.session_id()
+    /// Who the call runs for.
+    pub fn owner(&self) -> &crate::ExecutionOwner {
+        self.context.owner()
     }
 
     /// The process the call runs inside, when it runs inside one.
@@ -697,9 +697,9 @@ impl<'run> ToolCallFixture<'run> {
         self
     }
 
-    /// Overrides the frame lineage the call runs under.
-    pub fn agent_frame_id(mut self, agent_frame_id: crate::FrameNodeId) -> Self {
-        self.context.agent_frame_id = agent_frame_id;
+    /// Overrides who the call runs for.
+    pub fn owner_as(mut self, owner: crate::ExecutionOwner) -> Self {
+        self.context.owner = owner;
         self
     }
 
@@ -880,11 +880,16 @@ pub async fn execute_effect_locally(
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
             let execution = local_executor.into_process()?;
+            let receiver = envelope.invocation.execution_scope().clone();
             if matches!(command.as_ref(), crate::ProcessCommand::Await { .. }) {
-                let result = execution.execute(*command).await?;
+                // Boxed: the await's state machine is large, and inlining it
+                // would grow every caller's future by the same amount.
+                let result = Box::pin(execution.execute(&receiver, *command)).await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
-            let joined = crate::task::spawn(async move { execution.execute(*command).await }).await;
+            let joined =
+                crate::task::spawn(async move { execution.execute(&receiver, *command).await })
+                    .await;
             let result = match joined {
                 Ok(result) => result?,
                 Err(error) => {
@@ -1027,7 +1032,7 @@ pub fn runtime_services_without_ports(
 ) -> crate::RuntimeServices {
     crate::RuntimeServices::new(
         plugins,
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
+        Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         Arc::new(UnavailableProcessExecutionEnvStore),
     )
 }
@@ -1143,7 +1148,13 @@ pub async fn code_execution_context_stopped<'run>(
     let control = Arc::new(
         crate::runtime::turn_control::ActiveTurnControl::new(
             host.await_event_resolver(),
-            crate::TurnAddress::new(context.session_id(), "cancelled-cell-turn"),
+            crate::TurnAddress::new(
+                context
+                    .session_id()
+                    .expect("the test execution context runs in a session")
+                    .clone(),
+                "cancelled-cell-turn",
+            ),
         )
         .await
         .expect("the test host keys a turn's cancellation gate"),
@@ -1412,7 +1423,7 @@ pub async fn coordinate_tool_provider_with_services(
         .plugins
         .present_tool_result(
             crate::plugin::ToolResultProjectionContext {
-                session_id: SessionId::from(session_id.to_string()),
+                owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
                 call_id: call.call_id.clone(),
                 tool_id: call.tool_id.clone(),
                 tool_name: outcome.record.tool.clone(),
@@ -1605,7 +1616,6 @@ pub fn process_engine_run_context_for_validation(
         process_id,
         execution_context,
         process_work,
-        SessionId::from("engine-validation-test"),
         plugins,
         tool_catalog,
         None,
@@ -1728,9 +1738,10 @@ impl EffectBackedProcessService {
 impl crate::ProcessService for EffectBackedProcessService {
     async fn list_visible_for_attempt(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        let session_id = crate::plugin::require_session_owner(owner, "list_visible_for_attempt")?;
         match mode {
             crate::ProcessListMode::Live => self.registry.list_live_observed_by(session_id).await,
             crate::ProcessListMode::All => {
@@ -1772,10 +1783,11 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn start_from_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
+        let session_id = crate::plugin::require_session_owner(owner, "start_from_recorded_intent")?;
         self.start_from_request(session_id, request, scope).await
     }
 
@@ -1852,10 +1864,11 @@ impl crate::ProcessService for EffectBackedProcessService {
     /// nothing.
     async fn validate_visible(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_ids: &[ProcessId],
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
+        let session_id = crate::plugin::require_session_owner(owner, "validate_visible")?;
         for process_id in process_ids {
             if !self.registry.is_observer(session_id, process_id).await? {
                 return Err(crate::PluginError::Session(format!(
@@ -1868,7 +1881,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -1890,7 +1903,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
@@ -1912,7 +1925,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -1938,22 +1951,15 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal_possessed(
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-        )
-        .await
+        self.signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
+            .await
     }
 
     async fn emit_event(
@@ -1978,13 +1984,14 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let session_id = crate::plugin::require_session_owner(owner, "emit_event_recorded_intent")?;
         self.emit_event(
             session_id, process_id, event_type, replay_key, payload, scope,
         )
@@ -2130,6 +2137,7 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
         omitted: None,
+        retained_outputs: Vec::new(),
         failure_evidence: Vec::new(),
         errors: Vec::new(),
         turn_input_acceptance: None,
@@ -2324,10 +2332,11 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn start_from_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, PluginError> {
+        let session_id = crate::plugin::require_session_owner(owner, "start_from_recorded_intent")?;
         let observers = request.observers.clone();
         let env_spec = request.env_spec.clone();
         let record = self
@@ -2430,11 +2439,12 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn validate_visible(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         let _ = scope;
+        let session_id = crate::plugin::require_session_owner(owner, "validate_visible")?;
         for handle_id in handle_ids {
             match self
                 .registry()?
@@ -2455,7 +2465,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
@@ -2474,7 +2484,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         _scope: crate::ProcessOpScope<'_>,
@@ -2493,7 +2503,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn signal_possessed(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -2514,27 +2524,20 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn signal_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        self.signal_possessed(
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-        )
-        .await
+        self.signal_possessed(owner, process_id, signal_name, signal_id, payload, scope)
+            .await
     }
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         event_type: String,
         replay_key: String,

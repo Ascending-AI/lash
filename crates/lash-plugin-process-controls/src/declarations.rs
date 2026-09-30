@@ -18,8 +18,8 @@
 use serde_json::Value;
 
 use lash_core::{
-    AttemptContext, SessionId, ToolAttemptOutcome, ToolDefinition, ToolIntent, ToolIntents,
-    ToolOutcome, ToolOutcomeDone,
+    AttemptContext, ToolAttemptOutcome, ToolDefinition, ToolIntent, ToolIntents, ToolOutcome,
+    ToolOutcomeDone,
 };
 use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
@@ -274,7 +274,7 @@ pub async fn execute_process_start_tool_call(
         Err(error) => return refuse(error),
     };
     let lifetime = lifetime(&cx);
-    let session_id = SessionId::from(context.session_id());
+    let owner = context.owner().runtime_owner();
     // A child started from inside a running process belongs to the chain that
     // started that process, not to the ephemeral session the run executes in:
     // it inherits the chain's originator and its wake target, and the execution
@@ -292,15 +292,26 @@ pub async fn execute_process_start_tool_call(
     // `processes.emit` from that process never becomes queued work on the
     // session waiting for it.
     let spawn = context.process_spawn_provenance().cloned();
-    let (originator, wake_session_id) = match spawn {
-        Some(spawn) => (spawn.originator, spawn.wake_session_id),
-        None => (
+    let (originator, wake_session_id) = match (spawn, context.owner()) {
+        (Some(spawn), _) => (spawn.originator, spawn.wake_session_id),
+        (
+            None,
+            lash_core::ExecutionOwner::SessionFrame {
+                session_id,
+                agent_frame_id,
+            },
+        ) => (
             lash_core::ProcessOriginator::Session {
                 session_id: session_id.clone(),
-                agent_frame_id: Some(context.agent_frame_id().clone()),
+                agent_frame_id: Some(agent_frame_id.clone()),
             },
             Some(session_id.clone()),
         ),
+        (None, lash_core::ExecutionOwner::Process { process_id }) => {
+            return refuse(format!(
+                "process `{process_id}` carries no spawn provenance for the child it starts"
+            ));
+        }
     };
     let declaration = lash_core::ProcessStartDeclaration::new(
         lash_core::ProcessInput::Engine {
@@ -338,10 +349,7 @@ pub async fn execute_process_start_tool_call(
             identity.intent_index,
         )),
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(
-            lash_core::StartProcessIntent {
-                session_id,
-                declaration,
-            },
+            lash_core::StartProcessIntent { owner, declaration },
         ))]),
     )
 }
@@ -373,7 +381,7 @@ pub fn execute_process_signal_tool_call(
         })),
         ToolIntents::v3(vec![ToolIntent::SignalProcess(
             lash_core::SignalProcessIntent {
-                session_id: SessionId::from(context.session_id()),
+                owner: context.owner().runtime_owner(),
                 process_id,
                 signal_name: signal_name.to_string(),
                 payload: args.get("payload").cloned().unwrap_or(Value::Null),
@@ -407,7 +415,7 @@ pub fn execute_process_emit_tool_call(
         })),
         ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(
             lash_core::EmitProcessEventIntent {
-                session_id: SessionId::from(context.session_id()),
+                owner: context.owner().runtime_owner(),
                 process_id,
                 event_type: PROCESS_PROGRESS_EVENT_TYPE.to_string(),
                 payload: value,
@@ -443,7 +451,7 @@ pub fn execute_process_register_tool_call(
         ToolOutcomeDone::ok(serde_json::json!({ "name": name })),
         ToolIntents::v3(vec![ToolIntent::RegisterProcessDefinition(Box::new(
             lash_core::RegisterProcessDefinitionIntent {
-                session_id: SessionId::from(context.session_id()),
+                owner: context.owner().runtime_owner(),
                 engine_kind: engine_kind(args),
                 definition,
                 env_spec: None,

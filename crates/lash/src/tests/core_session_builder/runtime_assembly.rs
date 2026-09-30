@@ -86,7 +86,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
             "assembly attempted a state write"
         );
         assert!(
-            recording.attachment_intents().is_empty(),
+            recording.attachment_writes().is_empty(),
             "assembly attempted an attachment write"
         );
         assert_eq!(

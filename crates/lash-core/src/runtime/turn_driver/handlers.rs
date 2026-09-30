@@ -363,7 +363,6 @@ impl RuntimeTurnDriver<'_> {
             let authority = &self.turn_pipeline.state().authority;
             self.session
                 .install_recorded_tool_surface(
-                    &self.session_id,
                     &authority.tool_access,
                     authority.subagent.as_ref(),
                     &tool_surface,
@@ -613,6 +612,9 @@ impl RuntimeTurnDriver<'_> {
             .now()
             .saturating_duration_since(cell_started)
             .as_millis() as u64;
+        if let Ok(output) = &result {
+            self.recorded_assembly.note_code_outputs(output);
+        }
         match &result {
             Ok(output) => {
                 code_observations.observe(

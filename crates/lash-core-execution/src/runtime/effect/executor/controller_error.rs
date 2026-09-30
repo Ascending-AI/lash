@@ -18,6 +18,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
             }
+            err @ PluginError::NotASessionRuntime { .. } => {
+                Self::new(RuntimeErrorCode::NotASessionRuntime, err.to_string())
+            }
             err @ PluginError::ProcessAlreadyTerminal { .. } => {
                 Self::new(RuntimeErrorCode::ProcessAlreadyTerminal, err.to_string())
             }

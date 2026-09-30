@@ -18,7 +18,6 @@
 //! a durable tool-catalog refresh so the next opened turn sees the updated
 //! `inbox.<slug>` authority set.
 
-use lash::SessionId;
 use lash::sync::{MutexExt, RwLockExt};
 use std::{
     collections::BTreeMap,
@@ -244,7 +243,7 @@ impl MailWorld {
     pub(crate) fn send_with_trigger(
         &self,
         call_id: &str,
-        session_id: &SessionId,
+        owner: &lash::RuntimeOwner,
         slug: &str,
         args: &Value,
     ) -> Result<(Value, ToolIntent), String> {
@@ -257,7 +256,7 @@ impl MailWorld {
         // ingests one occurrence however often the declaration is re-executed.
         let idempotency_key = format!("{call_id}:mail.received:{}", delivered.message.id);
         let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {
-            session_id: SessionId::from(session_id.to_string()),
+            owner: owner.clone(),
             request: TriggerOccurrenceRequest::new(
                 MAIL_RECEIVED_SOURCE_TYPE,
                 source_key,
@@ -482,7 +481,7 @@ impl ToolProvider for MockMailProvider {
         // crash replay and a reported-failure retry.
         match self.world.send_with_trigger(
             call.context.call_id().as_str(),
-            &SessionId::from(call.context.session_id()),
+            &call.context.owner().runtime_owner(),
             &slug,
             call.args,
         ) {
@@ -501,6 +500,7 @@ impl ToolProvider for MockMailProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::SessionId;
     use lash::tools::ToolBindingResolutionExt;
 
     #[test]
@@ -557,7 +557,7 @@ mod tests {
         let (receipt, intent) = world
             .send_with_trigger(
                 "turn-1:call-1",
-                &SessionId::from("session-1"),
+                &lash::RuntimeOwner::Session(SessionId::from("session-1")),
                 "work",
                 &args,
             )
@@ -569,7 +569,10 @@ mod tests {
         let ToolIntent::EmitTrigger(declared) = intent else {
             panic!("inbox send must declare a trigger emission")
         };
-        assert_eq!(declared.session_id, "session-1");
+        assert_eq!(
+            declared.owner,
+            lash::RuntimeOwner::Session(lash::SessionId::from("session-1"))
+        );
         assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);
         assert_eq!(
             declared.request.idempotency_key,
@@ -579,7 +582,7 @@ mod tests {
         let (replayed_receipt, replayed_intent) = world
             .send_with_trigger(
                 "turn-1:call-1",
-                &SessionId::from("session-1"),
+                &lash::RuntimeOwner::Session(SessionId::from("session-1")),
                 "work",
                 &args,
             )

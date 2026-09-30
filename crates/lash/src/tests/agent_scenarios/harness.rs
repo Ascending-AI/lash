@@ -413,25 +413,25 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         )
         .await?;
         for attachment_id in &case.seeded_attachment_writes {
-            let intent = lash_core::AttachmentIntent {
+            let write = lash_core::AttachmentWrite {
                 attachment_id: attachment_id.clone(),
-                session_id: seed_session_id.clone(),
-                canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-                intent_at_epoch_ms: 1,
-                owner: None,
+                claim: lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::Session(
+                    seed_session_id.clone(),
+                ))
+                .expect("a session claim is unguarded"),
             };
             let lash_core::AttachmentWriteFence::Granted(permit) =
-                lash_core::AttachmentManifest::begin_attachment_write(
+                lash_core::AttachmentReferrers::begin_attachment_write(
                     seed_store.store().as_ref(),
-                    intent.clone(),
+                    &write,
                 )
                 .await?
             else {
                 panic!("a seeded attachment write must be granted");
             };
-            lash_core::AttachmentManifest::complete_attachment_write(
+            lash_core::AttachmentReferrers::complete_attachment_write(
                 seed_store.store().as_ref(),
-                &intent,
+                &write,
                 permit,
             )
             .await?;

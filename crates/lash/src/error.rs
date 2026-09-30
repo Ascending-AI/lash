@@ -543,7 +543,7 @@ mod tests {
                 session_config_bytes: 0,
                 graph_delta_bytes: 2,
                 checkpoint_bytes: 3,
-                attachment_manifest_bytes: 5,
+                attachment_referrer_bytes: 5,
                 follow_on_bytes: 0,
                 agent_frame_bytes: 0,
                 usage_delta_bytes: 0,

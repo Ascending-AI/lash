@@ -957,6 +957,18 @@ fn enqueue_pending_turn_inputs_conn(
     let session_id = batch.session_id();
     ensure_session_not_deleted_conn(tx, session_id)?;
     ensure_session_not_closing_conn(tx, session_id)?;
+    let ids = batch
+        .drafts()
+        .iter()
+        .flat_map(|draft| draft.input.stored_attachment_ids())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let claim = lash_core_execution::ReferrerClaim::unguarded(
+        lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+    )
+    .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
+    crate::attachments::acquire_attachment_refs_conn(tx, &claim, &ids, now)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut interned = std::collections::BTreeSet::new();
     let mut admitted = Vec::with_capacity(batch.drafts().len());

@@ -240,7 +240,6 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
         let state = self.turn_pipeline.state();
         let tool_surface = self.session.pin_tool_surface(
-            &self.session_id,
             &state.authority.tool_access,
             state.authority.subagent.as_ref(),
         )?;

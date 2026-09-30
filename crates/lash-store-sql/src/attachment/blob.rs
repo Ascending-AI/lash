@@ -10,7 +10,7 @@
 //! It is deliberately not the content-addressed `blobs` table beside it. That
 //! table is rooted by checkpoints, anchors and artifact pointers, while the
 //! attachment GC lists its backend and deletes every entry the attachment
-//! manifest does not root. Sharing one table would hand checkpoint bytes to a
+//! root set does not root. Sharing one table would hand checkpoint bytes to a
 //! sweep that cannot see their roots.
 
 /// The table's unprefixed name.

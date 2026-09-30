@@ -54,7 +54,7 @@ use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
 use lash::persistence::DurabilityTier as _;
 use lash::persistence::PendingTurnInputDraft as _;
-use lash::persistence::SessionAttachmentStore as _;
+use lash::persistence::RuntimeAttachmentStore as _;
 use lash::persistence::SessionRelation as _;
 use lash::persistence::SessionStoreCreateRequest as _;
 use lash::persistence::TurnInputCheckpointBoundary as _;

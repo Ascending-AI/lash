@@ -101,8 +101,10 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
             opener: lash_core::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),
             admitted_scope: admitted,
-            session_id: SessionId::from(SESSION),
-            agent_frame_id: lash_core::FrameNodeId::new("frame").expect("a valid frame id"),
+            owner: lash_core::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from(SESSION),
+                agent_frame_id: lash_core::FrameNodeId::new("frame").expect("a valid frame id"),
+            },
         },
         // The child is refused at the session gate, before any authority is
         // consulted.

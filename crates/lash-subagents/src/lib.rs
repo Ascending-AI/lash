@@ -16,7 +16,9 @@ use lash_core::{
     facade_support::SessionSpec,
 };
 
-pub use rlm::spawn_agent_tool_definition;
+pub use rlm::{
+    SPAWN_HOST_ORIGINATED_PROCESS, SPAWN_PARENT_FORK_IN_PROCESS, spawn_agent_tool_definition,
+};
 
 /// # Child tool access
 ///

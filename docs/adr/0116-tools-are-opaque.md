@@ -694,11 +694,19 @@ the record identifies the child session too. The model sees only the value.
 `spawn_agent_orchestrating_tool` and `execute_orchestration` are deleted, and
 the plugin registers only the provider (`crates/lash-subagents/src/lib.rs:116-181`).
 
-- **Prepare** is unchanged (`rlm.rs:99-174`). It resolves the capability, the
-  depth and the `ParentFork` plugin init, clears `session_id`, renders the
-  task, and seals `PreparedSpawnAgent { create_request, turn_input }`. It
-  additionally seals the parsed output schema, which today is re-parsed at
-  execution (`rlm.rs:56-57`).
+- **Prepare** resolves the parent, the capability, the depth and the
+  `ParentFork` plugin init, clears `session_id`, renders the task, and seals
+  `PreparedSpawnAgent { create_request, turn_input }` with the parsed output
+  schema. The parent is the spawning session, caused by the spawn's tool
+  call. A spawn from inside a durable process parents its child under the
+  session that originated the process chain
+  (`ToolPrepareContext::process_originator`), reads that session's policy by
+  an explicit named snapshot, and records `caused_by = CausalRef::Process`.
+  No session stands in for the process and there is no fallback: a chain the
+  host originated refuses with `subagent_spawn_host_originated_process`, and
+  a `ParentFork` capability inside a process refuses with
+  `subagent_spawn_parent_fork_in_process`, since a process has no
+  conversation to fork (ADR 0124 §6).
 - **Execute** decodes the payload and builds one `StartProcessIntent` whose
   input is `ProcessInput::SessionTurn { definition_key:
   "lash-subagent-session-turn", create_request, turn_input, result:

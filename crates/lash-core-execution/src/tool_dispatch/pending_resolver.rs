@@ -106,8 +106,8 @@ impl ArmedResolver {
 /// Where one parked call arms its resolver.
 pub struct ParkSite<'a, 'scope> {
     pub processes: &'a dyn crate::ProcessService,
-    /// The session the call runs in.
-    pub session_id: &'a crate::SessionId,
+    /// Who the call runs for.
+    pub owner: crate::RuntimeOwner,
     /// The call's id: the key material of its cancel obligation.
     pub call_id: &'a lash_sansio::ToolCallId,
     /// The call's lineage: the start, the arming and the cancel obligation
@@ -497,11 +497,7 @@ async fn cancel_owned_process(
         .into_runtime_invocation()
     });
     let scope = site.scope.clone().with_parent_invocation(parent);
-    match site
-        .processes
-        .cancel(site.session_id, process_id, scope)
-        .await
-    {
+    match site.processes.cancel(&site.owner, process_id, scope).await {
         Ok(_) => Ok(CancelDischarge::Met),
         Err(error) => match super::intent_executor::declared_start_fault(&error) {
             // The invocation that owns the call can journal nothing more: a

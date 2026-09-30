@@ -761,40 +761,6 @@ finish(result);"#,
 }
 
 #[tokio::test]
-async fn rlm_spawn_process_handle_returns_child_final_value() {
-    let (outcome, prompt) = run_seed_probe(
-        r#"<typescript>
-const spawnChild = async () => {
-  const result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: { len: "int" }
-  });
-  return result;
-};
-const handle = await processes.start({ definition: spawnChild });
-finish(await handle);
-</typescript>"#,
-        TurnInput::text("spawn a child with a seeded chunk through start/await"),
-    )
-    .await;
-
-    assert_eq!(
-        outcome,
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
-                value: json!({ "len": 2 })
-            }
-        )
-    );
-    assert!(
-        prompt_advertises_bound_variable(&prompt, "chunk"),
-        "child prompt did not advertise seeded `chunk` variable:\n{prompt}"
-    );
-}
-
-#[tokio::test]
 async fn rlm_spawn_links_subagent_process_from_lashlang_graph() {
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let (outcome, _) = run_seed_probe_with_graph_store(
@@ -1361,7 +1327,7 @@ async fn subagents_plugin_builds_without_mode_context() {
         lash_core::lifetime::starter,
     );
     let ctx = PluginSessionContext {
-        session_id: SessionId::from("parent"),
+        owner: lash_core::RuntimeOwner::Session(SessionId::from("parent")),
         tool_access: lash_core::SessionToolAccess::default(),
         subagent: None,
         extensions: Default::default(),

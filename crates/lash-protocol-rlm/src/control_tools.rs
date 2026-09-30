@@ -4,7 +4,6 @@ use lash_core::{
     ToolManifest, ToolOutcome, ToolProvider,
 };
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
-use lash_sansio::SessionId;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -116,8 +115,12 @@ fn continue_as_switch_frame(
     seed_keys.sort();
     let seed_count = seed_keys.len();
     let frame_key = lash_core::FrameKey::from_call_site(
-        &SessionId::from(context.session_id()),
-        context.agent_frame_id(),
+        context
+            .session_id()
+            .map_err(|err| format!("continue_as {err}"))?,
+        context
+            .agent_frame_id()
+            .map_err(|err| format!("continue_as {err}"))?,
         context.call_id(),
     );
     let initial_nodes = crate::rlm_seed_initial_nodes(seed);
@@ -163,8 +166,8 @@ fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolOutcome
 mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
-    use lash_sansio::ProcessId;
     use lash_sansio::sync::MutexExt;
+    use lash_sansio::{ProcessId, SessionId};
     use std::sync::{Arc, Mutex};
 
     use lash_core::plugin::runtime_host::{
@@ -273,7 +276,7 @@ mod tests {
     impl lash_core::ProcessService for BatonManager {
         async fn start_from_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _request: lash_core::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessHandleView, PluginError> {
@@ -315,7 +318,7 @@ mod tests {
 
         async fn validate_visible(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _handle_ids: &[ProcessId],
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
@@ -326,7 +329,7 @@ mod tests {
 
         async fn cancel(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
@@ -337,7 +340,7 @@ mod tests {
 
         async fn cancel_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _identity: lash_core::ToolIntentIdentity,
             _scope: lash_core::ProcessOpScope<'_>,
@@ -349,7 +352,7 @@ mod tests {
 
         async fn signal_possessed(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
@@ -363,7 +366,7 @@ mod tests {
 
         async fn signal_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
@@ -377,7 +380,7 @@ mod tests {
 
         async fn emit_event_recorded_intent(
             &self,
-            _session_id: &SessionId,
+            _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _event_type: String,
             _replay_key: String,
@@ -419,10 +422,13 @@ mod tests {
         )
         .processes(processes)
         .call_id(lash_core::ToolCallId::fixture(tool_call_id))
-        .agent_frame_id(lash_core::facade_support::frame_node_id(
-            &SessionId::from("test-session"),
-            "test-lineage",
-        ))
+        .owner_as(lash_core::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("test-session"),
+            agent_frame_id: lash_core::facade_support::frame_node_id(
+                &SessionId::from("test-session"),
+                "test-lineage",
+            ),
+        })
         .attempt("test-turn");
         let manifest = provider
             .resolve_manifest("continue_as")

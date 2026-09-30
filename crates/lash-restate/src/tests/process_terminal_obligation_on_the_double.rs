@@ -111,6 +111,8 @@ impl World {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress: RestateIngressClient::new(connection.clone()),
+                attachments: stores.session_store_factory()
+                    as Arc<dyn lash_core::AttachmentReferrers>,
                 sessions: stores.session_store_factory(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&runner),

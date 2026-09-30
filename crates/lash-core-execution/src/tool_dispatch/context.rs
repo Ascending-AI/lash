@@ -1,4 +1,3 @@
-use crate::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
@@ -90,8 +89,9 @@ pub struct ToolDispatchContext<'run> {
     /// a command's — already keys uniquely through `parent_invocation`.
     pub observation_call_key: Option<String>,
     pub execution_env_spec: crate::ProcessExecutionEnvSpec,
-    pub session_id: SessionId,
-    pub agent_frame_id: crate::FrameNodeId,
+    /// Who this dispatch runs for: a session on its admitted agent frame, or
+    /// a process, which has neither a session nor a frame of its own.
+    pub owner: crate::ExecutionOwner,
     /// The turn's observation sink (ADR 0105 §1): every host-facing event a
     /// dispatch emits is a synchronous [`ObservationSink::observe`] call,
     /// keyed by replay key and ordinal, and never awaited. A group child
@@ -102,7 +102,7 @@ pub struct ToolDispatchContext<'run> {
     pub observer: Arc<dyn crate::engine::ObservationSink>,
     pub checkpoint_messages: CheckpointMessageBuffer,
     pub trigger_outcomes: ToolTriggerOutcomeBuffer,
-    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
     pub clock: Arc<dyn crate::Clock>,
@@ -155,7 +155,7 @@ impl ToolDispatchContext<'_> {
         scope
             .journal_identity()
             .map(|identity| identity.key().to_owned())
-            .unwrap_or_else(|_| format!("dispatch:{}:{}", scope.id(), self.session_id))
+            .unwrap_or_else(|_| format!("dispatch:{}:{}", scope.id(), self.owner.runtime_owner()))
     }
 
     /// This dispatch with one call's observation key installed:
@@ -214,7 +214,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 6;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -260,8 +260,7 @@ pub enum RebindField {
     ParentInvocation,
     ObservationCallKey,
     ExecutionEnvSpec,
-    SessionId,
-    AgentFrameId,
+    Owner,
     Observer,
     CheckpointMessages,
     TriggerOutcomes,
@@ -294,8 +293,7 @@ impl RebindField {
             Self::ParentInvocation => "parent_invocation",
             Self::ObservationCallKey => "observation_call_key",
             Self::ExecutionEnvSpec => "execution_env_spec",
-            Self::SessionId => "session_id",
-            Self::AgentFrameId => "agent_frame_id",
+            Self::Owner => "owner",
             Self::Observer => "observer",
             Self::CheckpointMessages => "checkpoint_messages",
             Self::TriggerOutcomes => "trigger_outcomes",
@@ -323,8 +321,7 @@ impl RebindField {
             | Self::DirectCompletions
             | Self::ParentInvocation
             | Self::ExecutionEnvSpec
-            | Self::SessionId
-            | Self::AgentFrameId => RebindSource::Rebound,
+            | Self::Owner => RebindSource::Rebound,
             // Facts that ride the child's own outcome: a buffer the opener
             // filled would smuggle the opener's pending facts into the child's
             // settlement. The observation call key is likewise call-scoped —
@@ -384,8 +381,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::ParentInvocation,
     RebindField::ObservationCallKey,
     RebindField::ExecutionEnvSpec,
-    RebindField::SessionId,
-    RebindField::AgentFrameId,
+    RebindField::Owner,
     RebindField::Observer,
     RebindField::CheckpointMessages,
     RebindField::TriggerOutcomes,
@@ -401,7 +397,7 @@ impl<'run> ToolDispatchContext<'run> {
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.clone())
             .with_parent_invocation(self.parent_invocation.clone())
-            .with_agent_frame_id(Some(self.agent_frame_id.clone()))
+            .with_agent_frame_id(self.owner.agent_frame_id().cloned())
             .with_process_lineage(self.process_lineage.clone())
     }
 
@@ -423,8 +419,7 @@ impl<'run> ToolDispatchContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             observation_call_key: self.observation_call_key.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
-            session_id: self.session_id.clone(),
-            agent_frame_id: self.agent_frame_id.clone(),
+            owner: self.owner.clone(),
             observer: Arc::clone(&self.observer),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
@@ -473,8 +468,7 @@ impl<'run> ToolDispatchContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             observation_call_key: self.observation_call_key.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
-            session_id: self.session_id.clone(),
-            agent_frame_id: self.agent_frame_id.clone(),
+            owner: self.owner.clone(),
             observer: Arc::clone(&self.observer),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),

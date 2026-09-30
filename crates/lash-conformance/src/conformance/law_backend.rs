@@ -244,6 +244,13 @@ impl crate::StoreSet for StoreLawStores {
     fn session_store_factory(&self) -> Arc<dyn crate::DeploymentStore> {
         Self::no_second_substrate("session catalog")
     }
+    /// Host construction captures the referrer port (the cleanup executor
+    /// ends attachment edges through it). Every attachment write is still
+    /// refused, by the unavailable attachment store below, so no edge can
+    /// exist for these referrers to hold.
+    fn attachment_referrers(&self) -> Arc<dyn crate::AttachmentReferrers> {
+        Arc::new(crate::attachments::NoopAttachmentReferrers)
+    }
 
     fn process_registry(&self) -> Arc<dyn crate::ProcessRegistry> {
         Self::no_second_substrate("process registry")

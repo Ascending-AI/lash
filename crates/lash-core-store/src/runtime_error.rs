@@ -225,6 +225,9 @@ pub enum RuntimeErrorCode {
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose target is outside the invoking session's visible set.
     ProcessNotVisible,
+    /// A session-only operation was asked of a process runtime: a process
+    /// has no session and no agent frame of its own.
+    NotASessionRuntime,
     /// ADR 0051 effect-host implementor diagnostic for a write or cancellation
     /// refused because the recorded target is already terminal.
     ProcessAlreadyTerminal,
@@ -644,6 +647,7 @@ impl RuntimeErrorCode {
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
             Self::ProcessPanicked => "process_panicked",
             Self::ProcessNotVisible => "process_not_visible",
+            Self::NotASessionRuntime => "not_a_session_runtime",
             Self::ProcessAlreadyTerminal => "process_already_terminal",
             Self::ProcessParentEnded => "process_parent_ended",
             Self::ProcessCancelConflict => "process_cancel_conflict",
@@ -891,6 +895,7 @@ impl RuntimeErrorCode {
         Self::QueuedWorkRowExceedsContextWindow,
         Self::ProcessPanicked,
         Self::ProcessNotVisible,
+        Self::NotASessionRuntime,
         Self::ProcessAlreadyTerminal,
         Self::ProcessParentEnded,
         Self::ProcessCancelConflict,
@@ -1082,6 +1087,7 @@ impl RuntimeErrorCode {
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
             "process_panicked" => Self::ProcessPanicked,
             "process_not_visible" => Self::ProcessNotVisible,
+            "not_a_session_runtime" => Self::NotASessionRuntime,
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
             "process_parent_ended" => Self::ProcessParentEnded,
             "process_cancel_conflict" => Self::ProcessCancelConflict,

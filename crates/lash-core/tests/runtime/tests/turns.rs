@@ -519,14 +519,24 @@ fn attachment_put_transport() -> TestProvider {
         .build()
 }
 
-fn assert_turn_owned_attachment(store: &RecordingStore, turn_id: &TurnId) {
-    let entries = store.attachment_intents();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(
-        entries[0].owner,
-        Some(lash_core::AttachmentOwner::Turn {
-            id: turn_id.as_str().to_string()
-        })
+/// The tool's put was bound to the turn's execution, never to an upload, and
+/// the commit acquired the session's edge on it (ADR 0124).
+async fn assert_turn_owned_attachment(store: &RecordingStore) {
+    let id = lash_core::attachments::content_id(b"turn-owned-tool-attachment");
+    let referrers = lash_core::AttachmentReferrers::attachment_referrers(store, &id)
+        .await
+        .expect("read the attachment's referrers");
+    assert!(
+        referrers.contains(&lash_core::ArtifactReferrer::Session(SessionId::from(
+            "root"
+        ))),
+        "the commit acquired the session's edge: {referrers:?}"
+    );
+    assert!(
+        referrers
+            .iter()
+            .all(|referrer| !matches!(referrer, lash_core::ArtifactReferrer::Upload(_))),
+        "a turn's put is held by its execution, not an upload: {referrers:?}"
     );
 }
 

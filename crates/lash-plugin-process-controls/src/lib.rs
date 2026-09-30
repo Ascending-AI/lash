@@ -14,7 +14,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
-use lash_core::{ProcessId, SessionId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
+use lash_core::{ProcessId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
@@ -139,7 +139,7 @@ impl StaticToolExecute for SessionProcessAdminTools {
             })),
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::CancelProcess(
                 lash_core::CancelProcessIntent {
-                    session_id: SessionId::from(call.context.session_id()),
+                    owner: call.context.owner().runtime_owner(),
                     process_id,
                 },
             )]),
@@ -568,7 +568,10 @@ mod tests {
         let lash_core::ToolIntent::CancelProcess(intent) = &intents.intents[0] else {
             panic!("processes.cancel must declare CancelProcess")
         };
-        assert_eq!(intent.session_id, "test-session");
+        assert_eq!(
+            intent.owner,
+            lash_core::RuntimeOwner::Session(lash_core::SessionId::from("test-session"))
+        );
         assert_eq!(
             intent.process_id,
             lash_core::ProcessId::fixture("literal-process")
@@ -719,7 +722,7 @@ mod tests {
         ))
         .expect("standard session");
         let standard_names = standard_session
-            .resolved_tool_catalog(&SessionId::from("standard"))
+            .resolved_tool_catalog()
             .expect("standard tool catalog")
             .tool_names()
             .as_ref()
@@ -737,7 +740,7 @@ mod tests {
         .build_session(PluginSessionRequest::creation("rlm", Default::default()))
         .expect("rlm session");
         let rlm_names = rlm_session
-            .resolved_tool_catalog(&SessionId::from("rlm"))
+            .resolved_tool_catalog()
             .expect("rlm tool catalog")
             .tool_names()
             .as_ref()

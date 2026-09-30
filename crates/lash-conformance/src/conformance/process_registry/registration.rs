@@ -33,7 +33,7 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     let key = crate::StartKey::for_tool_intent(
         crate::DERIVED_START_KEYS,
         &crate::derive_tool_intent_identity(
-            &crate::SessionId::from("start-key-disposition"),
+            &crate::RuntimeOwner::Session(crate::SessionId::from("start-key-disposition")),
             "start-key-disposition",
             &lash_core::ToolCallId::fixture("call-1"),
             0,

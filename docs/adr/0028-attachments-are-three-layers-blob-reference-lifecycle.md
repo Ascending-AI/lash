@@ -27,42 +27,44 @@ sibling (pid + counter, not a fixed `.tmp`) and fsyncs the parent directory
 after `rename`, so the directory entry itself is crash-durable and a stale
 staging file from a prior crash never blocks a later write.
 
-**Layer 2 — reference tracking is lash-owned.** The `AttachmentManifest` layer
-with `(session_id, attachment_id)` identity, a write-ahead intent recorded
-before the bytes land, and a commit stamped inside the session-store transaction
-remains the core boundary. Each intent also records the durable logical owner
-that can finish it: a turn id, a process id, or no owner for direct host puts.
-What changed is the facade: the trait-implementing
-`SessionScopedAttachmentStore` decorator became a concrete `SessionAttachmentStore`
-struct — the one and only attachment surface the runtime and its consumers see.
-It binds a flat backend, a manifest, and a `session_id`, and exposes inherent
-`put`/`get`/`delete`, `backend()`, `session_id()`, and a forwarded
-`persistence()`. Turn and recovered-process execution scope the facade while
-they run; owner identity is written in the same manifest mutation as the
-intent. There is no process-local pending-id correctness state. At final commit,
-the store stamps every row owned by the committing turn inside the graph and
-checkpoint transaction. The explicit tool-output/message attachment-id union
-remains as adoption for cross-turn references. FIG-2501 supersedes the original
-session-boundary read guard: reads resolve content addresses directly, and
-hosts own authorization. `delete(id)` forgets this session's manifest row only
-when retained history no longer needs it; physical deletion remains GC's job.
+**Layer 2 — reference tracking is lash-owned.** The `AttachmentReferrers`
+port is the core boundary. A digest is held by referrer edges, the same
+referrers that hold artifacts (ADR 0113, ADR 0124): the execution journal of
+the turn that put it, the process record of a process runtime, a session that
+committed or was sent it, or one upload of a session. There is no
+`(session_id, attachment_id)` identity, no owner column and no commit stamp;
+an attachment's URI is derived from its digest. Write state is separate from
+the edges: `begin_attachment_write` records a pending write and its claim's
+edge before the bytes land, and `complete_attachment_write` records upload
+evidence. The runtime's one attachment surface is the concrete
+`RuntimeAttachmentStore`: it binds a flat backend, the referrer port and the
+runtime owner that holds its puts, and exposes inherent `put`/`get`/`delete`,
+`backend()`, `holder()` and a forwarded `persistence()`. A session turn binds
+the facade to its execution journal while it runs, so its puts are held by
+that journal until it settles; a put outside any turn is held by a fresh
+upload of its session until the upload expires; a process runtime's puts are
+held by its record. The boundary commit acquires the session's edge on every
+attachment the committed messages and tool outputs name
+(`acquire_attachment_refs`), so a turn put nothing commits is released when
+the turn's journal settles. FIG-2501 supersedes the original session-boundary
+read guard: reads resolve content addresses directly, and hosts own
+authorization. `delete(id)` forgets the holder's lasting edge only when
+retained history no longer needs it; physical deletion remains GC's job.
 Ephemeral facades record no durable roots.
 
 **Layer 3 — lifecycle is host policy, with lash levers and a bundled default.**
 The per-session `reclaim_orphaned_attachments` sweep is deleted. In its place is
 `reclaim_unreferenced_attachments(root_set, backend, policy)`:
 mark-and-sweep GC that enumerates every blob via `list`, computes the live root
-set, and deletes every blob no session references. Every committed ref is live.
-The policy names the grace period and refuses an empty root set when any blob is
+set, and deletes every blob no referrer holds.
+The policy refuses an empty root set when any blob is
 deletion-eligible unless the host explicitly authorizes deleting everything
 unreferenced; emptiness cannot itself prove that destructive interpretation.
-An uncommitted intent becomes eligible only when it is older than the retention
-cutoff **and** its durable owner is proven dead: a different, later turn commit
-supersedes a turn owner, and pruning the durable process row kills a process
-owner. Direct host puts have no owner proof and retain the legacy age-only
-fallback. Elapsed time is therefore policy after terminal proof, never the
-correctness argument that a replayable execution is dead. The other use of the
-window is a *delete-time freshness re-check*: the `list` snapshot's modification time is
+A digest is live iff it has an edge or a pending write: there is no age
+predicate and no owner-death predicate, and a referrer's end is decided by
+the cleanup executor (ADR 0113 §2.5, ADR 0124), never by the sweep. The grace
+period's one use is a
+*delete-time freshness re-check*: the `list` snapshot's modification time is
 stale by the time the sweep reaches a candidate, so before deleting, the sweep
 re-stats the blob via `AttachmentStore::head` and spares any blob touched inside
 the window. That closes the race where a new intent plus a `put` of the same
@@ -74,13 +76,13 @@ unconditionally, the in-memory store restamps) precisely so this re-check sees i
 read: between deciding a digest is unreferenced and physically deleting it, a
 session can record an intent and write the same content, and no amount of
 re-reading closes that. The sweep closes it with a clockless CAS state machine in
-the lash-owned root authority — the same durable store the manifest lives in, so
+the lash-owned root authority — the same durable store the edges live in, so
 the two sides meet inside one transaction rather than across two reads.
 
 Per digest the state is `Free`, `Condemned`, or `Deleting`, and ownership
 transitions are conditional mutations. A failed delete records a retry deadline
 on the store clock; that deadline grants no ownership. The writer's `put`
-goes through `AttachmentManifest::begin_attachment_write`, which mints a fresh
+goes through `AttachmentReferrers::begin_attachment_write`, which mints a fresh
 `write_id` for the attempt, records the write-ahead intent under it, *and*
 resolves the condemnation in one mutation: it claims a `Condemned` digest with
 that id, and against a `Deleting` digest or a phase owned by another writer it
@@ -96,26 +98,26 @@ generation, and a sweep adopts and finishes a crashed predecessor's
 condemnations before it condemns anything new (ADR 0067 §6).
 
 **Adoption is gated on positive upload evidence, not on a tombstone
-(FIG-2795).** A completed upload stamps `written_at_ms` on the writer's manifest
-row through `complete_attachment_write`, which is fenced and matched on
-`write_id`: a permit superseded by a newer attempt stamps nothing and fails the
-put with `StoreError::StaleWritePermit`. A digest is adoptable iff some manifest
-row for it, in any session, carries `written_at_ms` and no `deleting`
-condemnation exists; `commit_refs` validates every digest in the batch before
-writing anything and copies the evidenced `written_at_ms` onto the adopter's row,
-so evidence outlives the uploader's own intent. Otherwise adoption refuses with
-`StoreError::UnknownAttachment` and publishes nothing. Condemnation deletes every
-manifest row for the digest under the same fence, so a swept digest is
-unadoptable until somebody puts the bytes again — the byte-absence fact is the
-absence of evidence rather than a phase that has to be preserved. GC liveness
-(the root set) and adoption eligibility (upload evidence) stay distinct
-predicates: an uncommitted intent is a root the moment it exists, and only a
-completed upload makes those bytes adoptable. A failed put releases only its own
-attempt: `abort_attachment_write` deletes just the unstamped, uncommitted row
-carrying its `write_id`, and a stale permit settles nothing at all. It preserves
-`Condemned` unless the same intent became a committed root while the claim was
-held; that newer root supersedes the old unarmed condemnation before the older
-sweep can arm it. A failed delete returns `Deleting` to `Condemned`, where a
+(FIG-2795).** A completed upload records the digest's upload evidence through
+`complete_attachment_write`, which is fenced and matched on `write_id`: a
+permit superseded by a newer attempt, or retired by its referrer's end,
+records nothing and fails the put with `StoreError::StaleWritePermit`. A
+digest is adoptable iff it has upload evidence and no `deleting`
+condemnation exists; `acquire_attachment_refs` validates every digest in the
+batch before writing anything, so evidence outlives the uploader's own
+edge. Otherwise acquisition refuses with `StoreError::UnknownAttachment` and
+writes nothing. Condemnation deletes the digest's evidence under the same
+fence, so a swept digest is unadoptable until somebody puts the bytes again —
+the byte-absence fact is the absence of evidence rather than a phase that has
+to be preserved. GC liveness (the root set) and adoption eligibility (upload
+evidence) stay distinct predicates: a pending write is a root the moment it
+exists, and only a completed upload makes those bytes adoptable. A failed put
+releases only its own attempt: `abort_attachment_write` deletes its pending
+write, and its edge only when no evidence and no sibling write remains; a
+stale permit settles nothing at all. A condemnation claim is a foreign key to
+the pending write that holds it, so completing, aborting or ending the write
+releases the claim structurally; when another root exists, abort retires the
+old unarmed condemnation before the older sweep can arm it. A failed delete returns `Deleting` to `Condemned`, where a
 writer may reclaim the digest and later sweeps retry it with capped backoff; a delete that
 keeps failing stays listed with a typed stall until success (ADR 0067 §6).
 Whoever loses a CAS
@@ -136,11 +138,11 @@ is lash's own protocol, and a host cannot judge fencing safely: the next sweep
 adopts a dead sweeper's `Condemned` or `Deleting` row under a generation that
 proves the predecessor dead, and finishes the delete (ADR 0067 §6). A restoring
 writer's claim is never adopted. The separate
-`recover_abandoned_attachment_write` lever clears a writer token and its
-associated uncommitted intent, but only after the host establishes that the
-writer is no longer running. It applies the same newer-root rule as failed-put
-settlement: preserve `Condemned` when the associated intent is still
-uncommitted, otherwise retire that old condemnation to `Free`. A fresh re-put
+`recover_abandoned_attachment_write` lever deletes the pending write that
+holds a digest's claim, but only after the host establishes that the writer
+is no longer running. It applies abort's rules: retire the old condemnation to
+`Free` when another root exists, otherwise leave it `Condemned` and
+sweep-owned. A fresh re-put
 then claims any retained phase normally. lash expires neither state on a
 timer.
 
@@ -149,7 +151,7 @@ now runs only after the sweep arms the digest as `Deleting`; writers arriving in
 that window record no intent and retry after the sweep settles the phase.
 
 Answering `Fenced` is a claim about ten methods across two traits —
-`AttachmentManifest::begin_attachment_write`, `complete_attachment_write`, and
+`AttachmentReferrers::begin_attachment_write`, `complete_attachment_write`, and
 `abort_attachment_write` plus the root set's `fence`,
 `begin_attachment_sweep`, `adopt_attachment_condemnations`,
 `condemn_attachment`, `arm_attachment_delete`,
@@ -172,10 +174,9 @@ alarm: it must stay empty, and a non-empty list means the transitions are not
 atomic with intent recording, or two authorities are pointed at one backend.
 
 The grace period is a post-terminal retention choice and need not bound turn or
-replay duration. `commit_refs` writes an adopter's row only for a digest some
-row already evidences as uploaded, so adoption cannot resurrect a ref whose bytes
-were reclaimed: the condemnation that preceded the delete removed that
-evidence. The sweep **continues
+replay duration. `acquire_attachment_refs` writes an edge only for a digest
+with upload evidence, so adoption cannot resurrect a ref whose bytes were
+reclaimed: the condemnation that preceded the delete removed that evidence. The sweep **continues
 past per-blob delete failures**, collecting failed ids into its report rather than
 aborting on the first error.
 The root set is a factory-level lever: every `SessionStoreFactory` must explicitly
@@ -189,39 +190,20 @@ an eligible blob propagates the enumeration error before any delete, while a
 no-candidate sweep returns a report carrying the failure so hosts can distinguish
 it from a healthy empty sweep. Decorators that can answer must deliberately
 delegate. The
-implementation answers in one transaction on the global manifest table for
-Postgres (conditionally delete aged, owner-dead intents, then read the survivors),
-and in one transaction on SQLite's factory-wide durable-core catalog.
-Process-owner death proof is an
-explicit host-supplied capability: SQLite hosts call
-`SqliteSessionStoreFactory::new_with_process_registry`, while Postgres hosts
-call `PostgresStorage::session_store_factory_with_shared_process_registry` only
-when the registry shares that database. Unwired factories warn and conservatively keep
-process-owned intents forever; they never infer a sibling path or query a table
-that merely happens to have the expected name. SQLite validates the configured
-database's process-registry schema when GC attaches it (not during ordinary
-session open), then evaluates process-row absence in the same
-conditional delete rather than through a read-then-forget race. The catalog is
-the sole SQLite root-set authority; if it cannot be opened, the sweep aborts
-rather than treating unreadable live references as absent. Because
-`delete_session` releases a session's manifest rows, and those rows are exactly
-what the root set enumerates, a deleted session's blobs become unreferenced and
-GC collects them — correct by construction, verified for both SQLite and
-Postgres through manifest row deletion. The stated assumption is
+implementation answers from the referrer edges and pending writes in one
+transaction: on PostgreSQL over the deployment's tables, on SQLite over the
+factory-wide durable-core catalog. The catalog is the sole SQLite root-set
+authority; if it cannot be opened, the sweep aborts rather than treating
+unreadable live references as absent. A deleted session's edges end through
+the cleanup executor once its retained history is gone (ADR 0124), and a
+pruned process's edges end with its record, so their blobs become
+unreferenced and GC collects them — correct by construction on both backends.
+The stated assumption is
 that the backend instance is **exclusive to this lash deployment**: a blob with
 no live ref is genuinely garbage only if every writer to that bucket/directory is
 this deployment's sessions. A host wires the bundled sweeper as one post-startup
 background pull with a generous grace period, logging its report; lash-core itself
 gains no scheduling infrastructure — the lever plus one host pull is the end-state.
-
-Terminal process retention owns the two internal session stores created while a
-process runs: `process-env:<id>` and `process-session-turn:<id>`. Pruning first
-releases their attachment-intent rows and deletes those stores, then removes the
-terminal process row. PostgreSQL performs the sequence in one transaction;
-SQLite deletes the explicitly wired session files before a transaction
-revalidates and removes the terminal row. Failures therefore retain a terminal
-process leak instead of deleting state that a live process could still need or
-making a process-owned intent appear dead too early.
 
 Why the global root set makes shared bytes safe where physical copies were the
 blunt fix: once every session's refs are visible in one root set, GC can prove a
@@ -229,50 +211,44 @@ blob is unreferenced *everywhere* before deleting it, so two sessions can share
 one physical blob and neither loses its content when the other is swept or
 deleted. The physical per-session namespace bought isolation by never sharing at
 all — paying a full byte copy per session and taxing every backend with session
-awareness — to solve a problem the manifest already models precisely. Reads resolve content addresses, storage is deduplicated, and lifecycle
+awareness — to solve a problem the referrer edges already model precisely. Reads resolve content addresses, storage is deduplicated, and lifecycle
 is the host's to schedule.
 
 ## Shared-history implementation (FIG-2501 / FIG-653)
 
-Attachment manifest ownership establishes liveness, not authorization. The
+Holding a referrer edge establishes liveness, not authorization. The
 attachment read guard and its membership capability are removed. History point
 reads still enforce graph membership, and process waits enforce observer
 subscription relationships. Hosts own authorization at their edge.
 
-A boundary commit adopting a stored content address also acquires a committed
-manifest root for the receiving session, even if that session never put the
-bytes. Root acquisition and graph publication share one transaction; failure
+A boundary commit adopting a stored content address also acquires the
+receiving session's edge, even if that session never put the bytes. Root acquisition and graph publication share one transaction; failure
 leaves no new root. Adoption uses the existing digest fence, revoking an unarmed
 condemnation and refusing a physical delete already in flight. After FIG-2795 it
-also requires positive upload evidence: some manifest row must carry
-`written_at_ms` for the digest, or the boundary refuses with
+also requires positive upload evidence for the digest, or the boundary
+refuses with
 `StoreError::UnknownAttachment`, because nothing proves the host blob store ever
 held these bytes. The caller re-reads or re-puts through its own facade and
-retries; the failed boundary publishes no manifest root or graph state. The receiver's root then follows the same
-owner-level retention rule as any other attachment.
+retries; the failed boundary publishes no edge or graph state. The receiver's
+edge then follows the same session retention rule as any other.
 
-FIG-2795 replaces the terminal `reclaimed` phase with upload evidence on the
-manifest row: rows gain `write_id` and `written_at_ms`, and the condemnation
-phase vocabulary narrows to `condemned` and `deleting`. Both changes move durable
+FIG-2795 replaces the terminal `reclaimed` phase with upload evidence, and
+the condemnation phase vocabulary narrows to `condemned` and `deleting`. Both changes move durable
 values, so PostgreSQL component 92 and SQLite session schema 61 are
 reject-and-recreate boundaries. Condemnation rows remain bounded to one row per
 distinct condemned digest, and are deleted outright on a completed delete. A
-restoring put holds an opaque token and its manifest session association in that
-row and clears them only after the backend put succeeds; no host blob access
-enters a store transaction.
+restoring put's claim is its pending write's token, cleared when that write
+completes, aborts or ends; no host blob access enters a store transaction.
 
-The schema-free mechanism retains a deleted owner's committed manifest rows
-while any of that owner's graph nodes remain retained by a head, child, or pin.
-The final prefix retirement makes those roots reclaimable on the next sweep.
-Uncommitted rows are removed at owner deletion. Explicit forget also respects
-the graph-retention precondition. The in-memory factory shares the same manifest
-across its stores, so pins retain roots even without an active store handle.
+A deleted session's edges are retained while any of its graph nodes remain
+retained by a head, child, or pin: session deletion arms
+`AwaitSessionGraphRetired`, and the executor ends the session's edges only
+once the final prefix retirement leaves no untombstoned node (ADR 0124).
+`forget_attachment_ref` respects the same graph-retention precondition.
 
-This conservatively retains suffix attachments too, until the last owner prefix
-is gone. Exact node-to-attachment edges would provide finer reclamation, but
-are not required for safety and would consume a store-schema change. Live-turn
-intent reconciliation still uses receipt supersession; terminal receipt
-reclamation is coupled to the permanent deleted-session proof in FIG-2502.
+This conservatively retains suffix attachments too, until the last retained
+prefix is gone. Exact node-to-attachment edges would provide finer
+reclamation, but are not required for safety.
 
 ## Cross-version consequences
 

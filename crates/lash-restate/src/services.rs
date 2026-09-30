@@ -767,6 +767,9 @@ pub(crate) struct LashServiceParts<'a, R> {
     /// The session catalog a session-scope group child checks its state
     /// generation in before it runs (FIG-3619).
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
+    /// The deployment's attachment referrers, which a parked process await
+    /// acquires the waiter's edges through (ADR 0124).
+    pub(crate) attachments: Arc<dyn lash_core::AttachmentReferrers>,
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
     /// Where the session handlers find the driver the core installs.
@@ -808,6 +811,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         effect_host,
         ingress,
         sessions,
+        attachments,
         process_workflow,
         session_driver,
         build_generation,
@@ -880,7 +884,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                 ),
                 LashService::ProcessAttach => bind_as(
                     builder,
-                    LashProcessAttachImpl::new(namespace.clone()).serve(),
+                    LashProcessAttachImpl::new(namespace.clone(), Arc::clone(&attachments)).serve(),
                     &name,
                     claimed(),
                     &wire,

@@ -9,7 +9,7 @@ use lash_core::facade_support::PluginHost;
 )]
 fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String> {
     session
-        .resolved_tool_catalog(&lash_core::SessionId::from("root"))
+        .resolved_tool_catalog()
         .expect("tool catalog")
         .tool_names()
         .as_ref()
@@ -114,7 +114,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
         ])
         .build_session(PluginSessionRequest::creation("root", Default::default()))?;
         Ok(session
-            .resolved_tool_catalog(&lash_core::SessionId::from("root"))?
+            .resolved_tool_catalog()?
             .tool_names()
             .as_ref()
             .clone())

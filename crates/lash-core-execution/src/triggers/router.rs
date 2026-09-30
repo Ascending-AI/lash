@@ -743,9 +743,16 @@ impl TriggerRouter {
             process_engines: self.process_engines.clone(),
             turn_cancellation: None,
             effect_controller: None,
+            attachments: None,
             outcome_observer: None,
         };
-        match execution.execute(command).await {
+        // A start records nothing into its caller: the relay has no journal,
+        // and the start derives its starter from its own key.
+        let receiver = crate::ExecutionScope::runtime_operation(format!(
+            "trigger-delivery-recovery:{}:{}",
+            reservation.occurrence.occurrence_id, reservation.subscription.subscription_id
+        ));
+        match execution.execute(&receiver, command).await {
             Ok(crate::ProcessEffectOutcome::Start { record, .. }) => Ok(record.id),
             Ok(_) => Err(TriggerDeliveryRecoveryError::Refused(PluginError::Session(
                 "trigger process start returned an outcome other than a start".to_string(),

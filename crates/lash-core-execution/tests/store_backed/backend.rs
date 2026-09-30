@@ -88,6 +88,10 @@ async fn backend_ports_remain_coherent_through_wrappers() {
                 &stores.attachment_store()
             ));
             assert!(Arc::ptr_eq(
+                &clone.attachment_referrers(),
+                &stores.attachment_referrers()
+            ));
+            assert!(Arc::ptr_eq(
                 &clone.module_artifacts(),
                 &stores.module_artifacts()
             ));
@@ -158,6 +162,7 @@ captured_ports! {
     process_definitions: crate::ProcessDefinitionStore,
     process_env_store: crate::ProcessExecutionEnvStore,
     attachment_store: crate::AttachmentStore,
+    attachment_referrers: crate::AttachmentReferrers,
     module_artifacts: crate::ModuleArtifactStore,
     recovery_leader: crate::store::RecoveryLeaderStore,
     generation_drain: crate::store::generation_drain::GenerationDrainStore,

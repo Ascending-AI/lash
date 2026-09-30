@@ -613,7 +613,7 @@ impl RuntimeTurnDriver<'_> {
 
 async fn normalize_plugin_message_attachments(
     messages: &mut [crate::PluginMessage],
-    attachment_store: &crate::SessionAttachmentStore,
+    attachment_store: &crate::RuntimeAttachmentStore,
     policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<(), RuntimeError> {
     for message in messages {
@@ -628,7 +628,7 @@ async fn normalize_plugin_message_attachments(
 
 async fn normalize_plugin_attachment_source(
     source: &mut crate::AttachmentSource,
-    attachment_store: &crate::SessionAttachmentStore,
+    attachment_store: &crate::RuntimeAttachmentStore,
     policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<(), RuntimeError> {
     policy

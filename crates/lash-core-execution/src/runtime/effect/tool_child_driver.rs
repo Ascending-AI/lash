@@ -871,13 +871,10 @@ pub(crate) fn rebind_child_dispatch<'run>(
         );
     }
     let mut child = lent.clone();
-    // A child may be attributed to a session the lending opener is not: a
-    // process opener has no session of its own (ADR 0094) and still does tool
-    // work that belongs to one.
-    child.session_id = request.scope.session_id.clone();
-    // One session holds many frames (ADR 0092), so a child that inherited the
-    // opener's current frame would attribute its work to the wrong one.
-    child.agent_frame_id = request.scope.agent_frame_id.clone();
+    // The child runs for the owner it recorded. One session holds many frames
+    // (ADR 0092), so a child that inherited the opener's current frame would
+    // attribute its work to the wrong one.
+    child.owner = request.scope.owner.clone();
     // Ruling 1: a reopen may not consult the live Tool Catalog, and neither
     // may the calls the child issues (FIG-3712). See `admitted_catalog`.
     child.tool_catalog = Arc::new(admitted_catalog(request));
@@ -921,7 +918,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // so a managed-LLM call the child makes is journaled under the child's
     // facts, never the opener's (ADR 0099 §3, §13).
     child.direct_completions = lent.direct_completions.bind_tool_child(
-        &request.scope.session_id,
+        &request.scope.owner.runtime_owner(),
         &execution_env_spec,
         controller,
         request
@@ -1024,7 +1021,6 @@ fn admitted_tool_drift(
     let live = lent
         .plugins
         .resolve_live_tool_catalog(
-            &request.scope.session_id,
             live_tools,
             request.session.tool_access.clone(),
             request.session.subagent.clone(),
@@ -1457,7 +1453,7 @@ async fn await_journaled_tool_completion(
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
     let site = crate::tool_dispatch::ParkSite {
         processes: dispatch.processes.as_ref(),
-        session_id: &dispatch.session_id,
+        owner: dispatch.owner.runtime_owner(),
         call_id,
         scope: dispatch.process_scope(),
         child_trace_hook: None,

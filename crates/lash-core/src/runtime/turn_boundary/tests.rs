@@ -308,6 +308,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
@@ -657,6 +658,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clear {
                 carries: SeedCarries::none(),
@@ -724,6 +726,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
@@ -829,6 +832,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
@@ -939,6 +943,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
@@ -1021,6 +1026,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
@@ -1081,7 +1087,7 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
         )),
     }];
     let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
-    let committed = committed_attachment_ids(&state, &tool_calls, None);
+    let committed = committed_attachment_ids(&state, &tool_calls, None, &[]);
     assert_eq!(committed, vec![attachment.id.clone()]);
 
     let roots = FixedAttachmentRoots(committed.into_iter().collect());
@@ -1135,6 +1141,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             outcome: &cancelled_outcome(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
@@ -1201,6 +1208,7 @@ async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 omitted: None,
+                retained_outputs: &[],
                 ingress_settlement: settlement,
                 pending_follow_on: None,
                 interrupted_turn_input_turn_id: None,
@@ -1260,6 +1268,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             outcome: &cancelled_outcome(),
             tool_calls: &[],
             omitted: None,
+            retained_outputs: &[],
             ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,

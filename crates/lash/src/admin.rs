@@ -492,28 +492,21 @@ impl SessionAdmin {
         payload: serde_json::Value,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let (session_id, processes) = {
+        let (owner, processes) = {
             let writer = self.runtime.writer();
             let runtime = writer.lock().await;
             (
-                SessionId::from(runtime.session_id()),
+                lash_core::RuntimeOwner::Session(SessionId::from(runtime.session_id())),
                 runtime.process_service()?,
             )
         };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
-            .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
+            .validate_visible(&owner, std::slice::from_ref(process_id), scope.clone())
             .await
             .map_err(EmbedError::Plugin)?;
         processes
-            .signal_possessed(
-                &session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
+            .signal_possessed(&owner, process_id, signal_name, signal_id, payload, scope)
             .await
             .map_err(EmbedError::Plugin)
     }
@@ -878,21 +871,21 @@ impl SessionAdmin {
         process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
-        let (session_id, processes) = {
+        let (owner, processes) = {
             let writer = self.runtime.writer();
             let runtime = writer.lock().await;
             (
-                SessionId::from(runtime.session_id()),
+                lash_core::RuntimeOwner::Session(SessionId::from(runtime.session_id())),
                 runtime.process_service()?,
             )
         };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
-            .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
+            .validate_visible(&owner, std::slice::from_ref(process_id), scope.clone())
             .await
             .map_err(EmbedError::Plugin)?;
         let summary = processes
-            .cancel(&session_id, process_id, scope)
+            .cancel(&owner, process_id, scope)
             .await
             .and_then(lash_core::ProcessCancelReceipt::from_record)
             .map_err(EmbedError::Plugin)?;

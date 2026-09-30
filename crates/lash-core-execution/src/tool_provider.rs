@@ -24,32 +24,55 @@ pub use direct_completion::ToolDirectCompletionClient;
 pub use session::ToolSessionModel;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
+///
+/// Under a session owner every read answers from the session. Under a process
+/// owner, the model and the tool catalog answer from the process's captured
+/// environment and pinned catalog, the current snapshot refuses with
+/// [`PluginError::NotASessionRuntime`], and a named snapshot works for any
+/// explicit session.
 #[derive(Clone)]
 pub struct AttemptSessionReads {
-    session_id: SessionId,
+    owner: crate::RuntimeOwner,
     sessions: Arc<dyn SessionStateService>,
+    /// The policy of the environment the attempt runs under: a process
+    /// owner's model reads answer from it.
+    policy: crate::SessionPolicy,
+    /// The catalog the attempt was dispatched against: a process owner's
+    /// catalog reads answer from it. `None` outside a runtime dispatch.
+    tool_catalog: Option<Arc<crate::ToolCatalog>>,
 }
 
 impl AttemptSessionReads {
-    /// Integrator class 3 read of the attempt session's effective model policy.
+    /// Integrator class 3 read of the attempt owner's effective model policy.
     pub async fn model(&self) -> Result<session::ToolSessionModel, PluginError> {
-        let snapshot = self.snapshot_current().await?;
-        let generation = snapshot
-            .policy
-            .model
-            .clamped_generation(&snapshot.policy.generation);
+        let policy = match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.snapshot_session(session_id).await?.policy
+            }
+            crate::RuntimeOwner::Process(_) => self.policy.clone(),
+        };
+        let generation = policy.model.clamped_generation(&policy.generation);
         Ok(session::ToolSessionModel {
-            model: snapshot.policy.model.id,
-            model_variant: snapshot.policy.model.variant,
-            model_capability: snapshot.policy.model.capability,
-            extra_body: snapshot.policy.model.extra_body,
+            model: policy.model.id,
+            model_variant: policy.model.variant,
+            model_capability: policy.model.capability,
+            extra_body: policy.model.extra_body,
             generation,
         })
     }
 
-    /// Integrator class 3 snapshot of the bound session without an effect controller.
+    /// Integrator class 3 snapshot of the bound session without an effect
+    /// controller. A process owner has no session and is refused.
     pub async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(&self.session_id).await
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.snapshot_session(session_id).await
+            }
+            crate::RuntimeOwner::Process(process_id) => Err(crate::runtime::not_a_session_runtime(
+                "snapshot_current",
+                process_id,
+            )),
+        }
     }
 
     /// Integrator class 3 snapshot of a named session through controller-free reads.
@@ -62,21 +85,43 @@ impl AttemptSessionReads {
             .await
     }
 
-    /// Integrator class 3 read of the bound session's serialized tool catalog.
+    /// Integrator class 3 read of the owner's serialized tool catalog.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
-        self.sessions.tool_catalog(&self.session_id).await
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.tool_catalog(session_id).await
+            }
+            crate::RuntimeOwner::Process(_) => Ok(self.pinned_catalog()?.as_ref().clone()),
+        }
     }
 
     /// Integrator class 3 shared read of the immutable serialized tool catalog.
     pub async fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
-        self.sessions.shared_tool_catalog(&self.session_id).await
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.shared_tool_catalog(session_id).await
+            }
+            crate::RuntimeOwner::Process(_) => self.pinned_catalog(),
+        }
+    }
+
+    fn pinned_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
+        let catalog = self.tool_catalog.as_ref().ok_or_else(|| {
+            PluginError::Session(format!(
+                "`{}` has no pinned tool catalog outside a runtime dispatch",
+                self.owner
+            ))
+        })?;
+        Ok(Arc::new(crate::tool_registry::project_tool_catalog(
+            catalog.tools.iter().cloned(),
+        )))
     }
 }
 
 /// Integrator class 3 controller-free process reads for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptProcessReads {
-    session_id: SessionId,
+    owner: crate::RuntimeOwner,
     processes: Arc<dyn crate::ProcessService>,
 }
 
@@ -88,7 +133,7 @@ impl AttemptProcessReads {
     ) -> Result<Vec<crate::ProcessHandleView>, PluginError> {
         Ok(self
             .processes
-            .list_visible_for_attempt(&self.session_id, filter.list_mode())
+            .list_visible_for_attempt(&self.owner, filter.list_mode())
             .await?
             .into_iter()
             .filter(|record| filter.matches_record(record))
@@ -115,7 +160,9 @@ pub(crate) enum ToolExecutionRoute {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
-    session_id: SessionId,
+    /// Who the attempt runs for: a session on its admitted frame, or a
+    /// process.
+    owner: crate::ExecutionOwner,
     /// The runtime-owned parent scope for a child lifecycle declaration —
     /// the admitted pair the enclosing execution runs under, which is the
     /// whole input to the one owner derivation —
@@ -123,14 +170,13 @@ pub struct AttemptContext<'run> {
     /// name (ADR 0099 §1, FIG-3417).
     parent_scope: crate::AdmittedScope,
     execution_scope_id: String,
-    agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
     processes: AttemptProcessReads,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
     /// The process this attempt executes inside, resolved once at context
     /// construction. `ToolContext` carries the same single fact.
     enclosing_process: Option<ProcessId>,
-    attachment_store: Arc<crate::SessionAttachmentStore>,
+    attachment_store: Arc<crate::RuntimeAttachmentStore>,
     /// The dispatch-bound direct-completion client. `pub(crate)` so the
     /// attempt-atomicity laws can reach the *raw* client and prove the binding
     /// travels with it rather than with the accessor.
@@ -196,15 +242,19 @@ impl<'run> AttemptContext<'run> {
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
             parent_scope: context.effect_controller.admitted_scope().clone(),
-            session_id: context.session_id.clone(),
+            owner: context.owner.clone(),
             execution_scope_id,
-            agent_frame_id: context.agent_frame_id.clone(),
             sessions: AttemptSessionReads {
-                session_id: context.session_id.clone(),
+                owner: context.owner.runtime_owner(),
                 sessions: Arc::clone(&context.sessions),
+                policy: context.execution_env_spec.policy.clone(),
+                tool_catalog: context
+                    .runtime_dispatch
+                    .as_ref()
+                    .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
             },
             processes: AttemptProcessReads {
-                session_id: context.session_id.clone(),
+                owner: context.owner.runtime_owner(),
                 processes: Arc::clone(&context.processes),
             },
             cancellation_token: context.cancellation_token.clone(),
@@ -241,17 +291,23 @@ impl<'run> AttemptContext<'run> {
         &self.tool_execution_route
     }
 
-    /// Integrator class 3 identity for the session that owns this recorded attempt.
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    /// Integrator class 3: who this recorded attempt runs for.
+    pub fn owner(&self) -> &crate::ExecutionOwner {
+        &self.owner
+    }
+    /// Integrator class 3 identity for the session that owns this recorded
+    /// attempt, or [`PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_id(&self) -> Result<&SessionId, PluginError> {
+        self.owner.require_session("attempt_session_id")
     }
     /// Integrator class 3 durable turn or process scope used for intent identity.
     pub fn execution_scope_id(&self) -> &str {
         &self.execution_scope_id
     }
-    /// Integrator class 3 agent-frame identity that authorized this provider attempt.
-    pub fn agent_frame_id(&self) -> &crate::FrameNodeId {
-        &self.agent_frame_id
+    /// Integrator class 3 agent-frame identity that authorized this provider
+    /// attempt, or [`PluginError::NotASessionRuntime`] inside a process.
+    pub fn agent_frame_id(&self) -> Result<&crate::FrameNodeId, PluginError> {
+        self.owner.require_agent_frame("attempt_agent_frame_id")
     }
     /// Integrator class 3 controller-free session reads for this attempt.
     pub fn sessions(&self) -> AttemptSessionReads {
@@ -289,7 +345,7 @@ impl<'run> AttemptContext<'run> {
     /// left unre-issued by redrive.
     pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
         ToolDirectCompletionClient {
-            session_id: self.session_id.clone(),
+            owner: self.owner.runtime_owner(),
             call_id: self.call_id.clone(),
             direct_completions: self.direct_completions.clone(),
             parent_invocation: self.parent_invocation.as_deref().cloned(),
@@ -328,7 +384,7 @@ impl<'run> AttemptContext<'run> {
     /// The provenance a child declared by this body inherits.
     ///
     /// A process's children belong to the chain that started the process, not
-    /// to the ephemeral session its run executes in: they carry the chain's
+    /// to the process's own runtime: they carry the chain's
     /// originator and its wake target, and the execution scope appears on no
     /// record. The in-attempt start path has always read this off the runtime
     /// execution context (`ProcessStartOptions::spawn_provenance`); a leaf
@@ -380,7 +436,7 @@ impl<'run> AttemptContext<'run> {
     /// derived from its [`call_id`](Self::call_id).
     pub fn intent_identity(&self, intent_index: u32) -> crate::ToolIntentIdentity {
         crate::derive_tool_intent_identity_under(
-            &self.session_id,
+            &self.owner.runtime_owner(),
             &self.execution_scope_id,
             &self.call_id,
             intent_index,
@@ -422,8 +478,7 @@ impl ToolCompletionState {
 /// effect controller.
 #[derive(Clone)]
 pub(crate) struct ToolContext<'run> {
-    pub(crate) session_id: SessionId,
-    pub(crate) agent_frame_id: crate::FrameNodeId,
+    pub(crate) owner: crate::ExecutionOwner,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
@@ -434,7 +489,7 @@ pub(crate) struct ToolContext<'run> {
     /// The process this call executes inside.
     pub(crate) enclosing_process: Option<ProcessId>,
     pub(crate) process_events: Option<ToolProcessEventContext>,
-    pub(crate) attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub(crate) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) prepared_payload: serde_json::Value,
     pub(crate) tool_execution_binding: serde_json::Value,
@@ -539,8 +594,7 @@ impl ProcessToolCallWiring {
 }
 
 pub(crate) struct ToolContextBuilder<'run> {
-    session_id: SessionId,
-    agent_frame_id: crate::FrameNodeId,
+    owner: crate::ExecutionOwner,
     sessions: Arc<dyn SessionStateService>,
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
@@ -551,7 +605,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
     enclosing_process: Option<ProcessId>,
     process_events: Option<ToolProcessEventContext>,
-    attachment_store: Arc<crate::SessionAttachmentStore>,
+    attachment_store: Arc<crate::RuntimeAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
@@ -570,8 +624,7 @@ impl<'run> ToolContextBuilder<'run> {
         call: &PreparedToolCall,
     ) -> Self {
         Self {
-            session_id: dispatch.session_id.clone(),
-            agent_frame_id: dispatch.agent_frame_id.clone(),
+            owner: dispatch.owner.clone(),
             sessions: Arc::clone(&dispatch.sessions),
             session_lifecycle: Arc::clone(&dispatch.session_lifecycle),
             session_graph: Arc::clone(&dispatch.session_graph),
@@ -677,8 +730,7 @@ impl<'run> ToolContextBuilder<'run> {
 
     pub(crate) fn build(self) -> ToolContext<'run> {
         ToolContext {
-            session_id: self.session_id,
-            agent_frame_id: self.agent_frame_id,
+            owner: self.owner,
             sessions: self.sessions,
             session_lifecycle: self.session_lifecycle,
             processes: self.processes,
@@ -731,8 +783,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<ToolContext<'static>> {
         Some(ToolContext {
-            session_id: self.session_id.clone(),
-            agent_frame_id: self.agent_frame_id.clone(),
+            owner: self.owner.clone(),
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             processes: Arc::clone(&self.processes),
@@ -779,13 +830,15 @@ impl<'run> ToolContext<'run> {
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
         effect_controller: crate::runtime::ScopedEffectController<'run>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder {
-            session_id,
-            agent_frame_id: crate::FrameNodeId::new("test-frame")
-                .expect("test frame identity is non-empty"),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id,
+                agent_frame_id: crate::FrameNodeId::new("test-frame")
+                    .expect("test frame identity is non-empty"),
+            },
             sessions,
             session_lifecycle,
             session_graph,
@@ -819,11 +872,11 @@ impl<'run> ToolContext<'run> {
         ToolContextBuilder::from_dispatch(dispatch, call)
     }
 
-    /// Exposes session id to protocol and process-engine implementors while preparing or executing
-    /// an authorized tool call.
+    /// Exposes the owner to protocol and process-engine implementors while
+    /// preparing or executing an authorized tool call.
     #[cfg(any(test, feature = "testing"))]
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    pub fn owner(&self) -> &crate::ExecutionOwner {
+        &self.owner
     }
 
     /// Append `request` to the journal of the durable process this call runs
@@ -1098,30 +1151,76 @@ impl ToolExecutionGrant {
 
 #[derive(Clone)]
 pub struct ToolPrepareContext {
-    session_id: SessionId,
+    owner: crate::RuntimeOwner,
     sessions: Arc<dyn SessionStateService>,
+    /// The catalog the call is dispatched against: a process owner's catalog
+    /// reads answer from it.
+    tool_catalog: Option<Arc<crate::ToolCatalog>>,
     turn_context: crate::TurnContext,
     call_id: lash_sansio::ToolCallId,
     tool_execution_binding: serde_json::Value,
     tool_execution_route: ToolExecutionRoute,
+    /// The originator of the process chain the call runs in, when it runs
+    /// inside a process.
+    process_originator: Option<crate::ProcessOriginator>,
 }
 
 impl ToolPrepareContext {
     pub(crate) fn with_execution_binding(
-        session_id: SessionId,
+        owner: crate::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
         call_id: lash_sansio::ToolCallId,
         tool_execution_binding: serde_json::Value,
     ) -> Self {
         Self {
-            session_id,
+            owner,
             sessions,
+            tool_catalog: None,
             turn_context,
             call_id,
             tool_execution_binding,
             tool_execution_route: ToolExecutionRoute::Catalog,
+            process_originator: None,
         }
+    }
+
+    pub(crate) fn with_process_originator(
+        mut self,
+        process_originator: Option<crate::ProcessOriginator>,
+    ) -> Self {
+        self.process_originator = process_originator;
+        self
+    }
+
+    /// A prepare context for tests of a provider's `prepare` step.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_testing(
+        owner: crate::RuntimeOwner,
+        sessions: Arc<dyn SessionStateService>,
+        process_originator: Option<crate::ProcessOriginator>,
+    ) -> Self {
+        Self::with_execution_binding(
+            owner,
+            sessions,
+            crate::TurnContext::default(),
+            lash_sansio::ToolCallId::fixture("prepare-for-testing"),
+            serde_json::Value::Null,
+        )
+        .with_process_originator(process_originator)
+    }
+
+    /// The originator of the process chain the call runs in, or `None`
+    /// outside a process. A child session that a call inside a process
+    /// creates parents under the originator's session: the process has no
+    /// session of its own.
+    pub fn process_originator(&self) -> Option<&crate::ProcessOriginator> {
+        self.process_originator.as_ref()
+    }
+
+    pub(crate) fn with_dispatch_catalog(mut self, catalog: Arc<crate::ToolCatalog>) -> Self {
+        self.tool_catalog = Some(catalog);
+        self
     }
 
     pub(crate) fn with_granted_source_id(mut self, source_id: Option<String>) -> Self {
@@ -1133,8 +1232,21 @@ impl ToolPrepareContext {
         &self.tool_execution_route
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    /// Who the call being prepared runs for.
+    pub fn owner(&self) -> &crate::RuntimeOwner {
+        &self.owner
+    }
+
+    /// The session the call is prepared in, or
+    /// [`PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_id(&self) -> Result<&SessionId, PluginError> {
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => Ok(session_id),
+            crate::RuntimeOwner::Process(process_id) => Err(crate::runtime::not_a_session_runtime(
+                "prepare_session_id",
+                process_id,
+            )),
+        }
     }
 
     /// The admitted identity of the call being prepared.
@@ -1153,18 +1265,31 @@ impl ToolPrepareContext {
     /// Snapshots the current session for protocol and tool implementors preparing an authorized
     /// call; failures preserve the plugin error contract.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(&self.session_id).await
+        self.sessions.snapshot_session(self.session_id()?).await
+    }
+
+    /// The snapshot of an explicitly named session, under either owner.
+    pub async fn snapshot_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<SessionSnapshot, PluginError> {
+        self.sessions.snapshot_session(session_id).await
     }
 
     /// Captures the spawn-time [`crate::SessionPluginInit`] payload a
     /// `ParentFork` creation request must carry for a peer of the current
     /// session.
     pub async fn session_plugin_init(&self) -> Result<crate::SessionPluginInit, PluginError> {
-        self.sessions.session_plugin_init(&self.session_id).await
+        self.sessions.session_plugin_init(self.session_id()?).await
     }
 
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
-        self.sessions.tool_catalog(&self.session_id).await
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.tool_catalog(session_id).await
+            }
+            crate::RuntimeOwner::Process(_) => Ok(self.pinned_catalog()?.as_ref().clone()),
+        }
     }
 
     /// Returns the shared canonical catalog snapshot for protocol and tool implementors that
@@ -1172,7 +1297,24 @@ impl ToolPrepareContext {
     pub async fn shared_tool_catalog(
         &self,
     ) -> Result<std::sync::Arc<Vec<serde_json::Value>>, PluginError> {
-        self.sessions.shared_tool_catalog(&self.session_id).await
+        match &self.owner {
+            crate::RuntimeOwner::Session(session_id) => {
+                self.sessions.shared_tool_catalog(session_id).await
+            }
+            crate::RuntimeOwner::Process(_) => self.pinned_catalog(),
+        }
+    }
+
+    fn pinned_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
+        let catalog = self.tool_catalog.as_ref().ok_or_else(|| {
+            PluginError::Session(format!(
+                "`{}` has no pinned tool catalog outside a runtime dispatch",
+                self.owner
+            ))
+        })?;
+        Ok(Arc::new(crate::tool_registry::project_tool_catalog(
+            catalog.tools.iter().cloned(),
+        )))
     }
 }
 
@@ -1303,7 +1445,7 @@ mod tests {
                 crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
             )
             .expect("valid test runtime scope"),
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -1313,7 +1455,10 @@ mod tests {
         .enclosing_process(Some(crate::ProcessId::fixture("process-1")))
         .build();
 
-        assert_eq!(context.session_id(), "session-1");
+        assert_eq!(
+            context.owner().session_id(),
+            Some(&SessionId::from("session-1"))
+        );
         assert_eq!(context.call_id(), &crate::ToolCallId::fixture("call-1"));
         assert_eq!(
             context.prepared_payload,
@@ -1356,7 +1501,7 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
             controller,
-            Arc::new(crate::SessionAttachmentStore::unavailable()),
+            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),

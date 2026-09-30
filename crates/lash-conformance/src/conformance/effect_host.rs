@@ -2100,7 +2100,7 @@ fn replay_conformance_tool_attempt_outcome(
             }),
             intents: crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
-                    session_id: SessionId::from("replay-session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("replay-session")),
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),
                         serde_json::json!({"tool": tool_name}),

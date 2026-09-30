@@ -273,6 +273,8 @@ pub fn obligation_relays(
                         modules: backend.module_artifacts(),
                         definitions: backend.process_definitions(),
                         engines: administration.process_engines().clone(),
+                        attachments: backend.attachment_referrers(),
+                        clock: backend.clock(),
                     })
                     .with_policy(policy),
                 )

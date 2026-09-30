@@ -101,7 +101,15 @@ async fn retry_sleep_shape(
         }),
     )
     .await;
-    context.session_id = crate::SessionId::from(ambient_session_id);
+    let agent_frame_id = context
+        .owner
+        .agent_frame_id()
+        .cloned()
+        .expect("the exact dispatch context runs in a session frame");
+    context.owner = crate::ExecutionOwner::SessionFrame {
+        session_id: crate::SessionId::from(ambient_session_id),
+        agent_frame_id,
+    };
     context.effect_controller = crate::ScopedEffectController::shared(
         recorder.clone(),
         match &execution_scope {

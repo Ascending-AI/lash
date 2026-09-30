@@ -92,7 +92,7 @@ async fn bind_state_to_store_with_trace(
 
 pub(in crate::runtime) struct RuntimePersistenceBindings {
     runtime_store: Option<crate::store::SessionStore>,
-    attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
+    attachment_referrers_store: Option<Arc<dyn crate::store::RuntimeStore>>,
 }
 
 pub(in crate::runtime) struct RuntimeSessionAssembly {
@@ -129,18 +129,18 @@ impl RuntimeSessionAssembly {
 impl RuntimePersistenceBindings {
     pub(in crate::runtime) fn new(runtime_store: Option<crate::store::SessionStore>) -> Self {
         Self {
-            attachment_manifest_store: runtime_store
+            attachment_referrers_store: runtime_store
                 .as_ref()
                 .map(|store| Arc::clone(store.store())),
             runtime_store,
         }
     }
 
-    pub(in crate::runtime) fn with_attachment_manifest_store(
+    pub(in crate::runtime) fn with_attachment_referrers_store(
         mut self,
         store: Arc<dyn crate::store::RuntimeStore>,
     ) -> Self {
-        self.attachment_manifest_store = Some(store);
+        self.attachment_referrers_store = Some(store);
         self
     }
 }
@@ -197,22 +197,23 @@ impl LashRuntime {
         // uncommitted manifest rows that GC can reconcile. Ephemeral
         // (no-store) runtimes use the inner store directly — there's
         // nothing to reconcile against.
-        if let Some(store) = services.attachment_manifest_store.clone() {
-            let manifest: Arc<dyn crate::AttachmentManifest> =
-                Arc::new(crate::attachments::PersistenceManifestAdapter(store));
+        if let Some(store) = services.attachment_referrers_store.clone() {
+            let manifest: Arc<dyn crate::AttachmentReferrers> =
+                Arc::new(crate::attachments::PersistenceReferrersAdapter(store));
             // Rebind a fresh facade over the flat backend. Attachment ownership
             // is recorded durably on each intent; no live facade state crosses
             // rebuilds or child-session initialisation.
             let previous_attachment_store = Arc::clone(&host.core.durability.attachment_store);
             let backend = Arc::clone(previous_attachment_store.backend());
             let scoped = Arc::new(
-                crate::SessionAttachmentStore::new_with_clock(
+                crate::RuntimeAttachmentStore::new_with_clock(
                     backend,
                     manifest,
-                    state.session_id.clone(),
+                    crate::RuntimeOwner::Session(state.session_id.clone()),
                     Arc::clone(&host.core.clock),
                 )
                 .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes())
+                .with_upload_expiry_ms(previous_attachment_store.upload_expiry_ms())
                 .with_output_retention(previous_attachment_store.output_retention()),
             );
             host.core.durability.attachment_store = scoped;
@@ -417,7 +418,7 @@ impl LashRuntime {
         } = session;
         let RuntimePersistenceBindings {
             runtime_store: store,
-            attachment_manifest_store,
+            attachment_referrers_store,
         } = persistence;
         if let Some(store) = store.as_ref()
             && let Err(error) =
@@ -441,8 +442,8 @@ impl LashRuntime {
                     attachment_store,
                     process_env_store,
                 );
-                if let Some(manifest_store) = attachment_manifest_store {
-                    services = services.with_attachment_manifest_store(manifest_store);
+                if let Some(manifest_store) = attachment_referrers_store {
+                    services = services.with_attachment_referrers_store(manifest_store);
                 }
                 Self::from_host_state(
                     policy,
@@ -461,7 +462,7 @@ impl LashRuntime {
                 // durable.
                 let mut services =
                     RuntimeServices::new(plugin_session, attachment_store, process_env_store);
-                services.attachment_manifest_store = attachment_manifest_store;
+                services.attachment_referrers_store = attachment_referrers_store;
                 Self::from_host_state(
                     policy,
                     host,

@@ -356,6 +356,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         modules: Arc::clone(ports.modules()),
         definitions: Arc::clone(ports.definitions()),
         engines: engines(),
+        attachments: Arc::clone(ports.attachments()),
+        clock: Arc::new(crate::SystemClock),
     }));
     let relay_on_end = Arc::new(RelayOnEnd {
         inner: Arc::clone(ports.cleanup()),
@@ -367,6 +369,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         Arc::clone(ports.modules()),
         Arc::clone(ports.env()),
         Arc::clone(ports.definitions()),
+        Arc::clone(ports.attachments()),
         Arc::clone(&relay_on_end) as Arc<dyn crate::ArtifactCleanupLedger>,
         Arc::new(crate::SystemClock),
     );

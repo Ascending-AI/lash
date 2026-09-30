@@ -21,5 +21,4 @@ mod storage_fixes;
 #[path = "store_gc.rs"]
 mod store_gc;
 
-mod attachment_owner_proof;
 mod boundary_retry;

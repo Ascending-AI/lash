@@ -62,18 +62,19 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             ctx: crate::plugin::SessionReadyContext,
         ) -> Result<(), crate::PluginError> {
             assert_eq!(ctx.state.keys(), vec![self.id.to_string()]);
-            let session = ctx.host.session(&ctx.session_id).unwrap();
+            let session_id = ctx.owner.session_id().unwrap().clone();
+            let session = ctx.host.session(&session_id).unwrap();
             assert!(session.export_state().plugins.is_empty());
             assert!(
                 session
                     .host()
-                    .session(&ctx.session_id)
+                    .session(&session_id)
                     .unwrap()
                     .export_state()
                     .plugins
                     .is_empty()
             );
-            self.hosts.lock_recover().push((ctx.session_id, ctx.host));
+            self.hosts.lock_recover().push((session_id, ctx.host));
             Ok(())
         }
     }

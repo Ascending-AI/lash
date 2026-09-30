@@ -604,7 +604,7 @@ mod tests {
         artifacts: Arc<Artifacts>,
     ) -> ToolResultProjectionContext {
         ToolResultProjectionContext {
-            session_id: SessionId::from("test"),
+            owner: lash_core::RuntimeOwner::Session(SessionId::from("test")),
             call_id: lash_core::ToolCallId::fixture("call"),
             tool_id: ToolId::new("tool:test"),
             tool_name: "display name".into(),

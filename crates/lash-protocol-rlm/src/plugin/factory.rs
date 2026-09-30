@@ -224,7 +224,7 @@ impl RlmProtocolPluginFactory {
                 ..Default::default()
             },
         ))?;
-        let tool_catalog = plugins.resolved_tool_catalog(&request.session_id)?;
+        let tool_catalog = plugins.resolved_tool_catalog()?;
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle_available);
         let surface = rlm_lashlang_surface(&config, process_lifecycle_available)
             .with_plugin_extensions(plugin_host.extensions())

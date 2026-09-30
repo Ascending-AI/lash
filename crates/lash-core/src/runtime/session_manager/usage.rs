@@ -73,13 +73,16 @@ impl UsageCapability {
 
     pub(in crate::runtime) async fn persist_current_usage_ledger(
         &self,
-        current: &CurrentSessionCapability,
+        current: &CurrentOwnerCapability,
         boundary_id: &str,
     ) -> Result<(), crate::PluginError> {
         if !self.persist_to_store {
             return Ok(());
         }
-        let Some(store) = &current.store else {
+        let Some(session) = current.session() else {
+            return Ok(());
+        };
+        let Some(store) = &session.store else {
             return Ok(());
         };
         let mut state = current.current_snapshot_for_store_write().await?;
@@ -107,10 +110,10 @@ impl UsageCapability {
             .stamp_semantic_boundary()
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = super::super::state::commit_in_lane_context(
-            current.held_drive_fence.as_ref(),
+            session.held_drive_fence.as_ref(),
             store.clone(),
             commit,
-            &current.resident_graph_head_stale,
+            &session.resident_graph_head_stale,
         )
         .await
         .map_err(|err| match err {

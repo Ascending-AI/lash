@@ -41,8 +41,10 @@ mod tests {
         ToolChildScope {
             opener: EffectOpener::turn("session", "turn"),
             admitted_scope: AdmittedScope::turn("session", "turn"),
-            session_id: SessionId::from("session"),
-            agent_frame_id: frame(),
+            owner: lash_core_execution::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: frame(),
+            },
         }
     }
 
@@ -95,7 +97,14 @@ mod tests {
             Some(process_id("process-9")),
             "the enclosing process must survive as an incarnation, not a bare name"
         );
-        assert_eq!(decoded.scope.agent_frame_id.as_str(), "frame-1");
+        assert_eq!(
+            decoded
+                .scope
+                .owner
+                .agent_frame_id()
+                .map(|frame| frame.as_str()),
+            Some("frame-1")
+        );
     }
 
     /// A field this build does not know is refused, not dropped. A retired field

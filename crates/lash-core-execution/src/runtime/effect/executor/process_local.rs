@@ -59,9 +59,33 @@ fn process_start_starter(
     Ok(scope.journal_identity()?)
 }
 
+/// Acquire what `output` delivers into `receiver` before the receiver records
+/// it, answering the value to record (ADR 0124). A host with no attachment
+/// store delivers the output as it is.
+async fn delivered_output(
+    attachments: Option<&Arc<dyn crate::AttachmentReferrers>>,
+    receiver: &crate::ExecutionScope,
+    output: crate::ProcessAwaitOutput,
+) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    match attachments {
+        Some(attachments) => {
+            crate::runtime::attachment_delivery::deliver_output(
+                attachments.as_ref(),
+                receiver,
+                output,
+            )
+            .await
+        }
+        None => Ok(output),
+    }
+}
+
 impl ProcessLocalExecution {
+    /// Execute `command`, issued by an effect of `receiver`: the scope that
+    /// records what the command returns.
     pub async fn execute(
         self,
+        receiver: &crate::ExecutionScope,
         command: ProcessCommand,
     ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
         let Self {
@@ -72,6 +96,7 @@ impl ProcessLocalExecution {
             process_engines,
             turn_cancellation,
             effect_controller,
+            attachments,
             outcome_observer,
         } = self;
         let outcome = match command {
@@ -243,6 +268,11 @@ impl ProcessLocalExecution {
                 } else {
                     await_terminal().await?
                 };
+                // Acquire, then return: the return is what the local executor
+                // records (ADR 0124 §8.3). A direct await holds no consumer
+                // hold, so a child pruned mid-wait answers the typed
+                // source-gone failure.
+                let output = delivered_output(attachments.as_ref(), receiver, output).await?;
                 Ok((
                     ProcessEffectOutcome::Await {
                         output: Box::new(output),
@@ -283,7 +313,29 @@ impl ProcessLocalExecution {
                         )
                         .await
                         {
-                            Ok(output) => process_terminal_resolution(output),
+                            // Acquire before the key resolves: the waiter's
+                            // journal records the value the resolution carries
+                            // (ADR 0124 §8.2).
+                            // A store fault leaves the wait open rather than
+                            // recording a failure the fault did not decide:
+                            // the redriven turn re-arms and acquires again.
+                            Ok(output) => match delivered_output(
+                                attachments.as_ref(),
+                                &key.scope,
+                                output,
+                            )
+                            .await
+                            {
+                                Ok(output) => process_terminal_resolution(output),
+                                Err(error) => {
+                                    tracing::warn!(
+                                        process_id = %process_id,
+                                        key_id = %key.key_id,
+                                        "armed process terminal could not acquire its delivered attachments; the wait stays open for the redrive: {error}"
+                                    );
+                                    return;
+                                }
+                            },
                             Err(error) => {
                                 Resolution::Err(crate::runtime::ExternalCompletionError {
                                     code: crate::TurnFailureCode::from_wire(

@@ -539,6 +539,7 @@ impl LashCore {
             self.backend().module_artifacts(),
             Arc::clone(&self.env.core.durability.process_env_store),
             self.backend().process_definitions(),
+            self.backend().attachment_referrers(),
             self.backend().artifact_cleanup(),
             Arc::clone(&self.env.core.clock),
             self.host_process_engines.clone(),
@@ -756,6 +757,7 @@ pub struct LashCoreBuilder {
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
+    attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
@@ -787,6 +789,7 @@ impl LashCoreBuilder {
             commit_budget: None,
             queued_work_batching: None,
             max_attachment_bytes: None,
+            attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
             prompt: None,
@@ -842,6 +845,14 @@ impl LashCoreBuilder {
     /// This deployment limit is independent from [`Self::commit_budget`].
     pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = Some(max_attachment_bytes);
+        self
+    }
+
+    /// How long an attachment put outside any turn stays held by its upload
+    /// before cleanup may reclaim it, unless a turn, process or session
+    /// acquires it first. Defaults to 24 hours.
+    pub fn attachment_upload_expiry(mut self, expiry: std::time::Duration) -> Self {
+        self.attachment_upload_expiry = Some(expiry);
         self
     }
 

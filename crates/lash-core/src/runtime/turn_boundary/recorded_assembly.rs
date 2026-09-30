@@ -23,6 +23,9 @@ pub struct RecordedTurnAssembly {
     pub(in crate::runtime) tool_calls: Vec<ToolCallRecord>,
     pub(in crate::runtime) had_code_execution: bool,
     pub(in crate::runtime) omitted: Option<crate::OmittedToolCalls>,
+    /// Outputs the turn's code cells retained out of history (FIG-1643), in
+    /// cell order, from each cell's recorded response.
+    pub(in crate::runtime) retained_outputs: Vec<crate::RetainedOutput>,
     pub(in crate::runtime) llm_calls: Vec<crate::LlmCallRecord>,
     /// Leading `llm_calls` whose counted response usage `token_usage` already
     /// carries: one `TokenUsage` event fires per counted response, and an
@@ -49,6 +52,7 @@ impl RecordedTurnAssembly {
             tool_calls: Vec::new(),
             had_code_execution: false,
             omitted: None,
+            retained_outputs: Vec::new(),
             llm_calls: Vec::new(),
             usage_counted_calls: 0,
             failure_evidence: Vec::new(),
@@ -63,6 +67,21 @@ impl RecordedTurnAssembly {
     /// Record that the machine ran a code cell this turn.
     pub fn note_code_execution(&mut self) {
         self.had_code_execution = true;
+    }
+
+    /// Record the outputs a code cell's recorded response retained out of
+    /// history: its prints and its finish value (FIG-1643). History holds
+    /// only their witnesses and references, inside protocol records the
+    /// commit cannot read, so the commit names them from here.
+    pub fn note_code_outputs(&mut self, response: &crate::ExecResponse) {
+        self.retained_outputs.extend(
+            response
+                .observations
+                .iter()
+                .filter_map(|observation| observation.value.retained())
+                .chain(response.terminal_finish_retained.as_ref())
+                .cloned(),
+        );
     }
 
     /// Fold one event the driver produced — a turn-machine emission, or a
@@ -265,6 +284,7 @@ impl RecordedTurnAssembly {
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
             omitted: self.omitted,
+            retained_outputs: self.retained_outputs,
             failure_evidence: self.failure_evidence,
             errors: issues,
             // Stamped by the ingress that accepted this turn's input, which

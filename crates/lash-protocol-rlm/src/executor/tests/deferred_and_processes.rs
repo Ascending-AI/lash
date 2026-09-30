@@ -358,7 +358,7 @@ async fn restricted_empty_deferred_context<'h>(
         ))
         .expect("restricted-empty deferred session");
     let catalog = session
-        .resolved_tool_catalog(&lash_core::SessionId::from(session_id))
+        .resolved_tool_catalog()
         .expect("restricted-empty catalog");
     assert!(catalog.tools.is_empty());
     let registry = session.tool_registry();
@@ -1800,14 +1800,16 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
     /// This fixture registers the child the same way its direct `start` does.
     async fn start_from_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &lash_core::RuntimeOwner,
         request: lash_core::ProcessStartRequest,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
         // The starting session observes the child it started, the way the
         // runtime's own start command records it.
         let mut observers = request.observers.clone();
-        if !observers.contains(session_id) {
+        if let Some(session_id) = owner.session_id()
+            && !observers.contains(session_id)
+        {
             observers.push(session_id.clone());
         }
         let request_env_spec = request.env_spec.clone();
@@ -1838,7 +1840,11 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         };
         let record = self
             .start(
-                session_id,
+                owner.session_id().ok_or_else(|| {
+                    lash_core::PluginError::Session(
+                        "the fixture starts children for sessions only".to_string(),
+                    )
+                })?,
                 registration,
                 lash_core::ProcessStartOptions::new().with_initial_observers(observers),
                 scope,
@@ -1854,7 +1860,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &lash_core::RuntimeOwner,
         _process_id: &ProcessId,
         _identity: lash_core::ToolIntentIdentity,
         _scope: lash_core::ProcessOpScope<'_>,
@@ -1871,20 +1877,20 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
     /// second copy that could drift from it.
     async fn signal_recorded_intent(
         &self,
-        session_id: &SessionId,
+        owner: &lash_core::RuntimeOwner,
         process_id: &ProcessId,
         signal: String,
         call_id: String,
         payload: serde_json::Value,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
-        self.signal_possessed(session_id, process_id, signal, call_id, payload, scope)
+        self.signal_possessed(owner, process_id, signal, call_id, payload, scope)
             .await
     }
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &SessionId,
+        _owner: &lash_core::RuntimeOwner,
         _process_id: &ProcessId,
         _event: String,
         _call_id: String,
@@ -2013,10 +2019,13 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &SessionId,
+        owner: &lash_core::RuntimeOwner,
         process_ids: &[ProcessId],
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<(), lash_core::PluginError> {
+        let session_id = owner
+            .session_id()
+            .ok_or_else(|| lash_core::PluginError::Session("not a session owner".to_string()))?;
         for process_id in process_ids {
             if !self.registry.is_observer(session_id, process_id).await? {
                 return Err(lash_core::PluginError::Session(format!(
@@ -2029,7 +2038,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &SessionId,
+        _owner: &lash_core::RuntimeOwner,
         _process_id: &ProcessId,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
@@ -2040,7 +2049,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &SessionId,
+        owner: &lash_core::RuntimeOwner,
         process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
@@ -2057,7 +2066,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
             Arc::clone(&self.env_store),
         )
         .signal_possessed(
-            session_id,
+            owner,
             process_id,
             signal_name.clone(),
             signal_id,

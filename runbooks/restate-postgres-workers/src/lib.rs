@@ -290,7 +290,8 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
             "DELETE FROM lash_usage_deltas WHERE session_id = $1",
             "DELETE FROM lash_session_meta WHERE session_id = $1",
             "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
-            "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
+            "DELETE FROM lash_attachment_referrer_edges
+             WHERE referrer_kind = 'session' AND referrer_id = $1",
             "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         ] {
             sqlx::query(statement)
@@ -959,8 +960,7 @@ impl E2eTools {
     }
 
     async fn app_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let key = call
             .args
             .get("key")
@@ -985,8 +985,7 @@ impl E2eTools {
     }
 
     async fn async_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let key_arg = call
             .args
             .get("key")
@@ -1052,8 +1051,7 @@ impl E2eTools {
     }
 
     async fn batch_side_effect(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let key = call
             .args
             .get("key")
@@ -1179,8 +1177,7 @@ impl E2eTools {
         reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
     )]
     async fn make_attachment(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let filename = call
             .args
             .get("name")
@@ -1243,8 +1240,7 @@ impl E2eTools {
     }
 
     async fn crash_once(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let result = serde_json::json!({
             "crashed": false,
             "worker_id": self.worker_id,
@@ -1313,8 +1309,7 @@ impl E2eTools {
     }
 
     async fn cancel_gate(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let started = serde_json::json!({
             "waiting": true,
             "worker_id": self.worker_id,
@@ -1339,8 +1334,7 @@ impl E2eTools {
     }
 
     async fn durable_input_request(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id =
-            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
+        let workflow_id = workflow_id_from_args(&call_owner_key(call.context), call.args);
         let question = call
             .args
             .get("question")
@@ -1559,6 +1553,15 @@ async fn should_exit_for_peer_failover(
 
 pub fn expected_attachment_bytes(workflow_id: &str) -> Vec<u8> {
     format!("lash-e2e-attachment:{workflow_id}:v1").into_bytes()
+}
+
+/// The key a call's default workflow id derives from: its session, or the
+/// process that runs it.
+fn call_owner_key(context: &lash::tools::AttemptContext<'_>) -> SessionId {
+    match context.owner().session_id() {
+        Some(session_id) => session_id.clone(),
+        None => SessionId::from(context.owner().runtime_owner().to_string()),
+    }
 }
 
 fn workflow_id_from_args(session_id: &SessionId, args: &serde_json::Value) -> String {

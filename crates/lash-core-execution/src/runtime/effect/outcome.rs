@@ -1,4 +1,3 @@
-use crate::SessionId;
 use std::sync::Arc;
 
 use crate::LlmResponse;
@@ -224,11 +223,11 @@ pub fn llm_call_error_from_transport(err: LlmTransportError) -> LlmCallError {
 }
 
 pub fn direct_trace_context(
-    session_id: &SessionId,
+    owner: &crate::RuntimeOwner,
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
 ) -> lash_trace::TraceContext {
-    let mut context = lash_trace::TraceContext::default().for_session(session_id.to_string());
+    let mut context = crate::plugin::owner_trace_context(owner);
     if let Some(llm_call_id) = llm_call_id {
         context = context.for_llm_call(llm_call_id.to_string());
     }
@@ -441,7 +440,11 @@ mod tests {
         super::emit_llm_trace_started(
             &Some(Arc::clone(&sink_dyn)),
             &lash_trace::TraceContext::default(),
-            super::direct_trace_context(&session_id, Some("direct-start"), Some(&effect_cause)),
+            super::direct_trace_context(
+                &crate::RuntimeOwner::Session(session_id.clone()),
+                Some("direct-start"),
+                Some(&effect_cause),
+            ),
             &request(),
             &crate::SystemClock,
         );
@@ -449,7 +452,7 @@ mod tests {
             &Some(Arc::clone(&sink_dyn)),
             &lash_trace::TraceContext::default(),
             super::direct_trace_context(
-                &session_id,
+                &crate::RuntimeOwner::Session(session_id.clone()),
                 Some("direct-completed"),
                 Some(&trigger_cause),
             ),
@@ -467,7 +470,11 @@ mod tests {
         super::emit_llm_trace_failed(
             &Some(sink_dyn),
             &explicit_base,
-            super::direct_trace_context(&session_id, Some("direct-failed"), Some(&effect_cause)),
+            super::direct_trace_context(
+                &crate::RuntimeOwner::Session(session_id.clone()),
+                Some("direct-failed"),
+                Some(&effect_cause),
+            ),
             super::LlmTraceFailure::invalid_structured_output(),
             None,
             None,
@@ -506,7 +513,7 @@ mod tests {
     fn direct_effect_invocation_preserves_runtime_scope() {
         let invocation = crate::runtime::causal::direct_effect_invocation(
             &crate::ExecutionScope::runtime_operation("direct-test"),
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             "tool",
             "request:k".to_string(),
             None,
@@ -525,7 +532,7 @@ mod tests {
     fn tool_retry_sleep_invocation_preserves_parent_replay_identity() {
         let parent = crate::runtime::causal::direct_effect_invocation(
             &crate::ExecutionScope::turn("s", "turn"),
-            &SessionId::from("s"),
+            &crate::RuntimeOwner::Session(SessionId::from("s")),
             "tool",
             "request:k".to_string(),
             Some(&TurnId::from("turn")),

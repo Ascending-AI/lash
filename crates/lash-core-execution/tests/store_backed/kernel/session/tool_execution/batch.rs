@@ -46,7 +46,7 @@ mod tests {
                 Default::default(),
             ))
             .expect("plugin session");
-        let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
+        let attachment_store = Arc::new(crate::RuntimeAttachmentStore::ephemeral(
             backend.attachment_store(),
         ));
         let host = Arc::new(crate::testing::MockSessionManager::default());
@@ -74,8 +74,10 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("granted-call-session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("granted-call-session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -93,7 +95,6 @@ mod tests {
         let wiring =
             crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &effect_host);
         let mut context = crate::RuntimeExecutionContext::new(
-            SessionId::from("granted-call-session"),
             dispatch,
             process_env_store,
             attachment_store,
@@ -549,11 +550,9 @@ mod tests {
             ))
             .expect("plugin session");
         let tools = plugins.tools();
-        let tool_catalog = plugins
-            .resolved_tool_catalog(&SessionId::from("session"))
-            .expect("tool catalog");
-        let attachment_store: Arc<crate::SessionAttachmentStore> =
-            Arc::new(crate::SessionAttachmentStore::unavailable());
+        let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
+        let attachment_store: Arc<crate::RuntimeAttachmentStore> =
+            Arc::new(crate::RuntimeAttachmentStore::unavailable());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
             plugins,
             tools,
@@ -580,8 +579,10 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
             observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -593,7 +594,6 @@ mod tests {
             process_originator: None,
         };
         crate::RuntimeExecutionContext::new(
-            SessionId::from("session"),
             Arc::new(dispatch),
             Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
             attachment_store,

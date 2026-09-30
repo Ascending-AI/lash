@@ -95,11 +95,11 @@ cross-surface identity, not the quality of the model's image description.
 - UI truth: **attach png**, its attached filename state, transcript, running/idle pill.
 - API truth: `POST /api/attachments`, `POST /api/turn`,
   `GET /api/attachments/{attachment_id}`, and `GET /api/state`.
-- Disk truth: the active session backend's committed attachment-manifest row, the stored
-  blob, and `<data-dir>/trace.jsonl`. SQLite keeps both in
-  `<data-dir>/lash-sessions/durable-core.db` — the manifest row in `attachment_manifest`,
+- Disk truth: the active session backend's `session` referrer edge for the attachment,
+  the stored blob, and `<data-dir>/trace.jsonl`. SQLite keeps both in
+  `<data-dir>/lash-sessions/durable-core.db` — the edge in `attachment_referrer_edges`,
   the bytes as the `attachment_blobs` row under the same id — while Postgres names the
-  shared table `lash_attachment_manifest` and keeps bytes at
+  edge table `lash_attachment_referrer_edges` and keeps bytes at
   `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`.
 
 ## Phase 0 — Boot and identify the session
@@ -146,7 +146,7 @@ Complete the three-layer attachment cross-check before continuing:
    dimensions.
 2. **API state:** one matching user message and one attachment reference with the upload id
    and retrieval URL.
-3. **Durable state:** one committed manifest row for the session/id plus the content blob in
+3. **Durable state:** one `session` referrer edge for the session/id plus the content blob in
    the backend's attachment store — on the SQLite stack this scenario boots, exactly one
    `attachment_blobs` row under the id in `<data-dir>/lash-sessions/durable-core.db`; byte
    length and content must match the source exactly.
@@ -182,7 +182,7 @@ route must return 200 and must not inherit the 409 semantics of session-scoped a
 Poll the reconstructed committed user row until its linked image is complete with positive
 natural dimensions. Re-run the same DOM/API/durable three-layer cross-check: the reloaded
 DOM has one image, `/api/state.messages` has the same committed attachment reference, the
-manifest row remains committed, and the blob still has the source hash and length. Save the
+session referrer edge remains, and the blob still has the source hash and length. Save the
 state as `03-state.json` and screenshot the reconstructed transcript and usage rail as
 `03-restarted.png`.
 
@@ -201,7 +201,7 @@ confirm the workbench and its managed services are gone.
 | Byte fidelity | source and pre-restart retrieval hashes/lengths agree | | source, `01-before-restart.png` |
 | Turn reference | `/api/turn` carries the upload id; correlated upload/request/wire traces carry matching reference and content facts | | request capture, `02-upload-trace.json`, `02-provider-request.json`, `02-provider-wire.json` |
 | Live image render | optimistic user row has one loaded, bounded, linked image; retrieval is 200 | | `02-rendered-image.png`, DOM capture, headers |
-| Committed turn | one settled UI row and `/api/state` attachment ref agree with committed manifest/blob | | `02-referenced-turn.png`, `02-state.json`, manifest query |
+| Committed turn | one settled UI row and `/api/state` attachment ref agree with the session edge and blob | | `02-referenced-turn.png`, `02-state.json`, referrer query |
 | Restart persistence | PID changed; image reloads from the committed ref and retrieval is byte-identical | | `03-restarted.png`, `03-state.json`, `03-after-restart.png`, command log |
 | Cross-surface identity | upload/turn/retrieval ids all agree | | saved JSON + headers |
 

@@ -1,5 +1,4 @@
 use crate::ProcessId;
-use crate::SessionId;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -7,12 +6,11 @@ use tokio_util::sync::CancellationToken;
 mod park;
 
 use crate::RuntimeHostConfig;
-use crate::runtime::EmbeddedRuntimeBuilder;
 use crate::{
-    DeploymentStore, LashRuntime, PluginError, PluginFactory, PluginHost, PluginStack,
-    ProcessExecutionContext, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    DeploymentStore, PluginError, PluginFactory, PluginHost, PluginStack, ProcessExecutionContext,
+    ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
 };
-use lash_core::core_internal::RuntimeSessionServices;
+use lash_core::core_internal::{ProcessRuntimeContext, ProcessRuntimePorts};
 use lash_core_execution::runtime::effect::ProcessRunner;
 
 /// Deployment-local configuration for rebuilding durable process executions.
@@ -230,7 +228,6 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        let attachment_owner = current.id.clone();
         let owner = execution_write_authority.owner_identity();
         let attempt = current.first_started.as_deref().map_or(1, |started| {
             if started.owner.same_incarnation(&owner) {
@@ -320,17 +317,6 @@ impl DurableProcessWorker {
         }
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
-        let mut runtime =
-            Box::pin(self.runtime_for_registration(&process_id, &registration)).await?;
-        let _attachment_owner_binding =
-            matches!(registration.input.as_ref(), ProcessInput::Engine { .. }).then(|| {
-                runtime
-                    .host
-                    .core
-                    .durability
-                    .attachment_store
-                    .bind_process_scoped(attachment_owner)
-            });
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator
         {
@@ -343,26 +329,36 @@ impl DurableProcessWorker {
             .as_ref()
             .map(crate::SessionScope::new);
         let probe_scope = wake_scope.as_ref().or(originator_scope.as_ref());
-        if let Some(probe) =
-            probe_scope.and_then(|scope| self.config.turn_phase_probe_slot.get_for_scope(scope))
-        {
-            runtime.set_turn_phase_probe(probe);
-        }
-        let manager = RuntimeSessionServices::for_worker(&runtime, true).map_err(|err| {
+        let turn_phase_probe =
+            probe_scope.and_then(|scope| self.config.turn_phase_probe_slot.get_for_scope(scope));
+        // The opener is the name bound to the incarnation this run was
+        // admitted under, read off the record the authority CAS returned
+        // rather than re-read later (ADR 0099 §1).
+        let admitted = crate::execution::runtime::effect::AdmittedProcess {
+            registration,
+            process_id: process_id.clone(),
+        };
+        let runtime = Box::pin(ProcessRuntimeContext::for_admitted(
+            ProcessRuntimePorts {
+                host: self.config.runtime_host.clone(),
+                plugin_host: Arc::clone(&self.config.plugin_host),
+                process_work: self.process_wiring(),
+                queued_work: Arc::clone(&self.config.queued_work),
+                lease_owner: self.config.lease_owner.clone(),
+                turn_phase_probe,
+            },
+            &admitted,
+            self.config.session_policy.clone(),
+        ))
+        .await
+        .map_err(|err| {
             PluginError::Session(format!(
-                "failed to build runtime env for process `{}`: {err}",
-                process_id
+                "failed to build the runtime of process `{process_id}`: {err}"
             ))
         })?;
-        let result = manager
+        let result = runtime
             .run_process(
-                // The opener is the name bound to the incarnation this run was
-                // admitted under, read off the record the authority CAS
-                // returned rather than re-read later (ADR 0099 §1).
-                crate::execution::runtime::effect::AdmittedProcess {
-                    registration,
-                    process_id: process_id.clone(),
-                },
+                admitted,
                 execution_context,
                 Arc::clone(self.config.process_registry()),
                 scoped_effect_controller,
@@ -432,138 +428,5 @@ impl DurableProcessWorker {
         .await
         .map(|_| ())
         .map_err(PluginError::Runtime)
-    }
-
-    async fn runtime_for_registration(
-        &self,
-        process_id: &ProcessId,
-        registration: &ProcessRegistration,
-    ) -> Result<LashRuntime, PluginError> {
-        match registration.input.as_ref() {
-            ProcessInput::SessionTurn { create_request, .. } => {
-                Box::pin(self.runtime_for_session_turn(process_id, create_request.as_ref())).await
-            }
-            ProcessInput::Engine { .. } => {
-                Box::pin(self.runtime_for_process_env(process_id, registration)).await
-            }
-            // Externally-owned rows are rejected before dispatch (ADR 0110), so an
-            // External input has no execution runtime; fail loudly rather than
-            // fabricate one.
-            ProcessInput::External { .. } => Err(PluginError::Session(format!(
-                "process `{}` is externally-owned and has no execution runtime",
-                process_id
-            ))),
-            // Registration refuses an unresolved start by id, so no row
-            // holds one.
-            ProcessInput::Definition { definition_id, .. } => Err(PluginError::Session(format!(
-                "process `{process_id}` names definition `{definition_id}` unresolved"
-            ))),
-        }
-    }
-
-    async fn runtime_for_session_turn(
-        &self,
-        process_id: &ProcessId,
-        create_request: &crate::SessionCreateRequest,
-    ) -> Result<LashRuntime, PluginError> {
-        let mut policy = create_request
-            .policy
-            .clone()
-            .unwrap_or_else(|| self.config.session_policy.clone());
-        if policy.recorded_provider_id().is_empty() {
-            policy.provider_id = self.config.session_policy.provider_id.clone();
-        }
-        // Boxed: building a process runtime is a rare, cold path whose future
-        // holds a whole session policy, so it stays off the caller's stack.
-        Box::pin(self.build_process_runtime(
-            crate::process_runtime_session_ids(process_id)[1].clone(),
-            policy,
-            create_request.plugin_options.clone(),
-            None,
-            "session turn request",
-        ))
-        .await
-    }
-
-    async fn runtime_for_process_env(
-        &self,
-        process_id: &ProcessId,
-        registration: &ProcessRegistration,
-    ) -> Result<LashRuntime, PluginError> {
-        let Some(env_ref) = registration.env_ref.as_ref() else {
-            return Err(PluginError::Session(format!(
-                "process `{}` is missing a captured execution env",
-                process_id
-            )));
-        };
-        let env = crate::runtime::load_process_execution_env(
-            self.config
-                .runtime_host
-                .durability
-                .process_env_store
-                .as_ref(),
-            env_ref,
-        )
-        .await?;
-        Box::pin(self.build_process_runtime(
-            crate::process_runtime_session_ids(process_id)[0].clone(),
-            env.policy,
-            env.plugin_options,
-            env.render,
-            env_ref.as_str(),
-        ))
-        .await
-    }
-
-    async fn build_process_runtime(
-        &self,
-        session_id: SessionId,
-        policy: crate::SessionPolicy,
-        plugin_options: crate::PluginOptions,
-        render: Option<crate::RecordedRender>,
-        source_label: &str,
-    ) -> Result<LashRuntime, PluginError> {
-        let attachment_manifest_store = self.config.session_store_factory();
-        attachment_manifest_store
-            .admit_session(&crate::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: crate::SessionRelation::default(),
-                config: policy.clone().into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
-            })
-            .await
-            .map_err(|err| {
-                PluginError::Session(format!(
-                    "failed to open process attachment owner store for `{session_id}`: {err}"
-                ))
-            })?;
-        // A process execution runtime is reconstruction-only: it runs on the
-        // storeless path, keeps its session state in memory for the run and
-        // persists none of it, so it never aliases a parent-bound catalog's
-        // runtime state. Attachment intents still go to the catalog store so
-        // the process owner of every blob stays durable.
-        let process_work = self.process_wiring();
-        let mut state = crate::RuntimeSessionState::new(policy.clone());
-        state.session_id = session_id.clone();
-        state.authority.resolved_render = render;
-        let builder = EmbeddedRuntimeBuilder::new(
-            self.config.runtime_host.clone(),
-            self.config.lease_owner.clone(),
-        )
-        .with_session_id(session_id.to_string())
-        .with_initial_state(state)
-        .with_plugin_host(self.config.plugin_host.as_ref().clone())
-        .with_policy(policy)
-        .with_plugin_options(plugin_options)
-        .with_process_work(process_work)
-        .with_attachment_manifest_store(attachment_manifest_store)
-        .with_queued_work(Arc::clone(&self.config.queued_work));
-        Box::pin(builder.build()).await.map_err(|err| {
-            PluginError::Session(format!(
-                "failed to build process worker runtime for {source_label}: {err}"
-            ))
-        })
     }
 }

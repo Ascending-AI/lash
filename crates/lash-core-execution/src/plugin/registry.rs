@@ -407,7 +407,9 @@ pub enum PluginSessionMaterialization {
 
 #[derive(Clone, Debug)]
 pub struct PluginSessionContext {
-    pub session_id: SessionId,
+    /// Who the plugin session is built for: a session, or a process runtime
+    /// built from its captured execution environment.
+    pub owner: crate::RuntimeOwner,
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
     pub plugin_options: PluginOptions,
@@ -435,7 +437,7 @@ impl PluginSessionContext {
 #[derive(Clone)]
 pub struct SessionReadyContext {
     pub state: super::PluginStateStore,
-    pub session_id: SessionId,
+    pub owner: crate::RuntimeOwner,
     pub host: PluginHost,
 }
 

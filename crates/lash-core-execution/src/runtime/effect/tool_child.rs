@@ -96,8 +96,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_dispatch::ToolAttemptLineage;
 use crate::{
-    AdmittedScope, EffectOpener, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId,
-    SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
+    AdmittedScope, EffectOpener, PreparedToolCall, ProcessExecutionEnvRef, ProcessId,
+    ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -289,40 +289,43 @@ pub struct ToolChildScope {
     /// never `enclosing_process`.
     #[serde(with = "lash_core_store::admitted_scope::wire")]
     pub admitted_scope: AdmittedScope,
-    /// The session the child's work is attributed to.
+    /// Who the child's work runs for: the session and agent frame of a turn
+    /// opener, or the process of a process opener.
     ///
-    /// Carried beside the opener rather than derived from it because a
-    /// **process** opener has no session of its own — ADR 0094 governs its
-    /// lifetime through its own Parent Scope — while its tool work is still
-    /// attributed to a session. For a turn opener the two are one fact, and
-    /// [`validate`](Self::validate) refuses a request where they disagree.
-    pub session_id: SessionId,
-    /// The agent frame the child's work belongs to.
-    ///
-    /// Not reconstructible from [`session_id`](Self::session_id): one session
-    /// holds many frames (ADR 0092), so a recovered child that re-derived a
-    /// frame from its session would attribute its work to the wrong one.
-    pub agent_frame_id: FrameNodeId,
+    /// Carried beside the opener rather than derived from it because one
+    /// session holds many frames (ADR 0092): a recovered child that re-derived
+    /// a frame from its session would attribute its work to the wrong one.
+    pub owner: crate::ExecutionOwner,
 }
 
 impl ToolChildScope {
-    /// Refuses a binding whose opener and session disagree.
+    /// Refuses a binding whose opener and owner disagree.
     ///
-    /// A turn opener already names its session, so the pair is representable
-    /// and invalid in exactly one way. Refused at the boundary, as
-    /// `EffectGroupShape::validate_wire` refuses its own two-halves mismatch,
-    /// rather than left for a recovered child to attribute to the wrong session.
+    /// A turn opener already names its session and a process opener its
+    /// process, so the pair is representable and invalid in exactly those
+    /// ways. Refused at the boundary, as `EffectGroupShape::validate_wire`
+    /// refuses its own two-halves mismatch, rather than left for a recovered
+    /// child to attribute to the wrong owner.
     pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
-        if let Some(opener_session) = self.opener.session_id()
-            && *opener_session != self.session_id
-        {
+        let agrees = match (&self.owner, self.opener.process_id()) {
+            (crate::ExecutionOwner::Process { process_id }, Some(opener_process)) => {
+                process_id == opener_process
+            }
+            (crate::ExecutionOwner::Process { .. }, None) => false,
+            (crate::ExecutionOwner::SessionFrame { session_id, .. }, _) => self
+                .opener
+                .session_id()
+                .is_none_or(|opener_session| opener_session == session_id),
+        };
+        if !agrees {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
                 format!(
-                    "retained tool-child request binds opener session `{opener_session}` but \
-                     attributes its work to session `{}`; a turn opener and a queue-drain \
-                     opener each name their own session, so the two are one fact",
-                    self.session_id
+                    "retained tool-child request binds opener {:?} but attributes its work to \
+                     `{}`; a turn opener and a queue-drain opener each name their own session, \
+                     and a process opener its own process, so the two are one fact",
+                    self.opener,
+                    self.owner.runtime_owner()
                 ),
             ));
         }

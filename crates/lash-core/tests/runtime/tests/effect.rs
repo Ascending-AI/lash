@@ -1011,7 +1011,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let expected_replay_key =
         lash_core::testing::runtime_internals::causal::direct_effect_invocation(
             &ExecutionScope::turn("root", "turn-1"),
-            &SessionId::from("root"),
+            &lash_core::RuntimeOwner::Session(SessionId::from("root")),
             "direct-test",
             discriminator,
             None,

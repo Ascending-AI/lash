@@ -432,7 +432,7 @@ impl ToolProvider for OracleTools {
             lash_core::ToolOutcomeDone::ok(value),
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
-                    session_id: SessionId::from(self.session_id.clone()),
+                    owner: crate::RuntimeOwner::Session(SessionId::from(self.session_id.clone())),
                     process_id: self.theatre.intent_process(),
                     event_type: if args.refused_intent {
                         UNREGISTERED_EVENT.to_string()

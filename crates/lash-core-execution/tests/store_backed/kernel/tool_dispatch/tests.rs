@@ -347,7 +347,7 @@ impl crate::RuntimeEffectController for IntentReplayController {
         let result = match envelope.command {
             crate::RuntimeEffectCommand::Process { command } => local_executor
                 .into_process()?
-                .execute(*command)
+                .execute(envelope.invocation.execution_scope(), *command)
                 .await
                 .map(|result| crate::RuntimeEffectOutcome::Process { result }),
             command => {
@@ -421,7 +421,7 @@ impl ToolProvider for RetryingIntentTools {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
-                session_id: SessionId::from("session"),
+                owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                 process_id: self.target.clone(),
                 event_type: "attempt.retry.final".to_string(),
                 payload: json!({"attempt": call.context.attempt_number()}),
@@ -455,7 +455,13 @@ impl ToolProvider for AttemptIntentTools {
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(call.context.session_id(), "session");
+        assert_eq!(
+            call.context
+                .session_id()
+                .expect("the call runs in a session")
+                .as_str(),
+            "session"
+        );
         assert_eq!(
             call.context.call_id(),
             &crate::ToolCallId::fixture("attempt-intents-call")
@@ -534,7 +540,7 @@ impl ToolProvider for AttemptIntentTools {
             crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
             crate::ToolIntents::v3(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
                         json!({"source": "recorded-attempt"}),
@@ -542,19 +548,19 @@ impl ToolProvider for AttemptIntentTools {
                     ),
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     process_id: self.target.get().expect("the target is registered").clone(),
                     signal_name: "resume".to_string(),
                     payload: json!({"ordinal": 1}),
                 }),
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     process_id: self.target.get().expect("the target is registered").clone(),
                     event_type: "attempt.intent.note".to_string(),
                     payload: json!({"ordinal": 2}),
                 }),
                 crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     request: crate::TriggerOccurrenceRequest::new(
                         "attempt.intent.trigger",
                         "attempt-intents-source",
@@ -563,7 +569,7 @@ impl ToolProvider for AttemptIntentTools {
                     ),
                 }),
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-                    session_id: SessionId::from("session"),
+                    owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                     process_id: self.target.get().expect("the target is registered").clone(),
                 }),
             ]),
@@ -746,9 +752,7 @@ async fn strict_mcp_dispatch_context<'h>(
 ) -> ToolDispatchContext<'h> {
     let plugins = test_plugins(Arc::new(StrictMcpTools { executed }));
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -771,8 +775,10 @@ async fn strict_mcp_dispatch_context<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -799,9 +805,7 @@ use crate::testing::MockSessionManager;
 async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolDispatchContext<'h> {
     let plugins = test_plugins(Arc::new(MockTools));
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -824,8 +828,10 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -860,9 +866,7 @@ async fn projection_policy_dispatch_context<'h>(
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -885,8 +889,10 @@ async fn projection_policy_dispatch_context<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1057,8 +1063,10 @@ async fn pinned_contract_dispatch_context<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1106,9 +1114,7 @@ async fn authority_hidden_dispatch_context<'h>(
         "authority hiding must not rewrite the registry's curation bit"
     );
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -1131,8 +1137,10 @@ async fn authority_hidden_dispatch_context<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1157,9 +1165,7 @@ async fn exact_dispatch_context_with_plugins<'h>(
     plugins: Arc<PluginSession>,
 ) -> ToolDispatchContext<'h> {
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -1182,8 +1188,10 @@ async fn exact_dispatch_context_with_plugins<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1292,9 +1300,7 @@ async fn pending_dispatch_context<'h>(
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
-    let tool_catalog = plugins
-        .resolved_tool_catalog(&SessionId::from("session"))
-        .expect("tool catalog");
+    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
         plugins,
         tools,
@@ -1317,8 +1323,10 @@ async fn pending_dispatch_context<'h>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        owner: crate::ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+        },
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1497,7 +1505,6 @@ async fn retry_ladder_survives_a_later_pending_completion() {
 
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
-        SessionId::from("session"),
         Arc::new(context),
         crate::support::memory_store_set().await.process_env_store(),
         attachment_store,

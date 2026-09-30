@@ -585,7 +585,7 @@ async fn normalize_items_merges_adjacent_text_items() {
     ];
     let out = normalize_input_items(
         &items,
-        &lash_core::facade_support::SessionAttachmentStore::unavailable(),
+        &lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
         &lash_core::attachments::OpenAttachmentSourcePolicy,
     )
     .await
@@ -633,7 +633,7 @@ async fn attachment_source_policy_can_deny_borrowed_turn_ingress() {
 
     let error = normalize_input_items(
         &items,
-        &lash_core::facade_support::SessionAttachmentStore::unavailable(),
+        &lash_core::facade_support::RuntimeAttachmentStore::unavailable(),
         &DenyBorrowedIngress,
     )
     .await

@@ -428,6 +428,7 @@ impl TurnBoundary {
                 returned_state,
                 tool_calls: &returned_turn.tool_calls,
                 omitted: returned_turn.omitted.as_ref(),
+                retained_outputs: &returned_turn.retained_outputs,
                 plugins: plugins.as_deref(),
                 execution_state_update,
                 agent_frame_switch_materializes,
@@ -559,6 +560,7 @@ impl TurnBoundary {
             returned_state,
             tool_calls,
             omitted,
+            retained_outputs,
             plugins,
             execution_state_update,
             agent_frame_switch_materializes,
@@ -649,7 +651,8 @@ impl TurnBoundary {
 
         if let Some(store) = store {
             let graph = state.pending_graph_commit();
-            let committed_attachment_ids = committed_attachment_ids(state, tool_calls, omitted);
+            let committed_attachment_ids =
+                committed_attachment_ids(state, tool_calls, omitted, retained_outputs);
             // ADR 0058: this deduped union of explicit ids and recorded
             // write-ahead intent ids is a declared estimate, not the stamped
             // row count — replay can undercount prior-attempt rows, and

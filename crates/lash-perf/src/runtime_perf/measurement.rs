@@ -16,7 +16,7 @@ use lash_core::sansio::{
 };
 use lash_core::store::{AdmittedHead, GraphAppend, RootStore as _};
 use lash_core::{
-    AttachmentIntent, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
+    AttachmentWrite, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
     LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
     QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
     SessionHistoryStore, SessionObservationEventPayload, SessionRevision, TokenUsage,

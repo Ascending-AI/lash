@@ -551,10 +551,10 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
         inner: Arc::clone(&scenario.attachment_store),
         puts: AtomicUsize::new(0),
     });
-    let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
+    let attachment_store = Arc::new(crate::RuntimeAttachmentStore::ephemeral(
         Arc::clone(&backend) as Arc<dyn crate::AttachmentStore>,
     ));
-    let second_reader = crate::SessionAttachmentStore::ephemeral(
+    let second_reader = crate::RuntimeAttachmentStore::ephemeral(
         Arc::clone(&backend) as Arc<dyn crate::AttachmentStore>
     );
 

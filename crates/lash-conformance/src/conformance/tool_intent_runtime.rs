@@ -36,12 +36,16 @@ impl crate::ToolProvider for SignalIntentProvider {
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(call.context.session_id(), self.session_id);
+        assert_eq!(
+            call.context.owner().session_id(),
+            Some(&self.session_id),
+            "the intent-declaring call runs in its session"
+        );
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"signalled": true})),
             crate::ToolIntents::v3(vec![crate::ToolIntent::SignalProcess(
                 crate::SignalProcessIntent {
-                    session_id: self.session_id.clone(),
+                    owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                     process_id: self.process_id.clone(),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"tier": "durable"}),

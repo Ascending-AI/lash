@@ -878,11 +878,11 @@ pub trait ProcessRetention: Send + Sync {
     /// afterward so every backend has one observable reclamation path.
     /// Session-scoped trigger-mutation receipts follow their owner's ADR 0049
     /// deletion frontier during reconciliation; host and platform receipts
-    /// remain owned by the trigger store's explicit cutoff lever. Durable backends also
-    /// release attachment intents and delete the process-owned `process-env:<id>` and
-    /// `process-session-turn:<id>` session stores before deleting the process
-    /// row. Backends must fail toward retaining the terminal process if that
-    /// cleanup cannot complete.
+    /// remain owned by the trigger store's explicit cutoff lever. A process owns
+    /// no session store: the attachments it held are released by the cleanup
+    /// its terminal publication planned (ADR 0124), never by the prune.
+    /// Backends must fail toward retaining the terminal process if the prune
+    /// cannot complete.
     /// Host-scheduled retention: hosts that project results/events into their
     /// own store call this to keep the registry bounded. Non-terminal rows are
     /// never touched. A late await receives the typed

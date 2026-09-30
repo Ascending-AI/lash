@@ -515,11 +515,43 @@ where
                     .as_ref()
                     .map(|turn_cancellation| &turn_cancellation.scope),
             )?;
+            // The terminal reaches this journal only through the attach
+            // workflow, which acquires this scope's edges on the terminal's
+            // delivered attachments before it resolves the wait (ADR 0124):
+            // arm the attach against a wait of this command's own, then park
+            // on that wait.
+            let await_key = crate::durable_wait::restate_await_event_key_for_authority(
+                authority_id,
+                invocation.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::Custom {
+                    key: process_await_wait_key(&process_id, invocation.effect_id()),
+                },
+            )?;
+            context
+                .attach_process_terminal(
+                    namespace,
+                    RestateProcessAttachRequest {
+                        process_id: process_id.clone(),
+                        key: await_key.clone(),
+                    },
+                )
+                .await
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineProcessAwait,
+                        err.to_string(),
+                    )
+                })?;
+            let await_request = crate::durable_wait::RestateDurableWaitAwaitRequest {
+                key: await_key.clone(),
+                deadline: None,
+            };
             trace_park("process");
             let first_wait = context
-                .await_process_terminal_or_turn_cancel(
+                .await_event_or_turn_cancel(
                     namespace,
-                    process_id.clone(),
+                    await_request,
+                    await_key.key_id.clone(),
                     turn_cancel,
                     process_cancel,
                 )
@@ -535,9 +567,9 @@ where
                 }
             };
             let output = match first_wait {
-                RestateTurnCancelRaceOutcome::Completed(output) => {
+                RestateTurnCancelRaceOutcome::Completed(resolution) => {
                     trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
-                    *output
+                    process_await_output_from_resolution(resolution)?
                 }
                 RestateTurnCancelRaceOutcome::ProcessCancelled => {
                     // The awaiting process was cancelled while it waited: its
@@ -609,17 +641,53 @@ where
                                 ))
                             })?;
                     }
+                    // The race released the first wait as cancelled, so the
+                    // cancelled process's terminal arrives through an attach
+                    // armed on a wait of its own, acquired like any other.
+                    let after_key = crate::durable_wait::restate_await_event_key_for_authority(
+                        authority_id,
+                        invocation.execution_scope(),
+                        lash_core::AwaitEventWaitIdentity::Custom {
+                            key: process_await_after_turn_cancel_wait_key(
+                                &process_id,
+                                invocation.effect_id(),
+                            ),
+                        },
+                    )?;
+                    context
+                        .attach_process_terminal(
+                            namespace,
+                            RestateProcessAttachRequest {
+                                process_id: process_id.clone(),
+                                key: after_key.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(|err| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
+                                err.to_string(),
+                            )
+                        })?;
                     trace_park("process_after_turn_cancel");
                     match context
-                        .await_process_terminal(namespace, process_id.clone())
+                        .await_event(
+                            namespace,
+                            crate::durable_wait::RestateDurableWaitAwaitRequest {
+                                key: after_key.clone(),
+                                deadline: None,
+                            },
+                            after_key.key_id.clone(),
+                            tokio_util::sync::CancellationToken::new(),
+                        )
                         .await
                     {
-                        Ok(output) => {
+                        Ok(resolution) => {
                             trace_resolve(
                                 "process_after_turn_cancel",
                                 lash_trace::TraceDurableWaitResolution::Resolved,
                             );
-                            output
+                            process_await_output_from_resolution(resolution)?
                         }
                         Err(err) => {
                             trace_resolve(
@@ -854,4 +922,46 @@ where
         observer(outcome, *realization);
     }
     outcome.map(|(outcome, _)| outcome)
+}
+
+/// The wait a direct process await parks on: its own, named by the awaited
+/// process and the awaiting command, so two awaits of one process in one
+/// scope never share a wait (ADR 0124).
+fn process_await_wait_key(process_id: &lash_core::ProcessId, effect_id: &str) -> String {
+    format!("process-await:{process_id}:{effect_id}")
+}
+
+/// The wait a direct process await reads its terminal from after a turn
+/// stop won its first wait: the race released that wait as cancelled.
+fn process_await_after_turn_cancel_wait_key(
+    process_id: &lash_core::ProcessId,
+    effect_id: &str,
+) -> String {
+    format!("process-await:{process_id}:{effect_id}:after-turn-cancel")
+}
+
+/// The terminal a resolved process-await wait carries. The attach workflow
+/// resolves the wait with the whole terminal as its value; an error
+/// resolution is a terminal it could not observe.
+fn process_await_output_from_resolution(
+    resolution: lash_core::Resolution,
+) -> Result<lash_core::ProcessAwaitOutput, RuntimeEffectControllerError> {
+    match resolution {
+        lash_core::Resolution::Ok(value) => serde_json::from_value(value).map_err(|error| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineProcessAwait,
+                format!("process-await resolution does not decode as a terminal: {error}"),
+            )
+        }),
+        lash_core::Resolution::Err(error) => Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineProcessAwait,
+            error.message,
+        )),
+        lash_core::Resolution::Timeout | lash_core::Resolution::Cancelled => {
+            Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineProcessAwait,
+                "a process-await wait ended without the terminal it waits on",
+            ))
+        }
+    }
 }

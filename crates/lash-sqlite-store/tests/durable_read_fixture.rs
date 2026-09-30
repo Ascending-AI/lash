@@ -139,7 +139,7 @@ fn pin_attachment_write_token(core_path: &Path) {
         .expect("open SQLite durable-core fixture to pin the attachment write token");
     let rewritten = connection
         .execute(
-            "UPDATE attachment_manifest SET write_id = ?1 WHERE attachment_id = ?2",
+            "UPDATE attachment_pending_writes SET write_id = ?1 WHERE attachment_id = ?2",
             rusqlite::params![
                 fixture::FIXTURE_ATTACHMENT_WRITE_ID,
                 fixture::FIXTURE_ATTACHMENT_ID
@@ -148,7 +148,7 @@ fn pin_attachment_write_token(core_path: &Path) {
         .expect("pin the SQLite fixture attachment write token");
     assert_eq!(
         rewritten, 1,
-        "the fixture seeds exactly one attachment manifest row to pin; {rewritten} were rewritten"
+        "the fixture seeds exactly one pending attachment write to pin; {rewritten} were rewritten"
     );
 }
 
@@ -203,7 +203,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         SqliteProcessRegistry::open_with_clock(
             &root.join("processes.db"),
             Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-            root.join("process-sessions"),
         )
         .await
         .expect("open SQLite process fixture")

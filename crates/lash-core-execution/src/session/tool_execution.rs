@@ -1076,7 +1076,7 @@ impl RuntimeExecutionContext<'_> {
         // the recorded attempt body that named it does not re-run.
         let site = crate::tool_dispatch::ParkSite {
             processes: self.dispatch.processes.as_ref(),
-            session_id: &self.dispatch.session_id,
+            owner: self.dispatch.owner.runtime_owner(),
             call_id,
             scope: self.process_scope(parent_invocation.clone()),
             child_trace_hook,

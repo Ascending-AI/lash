@@ -55,8 +55,9 @@ Three properties of that boundary had drifted from the rest of the runtime:
 * **C. Retention is a journaled artifact, not a file.** `SpillPolicy` is
   deleted. A step that keeps full output calls
   `ToolPresentationInput::context.artifacts.retain_text(label, text)`, which the
-  runtime binds to the session's content-addressed `SessionAttachmentStore`
-  (manifest-referenced, so mark-and-sweep GC retains it). The hint names the
+  runtime binds to the session's content-addressed `RuntimeAttachmentStore`
+  (held by the turn's `Execution` referrer until the commit that names it
+  acquires the session's edge, ADR 0124). The hint names the
   `AttachmentRef`; because the `put` runs inside the journaled boundary, a
   recorded presentation replays unchanged and never puts again, and the
   recorded `artifacts` list names what was retained. A crash after the `put`
@@ -139,8 +140,12 @@ never becomes text for the model.
 An RLM cell's prints and final value follow the same rule inside the cell's
 journaled `{cell}:outputs` language value: an oversized value's JSON is put
 as an attachment and history carries `OutputValue::Retained`, while the
-host still receives the full final value. The retained attachment is owned
-by the turn that put it, so that turn's commit roots it
-([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)), and a
-turn that crashes before its commit leaves an intent the next commit's sweep
-reclaims.
+host still receives the full final value. The retained attachment is held
+by the `Execution` referrer of the turn that put it. That turn's commit
+names it and acquires `Session(s)` on it
+([ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md)):
+a tool result's retained block from its message part, and a cell's retained
+prints and finish value from the cell's recorded response. A redriven turn
+is served the recorded response and names the same attachments; a turn that
+never commits leaves only its execution's edge, which ends when its journal
+settles.

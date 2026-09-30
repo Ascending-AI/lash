@@ -173,6 +173,10 @@ pub struct ProcessLocalExecution {
     pub process_engines: Option<crate::ProcessEngineRegistry>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
+    /// The attachment referrers a delivered terminal is acquired through
+    /// before the receiver records it (ADR 0124). `None` on a host with no
+    /// durable attachment store: its terminals deliver nothing to hold.
+    pub attachments: Option<Arc<dyn crate::AttachmentReferrers>>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
@@ -187,7 +191,7 @@ pub struct ProcessDefinitionLocalExecution {
 pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
     charge_safety: crate::ChargeSafetyPolicy,
-    attachment_store: Arc<crate::SessionAttachmentStore>,
+    attachment_store: Arc<crate::RuntimeAttachmentStore>,
 }
 
 /// Runs one tool attempt against a live execution context: the recorded body
@@ -347,7 +351,7 @@ fn unresolved_execution_env(
 pub struct PresentationLocalExecution {
     pub plugins: Arc<crate::plugin::PluginSession>,
     pub settlement: Arc<super::ToolSettlement>,
-    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
     pub duration_ms: u64,
 }
@@ -378,7 +382,7 @@ impl PresentationLocalExecution {
             &self.attachment_store,
         )));
         let context = crate::plugin::ToolResultProjectionContext {
-            session_id: crate::SessionId::from(self.plugins.session_id().to_string()),
+            owner: self.plugins.owner().clone(),
             call_id,
             tool_id,
             tool_name,
@@ -660,12 +664,27 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_engines: None,
                     turn_cancellation: None,
                     effect_controller: None,
+                    attachments: None,
                     outcome_observer: None,
                 },
             )),
             replay_trace: None,
             served_only: None,
         }
+    }
+
+    /// Binds the attachment referrers a delivered process terminal is
+    /// acquired through before its receiver records it (ADR 0124).
+    pub fn with_process_attachments(
+        mut self,
+        attachments: Arc<dyn crate::AttachmentReferrers>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.attachments = Some(attachments);
+        }
+        self
     }
 
     /// Binds the `ProcessStart` obligation ledger a committed `Start`
@@ -731,7 +750,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn presentation(
         plugins: Arc<crate::plugin::PluginSession>,
         settlement: Arc<super::ToolSettlement>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
         duration_ms: u64,
     ) -> Self {
@@ -824,7 +843,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn direct(
         provider: ProviderHandle,
         charge_safety: crate::ChargeSafetyPolicy,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
+        attachment_store: Arc<crate::RuntimeAttachmentStore>,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
         Self {

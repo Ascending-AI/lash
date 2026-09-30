@@ -598,7 +598,7 @@ impl Opener {
         self.next_intent += 1;
         let call_id = format!("call-{}-{}", self.session, self.next_call);
         let identity = ToolIntentIdentity {
-            session_id: self.session.clone(),
+            owner: lash_core::RuntimeOwner::Session(self.session.clone()),
             execution_scope_id: format!("turn-{}", self.session),
             tool_call_id: lash_core::ToolCallId::fixture(&call_id),
             intent_index: self.next_intent,

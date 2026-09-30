@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 #[cfg(test)]
 mod context_tests;
@@ -139,8 +138,8 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                 .as_ref()
                 .and_then(|invocation| invocation.attribution.turn_id.clone()),
         );
-        let state = self.services.current.snapshot.to_runtime_state();
-        let execution_env_spec = state.process_execution_env_spec(&self.services.current.policy);
+        let execution_env_spec = self.services.current.execution_env_spec()?;
+        let owner = self.services.current.execution_owner()?;
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             plugins: Arc::clone(&self.services.current.plugins),
             tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
@@ -158,12 +157,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             parent_invocation: None,
             observation_call_key: None,
             execution_env_spec,
-            session_id: self.services.current.session_id.clone(),
-            agent_frame_id: state.current_frame_node_id.clone().ok_or_else(|| {
-                crate::PluginError::Session(
-                    "process execution requires an initialized agent frame".to_string(),
-                )
-            })?,
+            owner,
             // A process run has no host lane: its emissions went to a
             // drained channel before, so the dispatch observes nowhere.
             observer: crate::engine::NullObservationSink::arc(),

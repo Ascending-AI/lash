@@ -20,7 +20,7 @@ pub(crate) struct BoundSession {
     /// runs a drive on the runtime registered here.
     residents: Arc<crate::core::residents::ResidentSessions>,
     backend: lash_core::Backend,
-    attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
+    attachment_store: Arc<lash_core::facade_support::RuntimeAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn DeploymentStore>,

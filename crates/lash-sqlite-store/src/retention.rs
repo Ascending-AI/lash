@@ -25,18 +25,10 @@ pub(crate) async fn reclaim(
             )?;
             let removed_usage_delta_count =
                 crate::conn::cached_execute(tx, session_sql().usage.delete_reclaimable.sql(), [])?;
-            let removed_attachment_root_count = crate::conn::cached_execute(
-                tx,
-                crate::attachments::attachment_sql()
-                    .manifest_sqlite
-                    .delete_deleted_session_roots
-                    .sql(),
-                [],
-            )?;
             Ok(lash_core_execution::store::RetentionReport {
                 removed_receipt_count,
                 removed_usage_delta_count,
-                removed_attachment_root_count,
+                removed_attachment_root_count: 0,
                 retired_effect_scope_count: 0,
             })
         })
