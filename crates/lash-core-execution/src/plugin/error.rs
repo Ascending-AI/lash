@@ -120,6 +120,9 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// An atomic plugin-state refusal, retained across journal transport.
+    #[error("plugin state: {0}")]
+    State(#[source] super::PluginStateError),
     /// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
     StoreRefusal(#[from] crate::store::StoreRefusal),
@@ -368,6 +371,7 @@ impl PluginError {
             | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::State(_)
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }
@@ -437,6 +441,7 @@ impl PluginError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::StoreRefusal(_) => true,
+            Self::State(error) => error.is_terminal(),
             Self::Runtime(error) => error.is_terminal(),
             Self::RuntimeEffectController(error) => error.is_terminal(),
             Self::BeforeToolCallReplacementConflict { .. }

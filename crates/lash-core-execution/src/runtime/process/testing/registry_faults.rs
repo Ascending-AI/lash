@@ -37,6 +37,7 @@ type ExternalRefWriteHold =
 
 #[derive(Default)]
 struct ReadFaultPlan {
+    delete_error: Option<crate::PluginError>,
     error: Option<crate::PluginError>,
     wake_defer_error: Option<crate::PluginError>,
     error_after: Option<(usize, crate::PluginError)>,
@@ -130,6 +131,22 @@ impl ProcessRegistryFaults {
             injected_wakes: Arc::default(),
             process_point_reads: Arc::default(),
         }
+    }
+
+    /// The next session cleanup fails before changing process state.
+    pub fn fail_next_session_delete(&self, error: crate::PluginError) {
+        self.faults.lock_recover().delete_error = Some(error);
+    }
+
+    async fn delete_session_faulted(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::ProcessSessionDeleteReport, crate::PluginError> {
+        let error = self.faults.lock_recover().delete_error.take();
+        if let Some(error) = error {
+            return Err(error);
+        }
+        self.inner.delete_session_process_state(session_id).await
     }
 
     /// Every point read fails with `error` until cleared with `None`.
@@ -530,7 +547,7 @@ delegate_process_registrar!(
     }
 );
 
-delegate_process_observer_registry!(ProcessRegistryFaults, inner);
+delegate_process_observer_registry!(ProcessRegistryFaults, inner, delete_session_faulted);
 
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {

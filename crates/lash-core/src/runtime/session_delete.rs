@@ -100,21 +100,42 @@ pub struct SessionDeleteReport {
 #[derive(Debug, thiserror::Error)]
 pub enum SessionDeleteFailure {
     /// The process registry did not delete the session's process state.
-    #[error("process state: {message}")]
-    Process { message: String },
+    #[error("process state: {source}")]
+    Process { source: Box<crate::PluginError> },
     /// The trigger store did not delete the session's subscriptions.
-    #[error("trigger subscriptions: {message}")]
-    Triggers { message: String },
+    #[error("trigger subscriptions: {source}")]
+    Triggers { source: Box<crate::PluginError> },
     /// The effect host did not revoke the session's durable waits.
-    #[error("durable waits: {message}")]
-    Waits { message: String },
+    #[error("durable waits: {source}")]
+    Waits { source: Box<crate::RuntimeError> },
     /// The effect host did not retire the session's effect journal.
-    #[error("effect journal: {message}")]
-    Journal { message: String },
+    #[error("effect journal: {source}")]
+    Journal { source: Box<crate::RuntimeError> },
     /// The session's storage delete stopped, with the reclaim counters it
     /// witnessed before it did (ADR 0067).
     #[error("storage: {0}")]
     Storage(Box<MaintenanceFailure<SessionBlobReclaimReport>>),
+}
+
+impl SessionDeleteFailure {
+    /// Whether the retained cause explicitly permits an identical retry.
+    /// Recorded deletion remains owned by its obligation regardless of this classification.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Process { source } | Self::Triggers { source } => source.is_retryable(),
+            Self::Waits { source } | Self::Journal { source } => source.is_retryable(),
+            Self::Storage(_) => false,
+        }
+    }
+
+    /// Whether the retained cause requires a host change before it can succeed.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Process { source } | Self::Triggers { source } => source.is_terminal(),
+            Self::Waits { source } | Self::Journal { source } => source.is_terminal(),
+            Self::Storage(_) => false,
+        }
+    }
 }
 
 /// What [`delete_session`] did.
@@ -304,8 +325,8 @@ pub async fn physically_delete(
                 .registry()
                 .delete_session_process_state(session_id)
                 .await
-                .map_err(|error| SessionDeleteFailure::Process {
-                    message: error.to_string(),
+                .map_err(|source| SessionDeleteFailure::Process {
+                    source: Box::new(source),
                 })?,
         ),
         None => None,
@@ -314,20 +335,20 @@ pub async fn physically_delete(
         triggers
             .delete_session_subscriptions(session_id)
             .await
-            .map_err(|error| SessionDeleteFailure::Triggers {
-                message: error.to_string(),
+            .map_err(|source| SessionDeleteFailure::Triggers {
+                source: Box::new(source),
             })?;
     }
     let host = administration.effect_host();
     host.revoke_await_events_for_session(session_id)
         .await
-        .map_err(|error| SessionDeleteFailure::Waits {
-            message: error.to_string(),
+        .map_err(|source| SessionDeleteFailure::Waits {
+            source: Box::new(source),
         })?;
     host.retire_effect_journal(EffectJournalRetirement::session(session_id))
         .await
-        .map_err(|error| SessionDeleteFailure::Journal {
-            message: error.to_string(),
+        .map_err(|source| SessionDeleteFailure::Journal {
+            source: Box::new(source),
         })?;
     let storage = administration
         .store_factory()

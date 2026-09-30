@@ -971,7 +971,7 @@ impl SessionAdmin {
         for (tool_id, present) in updates {
             state
                 .set_membership(tool_id, *present)
-                .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
+                .map_err(EmbedError::from)?;
         }
         self.apply_tool_state(state).await
     }
@@ -984,7 +984,7 @@ impl SessionAdmin {
         let tool_registry = self.tool_registry().await?;
         let handle = tool_registry
             .add_tool_provider(provider)
-            .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
+            .map_err(EmbedError::from)?;
         self.refresh_tool_catalog().await?;
         Ok(handle)
     }
@@ -993,7 +993,7 @@ impl SessionAdmin {
         let tool_registry = self.tool_registry().await?;
         tool_registry
             .remove_source(handle)
-            .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
+            .map_err(EmbedError::from)?;
         self.refresh_tool_catalog().await?;
         Ok(self.tool_state().await?.generation())
     }

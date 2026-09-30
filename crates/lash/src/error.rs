@@ -94,14 +94,16 @@ pub enum EmbedError {
     },
     #[error("invalid work cadence: {0}")]
     WorkCadence(#[from] lash_core::WorkCadenceError),
-    #[error("failed to delete process state for session `{session_id}`: {message}")]
-    /// Process-state deletion failed for the identified session.
-    SessionDeleteProcess {
-        /// Session whose process state could not be deleted.
+    /// Cleanup of an unrecorded session stopped at the retained step.
+    #[error("failed to clean up session `{session_id}`: {failure}")]
+    SessionDeleteCleanup {
         session_id: SessionId,
-        /// Process-state deletion failure detail suitable for diagnostics.
-        message: String,
+        #[source]
+        failure: Box<lash_core::session_delete::SessionDeleteFailure>,
     },
+    /// A ToolAdmin reconfiguration was refused before changing its catalog.
+    #[error("tool reconfiguration: {0}")]
+    Reconfigure(#[from] lash_core::facade_support::ReconfigureError),
     #[error(
         "session is still in use: park()/close() consume the session and require exclusive ownership; drop any cloned handles and finish or cancel in-flight turns first"
     )]
@@ -278,7 +280,9 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Runtime(err) => err.is_retryable(),
-            Self::Plugin(err) => err.is_retryable(),
+            Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
+            Self::SessionDeleteCleanup { failure, .. } => failure.is_retryable(),
+            Self::Reconfigure(_) => false,
             Self::Store(lash_core::StoreError::Contended)
             | Self::Session(SessionError::Store {
                 source: lash_core::StoreError::Contended,
@@ -297,7 +301,6 @@ impl EmbedError {
             | Self::Store(_)
             | Self::StoreSessionMismatch { .. }
             | Self::WorkCadence(_)
-            | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
             | Self::Session(_)
@@ -355,14 +358,22 @@ impl EmbedError {
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
-            Self::Plugin(err) => err.is_terminal(),
+            Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
+            Self::SessionDeleteCleanup { failure, .. } => failure.is_terminal(),
+            Self::Reconfigure(
+                lash_core::facade_support::ReconfigureError::Validation(_)
+                | lash_core::facade_support::ReconfigureError::UnknownSource(_),
+            ) => true,
+            Self::Reconfigure(
+                lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },
+            ) => false,
+            Self::Reconfigure(_) => false,
             Self::Session(SessionError::ProviderMismatch { .. })
             | Self::Session(SessionError::ProviderUnconfigured { .. })
             | Self::Session(SessionError::ProviderUnavailable { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
             Self::SessionDeleteStorage { .. }
-            | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
             | Self::RemoteProtocol(_)

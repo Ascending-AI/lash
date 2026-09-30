@@ -54,6 +54,22 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.owns_commit_backpressure()
     }
 
+    async fn revoke_await_events_for_session(
+        &self,
+        inner: &dyn AwaitEventResolver,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
+        inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        inner: &dyn EffectHost,
+        retirement: EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        inner.retire_effect_journal(retirement).await
+    }
+
     async fn execute_effect(
         &self,
         inner: &dyn RuntimeEffectController,
@@ -302,7 +318,9 @@ impl AwaitEventResolver for LayeredEffectHost {
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
+        self.layer
+            .revoke_await_events_for_session(self.inner.await_event_resolver(), session_id)
+            .await
     }
 
     async fn cancel_await_events_for_session(
@@ -424,7 +442,9 @@ impl EffectHost for LayeredEffectHost {
         &self,
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        self.inner.retire_effect_journal(retirement).await
+        self.layer
+            .retire_effect_journal(self.inner.as_ref(), retirement)
+            .await
     }
 
     async fn journal_replay(
@@ -579,9 +599,8 @@ impl AwaitEventResolver for LayeredController<'_> {
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner
-            .as_ref()
-            .revoke_await_events_for_session(session_id)
+        self.layer
+            .revoke_await_events_for_session(self.inner.as_ref(), session_id)
             .await
     }
 

@@ -698,9 +698,9 @@ impl LashCore {
                 lash_core::session_delete::SessionDeleteError::Unrecorded {
                     session_id,
                     failure,
-                } => EmbedError::SessionDeleteProcess {
+                } => EmbedError::SessionDeleteCleanup {
                     session_id,
-                    message: failure.to_string(),
+                    failure: Box::new(failure),
                 },
             })
     }

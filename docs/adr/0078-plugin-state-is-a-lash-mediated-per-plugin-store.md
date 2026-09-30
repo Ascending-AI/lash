@@ -31,7 +31,16 @@ Keys are 1 through 128 bytes of ASCII letters, digits, dot, underscore, or
 hyphen. Namespaces are flat. A JSON value is capped at 32 KiB of compact JSON;
 the namespace's values map is capped at 128 KiB. Limits are runtime constants.
 Invalid keys, size excesses, typed encode/decode failures, and generation
-conflicts return `PluginStateError`, convertible to `PluginError`.
+conflicts return `PluginStateError`. Its `Into<PluginError>` conversion returns
+`PluginError::State` with the typed variant and fields, so hook bodies use `?`.
+`PluginStateError` and `KeyRejection` are cloneable and serializable; plugin JSON
+and process journals retain their variants and fields. `Encode` and `Decode`
+retain the key and diagnostic text in their `message` field.
+
+Key, quota, and codec refusals are terminal for the same input. A generation
+conflict requires reading current state and choosing a new edit; it carries
+neither a terminal signal nor permission to retry the identical edit. The facade
+preserves these classifications through plugin hook errors.
 
 Batches validate a candidate map before installing it. A rejected call leaves
 values and generation unchanged. These failures do not perform storage I/O.
