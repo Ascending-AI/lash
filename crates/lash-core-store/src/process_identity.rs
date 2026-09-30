@@ -120,8 +120,7 @@ pub const START_KEY_FAMILY_VERSION: u8 = 1;
 /// and its own name in the rendered key, so no key derived on one path can
 /// equal one derived on another.
 ///
-/// Tag 2 is burned: it was the orchestration-call namespace, deleted with
-/// orchestrating tool bodies (ADR 0116), and no namespace may take it again.
+/// Tag 2 is retired (ADR 0116); no namespace may reuse it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StartKeyNamespace {
     /// A start declared by a recorded tool intent.
