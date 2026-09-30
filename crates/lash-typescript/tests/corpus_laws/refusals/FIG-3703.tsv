@@ -5,4 +5,3 @@
 # program id	refusal	reason
 differential:FIG-3703:1	generated binding `__typescript_1_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
 differential:FIG-3703:5	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
-differential:FIG-3703:8	invalid var binding identifier `undefined`	the identifier is outside the set the printer spells bare as a var binding

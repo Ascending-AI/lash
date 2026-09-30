@@ -6,7 +6,7 @@
 differential:FIG-3722:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3722:2	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3722:3	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:4	invalid field identifier `constructor`	a contextual keyword as a field name is a valid IdentifierName, which the lens printer does not spell
+differential:FIG-3722:4	generated binding `__typescript_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
 differential:FIG-3722:5	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3722:6	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3722:7	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar

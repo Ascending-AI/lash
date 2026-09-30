@@ -7,7 +7,7 @@ differential:FIG-3652:10	generated binding `__typescript_heap_new` has no author
 differential:FIG-3652:11	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3652:12	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3652:13	generated binding `__typescript_encode_uri_component` has no authored TypeScript spelling	a URI codec call lowers to its builtin, which the lens printer does not re-sugar
-differential:FIG-3652:14	cannot render a block in expression position as TypeScript	JSON.stringify lowers to a statement sequence (its toJSON checks), which has no expression spelling
+differential:FIG-3652:14	generated binding `__typescript_stdlib` has no authored TypeScript spelling	JSON.parse lowers to a stdlib call, which the lens printer does not re-sugar
 differential:FIG-3652:15	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3652:16	generated binding `__typescript_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
 differential:FIG-3652:19	generated binding `__typescript_0_replace_input` has no authored TypeScript spelling	a string replace lowers through generated slots for its input, pattern and replacement, which have no authored spelling

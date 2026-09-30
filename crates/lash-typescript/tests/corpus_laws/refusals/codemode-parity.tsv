@@ -3,4 +3,3 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-codemode-parity:turn	generated binding `__typescript_pending_tool` has no authored TypeScript spelling	an unawaited tool call lowers to the pending-handle builtin, which the lens printer does not re-sugar

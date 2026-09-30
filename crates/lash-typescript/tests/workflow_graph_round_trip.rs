@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
+    TypeScriptSourceError, parse_typescript_expression, typescript_expression_source,
     typescript_program_source, workflow_graph_from_source, workflow_graph_to_source,
     workflow_graph_to_source_in_session,
 };
@@ -15,6 +16,232 @@ use lashlang::WorkflowNodeKind;
 fn canonical(source: &str) -> String {
     typescript_program_source(&parse(source).expect("fixture parses"))
         .expect("a parsed fixture prints back as TypeScript")
+}
+
+#[test]
+fn sparse_array_literals_preserve_elisions() {
+    let cases = [
+        "[, 1]",
+        "[1, ,]",
+        "[1, , , 4]",
+        "[, ,]",
+        "[,]",
+        "[undefined, , 1]",
+        "[[, 1], ,]",
+    ];
+    for source in cases {
+        let globals = BTreeSet::new();
+        let locals = BTreeSet::new();
+        let expression =
+            parse_typescript_expression(source, &globals, &locals).expect("sparse literal lowers");
+        let printed = typescript_expression_source(&expression).expect("sparse literal prints");
+        assert_eq!(printed, source);
+        assert_eq!(
+            parse_typescript_expression(&printed, &globals, &locals)
+                .expect("printed literal parses"),
+            expression,
+            "hole positions and stored undefined values survive"
+        );
+        assert_lens_laws(&format!("finish({source});\n"));
+    }
+}
+
+#[test]
+fn malformed_sparse_array_helpers_are_typed_refusals() {
+    use lashlang::Expr;
+    let cases = [
+        (vec![Expr::Undefined], vec![Expr::Number(1.0)]),
+        (vec![], vec![Expr::Number(0.0)]),
+        (
+            vec![Expr::Undefined; 2],
+            vec![Expr::Number(1.0), Expr::Number(0.0)],
+        ),
+        (
+            vec![Expr::Undefined],
+            vec![Expr::Number(0.0), Expr::Number(0.0)],
+        ),
+        (vec![Expr::Undefined], vec![Expr::Number(-1.0)]),
+        (vec![Expr::Undefined], vec![Expr::Number(-0.0)]),
+        (vec![Expr::Undefined], vec![Expr::Number(0.5)]),
+        (vec![Expr::Undefined], vec![Expr::Number(f64::NAN)]),
+        (vec![Expr::Undefined], vec![Expr::Number(f64::INFINITY)]),
+        (vec![Expr::Undefined], vec![Expr::String("0".into())]),
+        (vec![Expr::Number(1.0)], vec![Expr::Number(0.0)]),
+        (vec![Expr::Undefined], vec![]),
+    ];
+    for (values, holes) in cases {
+        let helper = Expr::BuiltinCall {
+            name: "__typescript_stdlib".into(),
+            args: vec![
+                Expr::String("Lash.SparseArray".into()),
+                Expr::List(values),
+                Expr::List(holes),
+            ],
+        };
+        assert!(
+            matches!(
+                typescript_expression_source(&helper),
+                Err(TypeScriptSourceError::MalformedSparseArray { .. })
+            ),
+            "malformed helper must refuse: {helper:?}"
+        );
+    }
+    for operands in [
+        vec![],
+        vec![Expr::Undefined],
+        vec![Expr::List(vec![]), Expr::List(vec![]), Expr::Undefined],
+    ] {
+        let mut args = vec![Expr::String("Lash.SparseArray".into())];
+        args.extend(operands);
+        assert!(matches!(
+            typescript_expression_source(&Expr::BuiltinCall {
+                name: "__typescript_stdlib".into(),
+                args,
+            }),
+            Err(TypeScriptSourceError::MalformedSparseArray { .. })
+        ));
+    }
+}
+
+fn assert_json_round_trip(source: &str) {
+    assert_lens_laws(source);
+    let original = lashlang::ModuleArtifact::from_program(parse(source).expect("source parses"))
+        .expect("source admits");
+    let printed = typescript_program_source(original.ir()).expect("JSON call prints");
+    let readmitted = lashlang::ModuleArtifact::from_program(parse(&printed).expect("text parses"))
+        .expect("text admits");
+    assert_eq!(readmitted.module_ref(), original.module_ref());
+    assert_eq!(readmitted.source_identity(), original.source_identity());
+}
+
+#[test]
+fn plain_json_stringify_round_trips() {
+    assert_json_round_trip("const value = {a: [1, 2]}; finish(JSON.stringify(value));");
+    assert_json_round_trip("const value = {a: [1, 2]}; JSON.stringify(value); finish(value);");
+}
+
+#[test]
+fn json_stringify_iife_round_trips() {
+    assert_json_round_trip(
+        "finish(JSON.stringify((function () { const a = [1, ,]; return {length: a.length, value: a}; })()));",
+    );
+}
+
+#[test]
+fn nested_json_stringify_round_trips() {
+    assert_json_round_trip("finish(JSON.stringify({text: JSON.stringify({values: [, 1, ,]})}));");
+}
+
+#[test]
+fn edited_json_traversals_are_refused() {
+    use lashlang::Expr;
+    for edit in 0..4 {
+        let mut expression = parse_typescript_expression(
+            "JSON.stringify({a: 1})",
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+        .expect("JSON call lowers");
+        let Expr::Block(prefix) = &mut expression else {
+            panic!("JSON prefix")
+        };
+        let Expr::If { else_block, .. } = prefix.last_mut().expect("dispatch") else {
+            panic!("JSON dispatch")
+        };
+        let Expr::Block(traversal) = else_block.as_mut() else {
+            panic!("JSON traversal")
+        };
+        match edit {
+            0 => {
+                let Expr::If { then_block, .. } = &mut traversal[0] else {
+                    panic!("cycle guard")
+                };
+                **then_block = Expr::Print(Box::new(Expr::String("edited".into())));
+            }
+            1 => {
+                let Expr::Assign { expr, .. } = &mut traversal[3] else {
+                    panic!("transform binding")
+                };
+                let Expr::Function(transformer) = expr.as_mut() else {
+                    panic!("transform function")
+                };
+                *transformer.body = Expr::Undefined;
+            }
+            2 => {
+                let Expr::If { condition, .. } = &mut traversal[6] else {
+                    panic!("final cycle guard")
+                };
+                **condition = Expr::Bool(false);
+            }
+            _ => {
+                let Expr::If { condition, .. } = &mut traversal[6] else {
+                    panic!("final cycle guard")
+                };
+                let Expr::Index { index, .. } = condition.as_mut() else {
+                    panic!("cycle index")
+                };
+                **index = Expr::Number(-0.0);
+            }
+        }
+        assert!(
+            typescript_expression_source(&expression).is_err(),
+            "edited traversal {edit} must survive or refuse"
+        );
+    }
+}
+
+#[test]
+fn contextual_binding_names_round_trip() {
+    for name in [
+        "of",
+        "as",
+        "from",
+        "type",
+        "async",
+        "get",
+        "set",
+        "readonly",
+        "number",
+        "constructor",
+    ] {
+        assert_lens_laws(&format!(
+            "const {name} = [1]; for (const value of {name}) {{ console.log({name}, value); }} finish({name});"
+        ));
+    }
+}
+
+#[test]
+fn property_presence_queries_round_trip() {
+    for source in [
+        "finish([0 in [, 1], 1 in [, 1]]);",
+        "finish([, 1].hasOwnProperty('0'));",
+        "const a = [, 1]; finish([a.hasOwnProperty('0'), a.hasOwnProperty('1')]);",
+        "const a = {hasOwnProperty: (key) => key === 'x'}; finish(a.hasOwnProperty('x'));",
+        "finish(({x: 1}).hasOwnProperty('x'));",
+        "const a = {hasOwnProperty: (key) => key === 'x'}; a.hasOwnProperty('x'); finish(a);",
+    ] {
+        assert_json_round_trip(source);
+    }
+    let mut edited = parse_typescript_expression(
+        "({x: 1}).hasOwnProperty(0)",
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    )
+    .expect("own-property guard lowers");
+    let lashlang::Expr::Block(items) = &mut edited else {
+        panic!("own-property receiver")
+    };
+    let lashlang::Expr::If { else_block, .. } = &mut items[1] else {
+        panic!("own-property guard")
+    };
+    let lashlang::Expr::BuiltinCall { args, .. } = else_block.as_mut() else {
+        panic!("own-property fallback")
+    };
+    args[2] = lashlang::Expr::Number(-0.0);
+    assert!(
+        typescript_expression_source(&edited).is_err(),
+        "guard keys with distinct artifact identities must refuse"
+    );
 }
 
 /// The language-neutral IR projection, with TypeScript opaque-statement text.

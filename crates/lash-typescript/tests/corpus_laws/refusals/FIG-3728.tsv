@@ -3,7 +3,6 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:FIG-3728:1	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
 differential:FIG-3728:2	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
 differential:FIG-3728:4	generated binding `__typescript_heap_delete_member` has no authored TypeScript spelling	a member `delete` lowers to the heap's delete builtin, which the lens printer does not re-sugar
 differential:FIG-3728:5	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar

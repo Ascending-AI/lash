@@ -18,15 +18,7 @@ differential:FIG-3787:25	generated binding `__typescript_stdlib` has no authored
 differential:FIG-3787:26	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:27	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:32	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:35	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:36	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:37	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:38	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:39	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:40	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:41	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:42	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:43	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3787:36	generated binding `__typescript_heap_delete_member` has no authored TypeScript spelling	delete of an array member lowers to the heap-delete builtin, which the lens printer does not re-sugar
 differential:FIG-3787:44	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:45	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:46	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -51,7 +43,6 @@ differential:FIG-3787:65	generated binding `__typescript_stdlib` has no authored
 differential:FIG-3787:66	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:67	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:13	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
-differential:FIG-3787:29	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
 differential:FIG-3787:30	cannot render a block in expression position as TypeScript	a `hasOwnProperty` call lowers to a statement sequence (its own-method dispatch), which has no expression spelling
 differential:FIG-3787:14	generated binding `__typescript_0_reference_base` has no authored TypeScript spelling	a member update pins its reference base in a generated slot, which has no authored spelling
 differential:FIG-3787:31	cannot render a collection transform with extra arguments as TypeScript	a callback method called with more than its callback has no one-call spelling in the lens

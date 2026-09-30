@@ -20,6 +20,9 @@
 //! * `__typescript_stdlib("<method>", receiver, ..)`, for a method of the
 //!   instance standard-library surface, prints back as
 //!   `receiver.<method>(..)`.
+//! * `__typescript_stdlib("Lash.SparseArray", values, holes)` prints back as
+//!   an array literal with elisions at the recorded hole positions.
+//! * The default JSON traversal prints back as `JSON.stringify(value)`.
 //! * An iteration whose bind copies the element into one authored binding
 //!   prints back as `for (const x of source)` or `for (const x in source)`.
 //!
@@ -39,11 +42,15 @@ use lashlang::{
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use swc_ecma_ast::EsReserved;
 use thiserror::Error;
 
 mod collection_transform;
 mod for_loop;
+mod json_stringify;
 mod loop_bindings;
+mod property_presence;
+mod sparse_arrays;
 mod templates;
 
 use for_loop::{classic_for, is_statement_body, var_initialization};
@@ -64,6 +71,8 @@ pub enum TypeScriptSourceError {
     Unrepresentable { kind: &'static str },
     #[error("generated binding `{name}` has no authored TypeScript spelling")]
     GeneratedBinding { name: String },
+    #[error("malformed sparse array helper: {reason}")]
+    MalformedSparseArray { reason: &'static str },
     #[error("invalid {context} identifier `{name}`")]
     InvalidIdentifier { context: &'static str, name: String },
     #[error("cannot render host descriptor constructor `{type_name}` without a constructor path")]
@@ -381,6 +390,12 @@ impl<'p> Printer<'p> {
         vars: &BTreeSet<String>,
     ) -> Printed {
         let prefix = indent(level);
+        if let Some(sugared) = self.json_stringify(expression)? {
+            return Ok(format!("{prefix}{sugared};\n"));
+        }
+        if let Some(sugared) = self.property_presence(expression)? {
+            return Ok(format!("{prefix}{sugared};\n"));
+        }
         match expression {
             // A statement the front end closed with a completion value prints
             // as the statements it wraps — unless it is a `var` initializer:
@@ -1070,6 +1085,22 @@ impl<'p> Printer<'p> {
         {
             return Ok(Some(self.expression(call)?));
         }
+        if let Some(args) = stdlib_call(expression, "Lash.SparseArray") {
+            return self.sparse_array(args).map(Some);
+        }
+        if let Some([key, receiver]) = stdlib_call(expression, "Lash.HasProperty") {
+            return Ok(Some(format!(
+                "({} in {})",
+                self.binary_operand(key)?,
+                self.binary_operand(receiver)?
+            )));
+        }
+        if let Some(sugared) = self.property_presence(expression)? {
+            return Ok(Some(sugared));
+        }
+        if let Some(sugared) = self.json_stringify(expression)? {
+            return Ok(Some(sugared));
+        }
         // `globalThis.name`, read live through the root-global read.
         if let Expr::BuiltinCall { name, args } = expression
             && name.as_str() == "__typescript_global_get"
@@ -1666,7 +1697,8 @@ fn is_typescript_identifier(name: &str) -> bool {
         && characters.all(|character| {
             character == '_' || character == '$' || character.is_ascii_alphanumeric()
         })
-        && !crate::reserved_words().contains(&name)
+        && !name.is_reserved()
+        && !name.is_reserved_in_strict_mode(true)
 }
 
 fn javascript_binary_op(op: JavaScriptBinaryOp) -> &'static str {
