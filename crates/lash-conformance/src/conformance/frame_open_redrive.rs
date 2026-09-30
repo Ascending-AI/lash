@@ -1761,7 +1761,8 @@ macro_rules! frame_open_redrive_tests {
             plugin_state_dirty_park_reparks_from_the_recorded_head,
             command_cancellation_before_admission_withdraws_it,
             a_lowered_budget_refuses_a_stranded_command_once_per_drive,
-            raising_the_budget_settles_a_stranded_command);
+            raising_the_budget_settles_a_stranded_command,
+            host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,
                 host_append_waits_for_the_bound_turn, None),

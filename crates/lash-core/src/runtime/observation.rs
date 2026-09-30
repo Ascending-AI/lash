@@ -54,7 +54,7 @@ pub struct RuntimeObservation {
     pub queue_store: Option<crate::store::SessionStore>,
     /// The deployment's effect host, which a host reaches the session's
     /// durable waits through without the runtime's writer, such as an
-    /// admitted plugin task's cancel gate (FIG-4391).
+    /// admitted plugin task's cancel signal (FIG-4391).
     pub effect_host: Arc<dyn crate::EffectHost>,
     /// The ingress relay an acceptance through this observation delivers
     /// with (ADR 0109 §3).

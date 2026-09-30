@@ -22,8 +22,9 @@
 //!   per call (ADR 0125). A task's effects are journaled under
 //!   the command's own queue-drain scope, so a redrive of the unsettled
 //!   command replays them. A host's cancel reaches an admitted task through
-//!   its cancel gate ([`task_cancel`]), and a cancel that won settles the
-//!   command `Cancelled`.
+//!   its cancel signal ([`task_cancel`]), and a cancel the drive finds
+//!   requested once the task's code returned settles the command
+//!   `Cancelled`.
 //! - A frame open opens the frame in the commit that settles it and restarts
 //!   the live interpreter from the frame's seed (F5).
 //!
@@ -36,7 +37,7 @@ use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::turn_boundary::SeedCarries;
 
 mod task_cancel;
-use task_cancel::PluginTaskCancelGate;
+use task_cancel::PluginTaskCancelSignal;
 pub use task_cancel::{PluginTaskCancelRequest, request_plugin_task_cancel};
 
 /// The named phase a runtime's turn-phase probe sees when a host command
@@ -203,8 +204,8 @@ impl LashRuntime {
     /// Apply a host's plugin command or task (FIG-4202): the plugin's code
     /// runs here, after admission, with services that join the command's
     /// commit, and its events, state and queued turns settle with it. A task
-    /// whose cancel gate a host's cancel won settles `Cancelled` instead
-    /// (FIG-4391). `false` when the command was withdrawn since the lane was
+    /// a host's cancel reached before its code returned settles `Cancelled`
+    /// instead (FIG-4391, FIG-4453). `false` when the command was withdrawn since the lane was
     /// read.
     pub(super) async fn apply_plugin_operation_command(
         &mut self,
@@ -216,10 +217,10 @@ impl LashRuntime {
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
-        let cancel_gate = match operation {
+        let cancel_signal = match operation {
             HostPluginOperation::Command => None,
             HostPluginOperation::Task => {
-                PluginTaskCancelGate::open(
+                PluginTaskCancelSignal::open(
                     self.effect_host(),
                     &self.state.session_id,
                     batch_id.as_str(),
@@ -227,8 +228,8 @@ impl LashRuntime {
                 .await?
             }
         };
-        let cancelled_before_it_ran = match &cancel_gate {
-            Some(gate) => gate.cancel_won().await?,
+        let cancelled_before_it_ran = match &cancel_signal {
+            Some(signal) => signal.cancel_requested().await?,
             None => false,
         };
         let ran = if cancelled_before_it_ran {
@@ -240,7 +241,7 @@ impl LashRuntime {
                 args,
                 &batch_id,
                 drive_fence,
-                cancel_gate.as_ref(),
+                cancel_signal.as_ref(),
             ))
             .await?
         };
@@ -277,11 +278,13 @@ impl LashRuntime {
     /// state, and fold what it did into that state: its graph appends, its
     /// runtime events, its plugin state and the turns it queued.
     ///
-    /// A task runs under `cancel_gate`'s watch, and the gate is sealed the
-    /// moment its code returns: a host's cancel that won the gate answers
+    /// A task runs under `cancel_signal`'s watch, and the signal is peeked
+    /// the moment its code returns: a host's cancel requested by then answers
     /// `Cancelled`, with nothing of the task folded into resident state. The
-    /// outer `Err` is the drive's fault (the seal did not answer), which
-    /// settles nothing; the inner one is the operation's failure.
+    /// decision is durable only with the command's settling commit
+    /// (FIG-4453). The outer `Err` is the drive's fault (the peek did not
+    /// answer), which settles nothing; the inner one is the operation's
+    /// failure.
     async fn run_host_plugin_operation(
         &mut self,
         operation: HostPluginOperation,
@@ -289,7 +292,7 @@ impl LashRuntime {
         args: serde_json::Value,
         batch_id: &crate::BatchId,
         drive_fence: &crate::store::DriveFence,
-        cancel_gate: Option<&PluginTaskCancelGate>,
+        cancel_signal: Option<&PluginTaskCancelSignal>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
         RuntimeError,
@@ -361,14 +364,16 @@ impl LashRuntime {
                     controller,
                     stop.clone(),
                 );
-                let ran = match cancel_gate {
-                    Some(gate) => run_until_returned(task, gate.watch(&stop)).await,
+                let ran = match cancel_signal {
+                    Some(signal) => run_until_returned(task, signal.watch(&stop)).await,
                     None => task.await,
                 };
-                // The task's code returned: the gate's winner decides whether
-                // anything of it settles.
-                if let Some(gate) = cancel_gate
-                    && gate.seal().await?
+                // The task's code returned: a cancel requested by now settles
+                // nothing of it. The decision is written only by the settling
+                // commit, so a redrive before that commit runs the task's
+                // code again under the same live signal (FIG-4453).
+                if let Some(signal) = cancel_signal
+                    && signal.cancel_requested().await?
                 {
                     drop(services);
                     return Ok(Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled));

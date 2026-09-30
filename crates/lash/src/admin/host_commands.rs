@@ -119,9 +119,9 @@ impl SessionAdmin {
     /// drive at the next turn boundary, its events, state and queued turns
     /// settling with the command. `cancellation` withdraws a command no drive
     /// has admitted yet. A task a drive already admitted is cancelled through
-    /// its cancel gate (FIG-4391): its drive stops the task's code and
-    /// settles it cancelled, unless the task's code returned first; an
-    /// admitted plugin command runs to its settlement. A storeless session
+    /// its cancel signal (FIG-4391): its drive stops the task's code and
+    /// settles it cancelled, unless it already found the task's code returned
+    /// (FIG-4453); an admitted plugin command runs to its settlement. A storeless session
     /// runs the operation directly under the writer.
     pub(super) async fn run_plugin_operation(
         &self,
@@ -254,9 +254,9 @@ impl SessionAdmin {
     /// `cancellation` fires first, cancel it. A command no drive admitted is
     /// withdrawn transactionally and answers `Cancelled` (FIG-4202). One a
     /// drive already admitted is settled by that drive, and its settlement is
-    /// awaited: for a task, after its cancel gate was resolved cancelled, so
-    /// the drive stops the task's code and settles it cancelled unless the
-    /// task's code returned first (FIG-4391).
+    /// awaited: for a task, after its cancel signal was resolved cancelled, so
+    /// the drive stops the task's code and settles it cancelled unless it
+    /// already found the task's code returned (FIG-4391, FIG-4453).
     pub(super) async fn settle_or_withdraw(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
@@ -281,18 +281,28 @@ impl SessionAdmin {
         }
     }
 
-    /// Resolve the cancel gate of the admitted plugin task `receipt` names
+    /// Resolve the cancel signal of the admitted plugin task `receipt` names
     /// (FIG-4391), without the runtime's writer, which the drive applying the
-    /// task holds. Whether the cancel won the gate or the task's code
-    /// returned first, the command's settlement says how it ended.
+    /// task holds. Whatever the cancel reached, the command's settlement says
+    /// how it ended (FIG-4453).
     async fn cancel_admitted_plugin_task(
         &self,
         receipt: &lash_core::runtime::SessionCommandReceipt,
     ) -> Result<lash_core::runtime::PluginTaskCancelRequest> {
         self.require_own_command(receipt)?;
-        lash_core::runtime::request_plugin_task_cancel(&self.runtime.observe().effect_host, receipt)
-            .await
-            .map_err(EmbedError::Runtime)
+        let observation = self.runtime.observe();
+        // A storeless session runs its plugin operations under the writer:
+        // no drive holds a task of it.
+        let Some(store) = observation.queue_store.as_ref() else {
+            return Ok(lash_core::runtime::PluginTaskCancelRequest::Unavailable);
+        };
+        lash_core::runtime::request_plugin_task_cancel(
+            store.store().as_ref(),
+            &observation.effect_host,
+            receipt,
+        )
+        .await
+        .map_err(EmbedError::Runtime)
     }
 
     /// Refuse a host operation on a command of another session than this
