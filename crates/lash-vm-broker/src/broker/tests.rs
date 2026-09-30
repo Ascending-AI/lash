@@ -9,8 +9,7 @@ use std::time::Duration;
 
 use lash_core_store::effect_opener::EffectOpener;
 use lash_vm_protocol::{
-    BuildIdentity, DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, VmLimits,
-    VmOwner,
+    DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, VmLimits, VmOwner,
 };
 
 use super::*;
@@ -122,10 +121,7 @@ impl ParentEffects for Journal {
 }
 
 fn codec() -> FrameCodec {
-    FrameCodec::new(
-        BuildIdentity::new("broker unit build"),
-        DecodeLimits::standard(),
-    )
+    FrameCodec::new(DecodeLimits::standard())
 }
 
 fn context() -> AdmittedContext {

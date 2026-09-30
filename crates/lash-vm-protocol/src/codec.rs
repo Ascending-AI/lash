@@ -1,15 +1,14 @@
-//! Length-framed encoding under an exact build identity, and bounded decoding.
+//! Length-framed encoding and bounded decoding.
 //!
 //! A frame is a fixed header and a MessagePack payload:
 //!
 //! ```text
-//! magic "LVMP" (4) | build digest (32) | payload length, u32 big-endian (4) | payload
+//! magic "LVMP" (4) | payload length, u32 big-endian (4) | payload
 //! ```
 //!
 //! Decoding refuses, with a typed [`CodecRefusal`] and before allocating for
 //! the payload:
 //!
-//! - a frame of another build (its digest is not this build's);
 //! - a declared frame over [`DecodeLimits::max_frame_bytes`];
 //! - a frame shorter than its header or declared length (truncated);
 //! - a payload whose MessagePack structure nests deeper than
@@ -26,13 +25,12 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
-use crate::identity::BuildIdentity;
 use crate::message::{ParentFrame, WorkerFrame};
 
 pub const FRAME_MAGIC: [u8; 4] = *b"LVMP";
 
-/// Magic, build digest and payload length.
-pub const FRAME_HEADER_BYTES: usize = 4 + 32 + 4;
+/// Magic and payload length.
+pub const FRAME_HEADER_BYTES: usize = 4 + 4;
 
 /// What one decoded container element may cost the typed decode, charged
 /// against [`DecodeLimits::max_allocation_bytes`] before it is allocated: an
@@ -78,8 +76,6 @@ pub enum CodecRefusal {
     Truncated { needed: u64, available: u64 },
     #[error("frame does not start with the protocol magic")]
     BadMagic,
-    #[error("frame was written by build {found}, expected {expected}")]
-    WrongBuild { expected: String, found: String },
     #[error("frame declares {declared} bytes, over the {limit}-byte bound")]
     FrameTooLarge { limit: u64, declared: u64 },
     #[error("payload nests deeper than {limit}")]
@@ -94,26 +90,15 @@ pub enum CodecRefusal {
     TrailingBytes { extra: u64 },
 }
 
-/// Encodes and decodes frames for one build under one set of bounds.
+/// Encodes and decodes frames under one set of bounds.
 #[derive(Clone, Debug)]
 pub struct FrameCodec {
-    build: BuildIdentity,
-    digest: [u8; 32],
     limits: DecodeLimits,
 }
 
 impl FrameCodec {
-    pub fn new(build: BuildIdentity, limits: DecodeLimits) -> Self {
-        let digest = build.digest();
-        Self {
-            build,
-            digest,
-            limits,
-        }
-    }
-
-    pub fn build(&self) -> &BuildIdentity {
-        &self.build
+    pub fn new(limits: DecodeLimits) -> Self {
+        Self { limits }
     }
 
     pub fn limits(&self) -> DecodeLimits {
@@ -168,15 +153,14 @@ impl FrameCodec {
         let payload = writer.bytes;
         let mut bytes = Vec::with_capacity(FRAME_HEADER_BYTES + payload.len());
         bytes.extend_from_slice(&FRAME_MAGIC);
-        bytes.extend_from_slice(&self.digest);
         bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         bytes.extend_from_slice(&payload);
         Ok(bytes)
     }
 
     /// The whole frame's length once its header is complete: `None` while
-    /// fewer than [`FRAME_HEADER_BYTES`] bytes are present. The header's magic,
-    /// build and declared length are refused as soon as they are readable.
+    /// fewer than [`FRAME_HEADER_BYTES`] bytes are present. The header's magic
+    /// and declared length are refused as soon as they are readable.
     pub fn frame_len(&self, bytes: &[u8]) -> Result<Option<usize>, CodecRefusal> {
         if bytes.len() < FRAME_HEADER_BYTES {
             if !FRAME_MAGIC.starts_with(&bytes[..bytes.len().min(FRAME_MAGIC.len())]) {
@@ -187,13 +171,7 @@ impl FrameCodec {
         if bytes[..4] != FRAME_MAGIC {
             return Err(CodecRefusal::BadMagic);
         }
-        if bytes[4..36] != self.digest {
-            return Err(CodecRefusal::WrongBuild {
-                expected: hex(&self.digest),
-                found: hex(&bytes[4..36]),
-            });
-        }
-        let declared = u32::from_be_bytes([bytes[36], bytes[37], bytes[38], bytes[39]]);
+        let declared = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         if u64::from(declared) + FRAME_HEADER_BYTES as u64 > u64::from(self.limits.max_frame_bytes)
         {
             return Err(CodecRefusal::FrameTooLarge {
@@ -507,10 +485,6 @@ impl StructureWalk<'_> {
             bytes[0], bytes[1], bytes[2], bytes[3],
         ])))
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

@@ -174,10 +174,8 @@ def resolve(root, label):
 def vm_helper(root, worker):
     """The helper binary that speaks the protocol of the worker's linked helper library.
 
-    The handshake identity covers only the source fingerprint, platform,
-    debug and `testing`; a helper built without the worker's lash-vm-worker
-    features (the synthetic N+1's `synthetic-next`) passes it and then breaks
-    the protocol. The helper is the binary on the worker's own helper library
+    Synthetic-next helpers advertise the next wire-protocol version at the
+    handshake. The helper is the binary on the worker's own helper library
     or, as Cargo ships it, the one standalone binary whose lash-vm-worker
     features equal that library's, read from the generated feature variants.
     Its `testing` must match the linked lash-vm-client's."""
@@ -207,11 +205,11 @@ def image_helper(bin_dir, testing):
     helper = Path(bin_dir) / 'lash-vm-worker'
     if not helper.is_file() or not os.access(helper, os.X_OK):
         raise ValueError(f'{bin_dir} has no executable lash-vm-worker beside lash-e2e-worker')
-    identity = subprocess.run([str(helper), '--build-identity'], capture_output=True, text=True,
-                              check=True, timeout=30).stdout.strip()
-    if not identity.endswith(f'/testing-{str(testing).lower()}'):
-        raise ValueError(f'{helper} identity {identity!r} does not pair with a testing={testing} worker')
-    return identity
+    info = json.loads(subprocess.run([str(helper), '--version'], capture_output=True, text=True,
+                                    check=True, timeout=30).stdout)
+    if info['testing'] != testing:
+        raise ValueError(f'{helper} diagnostics {info!r} does not pair with a testing={testing} worker')
+    return info
 
 
 def main():

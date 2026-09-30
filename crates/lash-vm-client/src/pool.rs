@@ -265,9 +265,19 @@ impl Pool {
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         fence.admit(&frame.header).map_err(PoolError::protocol)?;
         match frame.message {
-            WorkerMessage::Ready { build } if build == self.config.entry.build => Ok(worker),
+            WorkerMessage::Ready {
+                protocol_version,
+                crate_version,
+            } => {
+                check_worker_protocol_version(
+                    protocol_version,
+                    env!("CARGO_PKG_VERSION"),
+                    &crate_version,
+                )?;
+                Ok(worker)
+            }
             _ => Err(PoolError::protocol(
-                "worker did not acknowledge the exact compiled build",
+                "worker did not send its protocol handshake",
             )),
         }
     }

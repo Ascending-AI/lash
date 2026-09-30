@@ -8,7 +8,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use lash_vm_protocol::{BuildIdentity, CodecRefusal, DecodeLimits, FRAME_MAGIC, FrameCodec};
+use lash_vm_protocol::{CodecRefusal, DecodeLimits, FRAME_MAGIC, FrameCodec};
 
 struct CountingAllocator;
 
@@ -47,12 +47,11 @@ fn allocated_during<T>(work: impl FnOnce() -> T) -> (T, u64) {
 }
 
 fn codec() -> FrameCodec {
-    FrameCodec::new(BuildIdentity::new("bounds build"), DecodeLimits::standard())
+    FrameCodec::new(DecodeLimits::standard())
 }
 
-fn frame(codec: &FrameCodec, declared: u32, payload: &[u8]) -> Vec<u8> {
+fn frame(_codec: &FrameCodec, declared: u32, payload: &[u8]) -> Vec<u8> {
     let mut bytes = FRAME_MAGIC.to_vec();
-    bytes.extend_from_slice(&codec.build().digest());
     bytes.extend_from_slice(&declared.to_be_bytes());
     bytes.extend_from_slice(payload);
     bytes
@@ -104,12 +103,6 @@ fn hostile_frames_are_refused_with_bounded_allocation() {
         &frame(&codec, 1 << 20, &[0x93, 0xc0, 0xc0]),
         |refusal| matches!(refusal, CodecRefusal::Truncated { .. }),
     );
-
-    // Another build.
-    let other = FrameCodec::new(BuildIdentity::new("other build"), DecodeLimits::standard());
-    assert_bounded_refusal("wrong build", &frame(&other, 1, &[0xc0]), |refusal| {
-        matches!(refusal, CodecRefusal::WrongBuild { .. })
-    });
 
     // Malformed: well-formed MessagePack that is not a frame message.
     let payload = [0x92, 0xc3, 0xc2];

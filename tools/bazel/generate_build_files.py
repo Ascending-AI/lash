@@ -801,9 +801,6 @@ def target_support(
     # binary's support; its own run data is the `bin-unit-test` policy.
     kind = "bin" if kind == "bin-unit-test" else kind
     policy = target_policy(package["name"], kind, target["name"], targets)
-    if package["name"] == "lash-internal-vm-worker" and target["name"] == "build_identity_laws":
-        policy.data.extend(label for label in worker_identity_inputs()
-                           if not label.startswith("//crates/lash-vm-worker:"))
     return policy.compile_data, policy.data, policy.env, policy.args
 
 
@@ -858,20 +855,12 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
-        build_data = worker_identity_inputs() if package["name"] in ("lash-internal-vm-worker", "lash-internal-vm-client") else []
-        build_data_argument = (
-            f"    extra_data = {string_list(build_data)},\n"
-            '    build_script_env = {"LASH_VM_WORKER_SOURCE_ROOT": "$${pwd}"},\n'
-        ) if build_data else ""
-        if package["name"] == "lash-internal-vm-client":
-            build_data_argument += '    extra_srcs = ["//crates/lash-vm-worker:rust_sources"],\n'
         chunks.append(
             "lash_rust_build_script(\n"
             "    name = \"build_script\",\n"
             f"    crate_features = {string_list(features)},\n"
             f"    declared_features = {string_list(declared_features)},\n"
             f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]),\n"
-            f"{build_data_argument}"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
             f"    version = {quote(version)},\n"
@@ -2774,36 +2763,6 @@ def check(outputs: dict[pathlib.Path, str]) -> int:
             print(f"  {path}", file=sys.stderr)
         return 1
     return 0
-
-
-def worker_identity_inputs() -> list[str]:
-    """Declare the closure's files; the build script hashes their current contents."""
-    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["dependencies"]
-    pending = [ROOT / "crates/lash-vm-worker/Cargo.toml"]
-    seen = set()
-    while pending:
-        manifest = pending.pop()
-        if manifest in seen:
-            continue
-        seen.add(manifest)
-        data = tomllib.loads(manifest.read_text())
-        tables = [data.get("dependencies", {})]
-        tables.extend(target.get("dependencies", {}) for target in data.get("target", {}).values())
-        for table in tables:
-            for name, declaration in table.items():
-                if not isinstance(declaration, dict):
-                    continue
-                base = manifest.parent
-                if declaration.get("workspace"):
-                    declaration = workspace.get(name, {})
-                    base = ROOT
-                if isinstance(declaration, dict) and "path" in declaration:
-                    pending.append((base / declaration["path"] / "Cargo.toml").resolve())
-    labels = ["//:Cargo.toml", "//:Cargo.lock", "//:rust-toolchain.toml"]
-    for manifest in sorted(seen):
-        package = manifest.parent.relative_to(ROOT).as_posix()
-        labels.extend([f"//{package}:Cargo.toml", f"//{package}:rust_sources"])
-    return labels
 
 
 def main() -> int:

@@ -101,6 +101,7 @@ otel-trace = ["lash-core/otel-trace"]
 # whose constants it moves. Optional backends move only when a host enables
 # them. Only lash-upgrade-harness enables it; no production build does.
 synthetic-next = [
+    "lash-vm-worker?/synthetic-next",
     "lash-core/synthetic-next",
     "lash-core-store/synthetic-next",
     "lash-remote-protocol/synthetic-next",

@@ -160,13 +160,16 @@ transport or pool:
 - **Headers.** Every message carries its execution lease, owner and frame
   epochs and a transport sequence. `MessageFence` admits only the next
   sequence of the current lease and epochs.
-- **Framing.** A frame is the magic `LVMP`, the 32-byte digest of the exact
-  `BuildIdentity`, a big-endian length and the payload. A frame from another
-  build is refused; the protocol has no negotiation, since
-  shapes change in place under the version freeze.
+- **Framing.** A frame is the magic `LVMP`, a big-endian length and the
+  payload. The handshake checks the worker wire version against
+  `[MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, WORKER_PROTOCOL_VERSION]`, both
+  defined in `lash-vm-protocol`. An out-of-range worker receives a typed
+  refusal naming both versions. Crate versions are diagnostic only. Shapes
+  change in place at protocol version 1 under the pre-1.0 version freeze,
+  with a committed snapshot for each feature selection.
 - **Bounded decoding.** Decoding charges frame size, nesting depth, node
   count and cumulative allocation against `DecodeLimits` before it
-  allocates, and a malformed, oversized, wrong-build, truncated or trailing
+  allocates, and a malformed, oversized, truncated or trailing
   frame is a typed `CodecRefusal`. Every value is a charged node, map keys
   included.
 - **Bounds.** `ProtocolBounds` states every bound a host holds its workers
@@ -317,14 +320,15 @@ and process fixtures need the service's explicit larger profile: 64 MiB state,
 echo workloads do not justify reducing that valid-state envelope. Hosts select
 their own configuration when their workload needs different bounds.
 
-Releases bundle the optimized helper with its exact SDK source tree, compiler
-pin, lockfile and per-file checksums. The host must build against that source
-tree, on the matching target and profile without the testing feature. The
-helper reports its immutable compiled identity with `--build-identity`; pool
-admission compares it before guest work. A single executable instead registers
-the facade's early re-exec entry and frontend before constructing its runtime,
-credentials or stores, as `crates/lash/examples/worker_host.rs` demonstrates.
-Standalone registry consumption of the fingerprint closure remains FIG-4408.
+Releases bundle an explicitly selected optimized helper, JSON diagnostics and
+reference SDK sources with checksums. Registry consumers build without the
+reference tree. The host passes `WorkerEntry::helper(path)` or
+`Service::subprocess(path)`; the SDK default names the helper beside the host
+executable, with no PATH or monorepo discovery. `--version` reports the protocol
+range, crate version, target and build flags. Admission compares only protocol
+versions before guest work. A single executable registers the facade's early
+re-exec entry and frontend before constructing its runtime, credentials or
+stores, as `crates/lash/examples/worker_host.rs` demonstrates.
 
 The optimized same-machine matrix records 10,000 paired fresh-state observations
 per workload and 200 cold helper starts. Warm zero-resource-effect overhead is

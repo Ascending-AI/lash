@@ -53,10 +53,7 @@ impl RemoteState {
         snapshot: &lash_vm_protocol::OpaqueVmState,
         value: &lash_vm_protocol::EncodedPayload,
     ) -> Result<lashlang::ExecutionOutcome, crate::PoolError> {
-        let codec = lash_vm_protocol::FrameCodec::new(
-            self.service.config().entry.build.clone(),
-            self.service.config().protocol.decode,
-        );
+        let codec = lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode);
         codec.check_payload(&value.0)?;
         let completion: CellCompletion =
             rmp_serde::from_slice(&value.0).map_err(crate::PoolError::protocol)?;

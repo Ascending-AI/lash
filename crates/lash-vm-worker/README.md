@@ -2,8 +2,8 @@
 
 `lash_vm_client::WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))` prewarms a
 credential-free helper. There is no in-process fallback. A host may instead
-register `worker_entry(immutable_host_build_identity)` as its first action and
-configure `WorkerEntry::reexec` with that same compiled identity. Register the
+register `worker_entry()` as its first action and
+configure `WorkerEntry::reexec()`. Register the
 entry before creating a runtime, loading credentials, opening stores, or
 constructing providers.
 
@@ -72,35 +72,41 @@ smaller `PoolConfig` for their own admitted workload.
 
 Effect values use explicit variants and IEEE number bits, preserving undefined,
 non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
-backing host handles. Frames include their 40-byte envelope in
+backing host handles. Frames include their eight-byte envelope in
 the configured cap, and encoding stops before crossing that allocation bound.
 Linux native-process laws run in this lane. macOS has an actual-descriptor
 adapter; execution evidence on a macOS runner remains pending. Persistence,
 journal replay and live Restate kill points belong to the broker/adapter lanes.
 
-The helper's compiled identity fingerprints its transitive local source, the
-locked dependency graph and compiler pin, plus target, debug assertions and its
-testing feature. Cargo and Bazel run the same `build.rs`; the fingerprint is a
-compiler environment input and is never generated into the source tree. Cargo
-watches the closure files and source directories, including source additions
-and removals. Bazel declares the closure as build-script inputs. The inventory
-generator declares inputs without hashing their contents. Re-exec hosts supply
-their own immutable compiled identity.
+`lash-vm-protocol` defines `WORKER_PROTOCOL_VERSION` and
+`MIN_SUPPORTED_WORKER_PROTOCOL_VERSION` once for both sides. Pool admission
+checks the worker's `Ready` message before guest work. An out-of-range version
+returns `PoolError::ProtocolVersion` with both protocol versions, the supported
+range and both crate versions. Crate versions are diagnostic only. The wire
+version stays at 1 until 1.0. The `synthetic-next` acceptance feature moves both
+ends of the supported range to 2, so N and N+1 cannot pair at admission; reviewed shape changes refresh the committed
+`lash-vm-client/tests/snapshots/wire-v1*.snap` snapshots in place. After 1.0,
+the repository gate requires snapshot changes to bump the protocol version and retain the old
+versioned snapshot. The syntax-derived snapshot includes every service request
+and response variant, field type and Serde attribute, under both feature selections.
+
+Hosts select `WorkerEntry::helper(path)` or `Service::subprocess(path)` explicitly.
+The SDK's `Service::default()` uses the documented `lash-vm-worker` executable
+beside the host executable. It does not search PATH or a checkout. Tests receive
+an explicit helper path through the runner's `LASH_VM_WORKER` environment.
 
 SDK releases attach `lash-sdk-worker-VERSION-OS-ARCH.tar.gz` plus its SHA256.
-It contains `bin/lash-vm-worker`, the complete exact `sdk/` source tree and a
-manifest with the compiled identity and every source file's checksum. Build the
-host against those sources using the pinned compiler, matching target, release
-profile and disabled testing feature. Place the helper beside the host or select
-its path explicitly. `lash-vm-worker --build-identity` exposes the compiled
-identity for inspection; the handshake refuses a different build. Registry-only
-consumption of this source closure is unresolved in FIG-4408.
+The archive contains `bin/lash-vm-worker`, optional reference sources under
+`sdk/`, and `manifest.json` with protocol and crate diagnostics, the explicit
+worker binary path, and file checksums. SDK hosts can build from registry
+packages; they do not need those reference sources, a matching checkout,
+compiler or build profile. Pass the extracted binary path to the service.
+`lash-vm-worker --version` prints JSON diagnostics, including the protocol range,
+crate version, target and build flags. Packaging requires an optimized helper
+without testing controls; runtime compatibility depends only on the protocol.
 
-For a single executable, the facade's `crates/lash/examples/worker_host.rs`
-registers its frontend and early re-exec entry before any host runtime,
-credentials or stores. The worker and parent use the same compiled identity.
-The source tree and helper are a matching pair; substituting a worker from a
-different checkout, compiler, profile, feature selection or target is refused.
+For a single executable, `crates/lash/examples/worker_host.rs` registers its
+frontend and early re-exec entry before any runtime, credentials or stores.
 
 The native bootstrap lives in `entry.rs`. The core boundary gate allows only
 its argv read and empty-environment probe; every other ambient read in the

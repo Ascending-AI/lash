@@ -22,29 +22,14 @@ mod worker;
 pub use entry::{worker_entry, worker_entry_with_frontend};
 pub use lash_vm_client::PoolError;
 #[cfg(not(unix))]
-pub fn worker_entry(_build: lash_vm_protocol::BuildIdentity) -> Result<bool, PoolError> {
+pub fn worker_entry() -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 
 #[cfg(not(unix))]
-pub fn worker_entry_with_frontend(
-    _build: lash_vm_protocol::BuildIdentity,
-    _frontend: &dyn Frontend,
-) -> Result<bool, PoolError> {
+pub fn worker_entry_with_frontend(_frontend: &dyn Frontend) -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 
 #[cfg(all(unix, feature = "testing"))]
 pub use entry::worker_entry_with_hook;
-
-/// The compiled source identity used to refuse parent/worker build mismatches.
-pub fn build_identity() -> lash_vm_protocol::BuildIdentity {
-    lash_vm_protocol::BuildIdentity::new(format!(
-        "lash-worker/{}/{}/{}/debug-{}/testing-{}",
-        env!("LASH_VM_WORKER_BUILD_FINGERPRINT"),
-        std::env::consts::ARCH,
-        std::env::consts::OS,
-        cfg!(debug_assertions),
-        cfg!(feature = "testing")
-    ))
-}

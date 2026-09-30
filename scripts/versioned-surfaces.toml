@@ -720,3 +720,15 @@ reason = "versions a generated test artifact"
 constant = "SOURCE_CACHE_VERSION"
 constant_path = "crates/lashlang/src/runtime/cache.rs"
 reason = "identifies a process-local cache rather than a serialized shape"
+
+[[surface]]
+constant = "WORKER_PROTOCOL_VERSION"
+constant_path = "crates/lash-vm-protocol/src/version.rs"
+upgrade = "coexist"
+description = "live parent-worker wire messages and compiler/state service requests and responses"
+outside_manifest = "live worker admission; not a parked VM format"
+
+[[unregistered]]
+constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
+constant_path = "crates/lash-vm-protocol/src/version.rs"
+reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written format"

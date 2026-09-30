@@ -22,7 +22,7 @@ testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lashlang/testing", "
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
 # constants it moves, and the store's lift and pin tables they rely on. Only
 # lash-upgrade-harness enables it; no production build does.
-synthetic-next = ["lash-core/synthetic-next", "lashlang/synthetic-next"]
+synthetic-next = ["lash-core/synthetic-next", "lashlang/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm-worker?/synthetic-next"]
 
 [lints]
 workspace = true

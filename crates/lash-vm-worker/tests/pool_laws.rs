@@ -645,15 +645,49 @@ fn parent_effect_wait_pauses_deadlines() {
 }
 
 #[test]
-fn wrong_build_is_refused_before_model_code() {
-    let mut cfg = config("");
-    cfg.entry.build = BuildIdentity::new("another-build");
-    assert!(matches!(
-        WorkerPool::new(cfg),
-        Err(PoolError::Infrastructure(
-            InfrastructureOutcome::ProtocolViolation { .. }
-        ))
-    ));
+fn out_of_range_protocol_is_typed_and_refused_before_model_code() {
+    for (mode, version) in [
+        ("protocol_below", MIN_SUPPORTED_WORKER_PROTOCOL_VERSION - 1),
+        ("protocol_above", WORKER_PROTOCOL_VERSION + 1),
+    ] {
+        let Err(PoolError::ProtocolVersion(refusal)) = WorkerPool::new(config(mode)) else {
+            panic!("{mode}: expected a typed protocol refusal");
+        };
+        assert_eq!(refusal.parent_version, WORKER_PROTOCOL_VERSION);
+        assert_eq!(
+            refusal.minimum_supported_version,
+            MIN_SUPPORTED_WORKER_PROTOCOL_VERSION
+        );
+        assert_eq!(refusal.worker_version, version);
+        assert_eq!(refusal.parent_crate_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(refusal.worker_crate_version, "9.8.7-diagnostic-only");
+    }
+}
+
+#[test]
+fn synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake() {
+    let Err(PoolError::ProtocolVersion(refusal)) = WorkerPool::new(config("opposite_generation"))
+    else {
+        panic!("opposite generation must fail before model code");
+    };
+    assert_eq!(
+        refusal.parent_version,
+        1 + u32::from(cfg!(feature = "synthetic-next"))
+    );
+    assert_eq!(
+        refusal.worker_version,
+        if cfg!(feature = "synthetic-next") {
+            1
+        } else {
+            2
+        }
+    );
+}
+
+#[test]
+fn equal_protocol_accepts_a_different_crate_version() {
+    let pool = WorkerPool::new(config("crate_version")).expect("crate version is diagnostic only");
+    assert_eq!(pool.stats().workers, 1);
 }
 
 #[test]

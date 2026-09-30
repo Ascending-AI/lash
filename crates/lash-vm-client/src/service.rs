@@ -219,6 +219,16 @@ pub struct Service {
     claim: Option<Arc<lash_core_execution::store::worker_recovery::WorkerRecoveryClaim>>,
 }
 impl Service {
+    /// Select the helper executable explicitly, using the RLM/process bounds.
+    pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
+        let mut config = PoolConfig::standard(WorkerEntry::helper(executable));
+        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
+        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
+        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
+        config.max_queue_bytes = 128 * 1024 * 1024;
+        Self::new(config)
+    }
+
     pub fn new(config: PoolConfig) -> Self {
         Self {
             #[cfg(feature = "testing")]
@@ -458,11 +468,8 @@ impl Service {
             &worker,
         )?;
         let response = worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
-        lash_vm_protocol::FrameCodec::new(
-            self.config.entry.build.clone(),
-            self.config.protocol.decode,
-        )
-        .check_payload(&response.0)?;
+        lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
+            .check_payload(&response.0)?;
         let response = rmp_serde::from_slice(&response.0).map_err(PoolError::protocol)?;
         worker.release()?;
         Ok(response)
@@ -479,15 +486,10 @@ impl Default for Service {
         let executable = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("lash-vm-worker")))
-            .unwrap_or_else(|| "lash-vm-worker".into());
+            .unwrap_or_default();
         #[cfg(any(test, feature = "testing"))]
         let executable = crate::testing::worker_executable(executable);
-        let mut config = PoolConfig::standard(WorkerEntry::helper(executable));
-        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
-        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
-        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
-        config.max_queue_bytes = 128 * 1024 * 1024;
-        let service = Self::new(config);
+        let service = Self::subprocess(executable);
         #[cfg(any(test, feature = "testing"))]
         let service =
             service.with_recovery_store(Arc::new(crate::recovery::RecoveryDouble::default()));

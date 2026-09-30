@@ -14,7 +14,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::identity::BuildIdentity;
 use crate::state::{OpaqueVmState, VmOwner};
 
 /// The lease one checkout of a worker runs under. The parent mints it and
@@ -359,10 +358,10 @@ pub enum WorkerMessage {
     LimitExceeded {
         limit: crate::WorkerLimit,
     },
-    /// The handshake: the worker's exact build, which must equal the
-    /// parent's.
+    /// The handshake. The parent checks only the protocol version.
     Ready {
-        build: BuildIdentity,
+        protocol_version: u32,
+        crate_version: String,
     },
     EffectRequest(EffectRequest),
     /// Ordered execution observations, with no authority.

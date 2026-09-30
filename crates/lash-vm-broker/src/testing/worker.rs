@@ -186,8 +186,10 @@ impl FakeWorker {
             interrupted: false,
             shared,
         };
-        let build = worker.codec.build().clone();
-        worker.emit(WorkerMessage::Ready { build });
+        worker.emit(WorkerMessage::Ready {
+            protocol_version: lash_vm_protocol::WORKER_PROTOCOL_VERSION,
+            crate_version: env!("CARGO_PKG_VERSION").into(),
+        });
         worker
     }
 

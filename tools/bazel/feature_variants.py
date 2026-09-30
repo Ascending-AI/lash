@@ -314,6 +314,8 @@ def variant_hash(package_name: str, features: list[str]) -> str:
 
 def vm_worker_pairing_error(worker_features: list[str], client_features: list[str]) -> str | None:
     """The worker must handle every request the paired client can encode."""
+    if ("synthetic-next" in client_features) != ("synthetic-next" in worker_features):
+        return "vm-client and vm-worker have different synthetic-next protocol versions"
     if "testing" in client_features and "testing" not in worker_features:
         return "testing vm-client is paired with a non-testing vm-worker"
     return None

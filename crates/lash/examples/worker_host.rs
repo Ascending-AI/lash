@@ -2,7 +2,7 @@
 use lash::rlm::lang::{LashlangHostEnvironment, ModuleCompileError, Program};
 use lash::rlm::{
     WorkerEntry, WorkerFrontend, WorkerFrontendRefusal, WorkerPoolConfig, WorkerService,
-    worker_build_identity, worker_entry_with_frontend,
+    worker_entry_with_frontend,
 };
 
 struct TypeScript;
@@ -34,11 +34,10 @@ impl WorkerFrontend for TypeScript {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This call precedes runtime creation, credential loading and store opening.
-    let identity = worker_build_identity();
-    if worker_entry_with_frontend(identity.clone(), &TypeScript)? {
+    if worker_entry_with_frontend(&TypeScript)? {
         return Ok(());
     }
-    let entry = WorkerEntry::reexec(identity)?;
+    let entry = WorkerEntry::reexec()?;
     let service = WorkerService::new(WorkerPoolConfig::standard(entry));
     let pool = service.pool()?;
     println!("prewarmed {} credential-free worker", pool.stats().workers);

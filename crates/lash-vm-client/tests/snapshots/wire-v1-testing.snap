@@ -1,0 +1,33 @@
+worker protocol 1
+frame header 8 bytes
+testing true
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { References { source : String , } , VerifyArtifact { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , } , InspectArtifact { module_ref : lashlang :: ModuleRef , # [serde (with = "serde_bytes")] bytes : Vec < u8 > , } , TriggerCompatibility { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , definition : lashlang :: ProcessDefinitionIdentity , source_type : String , inputs : lashlang :: TriggerInputTemplate , } , CompileAst { source : String , program : lashlang :: Program , environment : LashlangHostEnvironment , } , ContinuationInfo { bytes : Vec < u8 > , } , ContinuationProbe { bytes : Vec < u8 > , remove_first_reference : bool , } , CreateDefinition { source : String , environment : LashlangHostEnvironment , } , LinkAst { source : String , program : lashlang :: Program , environment : LashlangHostEnvironment , } , CompileModule { source : String , environment : LashlangHostEnvironment , cell : bool , } , State { snapshot : Option < serde_bytes :: ByteBuf > , action : StateAction , } , Restore { header : serde_bytes :: ByteBuf , globals : BTreeMap < String , serde_bytes :: ByteBuf > , fleet : u32 , } , Capture { snapshot : serde_bytes :: ByteBuf , baseline : BTreeMap < String , String > , fleet : u32 , } }
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum StateAction { Inspect , Insert { name : String , # [serde (with = "lashlang::effect_value")] value : Value , } , Remove { names : BTreeSet < String > , } , Defaults { # [serde (with = "lashlang::effect_value::map")] values : BTreeMap < String , Value > , protected : BTreeSet < String > , } }
+
+# [serde (deny_unknown_fields)] struct StateMetadata { definition_ids : BTreeSet < lash_core_execution :: ProcessDefinitionId > , # [serde (with = "lashlang::effect_value::record")] globals : Record , names : BTreeSet < String > , expired : BTreeSet < String > , opaque : Vec < (String , String) > , }
+
+# [serde (deny_unknown_fields)] struct StateView { # [serde (with = "serde_bytes")] snapshot : Vec < u8 > , metadata : StateMetadata , }
+
+# [serde (deny_unknown_fields)] struct CellCompletion { outcome : lashlang :: ExecutionOutcome , state : EncodedPayload , }
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { References (BTreeSet < String >) , ArtifactVerification (ArtifactVerification) , Module (Box < CompiledModule >) , Definition (CreatedDefinition) , Artifact (crate :: InspectedArtifact) , ArtifactRefused { message : String , } , TriggerCompatibility (lashlang :: TriggerCompatibility) , CompileRefused { error : lashlang :: ModuleCompileError , policy : bool , } , ContinuationInfo { iterator_count : usize , } , ContinuationProbe { bytes : Vec < u8 > , closure_root : bool , } , State (StateView) , Captured (Capture) , Restored { view : StateView , baseline : BTreeMap < String , String > , } , Refused { message : String , policy : bool , } , SnapshotRefused (lashlang :: SnapshotDecodeError) }
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum ArtifactVerification { Match , Undecodable { reason : String } , IdentityMismatch { detail : String } }
+
+struct Capture { definition_ids : BTreeSet < lash_core_execution :: ProcessDefinitionId > , # [serde (with = "serde_bytes")] header : Vec < u8 > , fragments : BTreeMap < String , lashlang :: DurableFragment > , baseline : BTreeMap < String , String > , }
+
+struct CreatedDefinition { draft : lash_core_execution :: ProcessDefinitionDraft , signature : lash_core_execution :: ProcessSignature , process_name : String , module : lash_core_execution :: DeclaredModuleArtifact , }
+
+# [serde (deny_unknown_fields)] struct CompiledModule { module_ref : lashlang :: ModuleRef , host_requirements_ref : lashlang :: HostRequirementsRef , artifact : crate :: InspectedArtifact , introspection : lashlang :: ModuleIntrospection , }
+
+# [serde (deny_unknown_fields)] struct ProcessMetadata { lifted : bool , params : BTreeMap < String , lashlang :: TypeExpr > , signals : Vec < lash_core_execution :: ProcessEventType > , process_type : Option < lashlang :: TypeExpr > , }
+
+# [serde (deny_unknown_fields)] struct InspectedArtifact { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , module_ref : lashlang :: ModuleRef , host_requirements_ref : lashlang :: HostRequirementsRef , host_requirements : lashlang :: HostRequirements , exports : lashlang :: ModuleExports , source_identity : String , processes : BTreeMap < String , ProcessMetadata > , graph : lashlang :: WorkflowGraph , }
+
+# [serde (deny_unknown_fields)] struct RunContext { environment : LashlangHostEnvironment , mode : ExecutionMode , # [serde (default)] projected : Vec < ProjectionDescription > , # [serde (default)] observe_execution : bool , capture_state_view : bool , # [serde (default)] projection_namespace : String , }
+
+struct ProjectionDescription { name : String , key : usize , type_name : String , # [serde (with = "lashlang::effect_value::optional")] scalar : Option < lashlang :: Value > , }
+
+struct ProjectionRead { key : usize , request : lashlang :: ProjectedReadRequest , }

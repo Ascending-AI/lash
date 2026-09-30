@@ -420,6 +420,12 @@ commands = [
 [[lane]]
 name = "upgrade-harness-synthetic-next"
 features = [
+  "lash-internal-vm-protocol/synthetic-next:on",
+  "lash-internal-vm-protocol/synthetic-next:off",
+  "lash-internal-vm-broker/synthetic-next:on",
+  "lash-internal-vm-broker/synthetic-next:off",
+  "lash-internal-vm-client/synthetic-next:on",
+  "lash-internal-vm-client/synthetic-next:off",
   "lash-upgrade-harness/synthetic-next:on",
   "lash-upgrade-harness/synthetic-next:off",
   "lash-runtime/synthetic-next:on",
@@ -446,6 +452,16 @@ features = [
   "lash-internal-protocol-rlm/synthetic-next:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm-worker", "--test", "pool_laws", "--no-default-features", "--features", "testing,synthetic-next", "--locked", "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-remote-protocol", "--test", "decode_limits", "--no-default-features", "--features", "synthetic-next", "--locked"],

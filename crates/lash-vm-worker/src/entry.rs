@@ -6,27 +6,20 @@ use lash_vm_client::ipc::Bootstrap;
 use lash_vm_protocol::*;
 
 /// Register as the host binary's first action. Returns false for a normal
-/// host invocation. Worker argv never supplies the build identity: `build`
-/// belongs to the compiled host. The pool always execs with an empty env.
-pub fn worker_entry(build: BuildIdentity) -> Result<bool, PoolError> {
-    worker_entry_with_frontend(build, &crate::frontend::TypeScriptFrontend)
+/// host invocation. The pool always execs with an empty environment.
+pub fn worker_entry() -> Result<bool, PoolError> {
+    worker_entry_with_frontend(&crate::frontend::TypeScriptFrontend)
 }
 
 /// Enter the credential-free worker with the host's compiled source frontend.
 /// Call this before constructing the host runtime or credentials.
-pub fn worker_entry_with_frontend(
-    build: BuildIdentity,
-    frontend: &dyn crate::Frontend,
-) -> Result<bool, PoolError> {
-    worker_entry_inner(build, frontend, None)
+pub fn worker_entry_with_frontend(frontend: &dyn crate::Frontend) -> Result<bool, PoolError> {
+    worker_entry_inner(frontend, None)
 }
 
 #[cfg(feature = "testing")]
-pub fn worker_entry_with_hook(
-    build: BuildIdentity,
-    hook: &mut dyn FnMut(&ParentMessage),
-) -> Result<bool, PoolError> {
-    worker_entry_inner(build, &crate::frontend::TypeScriptFrontend, Some(hook))
+pub fn worker_entry_with_hook(hook: &mut dyn FnMut(&ParentMessage)) -> Result<bool, PoolError> {
+    worker_entry_inner(&crate::frontend::TypeScriptFrontend, Some(hook))
 }
 
 #[expect(
@@ -34,7 +27,6 @@ pub fn worker_entry_with_hook(
     reason = "early host entry inspects only bootstrap argv and verifies its empty environment"
 )]
 fn worker_entry_inner(
-    build: BuildIdentity,
     frontend: &dyn crate::Frontend,
     mut hook: Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<bool, PoolError> {
@@ -62,16 +54,13 @@ fn worker_entry_inner(
             .ok_or_else(|| PoolError::protocol("missing IPC bounds"))?,
     )
     .map_err(PoolError::protocol)?;
-    let codec = FrameCodec::new(
-        build.clone(),
-        DecodeLimits {
-            max_frame_bytes: bootstrap.frame,
-            max_depth: bootstrap.depth,
-            max_nodes: bootstrap.nodes,
-            max_allocation_bytes: bootstrap.allocation,
-        },
-    );
-    let mut server = Server::new(pipe, codec, bootstrap, build, frontend)?;
+    let codec = FrameCodec::new(DecodeLimits {
+        max_frame_bytes: bootstrap.frame,
+        max_depth: bootstrap.depth,
+        max_nodes: bootstrap.nodes,
+        max_allocation_bytes: bootstrap.allocation,
+    });
+    let mut server = Server::new(pipe, codec, bootstrap, frontend)?;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(&mut hook)))
         .unwrap_or_else(|panic| {
             let reason = panic

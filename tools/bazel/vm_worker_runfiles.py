@@ -114,6 +114,35 @@ class Graph:
             pending.extend(self.edges.get(current, ()))
         return False
 
+    def worker(self, label: str) -> str:
+        pending = [label]
+        visited = set()
+        features = set()
+        while pending:
+            current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            target = self.targets.get(current)
+            if target and target.directory in self.spawners:
+                features.update(target.value("crate_features", []))
+            pending.extend(self.edges.get(current, ()))
+        next_generation = "synthetic-next" in features
+        testing = "testing" in features
+        candidates = []
+        for name, target in self.targets.items():
+            if target.macro not in BINARY_MACROS or target.value("crate_root") != "src/main.rs" or target.directory != "crates/lash-vm-worker":
+                continue
+            library = self.targets[self.absolute(target.value("library"), target.directory)]
+            worker_features = set(library.value("crate_features", []))
+            if ("synthetic-next" in worker_features) == next_generation and (not testing or "testing" in worker_features):
+                candidates.append((name != WORKER_LABEL, len(worker_features), name))
+        if candidates:
+            return min(candidates)[2]
+        if next_generation:
+            raise ValueError(f"{label}: no synthetic-next VM worker helper matches the client")
+        return WORKER_LABEL
+
     def test_packages(self) -> set[str]:
         directories = {
             target.directory for label, target in self.targets.items()
@@ -129,10 +158,11 @@ def add(metadata: dict, outputs: dict[pathlib.Path, str], root: pathlib.Path) ->
     for label, target in graph.targets.items():
         if target.macro not in TEST_MACROS or not graph.requires(label):
             continue
+        worker = graph.worker(label)
         data = target.value("extra_data", [])
-        if WORKER_LABEL not in target.runfiles():
-            data.append(WORKER_LABEL)
-        env = target.value("test_env", {}) | {"LASH_VM_WORKER": WORKER_ENV}
+        if worker not in target.runfiles():
+            data.append(worker)
+        env = target.value("test_env", {}) | {"LASH_VM_WORKER": f"$(rootpath {worker})"}
         for name, value in (("extra_data", data), ("test_env", env)):
             if name == "extra_data" and not value:
                 continue
@@ -177,8 +207,9 @@ def check(metadata: dict, outputs: dict[pathlib.Path, str], root: pathlib.Path) 
         if target.macro == "lash_batch_test":
             failures.append(f"{label}: worker-dependent tests cannot be batch members because their environment would be lost")
         elif target.macro in TEST_MACROS:
-            if WORKER_LABEL not in target.runfiles():
-                failures.append(f"{label}: missing VM worker runfile {WORKER_LABEL}")
-            if target.value("test_env", {}).get("LASH_VM_WORKER") != WORKER_ENV:
+            worker = graph.worker(label)
+            if worker not in target.runfiles():
+                failures.append(f"{label}: missing VM worker runfile {worker}")
+            if target.value("test_env", {}).get("LASH_VM_WORKER") != f"$(rootpath {worker})":
                 failures.append(f"{label}: LASH_VM_WORKER must resolve the VM worker runfile")
     return failures

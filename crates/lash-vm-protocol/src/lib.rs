@@ -12,7 +12,7 @@
 //!   here decodes the bytes, and this crate depends on nothing that could.
 //!   Semantic restore, regexp compilation and artifact validation happen only
 //!   in the worker.
-//! - [`codec`]: length-framed encoding under an exact [`BuildIdentity`], and
+//! - [`codec`]: length-framed encoding and protocol-version admission, with
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
 //! - [`outcome`]: the typed infrastructure outcomes a worker's failure maps
@@ -24,16 +24,15 @@
 
 pub mod bounds;
 pub mod codec;
-pub mod identity;
 pub mod message;
 pub mod outcome;
 pub mod state;
+mod version;
 
 pub use bounds::ProtocolBounds;
 pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
 };
-pub use identity::BuildIdentity;
 pub use message::{
     ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse,
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, MessageFence, MessageHeader,
@@ -43,6 +42,10 @@ pub use message::{
 pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerLimit};
 pub use state::{
     OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,
+};
+pub use version::{
+    MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, ProtocolVersionRefusal, WORKER_PROTOCOL_VERSION,
+    check_worker_protocol_version,
 };
 mod contract;
 pub use contract::{VmContract, VmContractComponent, VmContractReads};

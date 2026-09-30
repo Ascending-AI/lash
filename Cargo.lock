@@ -2844,14 +2844,14 @@ dependencies = [
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "libc",
+ "quote",
  "rmp-serde",
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
+ "syn 2.0.118",
  "thiserror",
  "tokio",
- "toml",
  "uuid",
 ]
 
@@ -2884,9 +2884,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
- "toml",
 ]
 
 [[package]]

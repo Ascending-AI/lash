@@ -3,7 +3,7 @@
 mod matrix;
 
 fn main() -> anyhow::Result<()> {
-    if lash_vm_worker::worker_entry(lash_vm_worker::build_identity())? {
+    if lash_vm_worker::worker_entry()? {
         return Ok(());
     }
     if cfg!(debug_assertions) {

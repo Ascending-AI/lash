@@ -222,14 +222,14 @@ lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
         with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper binary'):
             proof.vm_helper(ambiguous, '//runbooks/e2e:worker__bin')
 
-    def image(self, identity):
+    def image(self, info):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         bin_dir = Path(directory.name)
         (bin_dir / 'lash-e2e-worker').write_text('')
-        if identity is not None:
+        if info is not None:
             helper = bin_dir / 'lash-vm-worker'
-            helper.write_text(f'#!/bin/sh\n[ "$1" = --build-identity ] && echo {identity}\n')
+            helper.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo \'{json.dumps(info)}\'\n')
             helper.chmod(0o755)
         return bin_dir
 
@@ -237,9 +237,9 @@ lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
         with self.assertRaisesRegex(ValueError, 'no executable lash-vm-worker'):
             proof.image_helper(self.image(None), True)
         with self.assertRaisesRegex(ValueError, 'does not pair'):
-            proof.image_helper(self.image('lash-worker/f/x86_64/linux/debug-false/testing-false'), True)
-        self.assertEqual(proof.image_helper(self.image('lash-worker/f/x86_64/linux/debug-false/testing-true'), True),
-                         'lash-worker/f/x86_64/linux/debug-false/testing-true')
+            proof.image_helper(self.image({'protocol_version': 1, 'testing': False}), True)
+        self.assertEqual(proof.image_helper(self.image({'protocol_version': 1, 'testing': True}), True),
+                         {'protocol_version': 1, 'testing': True})
 
 
 class ChartTests(unittest.TestCase):

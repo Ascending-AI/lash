@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VM worker identity ownership and dependency-derived test runfiles."""
+"""Dependency-derived VM worker test runfiles."""
 import ast
 import pathlib
 import sys
@@ -105,6 +105,23 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         self.assertEqual([], generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
         self.assertIn("LASH_VM_WORKER", outputs[path])
 
+    def test_synthetic_next_spawners_receive_the_next_helper(self):
+        metadata, outputs = self.fixture()
+        name = "worker-package"
+        metadata["workspace_members"].append(name)
+        metadata["packages"].append({"id": name, "name": "lash-internal-vm-worker", "manifest_path": str(ROOT / "crates/lash-vm-worker/Cargo.toml")})
+        metadata["resolve"]["nodes"].append({"id": name, "deps": []})
+        client = ROOT / "crates/lash-internal-vm-client/BUILD.bazel"
+        outputs[client] = outputs[client].replace('name="lash-internal-vm-client",', 'name="lash-internal-vm-client", crate_features=["synthetic-next"],')
+        outputs[ROOT / "crates/lash-vm-worker/BUILD.bazel"] = '''lash_rust_library(name="plain", crate_features=[])
+lash_rust_feature_library(name="next", crate_features=["synthetic-next"])
+lash_rust_binary(name="lash-vm-worker__bin", crate_root="src/main.rs", library=":plain")
+lash_rust_feature_binary(name="next__bin", crate_root="src/main.rs", library=":next")
+'''
+        generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
+        self.assertIn("$(rootpath //crates/lash-vm-worker:next__bin)", outputs[ROOT / "crates/host/BUILD.bazel"])
+        self.assertEqual([], generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
+
     def test_check_rejects_the_wrong_environment_and_unsafe_batch_members(self):
         metadata, outputs = self.fixture()
         generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
@@ -114,24 +131,6 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         outputs[path] += 'lash_batch_test(name="test_batch", tests=[":host__unit_test"])\n'
         failures = generator.vm_worker_runfiles.check(metadata, outputs, ROOT)
         self.assertTrue(any("batch" in failure for failure in failures))
-
-
-class WorkerIdentityGenerationTests(unittest.TestCase):
-    def test_inventory_does_not_generate_worker_identity(self):
-        outputs = {}
-        with patch.object(sys, "argv", ["generate_build_files.py", "--check"]), \
-             patch.object(generator, "cargo_metadata", return_value={}), \
-             patch.object(generator, "generated", return_value=(outputs, {})), \
-             patch.object(generator, "reconcile_lane_units", return_value=[]), \
-             patch.object(generator, "reconcile_vm_worker_variants", return_value=[]), \
-             patch.object(generator.vm_worker_runfiles, "check", return_value=[]), \
-             patch.object(generator, "check", return_value=0):
-            outputs[ROOT / "tools/bazel/target-inventory.json"] = '{"feature_lane_units": []}'
-            self.assertEqual(generator.main(), 0)
-        self.assertNotIn(ROOT / "crates/lash-vm-worker/src/identity.rs", outputs)
-
-    def test_worker_identity_is_not_a_source_tree_file(self):
-        self.assertFalse((ROOT / "crates/lash-vm-worker/src/identity.rs").exists())
 
 
 if __name__ == "__main__":

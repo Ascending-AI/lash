@@ -61,7 +61,6 @@ impl<'frontend> Server<'frontend> {
         pipe: UnixStream,
         codec: FrameCodec,
         bootstrap: Bootstrap,
-        build: BuildIdentity,
         frontend: &'frontend dyn crate::Frontend,
     ) -> Result<Self, PoolError> {
         let mut server = Self {
@@ -82,7 +81,10 @@ impl<'frontend> Server<'frontend> {
             capture_state_view: false,
             cpu_ceiling: None,
         };
-        server.send(WorkerMessage::Ready { build })?;
+        server.send(WorkerMessage::Ready {
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+        })?;
         Ok(server)
     }
 

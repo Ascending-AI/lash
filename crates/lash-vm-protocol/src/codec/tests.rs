@@ -7,10 +7,7 @@ use crate::message::{
 use crate::state::{OpaqueVmState, VmOwner, VmStateKind};
 
 fn codec() -> FrameCodec {
-    FrameCodec::new(
-        BuildIdentity::new("lash test build 1"),
-        DecodeLimits::standard(),
-    )
+    FrameCodec::new(DecodeLimits::standard())
 }
 
 fn fence() -> MessageFence {
@@ -62,9 +59,8 @@ fn request_frame() -> WorkerFrame {
 }
 
 /// A frame header around an arbitrary payload, for hostile payloads.
-fn frame_around(codec: &FrameCodec, payload: &[u8]) -> Vec<u8> {
+fn frame_around(_codec: &FrameCodec, payload: &[u8]) -> Vec<u8> {
     let mut bytes = FRAME_MAGIC.to_vec();
-    bytes.extend_from_slice(&codec.build().digest());
     bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     bytes.extend_from_slice(payload);
     bytes
@@ -114,7 +110,8 @@ fn every_message_round_trips() {
     );
     let workers = [
         WorkerMessage::Ready {
-            build: BuildIdentity::new("lash test build 1"),
+            protocol_version: crate::WORKER_PROTOCOL_VERSION,
+            crate_version: "diagnostic-only".into(),
         },
         request_frame().message,
         WorkerMessage::Progress {
@@ -155,19 +152,6 @@ fn every_message_round_trips() {
 }
 
 #[test]
-fn a_frame_of_another_build_is_refused() {
-    let other = FrameCodec::new(
-        BuildIdentity::new("lash test build 2"),
-        DecodeLimits::standard(),
-    );
-    let bytes = other.encode_worker(&request_frame()).unwrap();
-    assert!(matches!(
-        codec().decode_worker(&bytes),
-        Err(CodecRefusal::WrongBuild { .. })
-    ));
-}
-
-#[test]
 fn a_truncated_frame_is_refused_at_every_cut() {
     let codec = codec();
     let bytes = codec.encode_worker(&request_frame()).unwrap();
@@ -186,7 +170,6 @@ fn a_truncated_frame_is_refused_at_every_cut() {
 fn an_oversized_declaration_is_refused_from_the_header_alone() {
     let codec = codec();
     let mut bytes = FRAME_MAGIC.to_vec();
-    bytes.extend_from_slice(&codec.build().digest());
     bytes.extend_from_slice(&u32::MAX.to_be_bytes());
     assert_eq!(
         codec.decode_worker(&bytes),
@@ -204,13 +187,10 @@ fn an_oversized_declaration_is_refused_from_the_header_alone() {
 
 #[test]
 fn an_oversized_frame_is_refused_when_encoded() {
-    let codec = FrameCodec::new(
-        BuildIdentity::new("lash test build 1"),
-        DecodeLimits {
-            max_frame_bytes: 64,
-            ..DecodeLimits::standard()
-        },
-    );
+    let codec = FrameCodec::new(DecodeLimits {
+        max_frame_bytes: 64,
+        ..DecodeLimits::standard()
+    });
     let mut frame = request_frame();
     frame.message = WorkerMessage::EffectRequest(EffectRequest {
         id: EffectRequestId(0),
@@ -259,7 +239,7 @@ fn nesting_value_counts_and_declared_allocation_are_bounded() {
         max_nodes: 64,
         max_allocation_bytes: 4096,
     };
-    let codec = FrameCodec::new(BuildIdentity::new("lash test build 1"), limits);
+    let codec = FrameCodec::new(limits);
 
     let deep = vec![0x91; 32].into_iter().chain([0xc0]).collect::<Vec<_>>();
     assert_eq!(
@@ -281,7 +261,7 @@ fn nesting_value_counts_and_declared_allocation_are_bounded() {
         max_allocation_bytes: u64::MAX,
         ..limits
     };
-    let codec = FrameCodec::new(BuildIdentity::new("lash test build 1"), many);
+    let codec = FrameCodec::new(many);
     assert_eq!(
         codec.decode_worker(&frame_around(&codec, &wide)),
         Err(CodecRefusal::NodeLimitExceeded { limit: 64 })
@@ -397,13 +377,10 @@ fn envelope_and_encoding_allocation_fit_the_frame_bound() {
     let frame = request_frame();
     let bytes = codec().encode_worker(&frame).unwrap();
     let bounded = |limit| {
-        FrameCodec::new(
-            codec().build().clone(),
-            DecodeLimits {
-                max_frame_bytes: limit,
-                ..DecodeLimits::standard()
-            },
-        )
+        FrameCodec::new(DecodeLimits {
+            max_frame_bytes: limit,
+            ..DecodeLimits::standard()
+        })
     };
     assert_eq!(
         bounded(bytes.len() as u32).encode_worker(&frame).unwrap(),

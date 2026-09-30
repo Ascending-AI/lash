@@ -20,8 +20,8 @@ path = "src/main.rs"
 test = false
 
 [features]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lashlang/synthetic-next", "lash-core-execution/synthetic-next"]
 testing = ["lash-vm-client/testing"]
-synthetic-next = ["lashlang/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [[bin]]
 name = "lash-vm-worker-fixture"
@@ -31,11 +31,6 @@ test = false
 
 [lints]
 workspace = true
-
-# build.rs and tests/build_identity_laws.rs import build/fingerprint.rs by
-# #[path]. That module uses sha2 and toml, which cargo-shear cannot follow.
-[package.metadata.cargo-shear]
-ignored = ["sha2", "toml"]
 
 [dependencies]
 blake3 = { workspace = true }
@@ -52,8 +47,6 @@ serde_json = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-sha2 = { workspace = true }
-toml = "1.1.2"
 tempfile = { workspace = true }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
@@ -61,7 +54,3 @@ lashlang = { workspace = true, features = ["testing"] }
 [[test]]
 name = "pool_laws"
 path = "tests/pool_laws.rs"
-
-[build-dependencies]
-sha2 = { workspace = true }
-toml = "1.1.2"
