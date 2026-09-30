@@ -4,6 +4,8 @@ import hashlib
 import subprocess
 import sys
 
+ARGUMENT_MARKER = "--lash-libtest-args"
+
 
 def shard_assignments(tests: list[str], count: int) -> dict[str, int]:
     """Keep names that can collide under libtest substring skips together."""
@@ -43,10 +45,18 @@ def main() -> int:
     index = int(sys.argv[2])
     if count < 1 or index < 0 or index >= count:
         raise SystemExit("shard count must be positive and index must be in range")
-    binary = sys.argv[3]
-    arguments = sys.argv[4:]
+    command = sys.argv[3:]
+    if ARGUMENT_MARKER in command:
+        marker = command.index(ARGUMENT_MARKER)
+        command_prefix = command[:marker]
+        arguments = command[marker + 1:]
+    else:
+        command_prefix = command[:1]
+        arguments = command[1:]
+    if not command_prefix:
+        raise SystemExit("shard command is empty")
     listed = subprocess.run(
-        [binary, "--list", "--format", "terse"],
+        [*command_prefix, "--list", "--format", "terse"],
         check=True,
         capture_output=True,
         text=True,
@@ -58,7 +68,7 @@ def main() -> int:
         for name in tests
         if assignments[name] != index
     ]
-    command = [binary, *arguments]
+    command = [*command_prefix, *arguments]
     for name in skipped:
         command.extend(["--skip", name])
     return subprocess.run(command).returncode

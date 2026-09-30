@@ -63,7 +63,10 @@ def _external_test_impl(ctx):
         ),
         ExternalRunnerTestInfo(
             type = "custom",
-            command = [ctx.attrs.runner[RunInfo]] + ctx.attrs.prefix + [ctx.attrs.test[RunInfo]] + ctx.attrs.args,
+            command = [ctx.attrs.runner[RunInfo]] + ctx.attrs.prefix + [
+                ctx.attrs.test[RunInfo],
+                "--lash-libtest-args",
+            ] + ctx.attrs.args,
             env = ctx.attrs.env,
             labels = ctx.attrs.labels,
             run_from_project_root = True,

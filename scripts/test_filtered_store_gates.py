@@ -127,7 +127,7 @@ class Fixture(unittest.TestCase):
     def single(self, *args):
         return self.run_command(["bash", str(TOOLS / "test_xml_runner.sh"), str(self.member), *args])
 
-    def launcher(self, *args, prefix=()):
+    def launcher(self, *args, prefix=(), runinfo_prefix=()):
         Path(self.env["XML_OUTPUT_FILE"]).unlink(missing_ok=True)
         undeclared = self.root / "undeclared"
         undeclared.mkdir(exist_ok=True)
@@ -138,7 +138,8 @@ class Fixture(unittest.TestCase):
         )
         return self.run_command([
             "bash", str(TOOLS / "test_launcher.sh"),
-            *prefix, str(self.member), *args,
+            *prefix, *runinfo_prefix, str(self.member),
+            "--lash-libtest-args", *args,
         ])
 
     def batch(self, *args):
@@ -188,10 +189,22 @@ class FilteredRunnerTests(Fixture):
             "no executable tests matched the runner arguments",
         )
 
+        injector = self.root / "inject-test-env"
+        injector.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "os.execv(sys.argv[1], sys.argv[1:])\n",
+            encoding="utf-8",
+        )
+        injector.chmod(0o755)
+        injected = ("python3", str(injector))
+        self.assert_passed(self.launcher("law", "--exact", runinfo_prefix=injected))
+
         self.env.update(TEST_TOTAL_SHARDS="2", TEST_SHARD_INDEX="0")
         self.assert_passed(self.launcher(
             "law", "--exact",
             prefix=("python3", str(TOOLS / "test_shard.py"), "2", "0"),
+            runinfo_prefix=injected,
         ))
 
     def test_selector_typo_fails(self):

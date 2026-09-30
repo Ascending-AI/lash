@@ -15,6 +15,7 @@ from junit_xml import CASE, LIBTEST, read_log
 SUMMARY = re.compile(r"^test result: .*? (\d+) passed; (\d+) failed;", re.MULTILINE)
 LIST_CASE = re.compile(r"^(.+): test$", re.MULTILINE)
 VALUE_FLAGS = {"--skip", "--format", "--color", "--test-threads", "--logfile", "--shuffle-seed", "-Z"}
+ARGUMENT_MARKER = "--lash-libtest-args"
 
 
 def execution_count(text):
@@ -70,13 +71,19 @@ def discovered(command, cargo=False):
 
 
 def check_runner(log_path, command):
-    args = command[1:]
+    if ARGUMENT_MARKER in command:
+        marker = command.index(ARGUMENT_MARKER)
+        args = command[marker + 1:]
+        discovery_command = [*command[:marker], *args]
+    else:
+        args = command[1:]
+        discovery_command = command
     text = read_log(log_path)
     if "--help" in args or "-h" in args or not selected(args):
         return
     if not LIBTEST.search(text):
         return
-    names = discovered(command)
+    names = discovered(discovery_command)
     if not names:
         raise ValueError("no executable tests matched the runner arguments")
     validate_selectors(args, names)
