@@ -158,6 +158,14 @@ for resolved in "$next_worker" "$next_lashctl"; do
   fi
 done
 labels+=("//runbooks/restate-postgres-workers:$next_worker" "//crates/lashctl:$next_lashctl")
+# Model code runs only in the VM helper beside the worker (FIG-4161). Each
+# generation ships the helper its worker's VM client pairs with, selected
+# from the generated feature variants rather than named here.
+helper_pair="$(python3 scripts/check_loadtest_cluster.py helper . //runbooks/restate-postgres-workers:lash-e2e-worker__bin)"
+next_helper_pair="$(python3 scripts/check_loadtest_cluster.py helper . "//runbooks/restate-postgres-workers:$next_worker")"
+read -r helper helper_testing <<< "$helper_pair"
+read -r next_helper next_helper_testing <<< "$next_helper_pair"
+labels+=("$helper" "$next_helper")
 kiln build --remote_download_outputs=toplevel "${labels[@]}"
 install -m 755 bazel-bin/crates/lashctl/lashctl target/loadtest-image/bin/lashctl
 rm -rf target/loadtest-image/bin-next
@@ -168,6 +176,12 @@ for binary in "${binaries[@]}"; do
 done
 install -m 755 "bazel-bin/runbooks/restate-postgres-workers/$next_worker" target/loadtest-image/bin-next/lash-e2e-worker
 install -m 755 "bazel-bin/crates/lashctl/$next_lashctl" target/loadtest-image/bin-next/lashctl
+helper_path="${helper#//}"
+next_helper_path="${next_helper#//}"
+install -m 755 "bazel-bin/${helper_path/://}" target/loadtest-image/bin/lash-vm-worker
+install -m 755 "bazel-bin/${next_helper_path/://}" target/loadtest-image/bin-next/lash-vm-worker
+python3 scripts/check_loadtest_cluster.py image target/loadtest-image/bin "$helper_testing" > "$run/vm-helper.txt"
+python3 scripts/check_loadtest_cluster.py image target/loadtest-image/bin-next "$next_helper_testing" >> "$run/vm-helper.txt"
 # The chart's schema Job creates the witness role/database using secret values.
 sed '/^CREATE ROLE lash_witness /d; /^CREATE DATABASE lash_witness /d' runbooks/restate-postgres-workers/witness.sql > target/loadtest-image/witness.sql
 image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repository"])' "$run/build-settings.json"):$name"

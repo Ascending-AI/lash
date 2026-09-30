@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 import yaml
@@ -115,6 +116,81 @@ class ClusterEvidenceTests(unittest.TestCase):
         document['data']['activeTargets'][0]['health'] = 'down'
         with self.assertRaises(ValueError):
             proof.metrics(document)
+
+
+class WorkerHelperTests(unittest.TestCase):
+    """Each image generation ships the VM helper its worker handshakes with."""
+
+    CLIENT = '''lash_rust_library(name = "lash-vm-client", crate_features = ["testing"])
+lash_rust_feature_library(name = "lash-vm-client__fv_plain", crate_features = [])
+'''
+    HELPER = '''lash_rust_library(name = "lash-vm-worker", crate_features = ["testing"])
+lash_rust_binary(name = "lash-vm-worker__bin", crate_name = "lash_vm_worker", crate_root = "src/main.rs",
+    crate_features = ["testing"], library = ":lash-vm-worker")
+lash_rust_feature_library(name = "lash-vm-worker__fv_plain", crate_features = [])
+lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_plain", crate_name = "lash_vm_worker",
+    crate_root = "src/main.rs", crate_features = [], library = "//crates/lash-vm-worker:lash-vm-worker__fv_plain")
+lash_rust_binary(name = "lash-vm-worker-fixture__bin", crate_name = "lash_vm_worker_fixture",
+    crate_root = "src/bin/fixture.rs", crate_features = ["testing"], library = ":lash-vm-worker")
+'''
+    WORKER = '''lash_rust_binary(name = "worker__bin", crate_features = [], library = ":lib")
+lash_rust_feature_binary(name = "worker__bin__fv_plain", crate_features = [],
+    variant_deps = {"//crates/lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain"})
+'''
+
+    def workspace(self, client=CLIENT, helper=HELPER):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        for package, text in [('crates/lash-vm-client', client), ('crates/lash-vm-worker', helper),
+                              ('runbooks/e2e', self.WORKER)]:
+            (root / package).mkdir(parents=True)
+            (root / package / 'BUILD.bazel').write_text(text)
+        return root
+
+    def test_each_generation_of_the_repository_worker_pairs_the_testing_helper(self):
+        rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUILD.bazel')
+        (next_worker,) = [name for name, rule in rules.items() if name.startswith('lash-e2e-worker__bin__fv_')
+                          and 'synthetic-next' in rule.get('crate_features', [])]
+        for worker in ['lash-e2e-worker__bin', next_worker]:
+            self.assertEqual(proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{worker}'),
+                             ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
+
+    def test_a_worker_selects_the_helper_whose_features_match_its_client(self):
+        root = self.workspace()
+        self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
+        self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin__fv_plain'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin__fv_plain', False))
+
+    def test_a_missing_or_ambiguous_helper_fails(self):
+        missing = self.workspace(helper=self.HELPER.split('lash_rust_feature_library')[0])
+        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper'):
+            proof.vm_helper(missing, '//runbooks/e2e:worker__bin__fv_plain')
+        ambiguous = self.workspace(helper=self.HELPER + '''lash_rust_binary(name = "lash-vm-worker__bin__twin",
+    crate_name = "lash_vm_worker", crate_root = "src/main.rs", crate_features = ["testing"], library = ":lash-vm-worker")
+''')
+        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper'):
+            proof.vm_helper(ambiguous, '//runbooks/e2e:worker__bin')
+
+    def image(self, identity):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        bin_dir = Path(directory.name)
+        (bin_dir / 'lash-e2e-worker').write_text('')
+        if identity is not None:
+            helper = bin_dir / 'lash-vm-worker'
+            helper.write_text(f'#!/bin/sh\n[ "$1" = --build-identity ] && echo {identity}\n')
+            helper.chmod(0o755)
+        return bin_dir
+
+    def test_an_image_without_its_paired_helper_fails(self):
+        with self.assertRaisesRegex(ValueError, 'no executable lash-vm-worker'):
+            proof.image_helper(self.image(None), True)
+        with self.assertRaisesRegex(ValueError, 'does not pair'):
+            proof.image_helper(self.image('lash-worker/f/x86_64/linux/debug-false/testing-false'), True)
+        self.assertEqual(proof.image_helper(self.image('lash-worker/f/x86_64/linux/debug-false/testing-true'), True),
+                         'lash-worker/f/x86_64/linux/debug-false/testing-true')
 
 
 class ChartTests(unittest.TestCase):

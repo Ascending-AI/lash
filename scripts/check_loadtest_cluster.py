@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Fail closed on the committed Restate metadata and Prometheus evidence."""
+import ast
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 
@@ -116,8 +119,71 @@ def job(documents, suffix):
     return jobs[0]
 
 
+def build_rules(path):
+    """The literal attributes of each rule in a generated BUILD file, by name."""
+    rules = {}
+    for statement in ast.parse(Path(path).read_text()).body:
+        call = getattr(statement, 'value', None)
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+            continue
+        rule = {'kind': call.func.id}
+        for keyword in call.keywords:
+            try:
+                rule[keyword.arg] = ast.literal_eval(keyword.value)
+            except ValueError:
+                pass
+        if 'name' in rule:
+            rules[rule['name']] = rule
+    return rules
+
+
+def resolve(root, label):
+    package, name = label.removeprefix('//').split(':')
+    return build_rules(Path(root) / package / 'BUILD.bazel')[name]
+
+
+def vm_helper(root, worker):
+    """The helper binary whose build identity the worker's VM client expects.
+
+    The identity pairs on the `testing` feature of the linked lash-vm-client
+    (parent side) and of the helper's lash-vm-worker library (child side);
+    both read from the generated feature variants."""
+    client = resolve(root, worker).get('variant_deps', {}).get(
+        '//crates/lash-vm-client', '//crates/lash-vm-client:lash-vm-client')
+    testing = 'testing' in resolve(root, client)['crate_features']
+    package = Path(root) / 'crates/lash-vm-worker/BUILD.bazel'
+    helpers = [name for name, rule in build_rules(package).items()
+               if rule.get('crate_name') == 'lash_vm_worker' and rule.get('crate_root') == 'src/main.rs'
+               and ('testing' in resolve(root, rule['library'] if rule['library'].startswith('//')
+                                         else '//crates/lash-vm-worker' + rule['library'])['crate_features']) == testing]
+    if len(helpers) != 1:
+        raise ValueError(f'expected one lash-vm-worker helper with testing={testing} for {worker}, found {helpers}')
+    return f'//crates/lash-vm-worker:{helpers[0]}', testing
+
+
+def image_helper(bin_dir, testing):
+    """One image generation ships an executable helper that pairs with its worker."""
+    helper = Path(bin_dir) / 'lash-vm-worker'
+    if not helper.is_file() or not os.access(helper, os.X_OK):
+        raise ValueError(f'{bin_dir} has no executable lash-vm-worker beside lash-e2e-worker')
+    identity = subprocess.run([str(helper), '--build-identity'], capture_output=True, text=True,
+                              check=True, timeout=30).stdout.strip()
+    if not identity.endswith(f'/testing-{str(testing).lower()}'):
+        raise ValueError(f'{helper} identity {identity!r} does not pair with a testing={testing} worker')
+    return identity
+
+
 def main():
     mode, *paths = sys.argv[1:]
+    if mode == 'helper':
+        root, worker = paths
+        label, testing = vm_helper(root, worker)
+        print(label, str(testing).lower())
+        return
+    if mode == 'image':
+        bin_dir, testing = paths
+        print(image_helper(bin_dir, testing == 'true'))
+        return
     if mode == 'job':
         import yaml
         (suffix,) = paths
