@@ -192,8 +192,9 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-worker", "--bins", "--no-default-features", "--locked"],
+  # Check the library and production entry together without test targets,
+  # whose self dev-dependency would turn testing on.
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
 ]
 
