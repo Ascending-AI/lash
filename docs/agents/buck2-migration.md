@@ -228,6 +228,25 @@ acceptance measurement, and source revisions after the frozen benchmark are
 validated for correctness rather than mixed into the comparison.
 
 
+The later two-worktree SQL run completed all five phases on 2026-10-01 at
+`1309acacf8`, with one remote slot per worktree. The slowest measured worktree
+took 9.04 seconds for its first invocation, 1.46 seconds for the warm build,
+4.60 seconds for the cached test, 4.85 seconds after a source edit and metadata
+check, and 7.78 seconds after a separate source edit and test. Both cached
+verdicts and both actual edited executions materialized 31 passing JUnit cases.
+Distinct edited source hashes produced distinct action digests; both worktrees
+restored their exact preimages and ended clean. The two coordinators and their
+forkservers remained separate.
+
+Summing the individual daemon RSS peaks gives 473 to 512 MiB across these
+phases. These are sums of separately sampled peaks, not a simultaneous peak
+measurement. Total daemon CPU ranged from 0.14 seconds for the warm build to
+4.19 seconds for the first invocation. One coordinator was retained and the
+other started during measurement, shared caches were allowed, and other bounded
+migration validations were active. This verifies concurrent source, output and
+daemon isolation; it does not establish a controlled cold-cache speedup.
+
+
 ## Verified workflow and validation coverage
 
 `kiln build` requests full libraries or binaries; `kiln check` requests native
