@@ -80,8 +80,8 @@ pub(crate) fn group_child_cancel_verdict(resolution: Resolution) -> bool {
 
 /// The live watch: an ingress call on the child's cancel wait, kept out of
 /// the child's journal. A wait that ends `Settled` is no cancel, and the
-/// watch stays pending. A transient ingress failure reattaches to the same
-/// durable wait. A definitive refusal ends this watch.
+/// watch stays pending. An attach-ceiling timeout reattaches to the same
+/// durable wait. Other ingress failures reach the caller's shared retry ladder.
 struct IngressChildCancelWatch {
     ingress: RestateIngressClient,
     namespace: crate::RestateNamespace,
@@ -111,9 +111,9 @@ impl lash_core::GroupChildCancelWatch for IngressChildCancelWatch {
                 .await
             {
                 Ok(resolution) => break resolution,
-                Err(error) if error.classification() == crate::RestateHttpErrorClass::Transient => {
-                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                }
+                Err(error)
+                    if error.is_timeout()
+                        && error.classification() == crate::RestateHttpErrorClass::Transient => {}
                 Err(error) => {
                     return Err(ingress_group_error(
                         "observe effect-group child cancellation",

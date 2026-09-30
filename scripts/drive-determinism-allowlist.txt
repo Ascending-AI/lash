@@ -38,7 +38,6 @@ crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::Journa
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: crate::JournaledStepFuture<'run, RecordedRuntimeEffect>,  |  1  # RECORDED SB30 boxed ctx.run step body; the journal keeps its output
 crates/lash-restate/src/controller/mod.rs  |  crate::system_clock(),  |  1  # RECORDED CR-adjacent: the stamp feeds a journaled durable-wait request
 crates/lash-restate/src/durable_wait.rs  |  let remaining = deadline.remaining(crate::system_clock().timestamp_ms())?;  |  1  # RECORDED CR13: sizes only a ctx.sleep whose wake time Restate journals
-crates/lash-restate/src/effect_group/child_cancel.rs  |  tokio::time::sleep(std::time::Duration::from_millis(25)).await;  |  1  # RECORDED FIG-4260 live child cancel watch reattaches inside the atomic child recorded ctx.run body; delay records no outcome
 crates/lash-restate/src/effect_group/dispatch.rs  |  lash_core::retry_cancel_watch("an effect-group child's cancel", || watch.cancelled());  |  1  # RECORDED D20 live cancel watch of the atomic child's recorded ctx.run body; it only fires the body's stop
 crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # RECORDED D20 atomic child: picks only when its recorded ctx.run body is cancelled; the run's recorded outcome is what replay serves
 crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  1  # RECORDED D20 atomic child's cancel race inside its ctx.run body; the run records the winner

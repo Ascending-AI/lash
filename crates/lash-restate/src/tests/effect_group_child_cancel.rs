@@ -206,7 +206,7 @@ impl GroupExecutors for ChildExecutors {
     }
 }
 
-async fn endpoint(ingress: Arc<ScriptedIngress>, executors: Arc<ChildExecutors>) -> Endpoint {
+async fn endpoint(ingress: Arc<dyn HttpTransport>, executors: Arc<ChildExecutors>) -> Endpoint {
     let host = crate::RestateEffectHost::new_for_test("http://ingress.invalid");
     host.register_group_executors(executors as Arc<dyn GroupExecutors>)
         .expect("register the law's resolver");
@@ -377,7 +377,7 @@ async fn a_replayed_wait_child_whose_live_run_was_cancelled_settles_cancelled() 
 async fn a_transient_cancel_watch_fault_does_not_drop_an_atomic_childs_body() {
     let ingress = ScriptedIngress::new(vec![WatchReply::Fault, WatchReply::Hang]);
     let executors = ChildExecutors::new();
-    let endpoint = endpoint(Arc::clone(&ingress), Arc::clone(&executors)).await;
+    let endpoint = endpoint(ingress.clone(), Arc::clone(&executors)).await;
     let request = child_request(RuntimeEffectCommand::LanguageRuntimeValue {
         operation: "atomic".to_owned(),
     });
@@ -436,4 +436,57 @@ async fn a_transient_cancel_watch_fault_does_not_drop_an_atomic_childs_body() {
         1,
         "the body ran once"
     );
+}
+
+pub(super) async fn start_atomic_child(
+    ingress: Arc<dyn HttpTransport>,
+) -> (
+    tokio::task::JoinHandle<Vec<u8>>,
+    Arc<tokio::sync::Semaphore>,
+    Arc<AtomicUsize>,
+) {
+    let executors = ChildExecutors::new();
+    let endpoint = endpoint(ingress, Arc::clone(&executors)).await;
+    let request = child_request(RuntimeEffectCommand::LanguageRuntimeValue {
+        operation: "atomic".to_owned(),
+    });
+    let run = tokio::spawn(async move {
+        let output = tokio::time::timeout(
+            Duration::from_secs(120),
+            super::endpoint_protocol::invoke_endpoint_body_with_named_call_responses_unbounded(
+                &endpoint,
+                DISPATCH,
+                "child",
+                super::endpoint_protocol::encode_invocation_body(GROUP, &request)
+                    .expect("encode the child"),
+                Vec::new(),
+                named_answers(&[
+                    "admit_child",
+                    "record_group_child",
+                    "commit_child",
+                    "put",
+                    "record_settlement",
+                ]),
+            ),
+        )
+        .await
+        .expect("atomic law exceeded its virtual-time budget")
+        .expect("drive the atomic child");
+        assert_eq!(restate_error_message(&output), None);
+        assert!(
+            restate_message_types(&output)
+                .expect("decode frames")
+                .contains(&PROPOSE_RUN_COMPLETION)
+        );
+        assert!(matches!(
+            settled_terminal(&output),
+            Some(EffectGroupSettlementTerminal::StoredPayload)
+        ));
+        output.to_vec()
+    });
+    (
+        run,
+        Arc::clone(&executors.gate),
+        Arc::clone(&executors.runs),
+    )
 }

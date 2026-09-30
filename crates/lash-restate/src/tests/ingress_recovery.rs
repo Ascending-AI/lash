@@ -4,6 +4,7 @@ use super::*;
 struct ScriptedIngress {
     responses: Mutex<VecDeque<Result<HttpResponse, LlmTransportError>>>,
     requests: Mutex<Vec<HttpRequest>>,
+    request_times: Mutex<Vec<tokio::time::Instant>>,
 }
 
 impl ScriptedIngress {
@@ -11,6 +12,7 @@ impl ScriptedIngress {
         Arc::new(Self {
             responses: Mutex::new(responses.into()),
             requests: Mutex::new(Vec::new()),
+            request_times: Mutex::new(Vec::new()),
         })
     }
 
@@ -27,6 +29,9 @@ impl HttpTransport for ScriptedIngress {
         _timeout: Option<Duration>,
     ) -> Result<HttpResponse, LlmTransportError> {
         self.requests.lock_recover().push(request);
+        self.request_times
+            .lock_recover()
+            .push(tokio::time::Instant::now());
         self.responses
             .lock_recover()
             .pop_front()
@@ -198,30 +203,305 @@ async fn caller_departure_refuses_the_wait_without_contacting_ingress() {
     assert!(record.outcome.is_none());
 }
 
-#[tokio::test]
-async fn child_cancel_watch_reattaches_after_transport_failure() {
-    let ingress = ScriptedIngress::new(vec![
-        transport_failure("connection reset during restart"),
-        reply(Resolution::Cancelled),
-    ]);
-    let child = crate::effect_group::GroupChildCancel::new(
+fn child_watch(ingress: &Arc<ScriptedIngress>) -> Arc<dyn lash_core::GroupChildCancelWatch> {
+    crate::effect_group::GroupChildCancel::new(
         RestateIngressClient::new(ingress.connection()),
         crate::RestateNamespace::default(),
         test_restate_await_event_key(
-            &ExecutionScope::process(ProcessId::fixture("restart-child-cancel")),
+            &ExecutionScope::process(ProcessId::fixture("faulting-child-cancel")),
             AwaitEventWaitIdentity::TurnTerminal,
         )
         .expect("valid cancel wait key"),
-    );
+    )
+    .watch()
+}
 
-    tokio::time::timeout(Duration::from_secs(2), child.watch().cancelled())
-        .await
-        .expect("recovery is bounded by the scripted response")
-        .expect("the durable cancel fact survives a disconnected watch");
+fn assert_shared_backoff(ingress: &ScriptedIngress) {
+    let times = ingress.request_times.lock_recover();
+    assert_eq!(
+        times.len(),
+        8,
+        "the shared ladder makes exactly eight requests"
+    );
+    let delays: Vec<_> = times.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert_eq!(
+        delays,
+        [25, 50, 100, 200, 400, 800, 1000].map(Duration::from_millis)
+    );
     let requests = ingress.requests.lock_recover();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].url, requests[1].url);
-    assert_eq!(requests[0].body, requests[1].body);
+    for request in requests.iter().skip(1) {
+        assert_eq!(request.url, requests[0].url);
+        assert_eq!(request.body, requests[0].body);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_cancel_watch_exhausts_actual_ingress_faults() {
+    for reset in [false, true] {
+        let ingress = ScriptedIngress::new(
+            (0..1000)
+                .map(|_| {
+                    if reset {
+                        transport_failure("connection reset")
+                    } else {
+                        response(503, "ingress unavailable")
+                    }
+                })
+                .collect(),
+        );
+        let watch = child_watch(&ingress);
+        let lost = tokio::time::timeout(
+            Duration::from_secs(3),
+            lash_core::retry_cancel_watch("child cancel law", || watch.cancelled()),
+        )
+        .await
+        .expect("actual faults must exhaust the ladder")
+        .expect_err("eight ingress faults lose the watch");
+        assert_eq!(lost.code, lash_core::RuntimeErrorCode::TransientCancelWatch);
+        assert_shared_backoff(&ingress);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(ingress.requests.lock_recover().len(), 8);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_cancel_watch_succeeds_on_the_eighth_attempt() {
+    let ingress = ScriptedIngress::new(
+        (0..7)
+            .map(|_| response(503, "ingress unavailable"))
+            .chain([reply(Resolution::Cancelled)])
+            .collect(),
+    );
+    let watch = child_watch(&ingress);
+    lash_core::retry_cancel_watch("child cancel law", || watch.cancelled())
+        .await
+        .expect("the eighth attempt may still observe cancellation");
+    assert_shared_backoff(&ingress);
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_cancel_watch_reattaches_only_for_attach_timeouts() {
+    let ingress = ScriptedIngress::new(
+        (0..12)
+            .map(|_| {
+                Err(LlmTransportError::new("attach ceiling elapsed")
+                    .with_kind(lash_core::ProviderFailureKind::Timeout))
+            })
+            .chain([reply(Resolution::Cancelled)])
+            .collect(),
+    );
+    let watch = child_watch(&ingress);
+    lash_core::retry_cancel_watch("child cancel law", || watch.cancelled())
+        .await
+        .expect("healthy attach ceilings do not exhaust the fault ladder");
+    assert_eq!(ingress.requests.lock_recover().len(), 13);
+    let times = ingress.request_times.lock_recover();
+    assert!(
+        times.iter().all(|time| *time == times[0]),
+        "reattachment adds no fault backoff"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_cancel_watch_settled_never_cancels_or_reattaches() {
+    let ingress = ScriptedIngress::new(vec![reply(Resolution::Ok(
+        serde_json::to_value(crate::effect_group::EffectGroupWaitResolution::Settled)
+            .expect("encode settled"),
+    ))]);
+    let watch = child_watch(&ingress);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(60), watch.cancelled())
+            .await
+            .is_err()
+    );
+    assert_eq!(ingress.requests.lock_recover().len(), 1);
+}
+
+struct HeldTool {
+    definition: lash_core::ToolDefinition,
+    gate: Arc<tokio::sync::Semaphore>,
+    runs: Arc<AtomicUsize>,
+    dropped: Arc<AtomicBool>,
+}
+
+struct BodyDropWitness(Option<Arc<AtomicBool>>);
+
+impl Drop for BodyDropWitness {
+    fn drop(&mut self) {
+        if let Some(dropped) = &self.0 {
+            dropped.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for HeldTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![self.definition.manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let mut witness = BodyDropWitness(Some(self.dropped.clone()));
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        let _permit = self.gate.acquire().await.expect("body gate stays open");
+        assert!(
+            !call
+                .context
+                .cancellation_token()
+                .expect("child attempt has a stop")
+                .is_cancelled()
+        );
+        witness.0 = None;
+        lash_core::ToolOutcome::ok(serde_json::json!({"done": true})).into()
+    }
+}
+
+async fn start_tool_child(
+    ingress: &Arc<ScriptedIngress>,
+) -> (
+    tokio::task::JoinHandle<Vec<u8>>,
+    Arc<tokio::sync::Semaphore>,
+    Arc<AtomicUsize>,
+    Arc<AtomicBool>,
+) {
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let runs = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let definition = lash_core::ToolDefinition::raw(
+        "tool:held",
+        "held",
+        "Held body",
+        serde_json::json!({"type": "object"}),
+        serde_json::json!({"type": "object"}),
+    );
+    let provider = Arc::new(HeldTool {
+        definition: definition.clone(),
+        gate: gate.clone(),
+        runs: runs.clone(),
+        dropped: dropped.clone(),
+    });
+    let key = test_restate_await_event_key(
+        &ExecutionScope::process(ProcessId::fixture("recorded-tool-child")),
+        AwaitEventWaitIdentity::TurnTerminal,
+    )
+    .expect("child cancel key");
+    let child = crate::effect_group::GroupChildCancel::new(
+        RestateIngressClient::new(ingress.connection()),
+        crate::RestateNamespace::default(),
+        key,
+    );
+    let journal = Arc::new(ReplayableRecordingContext::default());
+    let controller = Arc::new(
+        RestateRuntimeEffectController::new_for_test(journal.clone())
+            .with_group_child_cancel(child),
+    );
+    let run = tokio::spawn(async move {
+        let run_once = || async {
+            Box::pin(lash_core::testing::coordinate_tool_provider_with_services(
+                ScopedEffectController::shared(
+                    controller.clone(),
+                    lash_core::AdmittedScope::runtime_operation("recorded-tool-child"),
+                )
+                .expect("admitted child controller"),
+                Arc::new(lash_core::testing::MockSessionManager::default()),
+                &SessionId::from("child-law"),
+                definition.clone(),
+                provider.clone(),
+                prepared_tool_call_with("held-call", "held"),
+            ))
+            .await
+            .expect("the tool body completes despite losing its watch")
+        };
+        let (completed, outcome) = run_once().await;
+        assert!(completed.output.is_success());
+        let bytes = serde_json::to_vec(&outcome).expect("recorded tool outcome");
+        journal.start_replay();
+        let (_, replay) = run_once().await;
+        assert_eq!(
+            serde_json::to_vec(&replay).expect("replayed outcome"),
+            bytes
+        );
+        bytes
+    });
+    (run, gate, runs, dropped)
+}
+
+async fn until_child_requests(ingress: &ScriptedIngress, count: usize) {
+    for _ in 0..10_000 {
+        if ingress.requests.lock_recover().len() >= count {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("child did not issue request {count}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_cancel_watch_exhausts_actual_ingress_faults_under_both_callers() {
+    for tool in [true, false] {
+        for reset in [false, true] {
+            let ingress = ScriptedIngress::new(
+                (0..1000)
+                    .map(|_| {
+                        if reset {
+                            transport_failure("connection reset")
+                        } else {
+                            response(503, "ingress unavailable")
+                        }
+                    })
+                    .collect(),
+            );
+            let (run, gate, runs, dropped) = if tool {
+                let (run, gate, runs, dropped) = start_tool_child(&ingress).await;
+                (run, gate, runs, Some(dropped))
+            } else {
+                let (run, gate, runs) =
+                    super::effect_group_child_cancel::start_atomic_child(ingress.clone()).await;
+                (run, gate, runs, None)
+            };
+            until_child_requests(&ingress, 1).await;
+            for (attempt, delay) in [25, 50, 100, 200, 400, 800, 1000].into_iter().enumerate() {
+                tokio::time::advance(Duration::from_millis(delay - 1)).await;
+                tokio::task::yield_now().await;
+                assert_eq!(
+                    ingress.requests.lock_recover().len(),
+                    attempt + 1,
+                    "no early retry for caller tool={tool}"
+                );
+                tokio::time::advance(Duration::from_millis(1)).await;
+                until_child_requests(&ingress, attempt + 2).await;
+            }
+            assert_shared_backoff(&ingress);
+            tokio::time::advance(Duration::from_secs(60)).await;
+            for _ in 0..100 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                ingress.requests.lock_recover().len(),
+                8,
+                "the lost watch must stop sending for caller tool={tool}"
+            );
+            assert_eq!(runs.load(Ordering::SeqCst), 1);
+            assert!(!run.is_finished(), "watch loss leaves the body running");
+            if let Some(dropped) = dropped {
+                assert!(
+                    !dropped.load(Ordering::SeqCst),
+                    "watch loss never drops the tool"
+                );
+            }
+            gate.add_permits(1);
+            run.await
+                .expect("child completes and records its body outcome");
+            assert_eq!(
+                runs.load(Ordering::SeqCst),
+                1,
+                "replay never runs the tool again"
+            );
+            assert_eq!(ingress.requests.lock_recover().len(), 8);
+        }
+    }
 }
 
 #[tokio::test]

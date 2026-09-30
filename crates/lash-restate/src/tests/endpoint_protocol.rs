@@ -1575,7 +1575,7 @@ pub(super) async fn invoke_endpoint_with_named_call_responses<T: serde::Serializ
     .map_err(|_| TerminalError::new("named-call endpoint test timed out"))?
 }
 
-async fn invoke_endpoint_body_with_named_call_responses_unbounded(
+pub(super) async fn invoke_endpoint_body_with_named_call_responses_unbounded(
     endpoint: &Endpoint,
     service: &str,
     handler: &str,
