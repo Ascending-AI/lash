@@ -42,7 +42,12 @@ def prepare_tools(executable, lock_fd):
     overlay = ROOT / 'tools/buck2/prelude_overlay.py'
     if overlay.is_file():
         subprocess.run([sys.executable, str(overlay), '--buck2', str(executable), '--prelude-dir', str(ROOT / '.buck2/prelude')], check=True, cwd=ROOT, stdout=subprocess.DEVNULL, pass_fds=(lock_fd,))
-    for name in ('bootstrap_rust_toolchain.py', 'bootstrap_native_tools.py', 'bootstrap_reindeer.py'):
+    for name in (
+        'bootstrap_rust_toolchain.py',
+        'bootstrap_native_tools.py',
+        'bootstrap_reindeer.py',
+        'bootstrap_vendor.py',
+    ):
         script = ROOT / 'tools/buck2' / name
         if script.is_file():
             subprocess.run([sys.executable, str(script)], check=True, cwd=ROOT, stdout=subprocess.DEVNULL, pass_fds=(lock_fd,))

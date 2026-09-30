@@ -29,6 +29,13 @@ FINISH = '''import os
 from pathlib import Path
 with Path('events').open('a') as out: out.write(os.environ['PROBE_TAG'] + ':end\\n')
 '''
+VENDOR = '''import os
+from pathlib import Path
+if not os.environ.get('KILN_REAL_CARGO'):
+    raise SystemExit('vendor bootstrap requires KILN_REAL_CARGO')
+with Path('events').open('a') as out: out.write(os.environ['PROBE_TAG'] + ':vendor\\n')
+Path('vendor').mkdir(exist_ok=True)
+'''
 
 
 class BootstrapLockTests(unittest.TestCase):
@@ -41,6 +48,7 @@ class BootstrapLockTests(unittest.TestCase):
         shutil.copyfile(BOOTSTRAP, tools / 'bootstrap.py')
         (tools / 'prelude_overlay.py').write_text(CHILD)
         (tools / 'bootstrap_rust_toolchain.py').write_text(FINISH)
+        (tools / 'bootstrap_vendor.py').write_text(VENDOR)
         binary = self.root / '.buck2/bin/buck2'
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b'private bootstrap fixture')
@@ -58,7 +66,7 @@ class BootstrapLockTests(unittest.TestCase):
                 process.communicate(timeout=5)
 
     def start(self, tag):
-        process = subprocess.Popen([sys.executable, str(self.root / 'tools/buck2/bootstrap.py')], cwd=self.root, env=dict(os.environ, PROBE_TAG=tag), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = subprocess.Popen([sys.executable, str(self.root / 'tools/buck2/bootstrap.py')], cwd=self.root, env=dict(os.environ, PROBE_TAG=tag, KILN_REAL_CARGO=sys.executable), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.processes.append(process)
         return process
 
@@ -83,7 +91,7 @@ class BootstrapLockTests(unittest.TestCase):
         (self.root / 'release').touch()
         self.finish(first)
         self.finish(second)
-        self.assertEqual((self.root / 'events').read_text().splitlines(), ['first:begin', 'first:overlay_done', 'first:end', 'second:begin', 'second:overlay_done', 'second:end'])
+        self.assertEqual((self.root / 'events').read_text().splitlines(), ['first:begin', 'first:overlay_done', 'first:end', 'first:vendor', 'second:begin', 'second:overlay_done', 'second:end', 'second:vendor'])
 
     def test_running_child_keeps_lock_after_parent_dies_then_releases_it(self):
         first = self.start('first')
@@ -97,7 +105,13 @@ class BootstrapLockTests(unittest.TestCase):
         (self.root / 'release').touch()
         self.finish(second)
         first.communicate(timeout=5)
-        self.assertEqual((self.root / 'events').read_text().splitlines(), ['first:begin', 'first:overlay_done', 'second:begin', 'second:overlay_done', 'second:end'])
+        self.assertEqual((self.root / 'events').read_text().splitlines(), ['first:begin', 'first:overlay_done', 'second:begin', 'second:overlay_done', 'second:end', 'second:vendor'])
+
+    def test_fresh_cache_prepares_vendor_before_graph_checks(self):
+        process = self.start('second')
+        self.finish(process)
+        self.assertTrue((self.root / 'vendor').is_dir())
+        self.assertIn('second:vendor', (self.root / 'events').read_text().splitlines())
 
     def test_symlinked_lock_is_rejected_without_touching_its_target(self):
         target = self.root / 'unrelated'

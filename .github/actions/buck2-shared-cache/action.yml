@@ -118,7 +118,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        export KILN_REAL_CARGO="$(command -v cargo)"
         client="$(python3 tools/buck2/bootstrap.py)"
         test -x "$client"
         echo "$(dirname "$client")" >> "$GITHUB_PATH"
-        echo "KILN_REAL_CARGO=$(command -v cargo)" >> "$GITHUB_ENV"
+        echo "KILN_REAL_CARGO=${KILN_REAL_CARGO}" >> "$GITHUB_ENV"
