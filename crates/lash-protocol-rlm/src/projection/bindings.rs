@@ -10,7 +10,49 @@ pub struct RlmProjectedBindings {
     bindings: BTreeMap<String, FlowValue>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+struct RecordedProjection(#[serde(with = "lashlang::effect_value")] FlowValue);
+
 impl RlmProjectedBindings {
+    pub(crate) async fn journaled(
+        self,
+        ctx: &lash_core::RuntimeExecutionContext<'_>,
+        cell_key: &str,
+    ) -> Result<Self, lash_core::RuntimeEffectControllerError> {
+        let recorded = ctx
+            .journaled_language_value_with(
+                format!("{cell_key}:projected-bindings"),
+                "rlm.projected-bindings".into(),
+                move || async move {
+                    serde_json::to_value(
+                        self.bindings
+                            .into_iter()
+                            .map(|(name, value)| (name, RecordedProjection(value)))
+                            .collect::<BTreeMap<_, _>>(),
+                    )
+                    .map_err(|error| {
+                        lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                            error.to_string(),
+                        )
+                    })
+                },
+            )
+            .await?;
+        let bindings: BTreeMap<String, RecordedProjection> = serde_json::from_value(recorded)
+            .map_err(|error| {
+                lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                    error.to_string(),
+                )
+            })?;
+        Ok(Self {
+            bindings: bindings
+                .into_iter()
+                .map(|(name, RecordedProjection(value))| (name, value))
+                .collect(),
+        })
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

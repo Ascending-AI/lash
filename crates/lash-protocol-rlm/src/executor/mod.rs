@@ -576,6 +576,31 @@ async fn execute_code_in_worker_scope(
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
+    // A frame handoff changes the session's live projections. Re-execution
+    // links against this cell's recorded inputs, under the exec_code address
+    // its parent installed, before it reaches its recorded command keys.
+    let session_projected_bindings = match ctx
+        .parent_invocation()
+        .and_then(lash_core::RuntimeInvocation::effect_address)
+    {
+        Some(address) => match session_projected_bindings
+            .journaled(&ctx, &address.replay_key)
+            .await
+        {
+            Ok(bindings) => bindings,
+            Err(error) => {
+                let message = error.message.clone();
+                ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(&cell, error));
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    message,
+                );
+            }
+        },
+        None => session_projected_bindings,
+    };
     let (parsed, referenced) = match workers
         .request_accounted(lash_vm_client::service::Request::References {
             source: code.to_string(),

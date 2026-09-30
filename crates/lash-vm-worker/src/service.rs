@@ -149,7 +149,10 @@ pub(crate) fn perform(
             bytes,
             remove_first_reference,
         } => {
-            let mut continuation = vm.open_continuation(&bytes).map_err(PoolError::protocol)?;
+            let mut parked = crate::worker::ParkedRun::decode(&bytes)?;
+            let mut continuation = vm
+                .open_continuation(&parked.vm.0)
+                .map_err(PoolError::protocol)?;
             let root = continuation
                 .operand_stack
                 .iter_mut()
@@ -159,12 +162,17 @@ pub(crate) fn perform(
             if remove_first_reference && let Some(root) = root {
                 *root = lashlang::Value::Null;
             }
+            parked.vm = EncodedPayload(continuation.to_bytes().map_err(PoolError::protocol)?);
             Response::ContinuationProbe {
-                bytes: continuation.to_bytes().map_err(PoolError::protocol)?,
+                bytes: parked.encode()?,
                 closure_root,
             }
         }
-        Request::ContinuationInfo { bytes } => match vm.open_continuation(&bytes) {
+        Request::ContinuationInfo { bytes } => match crate::worker::ParkedRun::decode(&bytes)
+            .and_then(|parked| {
+                vm.open_continuation(&parked.vm.0)
+                    .map_err(PoolError::protocol)
+            }) {
             Ok(continuation) => Response::ContinuationInfo {
                 iterator_count: continuation.iterator_stack.len(),
             },

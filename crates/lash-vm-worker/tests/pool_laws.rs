@@ -492,6 +492,56 @@ fn single_slot_nested_compile_completes_by_parking_the_awaiting_run() {
 }
 
 #[test]
+fn parked_projected_tool_arguments_keep_the_recorded_request() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut input = start(
+        "finish(await tools.echo({ value: session_projection.length }));",
+        ExecutionMode::Foreground,
+    );
+    input.contexts[0].body = EncodedPayload(
+        rmp_serde::to_vec_named(&RunContext {
+            environment: lashlang::testing::harness::test_environment()
+                .with_globals(["session_projection".to_string()]),
+            mode: ExecutionMode::Foreground,
+            projected: vec![ProjectionDescription {
+                name: "session_projection".into(),
+                key: 0,
+                type_name: "string".into(),
+                scalar: Some(lashlang::Value::String("session:durable".into())),
+            }],
+            ..RunContext::default()
+        })
+        .expect("projected context"),
+    );
+    let mut worker = checkout(&pool);
+    let WorkerMessage::EffectRequest(request) = worker.start(input.clone()).expect("start") else {
+        panic!("the cell requests its projected tool call");
+    };
+    assert_eq!(request.kind, EffectKind::ResourceOperation);
+    input.state = StartState::Continuation(parked(worker.park().expect("park")));
+    worker.release().expect("release the one slot");
+    let mut resumed = checkout(&pool);
+    let WorkerMessage::EffectRequest(again) = resumed.start(input).expect("resume") else {
+        panic!("the cell reissues its pending tool call");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (request.kind, &request.payload),
+        "parking must preserve the issued request, including a derived projected scalar"
+    );
+    let message = resumed.effect_result(answer(again)).expect("answer");
+    let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
+        panic!("the resumed cell completes");
+    };
+    let outcome: lashlang::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("outcome");
+    let lashlang::ExecutionOutcome::Finished(lashlang::Value::Projected(value)) = outcome else {
+        panic!("the terminal value keeps its projected provenance: {outcome:?}");
+    };
+    assert_eq!(value.scalar_value(), Some(&lashlang::Value::Number(15.0)));
+    resumed.release().expect("release");
+}
+
+#[test]
 fn process_boundary_releases_and_resumes_on_one_worker() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let mut worker = checkout(&pool);

@@ -1737,7 +1737,85 @@ pub(super) fn engine_driven_continue_as_seed_is_visible_to_follow_turn_linker() 
 #[cfg(feature = "rlm")]
 pub(super) async fn engine_driven_continue_as_seed_is_visible_to_follow_turn_linker_inner()
 -> Result<()> {
+    Box::pin(continue_as_seed_and_follow_turn(false)).await?;
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-seal-key-replay-test", || async {
+        let double = Box::pin(continue_as_seed_and_follow_turn(true)).await?;
+        let server = double.server();
+        let invocations = server.invocations();
+        let root_service = format!(
+            "{}/",
+            double.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
+        );
+        assert!(
+            invocations.iter().any(|invocation| {
+                invocation.target.starts_with(&root_service) && invocation.attempts > 1
+            }),
+            "the follow turn must replay after its cell sealed"
+        );
+        let mut cell_keys = std::collections::BTreeSet::new();
+        let mut seal_keys = std::collections::BTreeSet::new();
+        for invocation in invocations {
+            for entry in server.journal(&invocation.id).unwrap_or_default() {
+                if let Some(name) = &entry.name
+                    && name.ends_with(":lk2:~seal")
+                {
+                    seal_keys.insert(name.clone());
+                }
+                let Some(Ok(value)) = entry.run_completion() else {
+                    continue;
+                };
+                let Ok(record) = serde_json::from_slice::<serde_json::Value>(&value) else {
+                    continue;
+                };
+                if let Some(recorded_envelope) = record.get("envelope") {
+                    let canonical: lash_core::facade_support::CanonicalRuntimeEffectEnvelope =
+                        serde_json::from_value(recorded_envelope.clone())?;
+                    let envelope: serde_json::Value = serde_json::from_str(canonical.json())?;
+                    if envelope["command"]["operation"] != "rlm.projected-bindings" {
+                        continue;
+                    }
+                    let envelope: lash_core::RuntimeEffectEnvelope =
+                        serde_json::from_value(envelope)?;
+                    cell_keys.insert(
+                        envelope
+                            .invocation
+                            .effect_replay_key()
+                            .strip_suffix(":projected-bindings")
+                            .expect("the recorded cell input has its projection suffix")
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            cell_keys.len(),
+            3,
+            "the established, seed and follow cells record their keys"
+        );
+        assert_eq!(
+            seal_keys,
+            cell_keys
+                .into_iter()
+                .map(|key| format!("lash:{key}:lk2:~seal"))
+                .collect(),
+            "every seal uses its recorded exec_code key, including the replayed follow cell"
+        );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn continue_as_seed_and_follow_turn(
+    replay_follow: bool,
+) -> Result<lash_restate_test::RestateTestBackend> {
     let session_id = "engine-continue-as-seed";
+    let double = restate_double(0x0036_68c2).await;
     let (first_provider_call_tx, first_provider_call_rx) = tokio::sync::oneshot::channel();
     let first_provider_call_tx = Arc::new(std::sync::Mutex::new(Some(first_provider_call_tx)));
     let release_first_provider_call = Arc::new(tokio::sync::Notify::new());
@@ -1746,11 +1824,13 @@ pub(super) async fn engine_driven_continue_as_seed_is_visible_to_follow_turn_lin
     let provider = crate::testing::TestProvider::builder()
         .kind("embed-test")
         .complete({
+            let double = double.clone();
             let first_provider_call_tx = Arc::clone(&first_provider_call_tx);
             let release_first_provider_call = Arc::clone(&release_first_provider_call);
             let provider_call_count = Arc::clone(&provider_call_count);
             let repair_request = Arc::clone(&repair_request);
             move |request| {
+                let double = double.clone();
                 let first_provider_call_tx = Arc::clone(&first_provider_call_tx);
                 let release_first_provider_call = Arc::clone(&release_first_provider_call);
                 let provider_call_count = Arc::clone(&provider_call_count);
@@ -1784,9 +1864,16 @@ finish({ established: established.total });"#,
                                 r#"await control.continue_as({ task: "finish from seeded durable handoff", seed: { baton: "seed:durable", session_chars: session_projection.length } });"#,
                             )
                         }
-                        2 => typescript_block(
-                            r#"finish({ seed_visible: baton, session_projection_chars: session_chars });"#,
-                        ),
+                        2 => {
+                            if replay_follow {
+                                double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResultEnding {
+                                    suffix: ":lk2:~seal".into(),
+                                });
+                            }
+                            typescript_block(
+                                r#"finish({ seed_visible: baton, session_projection_chars: session_chars });"#,
+                            )
+                        }
                         _ => {
                             *repair_request.lock_recover() = Some(format!("{request:?}"));
                             typescript_block(r#"finish({ unexpected_repair: true });"#)
@@ -1798,7 +1885,6 @@ finish({ established: established.total });"#,
         })
         .build()
         .into_handle();
-    let double = restate_double(0x0036_68c2).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .provider(provider)
         .model(mock_model_spec())
@@ -1870,5 +1956,5 @@ finish({ established: established.total });"#,
         repair_request.lock_recover()
     );
     assert_eq!(provider_call_count.load(Ordering::SeqCst), 3);
-    Ok(())
+    Ok(double)
 }
