@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 
 const SEED: u64 = 0x5_2c0a;
 
@@ -342,9 +343,8 @@ async fn restricted_empty_deferred_context<'h>(
         lash_core::plugin::PluginSpec::new().with_tool_provider(provider),
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)
-        .build_session_with_parent(
+        .build_session(PluginSessionRequest::creation(
             session_id,
-            None,
             lash_core::plugin::SessionCreationConfig {
                 authority: lash_core::plugin::SessionAuthorityContext {
                     tool_access: lash_core::SessionToolAccess::restricted([])
@@ -353,7 +353,7 @@ async fn restricted_empty_deferred_context<'h>(
                 },
                 ..Default::default()
             },
-        )
+        ))
         .expect("restricted-empty deferred session");
     let catalog = session
         .resolved_tool_catalog(&lash_core::SessionId::from(session_id))

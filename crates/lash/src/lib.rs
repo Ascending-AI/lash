@@ -547,11 +547,12 @@ pub mod plugins {
     pub use lash_core::plugin::{
         CheckpointApplication, CodeExecutionOutcome, CodeExecutorPlugin,
         ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
-        PluginAbort, PluginNamespaceState, PluginState, PrepareTurnRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-        ProtocolSessionPlugin, ProtocolSessionRestoreView, RecordedSessionConfig,
-        SessionAuthorityContext, SessionCreationConfig, TurnFinalization, TurnPreparation,
+        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
+        PluginSessionRequest, PluginState, PrepareTurnRequest, ProtocolBeforeLlmCallContext,
+        ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolRuntimeContext,
+        ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
+        ProtocolSessionRestoreView, RecordedSessionConfig, SessionAuthorityContext,
+        SessionCreationConfig, TurnFinalization, TurnPreparation,
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
     pub use lash_core::plugin::{

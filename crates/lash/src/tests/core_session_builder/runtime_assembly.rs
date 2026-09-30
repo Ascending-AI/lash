@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::{RuntimeSessionState, SessionId};
 
 async fn assert_runtime_assembly_refuses_without_writes(
@@ -35,7 +36,10 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let plugins = lash_core::facade_support::PluginHost::new(
         lash_core::testing::test_standard_protocol_factories(),
     )
-    .build_session(session_id.clone())
+    .build_session(PluginSessionRequest::creation(
+        session_id.clone(),
+        Default::default(),
+    ))
     .expect("runtime plugins");
     for builder in [false, true] {
         let host = lash_core::facade_support::RuntimeHostConfig::new(

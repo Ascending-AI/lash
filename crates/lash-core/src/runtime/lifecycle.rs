@@ -1,4 +1,5 @@
 use super::*;
+use crate::plugin::PluginSessionRequest;
 
 pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
@@ -552,23 +553,27 @@ impl LashRuntime {
             plugin_options,
         };
         let plugin_session = match state.plugin_state() {
-            Some(snapshot) => plugin_host.rematerialize_session_with_parent(
-                state.session_id.as_str(),
-                parent_session_id.clone(),
-                snapshot,
-                crate::plugin::RecordedSessionConfig {
-                    authority,
-                    protocol_turn_options: state.protocol_turn_options.clone(),
-                },
-            ),
-            None => plugin_host.build_session_with_parent(
-                state.session_id.as_str(),
+            Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
+                parent_session_id: parent_session_id.clone(),
+                ..PluginSessionRequest::rematerialization(
+                    state.session_id.as_str(),
+                    snapshot,
+                    crate::plugin::RecordedSessionConfig {
+                        authority,
+                        protocol_turn_options: state.protocol_turn_options.clone(),
+                    },
+                )
+            }),
+            None => plugin_host.build_session(PluginSessionRequest {
                 parent_session_id,
-                crate::plugin::SessionCreationConfig {
-                    authority,
-                    protocol_turn_options: state.protocol_turn_options.clone(),
-                },
-            ),
+                ..PluginSessionRequest::creation(
+                    state.session_id.as_str(),
+                    crate::plugin::SessionCreationConfig {
+                        authority,
+                        protocol_turn_options: state.protocol_turn_options.clone(),
+                    },
+                )
+            }),
         }
         .map_err(SessionError::Plugin)?;
         let embedded = EmbeddedRuntimeHost::new(env.core.clone());

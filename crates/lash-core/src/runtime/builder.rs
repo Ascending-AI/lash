@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
@@ -305,22 +306,24 @@ impl EmbeddedRuntimeBuilder {
             PluginSource::Host(host) => host
                 .clone()
                 .isolated_registry()
-                .build_session_with_parent(
-                    state.session_id.clone(),
-                    state
+                .build_session(PluginSessionRequest {
+                    parent_session_id: state
                         .authority
                         .subagent
                         .as_ref()
                         .map(|subagent| subagent.parent_session_id.clone()),
-                    crate::plugin::SessionCreationConfig {
-                        authority: crate::plugin::SessionAuthorityContext {
-                            tool_access: state.authority.tool_access.clone(),
-                            subagent: state.authority.subagent.clone(),
-                            plugin_options: self.plugin_options.clone(),
+                    ..PluginSessionRequest::creation(
+                        state.session_id.clone(),
+                        crate::plugin::SessionCreationConfig {
+                            authority: crate::plugin::SessionAuthorityContext {
+                                tool_access: state.authority.tool_access.clone(),
+                                subagent: state.authority.subagent.clone(),
+                                plugin_options: self.plugin_options.clone(),
+                            },
+                            protocol_turn_options: state.protocol_turn_options.clone(),
                         },
-                        protocol_turn_options: state.protocol_turn_options.clone(),
-                    },
-                )
+                    )
+                })
                 .map_err(SessionError::Plugin),
         }
     }

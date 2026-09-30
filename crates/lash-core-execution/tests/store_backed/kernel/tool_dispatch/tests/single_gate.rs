@@ -1,5 +1,6 @@
 use super::*;
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 
 #[tokio::test]
 async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_catalog() {
@@ -13,7 +14,7 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(provider),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let session = crate::Session::new(
         crate::testing::runtime_services_without_ports(plugins),

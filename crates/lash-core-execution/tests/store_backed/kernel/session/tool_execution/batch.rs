@@ -1,5 +1,6 @@
 mod tests {
     use crate::SessionId;
+    use crate::plugin::PluginSessionRequest;
     use crate::session::*;
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Arc;
@@ -40,7 +41,10 @@ mod tests {
         observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> crate::RuntimeExecutionContext<'run> {
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("granted-call-session")
+            .build_session(PluginSessionRequest::creation(
+                "granted-call-session",
+                Default::default(),
+            ))
             .expect("plugin session");
         let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
             backend.attachment_store(),
@@ -539,7 +543,10 @@ mod tests {
                 "batch_failure_tools",
                 crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
             ))])
-            .build_session("session")
+            .build_session(PluginSessionRequest::creation(
+                "session",
+                Default::default(),
+            ))
             .expect("plugin session");
         let tools = plugins.tools();
         let tool_catalog = plugins

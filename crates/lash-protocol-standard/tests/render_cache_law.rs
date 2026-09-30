@@ -3,6 +3,7 @@
     reason = "runtime law fixture failures must stop the test"
 )]
 
+use lash_core::plugin::PluginSessionRequest;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -230,15 +231,18 @@ async fn open_runtime(
     ];
     let host = PluginHost::new(factories);
     let plugins = if let Some(snapshot) = state.plugin_state() {
-        host.rematerialize_session(
+        host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
             snapshot,
             RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        )
+        ))
         .expect("rematerialize standard plugin")
     } else {
-        host.build_session(&state.session_id)
-            .expect("build standard plugin")
+        host.build_session(PluginSessionRequest::creation(
+            &state.session_id,
+            Default::default(),
+        ))
+        .expect("build standard plugin")
     };
     let mut host_config = RuntimeHostConfig::new(
         backend.clone(),

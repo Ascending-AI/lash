@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use super::{EmptyToolProvider, MockSessionManager};
@@ -482,7 +483,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
             self.plugin_factories
                 .unwrap_or_else(default_plugin_factories),
         )
-        .build_session(&self.session_id)
+        .build_session(PluginSessionRequest::creation(
+            &self.session_id,
+            Default::default(),
+        ))
         .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
             Arc<dyn crate::plugin::SessionStateService>,

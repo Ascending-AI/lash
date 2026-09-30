@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::SessionStreamEvent;
@@ -70,7 +71,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 RlmProtocolPluginFactory::new(config, &backend).with_process_lifecycle(false),
             )];
             let plugins = PluginHost::new(factories)
-                .build_session(&session_id)
+                .build_session(PluginSessionRequest::creation(&session_id, Default::default()))
                 .expect("build RLM plugin");
 
             let requests = Arc::new(Mutex::new(Vec::<LlmRequest>::new()));

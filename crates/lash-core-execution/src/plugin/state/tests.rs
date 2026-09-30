@@ -1,4 +1,5 @@
 use super::*;
+use crate::plugin::PluginSessionRequest;
 
 fn store() -> PluginStateStore {
     PluginStateStore::bind(
@@ -6,6 +7,125 @@ fn store() -> PluginStateStore {
         "mock",
         Arc::new(Mutex::new(PluginStateRegistry::default())),
     )
+}
+
+#[test]
+fn materialization_preserves_recorded_config_and_creation_kind() {
+    use crate::plugin::*;
+
+    #[derive(Clone)]
+    struct ContextProbe(Arc<Mutex<Vec<PluginSessionContext>>>);
+    impl PluginFactory for ContextProbe {
+        fn id(&self) -> &'static str {
+            "context-probe"
+        }
+        fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+            self.0.lock_recover().push(ctx.clone());
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl SessionPlugin for ContextProbe {
+        fn id(&self) -> &'static str {
+            "context-probe"
+        }
+        fn register(&self, _: &mut PluginRegistrar) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let host = PluginHost::new(vec![Arc::new(ContextProbe(contexts.clone()))]);
+    let created = host
+        .build_session(PluginSessionRequest::creation(
+            "created",
+            Default::default(),
+        ))
+        .unwrap();
+    let snapshot = created.export_state();
+    let options = crate::ProtocolTurnOptions::from_payload(serde_json::json!({"recorded": 7}));
+    let restored = host
+        .build_session(PluginSessionRequest {
+            parent_session_id: Some("parent".into()),
+            ..PluginSessionRequest::rematerialization(
+                "restored",
+                &snapshot,
+                RecordedSessionConfig::new(options.clone()),
+            )
+        })
+        .unwrap();
+    let contexts = contexts.lock_recover();
+    assert_eq!(
+        contexts[0].materialization,
+        PluginSessionMaterialization::Creation
+    );
+    assert!(contexts[0].protocol_turn_options.is_empty());
+    assert!(contexts[0].is_root_session());
+    assert_eq!(
+        contexts[1].materialization,
+        PluginSessionMaterialization::Rematerialization
+    );
+    assert_eq!(contexts[1].protocol_turn_options, options);
+    assert_eq!(contexts[1].parent_session_id, Some("parent".into()));
+    assert!(!restored.forked_plugins());
+    restored.require_hydrated_state(&snapshot).unwrap();
+}
+
+#[test]
+fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
+    use crate::plugin::*;
+
+    let host = PluginHost::empty();
+    let durable = PluginState {
+        plugins: BTreeMap::from([(
+            "absent-plugin".into(),
+            PluginNamespaceState {
+                generation: 17,
+                values: BTreeMap::from([("value".into(), serde_json::json!("at-spawn"))]),
+            },
+        )]),
+    };
+    let parent = host
+        .build_session(PluginSessionRequest {
+            tool_catalog_overlay: ToolCatalogContribution::remove_tools(["hidden-at-spawn"]),
+            tool_snapshot: Some(crate::ToolState::new(42, BTreeMap::new())),
+            ..PluginSessionRequest::rematerialization(
+                "parent",
+                &durable,
+                RecordedSessionConfig::new(Default::default()),
+            )
+        })
+        .unwrap();
+    let init = parent.capture_fork_init().unwrap();
+    let mut later = parent.export_state();
+    let namespace = later.plugins.get_mut("absent-plugin").unwrap();
+    namespace.generation += 1;
+    namespace
+        .values
+        .insert("value".into(), serde_json::json!("after-spawn"));
+    parent.hydrate_state(&later).unwrap();
+    host.unregister_session(&"parent".into()).unwrap();
+    drop(parent);
+    let child = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest {
+            parent_session_id: Some("parent".into()),
+            tool_catalog_overlay: init.tool_catalog_overlay.clone(),
+            tool_snapshot: Some(init.tool_state.clone()),
+            materialization: PluginSessionMaterializationRequest::Creation {
+                config: SessionCreationConfig::default(),
+                seed_snapshot: Some(&init.plugin_state),
+            },
+            session_id: ("child").into(),
+        })
+        .unwrap();
+    assert!(child.forked_plugins());
+    let captured = child.capture_fork_init().unwrap();
+    assert_eq!(captured.plugin_state, init.plugin_state);
+    assert_eq!(
+        captured.tool_catalog_overlay.remove,
+        init.tool_catalog_overlay.remove
+    );
+    assert_eq!(captured.tool_state.generation, init.tool_state.generation);
+    assert_eq!(captured.tool_state.entries(), init.tool_state.entries());
 }
 
 #[test]
@@ -183,11 +303,11 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
     };
     let host = crate::PluginHost::empty();
     let parent = host
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             "parent",
             &durable,
             crate::plugin::RecordedSessionConfig::new(Default::default()),
-        )
+        ))
         .unwrap();
     let child = parent
         .fork_for_session("child", Default::default())
@@ -261,15 +381,20 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
         observed.clone(),
         Arc::new(Mutex::new(Vec::new())),
     ))]);
-    let initial = host.build_session("initial").unwrap();
+    let initial = host
+        .build_session(PluginSessionRequest::creation(
+            "initial",
+            Default::default(),
+        ))
+        .unwrap();
     let state = initial.export_state();
     assert_eq!(state.plugins["ready-plugin"].generation, 2);
     let rebuilt = host
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             "rebuilt",
             &state,
             crate::plugin::RecordedSessionConfig::new(Default::default()),
-        )
+        ))
         .unwrap();
     assert_eq!(
         *observed.lock_recover(),

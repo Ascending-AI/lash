@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 
 const SEED: u64 = 0x5_f420;
 
@@ -251,14 +252,16 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![turn_budget_config_mutator(persisted_budget)]);
     let plugins = match reloaded_state.plugin_state() {
-        Some(snapshot) => plugin_host.rematerialize_session(
+        Some(snapshot) => plugin_host.build_session(PluginSessionRequest::rematerialization(
             "root",
             snapshot,
             lash_core::plugin::RecordedSessionConfig::new(
                 reloaded_state.protocol_turn_options.clone(),
             ),
-        ),
-        None => plugin_host.build_session("root"),
+        )),
+        None => {
+            plugin_host.build_session(PluginSessionRequest::creation("root", Default::default()))
+        }
     }
     .expect("reloaded plugins");
     let runtime_host = test_host_config(&backend);

@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use crate::plugin::{PluginSession, StaticPluginFactory};
 use crate::runtime::ScopedEffectController;
 use crate::support::prelude::*;
@@ -789,7 +790,7 @@ fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session")
 }
 
@@ -856,7 +857,7 @@ async fn projection_policy_dispatch_context<'h>(
             .with_tool_provider(Arc::clone(&provider))
             .with_before_tool_call(hook),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -1084,9 +1085,8 @@ async fn authority_hidden_dispatch_context<'h>(
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
     ))])
-    .build_session_with_parent(
+    .build_session(PluginSessionRequest::creation(
         "root",
-        None,
         crate::plugin::SessionCreationConfig {
             authority: crate::plugin::SessionAuthorityContext {
                 tool_access,
@@ -1094,7 +1094,7 @@ async fn authority_hidden_dispatch_context<'h>(
             },
             ..Default::default()
         },
-    )
+    ))
     .expect("plugin session");
     assert!(
         plugins
@@ -1253,7 +1253,7 @@ async fn retry_dispatch_context_with_after_observations<'h>(
             .with_tool_provider(provider)
             .with_after_tool_call(hook),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     exact_dispatch_context_with_plugins(ports, plugins).await
 }
@@ -1289,7 +1289,7 @@ async fn pending_dispatch_context<'h>(
         "pending_probe_tools",
         spec,
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins

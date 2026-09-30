@@ -7,6 +7,7 @@ use super::*;
 use lash_core::PartKind;
 use lash_core::SessionCommitStore as _;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::core_support::*;
 
@@ -494,7 +495,9 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
             fail_restore: Arc::new(AtomicBool::new(false)),
             advance_store_head: true,
         })]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
@@ -560,7 +563,9 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
             fail_restore: Arc::new(AtomicBool::new(false)),
             advance_store_head: false,
         })]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugins,
@@ -648,7 +653,9 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
             fail_restore: Arc::new(AtomicBool::new(false)),
             advance_store_head: false,
         })]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
@@ -791,7 +798,9 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
             fail_restore: Arc::new(AtomicBool::new(false)),
             advance_store_head: false,
         })]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
@@ -872,7 +881,9 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
             fail_restore: Arc::clone(&fail_restore),
             advance_store_head: false,
         })]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
@@ -990,7 +1001,9 @@ async fn completed_turns_are_persisted_in_session_graph() {
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::clone(&base_provider_factory)),
         ))]);
-    let plugins = plugin_host.build_session("root").expect("plugins");
+    let plugins = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         Arc::clone(&plugins),

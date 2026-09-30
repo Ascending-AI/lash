@@ -6,6 +6,7 @@
 //! case: a deployment store with the test seams that corrupt its accelerators.
 
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1489,12 +1490,15 @@ async fn property_runtime(
         });
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
     let plugins = match state.plugin_state() {
-        Some(snapshot) => host.rematerialize_session(
+        Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        ),
-        None => host.build_session(request.session_id.clone()),
+        )),
+        None => host.build_session(PluginSessionRequest::creation(
+            request.session_id.clone(),
+            Default::default(),
+        )),
     }
     .map_err(|error| error.to_string())?;
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(

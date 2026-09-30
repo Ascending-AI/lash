@@ -1,4 +1,5 @@
 use super::*;
+use crate::plugin::PluginSessionRequest;
 
 const SEED: u64 = 0x5_2d2b;
 
@@ -252,7 +253,7 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
             .with_tool_provider(provider)
             .with_before_tool_call(before_attachment_hook(DENIED_BYTES)),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(
         crate::support::double_dispatch_ports(&double, &handler),
@@ -296,7 +297,7 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
             .with_tool_provider(provider)
             .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(
         crate::support::double_dispatch_ports(&double, &handler),
@@ -333,7 +334,7 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
         "deferred_completion_attachment_probe",
         crate::PluginSpec::new().with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(
         crate::support::double_dispatch_ports(&double, &handler),

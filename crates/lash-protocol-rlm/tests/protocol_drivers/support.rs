@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 pub(crate) use std::sync::Arc;
@@ -541,7 +542,10 @@ impl RlmProtocolScenario {
         } else {
             Some(
                 PluginHost::new(self.plugin_factories.clone())
-                    .build_session("rlm-protocol-scenario-hooks")
+                    .build_session(PluginSessionRequest::creation(
+                        "rlm-protocol-scenario-hooks",
+                        Default::default(),
+                    ))
                     .unwrap_or_else(|err| {
                         panic!("{} failed to register plugin hooks: {err}", self.name)
                     }),

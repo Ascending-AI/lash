@@ -1,3 +1,4 @@
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use super::{LiveOpenerContext, LiveOpenerRegistry};
@@ -24,7 +25,10 @@ fn live_context() -> LiveOpenerContext {
 
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
         plugins: crate::plugin::PluginHost::empty()
-            .build_session("session")
+            .build_session(PluginSessionRequest::creation(
+                "session",
+                Default::default(),
+            ))
             .expect("plugin session"),
         tools: Arc::new(NoopTools),
         tool_registry: None,

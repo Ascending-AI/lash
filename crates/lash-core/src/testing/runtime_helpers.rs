@@ -7,6 +7,7 @@
 
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::LlmStreamEvent;
+use crate::plugin::PluginSessionRequest;
 use crate::plugin::StaticPluginFactory;
 use crate::runtime::*;
 use crate::testing::TestProvider;
@@ -341,7 +342,10 @@ pub fn plugin_session_with_tools(
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
     crate::PluginHost::new(factories)
-        .build_session(session_id)
+        .build_session(PluginSessionRequest::creation(
+            session_id,
+            Default::default(),
+        ))
         .expect("plugins")
 }
 
@@ -594,7 +598,9 @@ impl TestRuntime {
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
         )));
         let plugin_host = crate::testing::test_plugin_host(factories);
-        let plugin_session = plugin_host.build_session("root").expect("plugins");
+        let plugin_session = plugin_host
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .expect("plugins");
         let mut initial_state =
             RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
         if let Some(session_id) = self.session_id {

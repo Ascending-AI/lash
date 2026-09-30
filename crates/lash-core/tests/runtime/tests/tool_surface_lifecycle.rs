@@ -3,6 +3,7 @@ use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::SessionCommitStore as _;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{SessionAuthorityContext, StaticPluginFactory};
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
@@ -216,23 +217,27 @@ fn build_hidden_session(
 ) -> Arc<lash_core::facade_support::PluginSession> {
     let authority = hidden_authority(hidden_tool_name);
     match snapshot {
-        Some(snapshot) => plugin_host.rematerialize_session_with_parent(
-            session_id,
-            Some(SessionId::from("parent")),
-            snapshot,
-            lash_core::plugin::RecordedSessionConfig {
-                authority,
-                protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-            },
-        ),
-        None => plugin_host.build_session_with_parent(
-            session_id,
-            Some(SessionId::from("parent")),
-            lash_core::plugin::SessionCreationConfig {
-                authority,
-                ..Default::default()
-            },
-        ),
+        Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
+            parent_session_id: Some(SessionId::from("parent")),
+            ..PluginSessionRequest::rematerialization(
+                session_id,
+                snapshot,
+                lash_core::plugin::RecordedSessionConfig {
+                    authority,
+                    protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
+                },
+            )
+        }),
+        None => plugin_host.build_session(PluginSessionRequest {
+            parent_session_id: Some(SessionId::from("parent")),
+            ..PluginSessionRequest::creation(
+                session_id,
+                lash_core::plugin::SessionCreationConfig {
+                    authority,
+                    ..Default::default()
+                },
+            )
+        }),
     }
     .expect("hidden child plugin session")
 }
@@ -362,14 +367,16 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         ..SessionAuthorityContext::default()
     };
     let plugins = plugin_host
-        .build_session_with_parent(
-            "authority-child",
-            Some(SessionId::from("authority-parent")),
-            lash_core::plugin::SessionCreationConfig {
-                authority,
-                ..Default::default()
-            },
-        )
+        .build_session(PluginSessionRequest {
+            parent_session_id: Some(SessionId::from("authority-parent")),
+            ..PluginSessionRequest::creation(
+                "authority-child",
+                lash_core::plugin::SessionCreationConfig {
+                    authority,
+                    ..Default::default()
+                },
+            )
+        })
         .expect("initial authority plugin session");
     let store = double_unbound_recording_store(&double).await;
     create_fixture_session(store.as_ref(), "authority-child").await;
@@ -433,14 +440,13 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
     let plugins = plugin_host
-        .build_session_with_parent(
+        .build_session(PluginSessionRequest::creation(
             "persisted-broader",
-            None,
             lash_core::plugin::SessionCreationConfig {
                 authority: hidden_authority(hidden.name),
                 ..Default::default()
             },
-        )
+        ))
         .expect("narrower live-authority plugin session");
     let store = double_unbound_recording_store(&double).await;
     create_fixture_session(store.as_ref(), "persisted-broader").await;

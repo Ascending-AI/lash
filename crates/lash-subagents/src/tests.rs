@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -1089,7 +1090,7 @@ async fn run_seed_probe_inner(
     );
     let plugins = host_plugins
         .with_extensions(extensions)
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugin session");
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new({
         let mut config = RuntimeHostConfig::new(

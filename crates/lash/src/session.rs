@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::pin::Pin;
@@ -587,17 +588,19 @@ pub(crate) fn creation_protocol_turn_options(
     let is_root_session = parent_session_id.is_none();
     let plugin_host = build_plugin_host(Some(protocol_factory), &[], Vec::new())?;
     let plugins = plugin_host
-        .build_session_with_parent(
-            session_id.clone(),
+        .build_session(PluginSessionRequest {
             parent_session_id,
-            lash_core::plugin::SessionCreationConfig {
-                authority: lash_core::plugin::SessionAuthorityContext {
-                    plugin_options: plugin_options.clone(),
-                    ..Default::default()
+            ..PluginSessionRequest::creation(
+                session_id.clone(),
+                lash_core::plugin::SessionCreationConfig {
+                    authority: lash_core::plugin::SessionAuthorityContext {
+                        plugin_options: plugin_options.clone(),
+                        ..Default::default()
+                    },
+                    protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
                 },
-                protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-            },
-        )
+            )
+        })
         .map_err(EmbedError::Plugin)?;
     let mut options = lash_core::ProtocolTurnOptions::default();
     plugins

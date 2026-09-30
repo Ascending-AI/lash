@@ -13,6 +13,7 @@ use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice,
 };
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
@@ -826,7 +827,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         lash_core::testing::test_plugin_host(vec![Arc::new(EffectControllerTestProtocolFactory {
             code_executor: Some(Arc::new(EffectControllerTestCodeExecutor)),
         })])
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugins");
     let runtime_host = host_with_effect_recorder(&backend, recorder.clone());
     let runtime_services = RuntimeServices::new(
@@ -887,7 +888,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         lash_core::testing::test_plugin_host(vec![Arc::new(EffectControllerTestProtocolFactory {
             code_executor: None,
         })])
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugins");
     let runtime_host = EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
         &backend,

@@ -2,6 +2,7 @@ mod tests {
     use crate::ProcessId;
     use crate::RuntimeExecutionContext;
     use crate::SessionId;
+    use crate::plugin::PluginSessionRequest;
     use crate::runtime::ScopedEffectController;
     use crate::session::ToolInvocationReply;
     use crate::support::prelude::*;
@@ -69,7 +70,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("root")
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::memory_store_backend().await;
@@ -302,7 +303,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("root")
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::memory_store_set().await;
@@ -439,7 +440,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("root")
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::memory_store_set().await;
@@ -585,7 +586,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("root")
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::memory_store_set().await;
@@ -940,7 +941,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("root")
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let double =

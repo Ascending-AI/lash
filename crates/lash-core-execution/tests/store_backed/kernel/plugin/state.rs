@@ -1,4 +1,5 @@
 mod tests {
+    use crate::plugin::PluginSessionRequest;
     use std::sync::Arc;
 
     use crate::SessionId;
@@ -38,7 +39,12 @@ mod tests {
     #[tokio::test]
     async fn checkpoint_component_changes_iff_mediated_generation_moves() {
         let host = crate::support::plugin_host(Vec::new());
-        let plugins = host.build_session("generation-gate").unwrap();
+        let plugins = host
+            .build_session(PluginSessionRequest::creation(
+                "generation-gate",
+                Default::default(),
+            ))
+            .unwrap();
         let handle =
             crate::plugin_state_store(&plugins, &SessionId::from("generation-gate"), "mock");
         let store = session_store("generation-gate").await;
@@ -80,7 +86,10 @@ mod tests {
     #[tokio::test]
     async fn write_after_capture_survives_commit_receipt_adoption() {
         let plugins = crate::support::plugin_host(Vec::new())
-            .build_session("capture-race")
+            .build_session(PluginSessionRequest::creation(
+                "capture-race",
+                Default::default(),
+            ))
             .unwrap();
         let handle = crate::plugin_state_store(&plugins, &SessionId::from("capture-race"), "mock");
         let store = session_store("capture-race").await;

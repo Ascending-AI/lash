@@ -7,6 +7,7 @@
 //! only asserted the happy path would pass just as well against a rebind that
 //! forgot a field.
 
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
@@ -123,7 +124,10 @@ fn lent_with_direct_completions(
     other_tool.retry_policy = ToolRetryPolicy::Never;
     ToolDispatchContext {
         plugins: crate::plugin::PluginHost::empty()
-            .build_session("opener-session")
+            .build_session(PluginSessionRequest::creation(
+                "opener-session",
+                Default::default(),
+            ))
             .expect("plugin session"),
         tools: Arc::new(NoopTools),
         tool_registry: None,

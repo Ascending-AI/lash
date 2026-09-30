@@ -15,6 +15,7 @@
 //! call id.
 
 use super::*;
+use crate::plugin::PluginSessionRequest;
 
 const SEED: u64 = 0x5_2d23;
 
@@ -330,7 +331,7 @@ async fn ledger_dispatch_context<'h>(
         "ledger_tools",
         spec,
     ))])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     exact_dispatch_context_with_plugins(ports, plugins).await
 }

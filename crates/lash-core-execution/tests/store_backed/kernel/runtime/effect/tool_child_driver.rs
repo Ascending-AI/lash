@@ -1,4 +1,5 @@
 mod tests {
+    use crate::plugin::PluginSessionRequest;
     use std::sync::Arc;
 
     /// The driver laws' server-double seed.
@@ -110,7 +111,10 @@ mod tests {
         other_tool.retry_policy = ToolRetryPolicy::Never;
         ToolDispatchContext {
             plugins: crate::support::plugin_host(Vec::new())
-                .build_session("opener-session")
+                .build_session(PluginSessionRequest::creation(
+                    "opener-session",
+                    Default::default(),
+                ))
                 .expect("plugin session"),
             tools: Arc::new(NoopTools),
             tool_registry: None,

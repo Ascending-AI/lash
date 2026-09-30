@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use lash_core::facade_support::PluginHost;
@@ -31,9 +32,8 @@ fn standard_session_with_access(
             lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
         )),
     ])
-    .build_session_with_parent(
+    .build_session(PluginSessionRequest::creation(
         session_id,
-        None,
         lash_core::plugin::SessionCreationConfig {
             authority: lash_core::plugin::SessionAuthorityContext {
                 tool_access,
@@ -41,7 +41,7 @@ fn standard_session_with_access(
             },
             ..Default::default()
         },
-    )
+    ))
     .expect("standard protocol session")
 }
 
@@ -63,7 +63,7 @@ fn standard_protocol_registers_no_catalog_tools() {
     let session = PluginHost::new(vec![Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("session");
 
     assert!(
@@ -87,7 +87,7 @@ fn process_controls_and_a_model_provider_compose_with_standard_protocol() {
         )),
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
     ])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("session");
 
     let names = tool_names(&session);
@@ -112,7 +112,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
                 lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
             )),
         ])
-        .build_session("root")?;
+        .build_session(PluginSessionRequest::creation("root", Default::default()))?;
         Ok(session
             .resolved_tool_catalog(&lash_core::SessionId::from("root"))?
             .tool_names()

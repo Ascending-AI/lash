@@ -1,4 +1,6 @@
 use crate::SessionId;
+#[cfg(test)]
+use crate::plugin::PluginSessionRequest;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
@@ -999,9 +1001,8 @@ mod tool_catalog_cache_tests {
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
         crate::PluginHost::new(factories)
-            .build_session_with_parent(
+            .build_session(PluginSessionRequest::creation(
                 "admission-probe",
-                None,
                 crate::plugin::SessionCreationConfig {
                     authority: crate::plugin::SessionAuthorityContext {
                         tool_access,
@@ -1009,7 +1010,7 @@ mod tool_catalog_cache_tests {
                     },
                     ..Default::default()
                 },
-            )
+            ))
             .expect("plugin session")
     }
 
@@ -1193,7 +1194,10 @@ mod tool_catalog_cache_tests {
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
         let plugins = crate::PluginHost::new(factories)
-            .build_session("pinned-surface")
+            .build_session(PluginSessionRequest::creation(
+                "pinned-surface",
+                Default::default(),
+            ))
             .expect("plugin session");
         let session = Session::new(
             crate::testing::runtime_services_without_ports(plugins),
@@ -1340,7 +1344,10 @@ mod tool_catalog_cache_tests {
             });
         factories.push(Arc::new(StaticPluginFactory::new("reassignable", spec)));
         let plugins = crate::PluginHost::new(factories)
-            .build_session("route-reassignment")
+            .build_session(PluginSessionRequest::creation(
+                "route-reassignment",
+                Default::default(),
+            ))
             .expect("plugin session");
         let session_id = SessionId::from("route-reassignment");
         let session = Session::new(

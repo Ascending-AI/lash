@@ -14,6 +14,8 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 #[cfg(any(test, feature = "testing"))]
+use crate::plugin::PluginSessionRequest;
+#[cfg(any(test, feature = "testing"))]
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::AtomicBool;
 
@@ -473,7 +475,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("mixed-envelope plugin session");
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
         backend,
@@ -797,7 +799,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("cancelled usage plugin session");
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
         backend,

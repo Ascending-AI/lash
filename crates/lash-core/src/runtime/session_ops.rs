@@ -4,6 +4,8 @@
 //! no types live here and no public API is changed.
 
 use crate::SessionId;
+#[cfg(test)]
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use crate::{PluginOperationInvokeError, SessionError};
@@ -948,7 +950,10 @@ mod plugin_state_boundary_tests {
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(fixture.clone()));
         let plugins = crate::PluginHost::new(factories)
-            .build_session("event-state")
+            .build_session(PluginSessionRequest::creation(
+                "event-state",
+                Default::default(),
+            ))
             .unwrap();
         let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
             backend,

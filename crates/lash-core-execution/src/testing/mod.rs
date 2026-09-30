@@ -17,6 +17,7 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
+use crate::plugin::PluginSessionRequest;
 use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
@@ -1584,7 +1585,10 @@ pub fn process_engine_run_context_for_validation(
     let process_id = crate::mint_process_id();
     let process_work = process_work_wiring_for_registry(backend.process_registry());
     let plugins = crate::PluginHost::new(test_standard_protocol_factories())
-        .build_session("engine-validation-test")
+        .build_session(PluginSessionRequest::creation(
+            "engine-validation-test",
+            Default::default(),
+        ))
         .expect("test protocol session builds");
     let scoped_effect_controller = backend
         .effect_host()

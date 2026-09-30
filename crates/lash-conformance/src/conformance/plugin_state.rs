@@ -4,6 +4,7 @@ use crate::plugin::{
     PluginFactory, PluginRegistrar, PluginSessionContext, RecordedSessionConfig, SessionPlugin,
     SessionReadyContext,
 };
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::{PluginError, PluginStateEdit, PluginStateError, PluginStateStore};
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
@@ -158,7 +159,12 @@ pub async fn plugin_state_boundary_trace(
 ) -> Vec<lash_core::PluginState> {
     let fixture = MockPlugin::default();
     let host = fixture.host();
-    let plugins = host.build_session(parent_id).expect("build");
+    let plugins = host
+        .build_session(PluginSessionRequest::creation(
+            parent_id,
+            Default::default(),
+        ))
+        .expect("build");
     let handle = fixture.state(parent_id);
     let mut state = RuntimeSessionState {
         session_id: parent_id.into(),
@@ -196,11 +202,11 @@ pub async fn plugin_state_boundary_trace(
     let rebuilt_fixture = MockPlugin::default();
     let rebuilt_host = rebuilt_fixture.host();
     let rebuilt = rebuilt_host
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             parent_id,
             crash_state.plugin_state().unwrap(),
             RecordedSessionConfig::new(Default::default()),
-        )
+        ))
         .unwrap();
     assert_eq!(
         rebuilt_fixture.state(parent_id).get("counter"),
@@ -234,11 +240,11 @@ pub async fn plugin_state_boundary_trace(
             .unwrap()
             .unwrap();
     let rebuilt = rebuilt_host
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             parent_id,
             durable.plugin_state().unwrap(),
             RecordedSessionConfig::new(Default::default()),
-        )
+        ))
         .unwrap();
     assert_eq!(
         rebuilt_fixture.state(parent_id).get("counter"),
@@ -311,7 +317,10 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         session_id: id.into(),
         ..RuntimeSessionState::new(policy.clone())
     };
-    let plugins = fixture.host().build_session(id).unwrap();
+    let plugins = fixture
+        .host()
+        .build_session(PluginSessionRequest::creation(id, Default::default()))
+        .unwrap();
     let hook_session = plugins.clone();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -372,11 +381,11 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     };
     let plugins = rebuilt
         .host()
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             id,
             durable,
             RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        )
+        ))
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), generation + 1);
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
@@ -426,7 +435,10 @@ async fn registration_state_law(
     registration: Registration,
 ) {
     let fixture = MockPlugin::default();
-    let plugins = fixture.host().build_session(id).unwrap();
+    let plugins = fixture
+        .host()
+        .build_session(PluginSessionRequest::creation(id, Default::default()))
+        .unwrap();
     let handle = fixture.state(id);
     handle.set("counter", serde_json::json!(true)).unwrap();
     for key in ["large-a", "large-b", "large-c"] {
@@ -455,11 +467,11 @@ async fn registration_state_law(
     };
     let plugins = rebuilt
         .host()
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             id,
             durable.plugin_state().unwrap(),
             RecordedSessionConfig::new(Default::default()),
-        )
+        ))
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), 6);
     durable.refresh_plugin_states(&plugins);

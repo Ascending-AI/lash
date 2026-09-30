@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::sync::MutexExt;
 
@@ -104,7 +105,9 @@ async fn inherited_child_session_carries_parent_tool_state() {
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
-    let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let plugin_session = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,
@@ -214,7 +217,9 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
-    let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let plugin_session = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,
@@ -615,7 +620,9 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let plugin_host = lash_core::testing::test_plugin_host(vec![Arc::new(MemoryProbeFactory)]);
-    let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let plugin_session = plugin_host
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,

@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
 use std::sync::{Arc, OnceLock};
 
@@ -213,9 +214,8 @@ impl RlmProtocolPluginFactory {
         // contains this factory) and reads the recorded value.
         self.record_process_lifecycle(process_lifecycle_available)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
-        let plugins = plugin_host.build_session_with_parent(
+        let plugins = plugin_host.build_session(PluginSessionRequest::creation(
             &request.session_id,
-            None,
             lash_core::plugin::SessionCreationConfig {
                 authority: SessionAuthorityContext {
                     plugin_options: request.execution_env_spec.plugin_options,
@@ -223,7 +223,7 @@ impl RlmProtocolPluginFactory {
                 },
                 ..Default::default()
             },
-        )?;
+        ))?;
         let tool_catalog = plugins.resolved_tool_catalog(&request.session_id)?;
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle_available);
         let surface = rlm_lashlang_surface(&config, process_lifecycle_available)

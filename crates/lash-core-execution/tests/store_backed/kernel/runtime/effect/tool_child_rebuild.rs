@@ -3,6 +3,7 @@
 //! a group on the Restate server double.
 
 mod tests {
+    use crate::plugin::PluginSessionRequest;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -77,7 +78,7 @@ mod tests {
     fn context(tools: Arc<CountingTools>) -> ToolDispatchContext<'static> {
         ToolDispatchContext {
             plugins: crate::support::plugin_host(Vec::new())
-                .build_session(SESSION)
+                .build_session(PluginSessionRequest::creation(SESSION, Default::default()))
                 .expect("plugin session"),
             tools,
             tool_registry: None,

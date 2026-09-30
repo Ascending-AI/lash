@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::Clock;
+use lash_core::plugin::PluginSessionRequest;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 
@@ -438,12 +439,15 @@ async fn runtime_for_config_settlement(
     state.ensure_agent_frame_initialized();
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
     let plugins = match state.plugin_state() {
-        Some(snapshot) => host.rematerialize_session(
+        Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        ),
-        None => host.build_session(request.session_id.clone()),
+        )),
+        None => host.build_session(PluginSessionRequest::creation(
+            request.session_id.clone(),
+            Default::default(),
+        )),
     }
     .expect("config-settlement plugins");
     let mut host = crate::RuntimeHostConfig::new(

@@ -21,6 +21,7 @@
 use super::*;
 use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use crate::runtime::host::EmbeddedRuntimeHost;
 
 /// A create request resolved into everything materialization needs. Nothing
@@ -270,11 +271,10 @@ fn build_session_plugins<'a>(
 > {
     match plan.plugin_source {
         crate::SessionPluginSource::CurrentHostFresh => Ok((
-            current.plugins.host().build_session_with_parent(
-                &plan.session_id,
-                plan.parent_session_id.clone(),
-                plan.plugin_config.clone(),
-            )?,
+            current.plugins.host().build_session(PluginSessionRequest {
+                parent_session_id: plan.parent_session_id.clone(),
+                ..PluginSessionRequest::creation(&plan.session_id, plan.plugin_config.clone())
+            })?,
             None,
         )),
         // The fork initializes from the spawn-time capture alone. There is
@@ -287,12 +287,16 @@ fn build_session_plugins<'a>(
                     session_id: plan.session_id.clone(),
                 },
             )?;
-            let session = current.plugins.host().build_session_from_init(
-                &plan.session_id,
-                plan.parent_session_id.clone(),
-                init,
-                plan.plugin_config.clone(),
-            )?;
+            let session = current.plugins.host().build_session(PluginSessionRequest {
+                parent_session_id: plan.parent_session_id.clone(),
+                tool_catalog_overlay: init.tool_catalog_overlay.clone(),
+                tool_snapshot: Some(init.tool_state.clone()),
+                materialization: PluginSessionMaterializationRequest::Creation {
+                    config: plan.plugin_config.clone(),
+                    seed_snapshot: Some(&init.plugin_state),
+                },
+                session_id: (&plan.session_id).into(),
+            })?;
             Ok((session, Some(init)))
         }
     }
@@ -601,23 +605,27 @@ async fn reopen_committed_session(
     };
     let plugin_host = current.plugins.host();
     let plugins = match state.plugin_state() {
-        Some(snapshot) => plugin_host.rematerialize_session_with_parent(
-            state.session_id.as_str(),
-            plan.parent_session_id.clone(),
-            snapshot,
-            crate::plugin::RecordedSessionConfig {
-                authority,
-                protocol_turn_options: state.protocol_turn_options.clone(),
-            },
-        ),
-        None => plugin_host.build_session_with_parent(
-            state.session_id.as_str(),
-            plan.parent_session_id.clone(),
-            crate::plugin::SessionCreationConfig {
-                authority,
-                protocol_turn_options: state.protocol_turn_options.clone(),
-            },
-        ),
+        Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
+            parent_session_id: plan.parent_session_id.clone(),
+            ..PluginSessionRequest::rematerialization(
+                state.session_id.as_str(),
+                snapshot,
+                crate::plugin::RecordedSessionConfig {
+                    authority,
+                    protocol_turn_options: state.protocol_turn_options.clone(),
+                },
+            )
+        }),
+        None => plugin_host.build_session(PluginSessionRequest {
+            parent_session_id: plan.parent_session_id.clone(),
+            ..PluginSessionRequest::creation(
+                state.session_id.as_str(),
+                crate::plugin::SessionCreationConfig {
+                    authority,
+                    protocol_turn_options: state.protocol_turn_options.clone(),
+                },
+            )
+        }),
     }?;
     let policy = state.effective_policy().clone();
     let mut runtime = LashRuntime::assemble_runtime(

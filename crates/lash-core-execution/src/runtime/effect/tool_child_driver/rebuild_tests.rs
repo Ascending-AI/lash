@@ -5,6 +5,7 @@
 //! and a deployment-built one. In both, the serving context is deliberately
 //! wrong, so a path that let it decide shows up as its value surviving.
 
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use super::tests::{lent, manifest, request, spec};
@@ -54,19 +55,21 @@ fn plugins_under(
     subagent: Option<crate::SubagentSessionContext>,
 ) -> Arc<crate::plugin::PluginSession> {
     crate::plugin::PluginHost::empty()
-        .build_session_with_parent(
-            "opener-session",
-            subagent
+        .build_session(PluginSessionRequest {
+            parent_session_id: subagent
                 .as_ref()
                 .map(|subagent| subagent.parent_session_id.clone()),
-            crate::plugin::SessionCreationConfig {
-                authority: crate::plugin::SessionAuthorityContext {
-                    subagent,
+            ..PluginSessionRequest::creation(
+                "opener-session",
+                crate::plugin::SessionCreationConfig {
+                    authority: crate::plugin::SessionAuthorityContext {
+                        subagent,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
-                ..Default::default()
-            },
-        )
+            )
+        })
         .expect("plugin session")
 }
 

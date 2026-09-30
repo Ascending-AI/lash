@@ -4,6 +4,8 @@
 //! Dedicated plugins register these tools into the normal tool-provider
 //! surface, so protocol crates do not own or duplicate runtime control behavior.
 
+#[cfg(test)]
+use lash_core::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -711,7 +713,10 @@ mod tests {
             .chain(lash_core::testing::test_standard_protocol_factories())
             .collect(),
         )
-        .build_session("standard")
+        .build_session(PluginSessionRequest::creation(
+            "standard",
+            Default::default(),
+        ))
         .expect("standard session");
         let standard_names = standard_session
             .resolved_tool_catalog(&SessionId::from("standard"))
@@ -729,7 +734,7 @@ mod tests {
             .chain(lash_core::testing::test_code_protocol_factories())
             .collect(),
         )
-        .build_session("rlm")
+        .build_session(PluginSessionRequest::creation("rlm", Default::default()))
         .expect("rlm session");
         let rlm_names = rlm_session
             .resolved_tool_catalog(&SessionId::from("rlm"))

@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
 use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
@@ -21,7 +22,9 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
-    let session = host.build_session("parity").unwrap();
+    let session = host
+        .build_session(PluginSessionRequest::creation("parity", Default::default()))
+        .unwrap();
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
@@ -77,9 +80,8 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
         )
         .with_process_lifecycle(false);
         lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
-            .build_session_with_parent(
+            .build_session(PluginSessionRequest::creation(
                 session_id,
-                None,
                 lash_core::plugin::SessionCreationConfig {
                     authority: lash_core::plugin::SessionAuthorityContext {
                         tool_access,
@@ -87,7 +89,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                     },
                     ..Default::default()
                 },
-            )
+            ))
             .expect("RLM protocol session")
     };
 
@@ -724,7 +726,12 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
-    let session = host.build_session("native-plugin").unwrap();
+    let session = host
+        .build_session(PluginSessionRequest::creation(
+            "native-plugin",
+            Default::default(),
+        ))
+        .unwrap();
     let catalog = session
         .resolved_tool_catalog(&SessionId::from("native-plugin"))
         .unwrap();

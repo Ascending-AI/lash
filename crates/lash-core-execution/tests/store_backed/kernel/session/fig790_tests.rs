@@ -1,5 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -466,7 +467,10 @@ async fn fig790_process_await_context(
     let processes: Arc<dyn crate::ProcessService> =
         Arc::new(EffectBackedProcessService { registry });
     let plugins = crate::support::plugin_host(Vec::new())
-        .build_session("fig790-session")
+        .build_session(PluginSessionRequest::creation(
+            "fig790-session",
+            Default::default(),
+        ))
         .expect("FIG-790 plugin session");
     let attachment_store = Arc::new(crate::SessionAttachmentStore::unavailable());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {

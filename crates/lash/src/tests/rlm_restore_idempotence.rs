@@ -23,6 +23,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -310,15 +311,18 @@ async fn open_with_plugins(
 ) -> (LashRuntime, Arc<PluginSession>) {
     let host = plugin_host_with_plugins(extra_plugins).await;
     let plugins = if let Some(snapshot) = state.plugin_state() {
-        host.rematerialize_session(
+        host.build_session(PluginSessionRequest::rematerialization(
             &state.session_id,
             snapshot,
             RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        )
+        ))
         .expect("rematerialize plugins")
     } else {
-        host.build_session(&state.session_id)
-            .expect("build plugins")
+        host.build_session(PluginSessionRequest::creation(
+            &state.session_id,
+            Default::default(),
+        ))
+        .expect("build plugins")
     };
     let mut config = RuntimeHostConfig::new(
         backend.clone(),
@@ -1095,7 +1099,10 @@ async fn storeless_runtime(
     )];
     factories.extend(extra_plugins);
     let plugins = PluginHost::new(factories)
-        .build_session(&state.session_id)
+        .build_session(PluginSessionRequest::creation(
+            &state.session_id,
+            Default::default(),
+        ))
         .expect("build plugins");
     let mut config = RuntimeHostConfig::new(
         backend,

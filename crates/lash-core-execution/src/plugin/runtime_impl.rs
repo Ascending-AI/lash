@@ -24,15 +24,52 @@ pub struct PluginHost {
     sessions: Arc<StdMutex<BTreeMap<SessionId, Weak<PluginSession>>>>,
 }
 
-struct BuildPluginSessionRequest<'a> {
-    session_id: SessionId,
-    parent_session_id: Option<SessionId>,
-    materialization: PluginSessionMaterializationRequest<'a>,
-    tool_catalog_overlay: ToolCatalogContribution,
-    tool_snapshot: Option<crate::ToolState>,
+/// Inputs shared by new-session creation and reconstruction from durable state.
+#[derive(Clone, Debug)]
+pub struct PluginSessionRequest<'a> {
+    pub session_id: SessionId,
+    pub parent_session_id: Option<SessionId>,
+    pub materialization: PluginSessionMaterializationRequest<'a>,
+    pub tool_catalog_overlay: ToolCatalogContribution,
+    pub tool_snapshot: Option<crate::ToolState>,
 }
 
-enum PluginSessionMaterializationRequest<'a> {
+impl<'a> PluginSessionRequest<'a> {
+    pub fn creation(session_id: impl Into<SessionId>, config: SessionCreationConfig) -> Self {
+        Self {
+            session_id: session_id.into(),
+            parent_session_id: None,
+            materialization: PluginSessionMaterializationRequest::Creation {
+                config,
+                seed_snapshot: None,
+            },
+            tool_catalog_overlay: ToolCatalogContribution::default(),
+            tool_snapshot: None,
+        }
+    }
+
+    pub fn rematerialization(
+        session_id: impl Into<SessionId>,
+        snapshot: &'a PluginState,
+        config: RecordedSessionConfig,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            parent_session_id: None,
+            materialization: PluginSessionMaterializationRequest::Rematerialization {
+                snapshot,
+                config,
+            },
+            tool_catalog_overlay: ToolCatalogContribution::default(),
+            tool_snapshot: None,
+        }
+    }
+}
+
+/// Creation may seed a fork from its spawn-time capture. Rematerialization
+/// requires the snapshot and protocol configuration already recorded on disk.
+#[derive(Clone, Debug)]
+pub enum PluginSessionMaterializationRequest<'a> {
     Creation {
         config: SessionCreationConfig,
         seed_snapshot: Option<&'a PluginState>,
@@ -172,193 +209,9 @@ impl PluginHost {
 
     pub fn build_session(
         &self,
-        session_id: impl Into<SessionId>,
+        request: PluginSessionRequest<'_>,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_with_overlay(
-            session_id,
-            ToolCatalogContribution::default(),
-            None,
-            SessionCreationConfig::default(),
-        )
-    }
-
-    pub fn rematerialize_session(
-        &self,
-        session_id: impl Into<SessionId>,
-        snapshot: &PluginState,
-        config: RecordedSessionConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.rematerialize_session_with_overlay(
-            session_id,
-            snapshot,
-            ToolCatalogContribution::default(),
-            None,
-            config,
-        )
-    }
-
-    /// Variant of [`build_session`](Self::build_session) that records the caller as the
-    /// parent of the new session. Plugin factories read
-    /// [`PluginSessionContext::is_root_session`] to gate root-only
-    /// behavior; anything that goes through the plain `build_session`
-    /// is treated as a root session by default.
-    pub fn build_session_with_parent(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        config: SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_with_parent_and_overlay(
-            session_id,
-            parent_session_id,
-            ToolCatalogContribution::default(),
-            None,
-            config,
-        )
-    }
-
-    pub fn rematerialize_session_with_parent(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        snapshot: &PluginState,
-        config: RecordedSessionConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.rematerialize_session_with_parent_and_overlay(
-            session_id,
-            parent_session_id,
-            snapshot,
-            ToolCatalogContribution::default(),
-            None,
-            config,
-        )
-    }
-
-    pub fn build_session_with_parent_and_overlay(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        tool_catalog_overlay: ToolCatalogContribution,
-        tool_snapshot: Option<crate::ToolState>,
-        config: SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_inner(BuildPluginSessionRequest {
-            session_id: session_id.into(),
-            parent_session_id,
-            materialization: PluginSessionMaterializationRequest::Creation {
-                config,
-                seed_snapshot: None,
-            },
-            tool_catalog_overlay,
-            tool_snapshot,
-        })
-    }
-
-    pub fn build_session_with_overlay(
-        &self,
-        session_id: impl Into<SessionId>,
-        tool_catalog_overlay: ToolCatalogContribution,
-        tool_snapshot: Option<crate::ToolState>,
-        config: SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_inner(BuildPluginSessionRequest {
-            session_id: session_id.into(),
-            parent_session_id: None,
-            materialization: PluginSessionMaterializationRequest::Creation {
-                config,
-                seed_snapshot: None,
-            },
-            tool_catalog_overlay,
-            tool_snapshot,
-        })
-    }
-
-    /// Materialize a forked peer session from the spawn-time
-    /// [`SessionPluginInit`] capture. The payload is the only input — this
-    /// path never opens or reads a live parent session, so a worker restart
-    /// between spawn and execution initializes identically.
-    pub fn build_session_from_init(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        init: &SessionPluginInit,
-        config: SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_forked_session_with_parent_and_overlay(
-            session_id,
-            parent_session_id,
-            &init.plugin_state,
-            init.tool_catalog_overlay.clone(),
-            Some(init.tool_state.clone()),
-            config,
-        )
-    }
-
-    pub(super) fn build_forked_session_with_parent_and_overlay(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        seed_snapshot: &PluginState,
-        tool_catalog_overlay: ToolCatalogContribution,
-        tool_snapshot: Option<crate::ToolState>,
-        config: SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_inner(BuildPluginSessionRequest {
-            session_id: session_id.into(),
-            parent_session_id,
-            materialization: PluginSessionMaterializationRequest::Creation {
-                config,
-                seed_snapshot: Some(seed_snapshot),
-            },
-            tool_catalog_overlay,
-            tool_snapshot,
-        })
-    }
-
-    pub fn rematerialize_session_with_parent_and_overlay(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        snapshot: &PluginState,
-        tool_catalog_overlay: ToolCatalogContribution,
-        tool_snapshot: Option<crate::ToolState>,
-        config: RecordedSessionConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.build_session_inner(BuildPluginSessionRequest {
-            session_id: session_id.into(),
-            parent_session_id,
-            materialization: PluginSessionMaterializationRequest::Rematerialization {
-                snapshot,
-                config,
-            },
-            tool_catalog_overlay,
-            tool_snapshot,
-        })
-    }
-
-    pub fn rematerialize_session_with_overlay(
-        &self,
-        session_id: impl Into<SessionId>,
-        snapshot: &PluginState,
-        tool_catalog_overlay: ToolCatalogContribution,
-        tool_snapshot: Option<crate::ToolState>,
-        config: RecordedSessionConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        self.rematerialize_session_with_parent_and_overlay(
-            session_id,
-            None,
-            snapshot,
-            tool_catalog_overlay,
-            tool_snapshot,
-            config,
-        )
-    }
-
-    fn build_session_inner(
-        &self,
-        request: BuildPluginSessionRequest<'_>,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        let BuildPluginSessionRequest {
+        let PluginSessionRequest {
             session_id,
             parent_session_id,
             materialization,

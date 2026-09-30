@@ -1,5 +1,6 @@
 use super::*;
 use crate::plugin::PluginFactory;
+use crate::plugin::PluginSessionRequest;
 
 const SEED: u64 = 0x5_2d22;
 
@@ -52,7 +53,7 @@ fn before_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<P
         )),
     );
     crate::support::plugin_host(factories)
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugin session")
 }
 
@@ -88,7 +89,7 @@ fn after_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<Pl
         )),
     );
     crate::support::plugin_host(factories)
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugin session")
 }
 

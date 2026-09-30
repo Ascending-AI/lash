@@ -20,6 +20,7 @@ use lash_core::ProcessId;
 use lash_core::ProcessRegistrar as _;
 use lash_core::SessionId;
 use lash_core::TurnId;
+use lash_core::plugin::PluginSessionRequest;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -404,7 +405,7 @@ fn tool_context_with_provider<'run>(
     bind_direct_client_to_attempt: bool,
 ) -> ToolUnderTest<'run> {
     let plugins = lash_core::testing::test_plugin_host(Vec::new())
-        .build_session(SESSION)
+        .build_session(PluginSessionRequest::creation(SESSION, Default::default()))
         .expect("build attempt-atomicity plugin session");
     let processes = lash_core::testing::effect_backed_process_service(
         Arc::clone(&fixtures.registry),

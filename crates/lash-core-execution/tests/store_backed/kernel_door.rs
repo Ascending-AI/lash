@@ -1,6 +1,7 @@
 //! This target's twins on the Restate server double and the storage-only
 //! store set (D1 F3/F7, PR-S2).
 
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use crate::process_registry::{ProcessDefinitionRegistration, ProcessDefinitionRegistry};
@@ -135,7 +136,7 @@ fn echo_dispatch_context<'h>(
             "echo_tools",
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
         ))])
-        .build_session("root")
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugin session");
     let tool_catalog = plugins
         .resolved_tool_catalog(&SessionId::from("session"))

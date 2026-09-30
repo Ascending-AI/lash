@@ -1,4 +1,5 @@
 use super::*;
+use crate::plugin::PluginSessionRequest;
 use crate::tool_dispatch::ToolDispatchContext;
 use crate::{ToolCall, ToolOutcome, ToolProvider};
 
@@ -68,7 +69,10 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
     );
     let plugins = crate::plugin::PluginHost::empty()
-        .build_session("session")
+        .build_session(PluginSessionRequest::creation(
+            "session",
+            Default::default(),
+        ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
         plugins,
@@ -137,7 +141,10 @@ fn test_execution_context_with_env_store(
     env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) -> RuntimeExecutionContext<'static> {
     let plugins = crate::plugin::PluginHost::empty()
-        .build_session("session")
+        .build_session(PluginSessionRequest::creation(
+            "session",
+            Default::default(),
+        ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
         plugins,

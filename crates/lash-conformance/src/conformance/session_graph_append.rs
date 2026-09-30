@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_core::plugin::PluginSessionRequest;
 use pretty_assertions::assert_eq;
 
 pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::DeploymentStore>) {
@@ -447,12 +448,15 @@ async fn append_conformance_runtime(
     // enough here because this suite never runs a turn.
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
     let plugins = match state.plugin_state() {
-        Some(snapshot) => host.rematerialize_session(
+        Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
             request.session_id.clone(),
             snapshot,
             crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
-        ),
-        None => host.build_session(request.session_id.clone()),
+        )),
+        None => host.build_session(PluginSessionRequest::creation(
+            request.session_id.clone(),
+            Default::default(),
+        )),
     }
     .expect("append conformance plugin session");
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(

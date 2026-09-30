@@ -14,6 +14,7 @@
 //! both launch orders so neither input order nor its reverse can pass.
 
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -245,7 +246,7 @@ fn probe_context_with<'run>(
     let plugins = crate::support::plugin_host(vec![Arc::new(
         crate::plugin::StaticPluginFactory::new("probe_tools", spec),
     )])
-    .build_session("root")
+    .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins

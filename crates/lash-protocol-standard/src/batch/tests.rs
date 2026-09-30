@@ -1,3 +1,4 @@
+use lash_core::plugin::PluginSessionRequest;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -379,7 +380,8 @@ fn batch_config_ceiling_is_refused_at_build() {
                     max_members: max(members),
                 }),
             ));
-        lash_core::facade_support::PluginHost::new(vec![factory]).build_session("root")
+        lash_core::facade_support::PluginHost::new(vec![factory])
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
     };
     let refused = build(65)
         .err()

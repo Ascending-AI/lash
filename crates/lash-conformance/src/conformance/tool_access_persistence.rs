@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 
 fn definition(id: &str, name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
@@ -39,9 +40,8 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
         lash_core::plugin::PluginSpec::new().with_tool_provider(Arc::new(ResidentProvider)),
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)
-        .build_session_with_parent(
+        .build_session(PluginSessionRequest::creation(
             session_id,
-            None,
             lash_core::plugin::SessionCreationConfig {
                 authority: lash_core::plugin::SessionAuthorityContext {
                     tool_access: access,
@@ -49,7 +49,7 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
                 },
                 ..Default::default()
             },
-        )
+        ))
         .expect("build session from recovered authority");
     assert!(
         session

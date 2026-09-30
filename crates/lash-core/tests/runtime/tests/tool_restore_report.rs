@@ -4,6 +4,7 @@
 use super::*;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::ToolStateFacadeOps;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::StaticPluginFactory;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
@@ -1021,7 +1022,10 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
     let plugin_host = plugin_host_with_tools(Some(tools));
     let plugin_session = plugin_host
-        .build_session("fig3367-child-parent")
+        .build_session(PluginSessionRequest::creation(
+            "fig3367-child-parent",
+            Default::default(),
+        ))
         .expect("plugins");
     let mut host = test_host_config(&backend);
     host.core.control.tool_source_policy = lash_core::ToolSourcePolicy::Require;

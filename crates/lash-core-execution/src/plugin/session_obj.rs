@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -855,7 +856,7 @@ impl PluginSession {
         if self.state.lock_recover().was_hydrated_from(snapshot) {
             Ok(())
         } else {
-            Err(PluginError::Session("persisted plugin state requires PluginHost::rematerialize_session before runtime construction".into()))
+            Err(PluginError::Session("persisted plugin state requires a rematerialization request before runtime construction".into()))
         }
     }
 
@@ -874,14 +875,16 @@ impl PluginSession {
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.capture_state();
-        self.host.build_forked_session_with_parent_and_overlay(
-            session_id,
-            None,
-            &snapshot,
-            self.tool_catalog_overlay.clone(),
-            Some(self.tool_registry.export_state()),
-            config,
-        )
+        self.host.build_session(PluginSessionRequest {
+            tool_catalog_overlay: self.tool_catalog_overlay.clone(),
+            tool_snapshot: Some(self.tool_registry.export_state()),
+            materialization: PluginSessionMaterializationRequest::Creation {
+                config,
+                seed_snapshot: Some(&snapshot),
+            },
+            session_id: session_id.into(),
+            parent_session_id: None,
+        })
     }
 
     /// Capture everything a forked peer session needs to initialize, exactly
@@ -1185,7 +1188,10 @@ mod attachment_notice_order_tests {
             ),
         )]);
         let session = host
-            .build_session("notice-order-session")
+            .build_session(PluginSessionRequest::creation(
+                "notice-order-session",
+                Default::default(),
+            ))
             .expect("plugin session");
         let reference = crate::AttachmentRef::new(
             crate::AttachmentId::parse("notice-order").expect("attachment id"),

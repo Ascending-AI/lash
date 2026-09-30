@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::plugin::PluginSessionRequest;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
@@ -115,7 +116,12 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         }) as Arc<dyn crate::plugin::PluginFactory>,
     ]);
     let host = crate::PluginHost::new(factories);
-    let parent = host.build_session("private-parent").unwrap();
+    let parent = host
+        .build_session(PluginSessionRequest::creation(
+            "private-parent",
+            Default::default(),
+        ))
+        .unwrap();
     assert!(
         parent.export_state().plugins["neighbor-secret-key"]
             .values

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::plugin::PluginSessionRequest;
 use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f410;
@@ -800,11 +801,11 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         Some(reopen_executor),
     );
     let plugins = lash_core::testing::test_plugin_host(vec![reopen_factory])
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             "root",
             durable.plugin_state().expect("durable plugin state"),
             lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
-        )
+        ))
         .expect("reopen plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -947,11 +948,11 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         Some(reopen_code_executor),
     );
     let plugins = lash_core::testing::test_plugin_host(vec![reopen_factory])
-        .rematerialize_session(
+        .build_session(PluginSessionRequest::rematerialization(
             "root",
             durable.plugin_state().expect("durable plugin state"),
             lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
-        )
+        ))
         .expect("cold-reopen plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -1418,19 +1419,21 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
         lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
     )));
     let plugins = lash_core::testing::test_plugin_host(factories)
-        .build_session_with_parent(
-            "root",
-            Some(SessionId::from("parent")),
-            lash_core::plugin::SessionCreationConfig {
-                authority: lash_core::plugin::SessionAuthorityContext {
-                    tool_access: lash_core::SessionToolAccess::ambient()
-                        .with_hidden_tools(["hidden_after_rotation"])
-                        .expect("valid hidden name"),
-                    ..lash_core::plugin::SessionAuthorityContext::default()
+        .build_session(PluginSessionRequest {
+            parent_session_id: Some(SessionId::from("parent")),
+            ..PluginSessionRequest::creation(
+                "root",
+                lash_core::plugin::SessionCreationConfig {
+                    authority: lash_core::plugin::SessionAuthorityContext {
+                        tool_access: lash_core::SessionToolAccess::ambient()
+                            .with_hidden_tools(["hidden_after_rotation"])
+                            .expect("valid hidden name"),
+                        ..lash_core::plugin::SessionAuthorityContext::default()
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        )
+            )
+        })
         .expect("frame child plugins");
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(

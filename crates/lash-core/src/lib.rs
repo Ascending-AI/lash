@@ -220,6 +220,8 @@ pub mod facade_support {
     pub use crate::plugin::PluginSession;
     pub use crate::plugin::PluginSessionContext;
     pub use crate::plugin::PluginSessionMaterialization;
+    pub use crate::plugin::PluginSessionMaterializationRequest;
+    pub use crate::plugin::PluginSessionRequest;
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
