@@ -647,7 +647,8 @@ pub enum ProcessCommand {
     /// This is the command half of
     /// [`PendingResolver::ProcessTerminal`](crate::PendingResolver::ProcessTerminal).
     /// It returns as soon as the boundary has taken responsibility for the
-    /// resolution, so the turn that issued it goes on to park on `key` through
+    /// resolution. A terminal already observed is returned as
+    /// [`ProcessEffectOutcome::Await`]; otherwise the turn parks on `key` through
     /// the ordinary [`RuntimeEffectCommand::AwaitEvent`] path. Arming is
     /// idempotent: the same `(process_id, key)` may be armed on every redrive
     /// of the parked turn, and the first terminal to land resolves the wait

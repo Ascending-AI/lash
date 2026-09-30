@@ -140,3 +140,15 @@ filters = ["tests::remote_turn_cancel::live_remote_after_step_waits_for_committe
 endpoints = ["EG_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 180
+
+[suites.process-await]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::process_terminal_await::live_"]
+endpoints = ["PA"]
+shards = 1
+timeout_seconds = 180
+
+[suites.process-await.live.server_env]
+# The laws prune after the await and resume a suspended handler's journal.
+RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT = "100ms"

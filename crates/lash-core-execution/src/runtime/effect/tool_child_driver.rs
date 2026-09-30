@@ -1462,7 +1462,9 @@ async fn await_journaled_tool_completion(
         processes: dispatch.processes.as_ref(),
         owner: dispatch.owner.runtime_owner(),
         call_id,
-        scope: dispatch.process_scope(),
+        scope: dispatch
+            .process_scope()
+            .with_turn_cancellation(turn_cancel_wait),
         child_trace_hook: None,
     };
     let Some(invocation) =
@@ -1479,12 +1481,16 @@ async fn await_journaled_tool_completion(
             crate::tool_dispatch::ArmedResolver::default(),
         ));
     };
-    let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
-        crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-        crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-            return Ok(unarmed_child_outcome(pending, *failure, armed));
-        }
-    };
+    let (armed, resolved) =
+        match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+            crate::tool_dispatch::ResolverArming::Armed(armed) => (armed, None),
+            crate::tool_dispatch::ResolverArming::Resolved { resolution, armed } => {
+                (armed, Some(*resolution))
+            }
+            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                return Ok(unarmed_child_outcome(pending, *failure, armed));
+            }
+        };
     let resolver = pending.pending.resolved_by.clone();
     // The journaled await's replay key is the settled call's observation key:
     // unique per (parent, call id) and re-derived identically on a redrive
@@ -1497,23 +1503,28 @@ async fn await_journaled_tool_completion(
     // The settled call's observed duration is this resume's live window —
     // the journaled await and pending row carry no clock facts (FIG-3696).
     let settle_started = dispatch.clock.now();
-    let outcome = dispatch
-        .effect_controller
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                invocation,
-                RuntimeEffectCommand::AwaitEvent {
-                    key: pending.key.clone(),
-                },
-            ),
-            RuntimeEffectLocalExecutor::await_event_under(
-                turn_cancel_wait,
-                deadline,
-                Arc::clone(&dispatch.clock),
-            ),
-        )
-        .await;
-    let resolution = match outcome.and_then(RuntimeEffectOutcome::into_await_event) {
+    let outcome = if let Some(resolution) = resolved {
+        Ok(resolution)
+    } else {
+        dispatch
+            .effect_controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::AwaitEvent {
+                        key: pending.key.clone(),
+                    },
+                ),
+                RuntimeEffectLocalExecutor::await_event_under(
+                    turn_cancel_wait,
+                    deadline,
+                    Arc::clone(&dispatch.clock),
+                ),
+            )
+            .await
+            .and_then(RuntimeEffectOutcome::into_await_event)
+    };
+    let resolution = match outcome {
         Ok(resolution) => resolution,
         // The await's recorded `Failed` terminal replaying is the call's
         // result. Anything else — a replay divergence against its record, a

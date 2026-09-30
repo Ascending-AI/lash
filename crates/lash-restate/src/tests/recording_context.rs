@@ -2010,17 +2010,16 @@ impl ReplayableRecordingContext {
 }
 
 /// A journaled step that is not a recorded effect: a process command's
-/// journaled fact (a cancel admission, an await's or attach's existence
-/// guard, a process wait step, a start's registration, obligation claim and
-/// settle, compensation and external reference and their reruns past the
+/// journaled fact (a cancel admission, an await or attachment's terminal
+/// observation, a process wait step, a start's registration, obligation claim
+/// and settle, compensation and external reference and their reruns past the
 /// engine's cancellation, ADR 0107, or a command's
 /// recorded store work, FIG-3827), or the frontier marker a process start or
 /// a sleep journals before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
     [
         ".process-cancel-admission:v1",
-        ".process-await-guard:v1",
-        ".process-attach-guard:v1",
+        ".process-await-observation:v1",
         ".process-signal-append:v1",
         ".process-list:v1",
         ".process-transfer:v1",

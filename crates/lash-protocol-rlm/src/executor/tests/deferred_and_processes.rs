@@ -1986,7 +1986,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         process_id: &ProcessId,
         key: &lash_core::AwaitEventKey,
         scope: lash_core::ProcessOpScope<'_>,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<Option<lash_core::ProcessAwaitOutput>, lash_core::PluginError> {
         // Container snapshot laws join a child that has already completed.
         let output = self.await_process(process_id, scope).await?;
         let terminal = serde_json::to_value(output)
@@ -1994,7 +1994,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         self.effect_host
             .resolve_await_event(key, lash_core::Resolution::Ok(terminal))
             .await
-            .map(|_| ())
+            .map(|_| None)
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))
     }
 

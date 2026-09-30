@@ -1341,9 +1341,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
 
     // Simulates Restate replay of the same parent handler after a later
     // suspension resumes. The already persisted registry record has an
-    // external_ref at this point, but the handler must still issue the same
-    // Restate send before the await call so the journal command sequence stays
-    // send -> call -> ... on every replay.
+    // external_ref at this point. The start still sends to its recorded id;
+    // the terminal await returns its recorded observation without an attach.
     host.execute_effect(start(), registry_local_executor(registry.clone()))
         .await
         .expect("replay start");
@@ -1353,13 +1352,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
 
     assert_eq!(
         context.process_command_log.lock_recover().as_slice(),
-        &[
-            format!("send:{process_id}"),
-            format!("call:{process_id}"),
-            format!("send:{process_id}"),
-            format!("call:{process_id}"),
-        ],
-        "child process start/await must replay the same Restate command sequence"
+        &[format!("send:{process_id}"), format!("send:{process_id}"),],
+        "the start replays its send and terminal awaits issue no attach"
     );
 }
 
@@ -1413,8 +1407,7 @@ pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waite
                     result: ProcessEffectOutcome::AttachTerminal
                 }
             ),
-            "{attempt} must report the arming, never a terminal: reading the \
-             terminal inside the parked handler is what the attach exists to avoid"
+            "{attempt} arms the ordinary waiter for a non-terminal child"
         );
     }
 

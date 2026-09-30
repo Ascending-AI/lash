@@ -3,9 +3,10 @@
 //! the in-process server double.
 //!
 //! The waiters these laws protect are the journal-side ones: a
-//! `ProcessCommand::Await` or a `LashProcessAttach` waits only on the
-//! process's terminal promise, through the root workflow's `await_terminal`,
-//! and never reads SQL. A segment that stored its terminal and stopped before
+//! A non-terminal `ProcessCommand::Await` or a `LashProcessAttach` waits on
+//! the process's terminal promise, through the root workflow's `await_terminal`.
+//! An already-terminal await journals the registry's outcome directly.
+//! A segment that stored its terminal and stopped before
 //! resolving that promise stranded them (prospect S-14): nothing republished
 //! a terminal row. Now the terminal transaction arms the row's obligation,
 //! the segment that publishes settles it, and the relay publishes what no

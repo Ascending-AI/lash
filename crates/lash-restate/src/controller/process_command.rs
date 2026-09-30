@@ -45,6 +45,17 @@ struct JournaledProcessOutcome {
     realization: lash_core::StoreRealization,
 }
 
+/// The first observation of an await. A terminal carries its acquired value
+/// in this step, so replay never consults a child that retention may prune.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum JournaledProcessAwait {
+    Waiting,
+    Terminal {
+        output: Box<lash_core::ProcessAwaitOutput>,
+    },
+}
+
 impl JournaledProcessOutcome {
     fn realized(outcome: ProcessEffectOutcome) -> Self {
         Self {
@@ -167,13 +178,103 @@ fn validate_process_command_journal_identity<T: PartialEq>(
     ))
 }
 
-/// Whether `process_ref` names a process incarnation the registry retains:
-/// the refusal is typed, never a missing row read as a pending wait.
-async fn await_existence_guard(
-    registry: &dyn ProcessRegistry,
+#[allow(clippy::too_many_arguments)]
+async fn observed_process_terminal<'ctx, C>(
+    context: &C,
+    namespace: &crate::RestateNamespace,
+    invocation: &RuntimeEffectInvocation,
+    registry: &Arc<dyn ProcessRegistry>,
+    attachments: Option<Arc<dyn lash_core::AttachmentReferrers>>,
     process_id: &lash_core::ProcessId,
-) -> Result<(), PluginError> {
-    registry.require_process_id(process_id).await.map(|_| ())
+    turn_cancel: Option<&crate::durable_wait::RestateDurableWaitAwaitRequest>,
+    process_cancel: context::ProcessCancelRace,
+) -> Result<Option<lash_core::ProcessAwaitOutput>, RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    // Observe retention and the terminal in one step (FIG-4307).
+    // Acquire the receiver's attachment edges before recording the
+    // value (ADR 0124). A read or acquisition fault records nothing;
+    // a typed retention refusal is recorded like every command's.
+    let observation_registry = Arc::clone(registry);
+    let observed_id = process_id.clone();
+    let receiver = invocation.execution_scope().clone();
+    let Json(observed) = context
+        .run_json_or_retry_send::<Result<JournaledProcessAwait, PluginError>, _>(
+            process_command_journal_name(invocation, "process-await-observation"),
+            async move {
+                let record = match observation_registry.get_process(&observed_id).await {
+                    Ok(Some(record)) => record,
+                    Ok(None) => {
+                        return Ok(Err(PluginError::ProcessUnknown {
+                            process_id: observed_id,
+                        }));
+                    }
+                    Err(error) if error.is_retryable() => return Err(error.to_string()),
+                    Err(error) => return Ok(Err(error)),
+                };
+                if record.is_terminal()
+                    && record.status != lash_core::ProcessStatus::Cancelled
+                    && record.cancel_request.is_none()
+                    && let Some(output) = record.outcome
+                {
+                    let output = match attachments {
+                        Some(attachments) => {
+                            lash_core::runtime::attachment_delivery::deliver_output(
+                                attachments.as_ref(),
+                                &receiver,
+                                output,
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?
+                        }
+                        None => output,
+                    };
+                    return Ok(Ok(JournaledProcessAwait::Terminal {
+                        output: Box::new(output),
+                    }));
+                }
+                Ok(Ok(JournaledProcessAwait::Waiting))
+            },
+        )
+        .await
+        .map_err(|error| process_command_journal_error("await observation", error))?;
+    let observed = observed?;
+    // Cancellation and revocation remain journaled observations. A
+    // closed gate or cancelled process drive takes the ordinary wait
+    // path, which owns the cancellation race and its refusal.
+    let return_terminal = if matches!(&observed, JournaledProcessAwait::Terminal { .. }) {
+        let active = match turn_cancel {
+            Some(request) => matches!(
+                context
+                    .peek_turn_gate(namespace, request.key.clone())
+                    .await
+                    .map_err(|error| process_command_journal_error("await control", error))?,
+                crate::durable_wait::RestateTurnGatePeek::Open(None)
+            ),
+            None => match invocation.execution_scope().session_id() {
+                Some(session_id) => !context
+                    .session_is_revoked(namespace, session_id.clone())
+                    .await
+                    .map_err(|error| process_command_journal_error("await revocation", error))?,
+                None => true,
+            },
+        };
+        active
+            && (process_cancel == context::ProcessCancelRace::NotRaced
+                || !context
+                    .peek_process_cancel_requested()
+                    .await
+                    .map_err(|error| {
+                        process_command_journal_error("await process cancellation", error)
+                    })?)
+    } else {
+        false
+    };
+    Ok(match observed {
+        JournaledProcessAwait::Terminal { output } if return_terminal => Some(*output),
+        _ => None,
+    })
 }
 
 /// The cancel a turn's stop owes the process it was awaiting, as the recorded
@@ -267,6 +368,7 @@ where
     let process_env_store = execution.process_env_store;
     let process_engines = execution.process_engines;
     let turn_cancellation = execution.turn_cancellation;
+    let attachments = execution.attachments;
     let outcome = match command {
         ProcessCommand::Start {
             registration,
@@ -496,32 +598,6 @@ where
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
         ProcessCommand::Await { process_id } => {
-            // The existence guard is a recorded step (FIG-3808): a guard the
-            // first execution passed never fails on a replay, even after the
-            // awaited process ended and its row was pruned. Its answer is Ok
-            // or the typed refusal the registry gave; a retryable store fault
-            // ends the attempt unrecorded and the step runs again.
-            //
-            // FIG-790 emits Process::Await before observing state; FIG-1521
-            // keeps the pre-journal engine-admission gate pure; world
-            // readiness belongs to ProcessEngine::run, after the Start command
-            // replays.
-            let guard_registry = Arc::clone(&registry);
-            let guard_id = process_id.clone();
-            let Json(guarded) = context
-                .run_json_or_retry_send::<Result<(), PluginError>, _>(
-                    process_command_journal_name(invocation, "process-await-guard"),
-                    async move {
-                        match await_existence_guard(guard_registry.as_ref(), &guard_id).await {
-                            Ok(()) => Ok(Ok(())),
-                            Err(error) if error.is_retryable() => Err(error.to_string()),
-                            Err(error) => Ok(Err(error)),
-                        }
-                    },
-                )
-                .await
-                .map_err(|error| process_command_journal_error("await guard", error))?;
-            guarded?;
             // A process await that observes no turn races the awaiting
             // process segment's durable cancel promise when a process drive
             // issues it (FIG-3673).
@@ -533,143 +609,28 @@ where
                     .as_ref()
                     .map(|turn_cancellation| &turn_cancellation.scope),
             )?;
-            // The terminal reaches this journal only through the attach
-            // workflow, which acquires this scope's edges on the terminal's
-            // delivered attachments before it resolves the wait (ADR 0124):
-            // arm the attach against a wait of this command's own, then park
-            // on that wait.
-            let await_key = crate::durable_wait::restate_await_event_key_for_authority(
-                authority_id,
-                invocation.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::Custom {
-                    key: process_await_wait_key(&process_id, invocation.effect_id()),
-                },
-            )?;
-            context
-                .attach_process_terminal(
-                    namespace,
-                    RestateProcessAttachRequest {
-                        process_id: process_id.clone(),
-                        key: await_key.clone(),
-                    },
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineProcessAwait,
-                        err.to_string(),
-                    )
-                })?;
-            let await_request = crate::durable_wait::RestateDurableWaitAwaitRequest {
-                key: await_key.clone(),
-                deadline: None,
-            };
-            trace_park("process");
-            let first_wait = context
-                .await_event_or_turn_cancel(
-                    namespace,
-                    await_request,
-                    await_key.key_id.clone(),
-                    turn_cancel,
-                    process_cancel,
-                )
-                .await;
-            let first_wait = match first_wait {
-                Ok(outcome) => outcome,
-                Err(err) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Failed);
-                    return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineProcessAwait,
-                        err.to_string(),
-                    ));
-                }
-            };
-            let output = match first_wait {
-                RestateTurnCancelRaceOutcome::Completed(resolution) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
-                    process_await_output_from_resolution(resolution)?
-                }
-                RestateTurnCancelRaceOutcome::ProcessCancelled => {
-                    // The awaiting process was cancelled while it waited: its
-                    // await ends cancelled, which the drive records as its
-                    // own cancellation. The awaited process is left to its
-                    // own lifecycle; the ended parent scope's parent-end
-                    // plan, not this wait, owns its children.
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Cancelled);
-                    lash_core::ProcessAwaitOutput::from_tool_output(
-                        lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
-                            format!("awaiting process `{process_id}` was cancelled"),
-                        )),
-                    )
-                }
-                RestateTurnCancelRaceOutcome::TurnCancelled => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::TurnCancelled,
-                    );
-                    let Some(turn_cancellation) = turn_cancellation.as_ref() else {
-                        return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::EngineProcessTurnCancelContextMissing,
-                            "process-await cancellation won without turn-cancellation context",
-                        ));
-                    };
-                    let requester =
-                        serde_json::to_string(&turn_cancellation.scope).map_err(|error| {
-                            PluginError::Runtime(RuntimeError::new(
-                                RuntimeErrorCode::RecordEncodingFailed,
-                                error.to_string(),
-                            ))
-                        })?;
-                    // The losing process wait is cancelled through a recorded
-                    // step (ADR 0105 §3: `dispose(child, AwaitCancelled)`).
-                    // The store answers differently once the cancel it asked
-                    // for has ended the process, so a replay reads the
-                    // recorded answer and issues the same cancel call, never
-                    // the store (FIG-3752).
-                    let admission_registry = Arc::clone(&registry);
-                    let admission_process_id = process_id.clone();
-                    let Json(cancel_request) = context
-                        .run_json_or_retry_send(
-                            process_command_journal_name(
-                                invocation,
-                                "process-await-turn-cancel-admission",
-                            ),
-                            async move {
-                                turn_stop_process_cancel_admission(
-                                    admission_registry.as_ref(),
-                                    &admission_process_id,
-                                    requester,
-                                )
-                                .await
-                                .map_err(|error| error.to_string())
-                            },
-                        )
-                        .await
-                        .map_err(|error| {
-                            process_command_journal_error("turn-stop cancel admission", error)
-                        })?;
-                    if let Some(cancel_request) = cancel_request {
-                        context
-                            .request_process_workflow_cancel(namespace, cancel_request)
-                            .await
-                            .map_err(|err| {
-                                PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::EngineProcessCancel,
-                                    format!("Restate process cancellation failed: {err}"),
-                                ))
-                            })?;
-                    }
-                    // The race released the first wait as cancelled, so the
-                    // cancelled process's terminal arrives through an attach
-                    // armed on a wait of its own, acquired like any other.
-                    let after_key = crate::durable_wait::restate_await_event_key_for_authority(
+            let terminal = observed_process_terminal(
+                context,
+                namespace,
+                invocation,
+                &registry,
+                attachments,
+                &process_id,
+                turn_cancel.as_ref(),
+                process_cancel,
+            )
+            .await?;
+            let output = match terminal {
+                Some(output) => output,
+                None => {
+                    // The ordinary wait receives its terminal through the attach,
+                    // which acquires this scope's attachment edges before resolving
+                    // the wait (ADR 0124). Arm it on this command's own wait key.
+                    let await_key = crate::durable_wait::restate_await_event_key_for_authority(
                         authority_id,
                         invocation.execution_scope(),
                         lash_core::AwaitEventWaitIdentity::Custom {
-                            key: process_await_after_turn_cancel_wait_key(
-                                &process_id,
-                                invocation.effect_id(),
-                            ),
+                            key: process_await_wait_key(&process_id, invocation.effect_id()),
                         },
                     )?;
                     context
@@ -677,54 +638,198 @@ where
                             namespace,
                             RestateProcessAttachRequest {
                                 process_id: process_id.clone(),
-                                key: after_key.clone(),
+                                key: await_key.clone(),
                             },
                         )
                         .await
                         .map_err(|err| {
                             RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
+                                RuntimeErrorCode::EngineProcessAwait,
                                 err.to_string(),
                             )
                         })?;
-                    trace_park("process_after_turn_cancel");
-                    match context
-                        .await_event(
+                    let await_request = crate::durable_wait::RestateDurableWaitAwaitRequest {
+                        key: await_key.clone(),
+                        deadline: None,
+                    };
+                    trace_park("process");
+                    let first_wait = context
+                        .await_event_or_turn_cancel(
                             namespace,
-                            crate::durable_wait::RestateDurableWaitAwaitRequest {
-                                key: after_key.clone(),
-                                deadline: None,
-                            },
-                            after_key.key_id.clone(),
-                            tokio_util::sync::CancellationToken::new(),
+                            await_request,
+                            await_key.key_id.clone(),
+                            turn_cancel,
+                            process_cancel,
                         )
-                        .await
-                    {
-                        Ok(resolution) => {
+                        .await;
+                    let first_wait = match first_wait {
+                        Ok(outcome) => outcome,
+                        Err(err) => {
                             trace_resolve(
-                                "process_after_turn_cancel",
+                                "process",
+                                lash_trace::TraceDurableWaitResolution::Failed,
+                            );
+                            return Err(RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineProcessAwait,
+                                err.to_string(),
+                            ));
+                        }
+                    };
+                    match first_wait {
+                        RestateTurnCancelRaceOutcome::Completed(resolution) => {
+                            trace_resolve(
+                                "process",
                                 lash_trace::TraceDurableWaitResolution::Resolved,
                             );
                             process_await_output_from_resolution(resolution)?
                         }
-                        Err(err) => {
+                        RestateTurnCancelRaceOutcome::ProcessCancelled => {
+                            // The awaiting process was cancelled while it waited: its
+                            // await ends cancelled, which the drive records as its
+                            // own cancellation. The awaited process is left to its
+                            // own lifecycle; the ended parent scope's parent-end
+                            // plan, not this wait, owns its children.
                             trace_resolve(
-                                "process_after_turn_cancel",
-                                lash_trace::TraceDurableWaitResolution::Failed,
+                                "process",
+                                lash_trace::TraceDurableWaitResolution::Cancelled,
                             );
-                            return Err(RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
-                                err.to_string(),
-                            ));
+                            lash_core::ProcessAwaitOutput::from_tool_output(
+                                lash_core::ToolCallOutput::cancelled(
+                                    lash_core::ToolCancellation::runtime(format!(
+                                        "awaiting process `{process_id}` was cancelled"
+                                    )),
+                                ),
+                            )
+                        }
+                        RestateTurnCancelRaceOutcome::TurnCancelled => {
+                            trace_resolve(
+                                "process",
+                                lash_trace::TraceDurableWaitResolution::TurnCancelled,
+                            );
+                            let Some(turn_cancellation) = turn_cancellation.as_ref() else {
+                                return Err(RuntimeEffectControllerError::new(
+                                    RuntimeErrorCode::EngineProcessTurnCancelContextMissing,
+                                    "process-await cancellation won without turn-cancellation context",
+                                ));
+                            };
+                            let requester = serde_json::to_string(&turn_cancellation.scope)
+                                .map_err(|error| {
+                                    PluginError::Runtime(RuntimeError::new(
+                                        RuntimeErrorCode::RecordEncodingFailed,
+                                        error.to_string(),
+                                    ))
+                                })?;
+                            // The losing process wait is cancelled through a recorded
+                            // step (ADR 0105 §3: `dispose(child, AwaitCancelled)`).
+                            // The store answers differently once the cancel it asked
+                            // for has ended the process, so a replay reads the
+                            // recorded answer and issues the same cancel call, never
+                            // the store (FIG-3752).
+                            let admission_registry = Arc::clone(&registry);
+                            let admission_process_id = process_id.clone();
+                            let Json(cancel_request) = context
+                                .run_json_or_retry_send(
+                                    process_command_journal_name(
+                                        invocation,
+                                        "process-await-turn-cancel-admission",
+                                    ),
+                                    async move {
+                                        turn_stop_process_cancel_admission(
+                                            admission_registry.as_ref(),
+                                            &admission_process_id,
+                                            requester,
+                                        )
+                                        .await
+                                        .map_err(|error| error.to_string())
+                                    },
+                                )
+                                .await
+                                .map_err(|error| {
+                                    process_command_journal_error(
+                                        "turn-stop cancel admission",
+                                        error,
+                                    )
+                                })?;
+                            if let Some(cancel_request) = cancel_request {
+                                context
+                                    .request_process_workflow_cancel(namespace, cancel_request)
+                                    .await
+                                    .map_err(|err| {
+                                        PluginError::Runtime(RuntimeError::new(
+                                            RuntimeErrorCode::EngineProcessCancel,
+                                            format!("Restate process cancellation failed: {err}"),
+                                        ))
+                                    })?;
+                            }
+                            // The race released the first wait as cancelled, so the
+                            // cancelled process's terminal arrives through an attach
+                            // armed on a wait of its own, acquired like any other.
+                            let after_key =
+                                crate::durable_wait::restate_await_event_key_for_authority(
+                                    authority_id,
+                                    invocation.execution_scope(),
+                                    lash_core::AwaitEventWaitIdentity::Custom {
+                                        key: process_await_after_turn_cancel_wait_key(
+                                            &process_id,
+                                            invocation.effect_id(),
+                                        ),
+                                    },
+                                )?;
+                            context
+                                .attach_process_terminal(
+                                    namespace,
+                                    RestateProcessAttachRequest {
+                                        process_id: process_id.clone(),
+                                        key: after_key.clone(),
+                                    },
+                                )
+                                .await
+                                .map_err(|err| {
+                                    RuntimeEffectControllerError::new(
+                                        RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
+                                        err.to_string(),
+                                    )
+                                })?;
+                            trace_park("process_after_turn_cancel");
+                            match context
+                                .await_event(
+                                    namespace,
+                                    crate::durable_wait::RestateDurableWaitAwaitRequest {
+                                        key: after_key.clone(),
+                                        deadline: None,
+                                    },
+                                    after_key.key_id.clone(),
+                                    tokio_util::sync::CancellationToken::new(),
+                                )
+                                .await
+                            {
+                                Ok(resolution) => {
+                                    trace_resolve(
+                                        "process_after_turn_cancel",
+                                        lash_trace::TraceDurableWaitResolution::Resolved,
+                                    );
+                                    process_await_output_from_resolution(resolution)?
+                                }
+                                Err(err) => {
+                                    trace_resolve(
+                                        "process_after_turn_cancel",
+                                        lash_trace::TraceDurableWaitResolution::Failed,
+                                    );
+                                    return Err(RuntimeEffectControllerError::new(
+                                        RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
+                                        err.to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
+                            trace_resolve(
+                                "process",
+                                lash_trace::TraceDurableWaitResolution::SessionRevoked,
+                            );
+                            return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                         }
                     }
-                }
-                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::SessionRevoked,
-                    );
-                    return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
             };
             Ok((
@@ -735,33 +840,46 @@ where
             ))
         }
         ProcessCommand::AttachTerminal { process_id, key } => {
-            // Prove the process is still retained before claiming the wait is
-            // armed. The same retention exposure the `Await` branch documents
-            // applies: a host that prunes a terminal row out from under a
-            // waiter breaks the wait, and the refusal here is loud rather than
-            // a silent park.
-            // The guard is a recorded step, as the await's is (FIG-3808,
-            // FIG-3827): a replay after the process was pruned answers the
-            // recorded pass instead of refusing.
-            let guard_registry = Arc::clone(&registry);
-            let guard_id = process_id.clone();
-            recorded_process_step(context, invocation, "process-attach-guard", async move {
-                await_existence_guard(guard_registry.as_ref(), &guard_id).await
-            })
+            let turn_cancel = restate_process_turn_cancel_wait_request(
+                authority_id,
+                invocation,
+                turn_cancellation.is_some(),
+                turn_cancellation
+                    .as_ref()
+                    .map(|turn_cancellation| &turn_cancellation.scope),
+            )?;
+            let terminal = observed_process_terminal(
+                context,
+                namespace,
+                invocation,
+                &registry,
+                attachments,
+                &process_id,
+                turn_cancel.as_ref(),
+                process_cancel,
+            )
             .await?;
-            context
-                .attach_process_terminal(namespace, RestateProcessAttachRequest { process_id, key })
-                .await
-                .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineProcessAwait,
-                        err.to_string(),
-                    )
-                })?;
-            Ok((
-                ProcessEffectOutcome::AttachTerminal,
-                lash_core::StoreRealization::Realized,
-            ))
+            let outcome = match terminal {
+                Some(output) => ProcessEffectOutcome::Await {
+                    output: Box::new(output),
+                },
+                None => {
+                    context
+                        .attach_process_terminal(
+                            namespace,
+                            RestateProcessAttachRequest { process_id, key },
+                        )
+                        .await
+                        .map_err(|err| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineProcessAwait,
+                                err.to_string(),
+                            )
+                        })?;
+                    ProcessEffectOutcome::AttachTerminal
+                }
+            };
+            Ok((outcome, lash_core::StoreRealization::Realized))
         }
         ProcessCommand::Cancel {
             process_id,

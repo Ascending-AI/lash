@@ -1304,7 +1304,7 @@ impl crate::ProcessService for GatedProcessService {
         process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
         self.inner
             .attach_process_terminal(process_id, key, scope)
             .await

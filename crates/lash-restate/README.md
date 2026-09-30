@@ -134,6 +134,13 @@ EOF, timeouts, overload, and ingress-generated 5xx responses, preserving the
 durable process and its wait address. An invocation's terminal error stays
 terminal even with a 5xx code. See ADR 0016.
 
+An await of an already-terminal child journals the registry's full outcome in
+one step, after acquiring the receiver's references to its stored attachments.
+Replay reads that outcome even after retention prunes the child. The controller
+also journals its cancellation and revocation observations. Terminal attachment
+commands return the same observed value, so pending tool calls settle without
+opening a wait. Non-terminal or cancelled children and closed control gates use the attach and durable-wait path.
+
 ## Stuck effect-group dispatcher retirement
 
 Effect-group retirement tombstones the index before it cancels and durably

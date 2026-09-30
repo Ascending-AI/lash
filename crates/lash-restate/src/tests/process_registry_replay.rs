@@ -343,14 +343,9 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
         *output,
         process_success(serde_json::json!({ "done": true }))
     );
-    assert_eq!(
-        sink.records
-            .lock_recover()
-            .iter()
-            .map(|record| record.event.kind())
-            .collect::<Vec<_>>(),
-        vec!["durable_wait_parked", "durable_wait_resolved"],
-        "process awaits expose the same durable wait evidence as await-event"
+    assert!(
+        sink.records.lock_recover().is_empty(),
+        "an already-terminal process returns without parking a durable wait"
     );
 
     let outcome = host

@@ -295,7 +295,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<Option<crate::ProcessAwaitOutput>, crate::PluginError> {
         self.services
             .processes
             .attach_process_terminal(

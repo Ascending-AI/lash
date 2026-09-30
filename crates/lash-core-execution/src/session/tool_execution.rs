@@ -1074,42 +1074,52 @@ impl RuntimeExecutionContext<'_> {
         // Arm before parking, never after: the resolver the call named is what
         // makes the wait finishable, and this runs on the redrive too, because
         // the recorded attempt body that named it does not re-run.
+        let cancellation = cancellation.unwrap_or_default();
         let site = crate::tool_dispatch::ParkSite {
             processes: self.dispatch.processes.as_ref(),
             owner: self.dispatch.owner.runtime_owner(),
             call_id,
-            scope: self.process_scope(parent_invocation.clone()),
+            scope: self
+                .process_scope(parent_invocation.clone())
+                .with_turn_cancellation(&self.turn_cancel_wait(cancellation.clone())),
             child_trace_hook,
         };
-        let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
-            crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-                return Ok(pending.settle_unarmed(*failure, &armed));
-            }
-        };
-        let cancellation = cancellation.unwrap_or_default();
+        let (armed, resolved) =
+            match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+                crate::tool_dispatch::ResolverArming::Armed(armed) => (armed, None),
+                crate::tool_dispatch::ResolverArming::Resolved { resolution, armed } => {
+                    (armed, Some(*resolution))
+                }
+                crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                    return Ok(pending.settle_unarmed(*failure, &armed));
+                }
+            };
         let resolver = pending.pending.resolved_by.clone();
         let completion_key = pending.key.clone();
         let deadline = pending
             .pending
             .deadline
             .map(|duration| self.dispatch.clock.now() + duration);
-        let outcome = self
-            .dispatch
-            .effect_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
-                ),
-                crate::RuntimeEffectLocalExecutor::await_event_under(
-                    &self.turn_cancel_wait(cancellation),
-                    deadline,
-                    std::sync::Arc::clone(&self.dispatch.clock),
-                ),
-            )
-            .await;
-        let resolution = match outcome.and_then(crate::RuntimeEffectOutcome::into_await_event) {
+        let outcome = if let Some(resolution) = resolved {
+            Ok(resolution)
+        } else {
+            self.dispatch
+                .effect_controller
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        invocation,
+                        crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
+                    ),
+                    crate::RuntimeEffectLocalExecutor::await_event_under(
+                        &self.turn_cancel_wait(cancellation),
+                        deadline,
+                        std::sync::Arc::clone(&self.dispatch.clock),
+                    ),
+                )
+                .await
+                .and_then(crate::RuntimeEffectOutcome::into_await_event)
+        };
+        let resolution = match outcome {
             Ok(resolution) => resolution,
             Err(err) => {
                 // An unrecorded `Err` from the journaled `AwaitEvent` — a live

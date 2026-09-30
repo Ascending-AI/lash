@@ -2322,11 +2322,11 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
+    ) -> Result<Option<crate::ProcessAwaitOutput>, PluginError> {
         self.terminal_attachments
             .lock_recover()
             .push((process_id.clone(), key.clone()));
-        Ok(())
+        Ok(None)
     }
 
     async fn start_from_recorded_intent(
