@@ -34,10 +34,9 @@ impl LashRuntime {
             materialize_initial_admissions,
             drive_fence,
         } = context;
-        let turn_id = input
+        input
             .trace_turn_id
-            .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
-            .clone();
+            .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()));
         // The scope identifies the authority that admitted this run. Physical
         // turn ids remain separate routing and trace attribution, including for
         // queued drains, runtime operations, processes, and follow-on frames.
@@ -47,12 +46,29 @@ impl LashRuntime {
         // The stable execution-scope turn id is attached to every write-ahead
         // intent before ingress, tools, plugins, or envelope normalization can
         // put bytes. Replays bind the same id; no live pending-id state is used.
-        let _attachment_owner_binding = self
-            .host
-            .core
-            .durability
-            .attachment_store
-            .bind_turn_scoped(turn_id);
+        let _attachment_execution_binding =
+            match self.host.core.durability.attachment_store.holder() {
+                lash_core_execution::attachments::AttachmentHolder::Runtime(
+                    crate::RuntimeOwner::Session(_),
+                ) => Some(
+                    self.host
+                        .core
+                        .durability
+                        .attachment_store
+                        .bind_execution_scoped(
+                            scoped_effect_controller
+                                .execution_scope()
+                                .journal_identity()?,
+                        )
+                        .map_err(|error| {
+                            RuntimeError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
+                                error.to_string(),
+                            )
+                        })?,
+                ),
+                _ => None,
+            };
         Box::pin(self.stream_turn_inner(TurnPrepareContext {
             input: input.clone(),
             protocol_turn_options,

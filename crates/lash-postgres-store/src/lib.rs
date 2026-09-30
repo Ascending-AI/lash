@@ -49,8 +49,7 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport,
+    AttachmentId, AttachmentManifest, BlobRef, DeliveryPolicy, ExecutionScope, GcReport,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
@@ -662,7 +661,6 @@ pub struct PostgresStore {
     pool: PgPool,
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
-    process_registry_shared: bool,
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
@@ -1153,7 +1151,7 @@ impl PostgresStorage {
     }
 
     pub fn session_store_factory(&self) -> PostgresStore {
-        self.unwired_session_store_factory("PostgresStorage::session_store_factory")
+        self.store()
     }
 
     /// The fleet format this storage's durable writers emit — the `F` of ADR
@@ -1175,66 +1173,31 @@ impl PostgresStorage {
         self
     }
 
-    fn unwired_session_store_factory(&self, path: &'static str) -> PostgresStore {
-        warn_postgres_process_registry_not_wired(path);
-        PostgresStore {
-            pool: self.pool.clone(),
-            catalog_id: Arc::clone(&self.catalog_id),
-            fence: self.fence.clone(),
-            process_registry_shared: false,
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: None,
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-
-    /// Construct a session factory that explicitly declares this storage's
-    /// Lash process registry shares the same PostgreSQL database.
-    pub fn session_store_factory_with_shared_process_registry(&self) -> PostgresStore {
-        PostgresStore {
-            pool: self.pool.clone(),
-            catalog_id: Arc::clone(&self.catalog_id),
-            fence: self.fence.clone(),
-            process_registry_shared: true,
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: None,
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
-            decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-
     /// One multi-session store over this catalog.
     pub fn store(&self) -> PostgresStore {
-        self.unwired_session_store_factory("PostgresStorage::store")
+        PostgresStore {
+            pool: self.pool.clone(),
+            catalog_id: Arc::clone(&self.catalog_id),
+            fence: self.fence.clone(),
+            #[cfg(any(test, feature = "testing"))]
+            lease_clock_for_testing: None,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(test)]
+            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
+            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
     }
 
     pub fn process_registry(&self) -> PostgresProcessRegistry {
@@ -1359,11 +1322,7 @@ impl PostgresStore {
     }
 
     pub fn new(storage: &PostgresStorage) -> Self {
-        storage.unwired_session_store_factory("PostgresStore::new")
-    }
-
-    pub fn new_with_shared_process_registry(storage: &PostgresStorage) -> Self {
-        storage.session_store_factory_with_shared_process_registry()
+        storage.store()
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
@@ -1381,15 +1340,6 @@ impl PostgresStore {
         self.fault_injector = Some(injector);
         self
     }
-}
-
-fn warn_postgres_process_registry_not_wired(path: &'static str) {
-    tracing::warn!(
-        store = "postgres",
-        path,
-        consequence = "process-owned uncommitted intents are never reclaimed",
-        "PostgreSQL attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Call PostgresStorage::session_store_factory_with_shared_process_registry()."
-    );
 }
 
 impl PostgresStore {
@@ -1528,10 +1478,7 @@ pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
     SchemaReport, UniqueGuard,
 };
-use {
-    pending_turn_inputs::*, process_helpers::*, queued_work::*, schema::*, session_factory::*,
-    support::*,
-};
+use {pending_turn_inputs::*, process_helpers::*, queued_work::*, schema::*, support::*};
 
 // `tests/support/mod.rs` is also compiled into this crate's unit tests (as
 // `postgres_test_support`), so it can only name this crate uniformly if the

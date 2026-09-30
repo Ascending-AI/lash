@@ -312,8 +312,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         .execute_batch(
             "PRAGMA ignore_check_constraints = ON;
              INSERT INTO attachment_condemnations
-                 (attachment_id, phase, write_token, write_session_id, sweep_generation)
-             VALUES ('corrupt-condemnation', 'future-phase', NULL, NULL, 1);",
+                 (attachment_id, phase, write_token, sweep_generation)
+             VALUES ('corrupt-condemnation', 'future-phase', NULL, 1);",
         )
         .expect("inject unknown persisted phase");
     assert!(matches!(
@@ -324,8 +324,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         .execute_batch(
             "DELETE FROM attachment_condemnations;
              INSERT INTO attachment_condemnations
-                 (attachment_id, phase, write_token, write_session_id, sweep_generation)
-             VALUES ('corrupt-condemnation', 'deleting', 'opaque', 'session', 1);",
+                 (attachment_id, phase, write_token, sweep_generation)
+             VALUES ('corrupt-condemnation', 'deleting', NULL, 1);",
         )
         .expect("inject inconsistent persisted provenance");
     assert!(matches!(
@@ -670,7 +670,6 @@ lash_conformance::runtime_persistence_state_machine_tests!({
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
                 backend.store().await,
                 backend.attachment_store(),
-                true,
             )
             .await
             .expect("create SQLite runtime-persistence property handles")
@@ -1135,4 +1134,27 @@ lash_conformance::attachment_stalled_retry_tests!({
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
     ((backend, bytes_root), factory, make_bytes, clock)
+});
+
+lash_conformance::attachment_referrer_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.store().await;
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
+    let injector = backend.clone();
+    let insert_edge: lash_conformance::InsertAttachmentEdge = Arc::new(move |id, kind, key| {
+        let injector = injector.clone();
+        Box::pin(async move {
+            injector.raw(lash_sqlite_store::SqliteDatabase::DurableCore)
+                .execute("INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, ?2, ?3)", rusqlite::params![id.as_str(), kind, key])
+                .map(|_| ()).map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))
+        })
+    });
+    let handles = lash_conformance::AttachmentReferrerHandles {
+        factory,
+        cleanup: backend.as_stores().artifact_cleanup(),
+        bytes: make_bytes,
+        insert_edge,
+    };
+    ((backend, bytes_root), handles)
 });

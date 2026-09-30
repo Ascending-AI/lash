@@ -16,8 +16,6 @@ use lash_core_execution::store::RootStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{LeaseOwnerIdentity, TurnId};
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{Layer, Registry};
 
 async fn persisted_record_decode_store(
     storage: &PostgresStorage,
@@ -342,49 +340,6 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
     );
 }
 
-#[tokio::test]
-async fn attachment_unwired_process_registry_factory_warns() {
-    let storage = PostgresStorage {
-        pool: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/unused")
-            .unwrap(),
-        catalog_id: Arc::from("unused.public"),
-        fence: crate::guarded_tx::WriterFence::new(
-            lash_core_execution::FleetFormat::writable(),
-            lash_core_execution::FleetFormat::current(),
-        ),
-    };
-    for path in [
-        "PostgresStorage::session_store_factory",
-        "PostgresStore::new",
-    ] {
-        let warnings = AttachmentWarnings::default();
-        let subscriber = Registry::default().with(warnings.clone());
-        tracing::subscriber::with_default(subscriber, || {
-            let factory = if path == "PostgresStorage::session_store_factory" {
-                storage.session_store_factory()
-            } else {
-                PostgresStore::new(&storage)
-            };
-            assert!(
-                !lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&factory)
-            );
-            let wired = storage.session_store_factory_with_shared_process_registry();
-            assert!(lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&wired));
-            let wired = PostgresStore::new_with_shared_process_registry(&storage);
-            assert!(lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&wired));
-        });
-        let events = warnings.0.lock().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["store"], "postgres");
-        assert_eq!(events[0]["path"], path);
-        assert_eq!(
-            events[0]["consequence"],
-            "process-owned uncommitted intents are never reclaimed"
-        );
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn direct_session_store_defers_missing_identity_validation() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -426,220 +381,6 @@ async fn direct_session_store_defers_missing_identity_validation() {
             .await
             .expect("admit missing direct-constructor session"),
         lash_core_execution::SessionAdmission::Created
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidate_order() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping bulk-delete candidate-order witness: database URL is not set");
-        return;
-    };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect bulk-delete candidate-order witness storage");
-
-    async fn run_fixture(
-        storage: &PostgresStorage,
-        ancestor_sorts_first: bool,
-    ) -> (Vec<&'static str>, std::collections::BTreeSet<&'static str>) {
-        let nonce = uuid::Uuid::new_v4().simple().to_string();
-        let ancestor_session = format!(
-            "bulk-order:{nonce}:{}-ancestor",
-            if ancestor_sorts_first { "a" } else { "z" }
-        );
-        let child_session = format!(
-            "bulk-order:{nonce}:{}-child",
-            if ancestor_sorts_first { "z" } else { "a" }
-        );
-        let node = |role: &str| format!("bulk-order:{nonce}:{role}");
-        let nodes = [
-            ("ancestor-root", ancestor_session.as_str(), None, 0_i64),
-            (
-                "ancestor-leaf",
-                ancestor_session.as_str(),
-                Some("ancestor-root"),
-                1_i64,
-            ),
-            (
-                "child-root",
-                child_session.as_str(),
-                Some("ancestor-root"),
-                0_i64,
-            ),
-            (
-                "child-leaf",
-                child_session.as_str(),
-                Some("child-root"),
-                1_i64,
-            ),
-        ];
-
-        for session_id in [&ancestor_session, &child_session] {
-            // Deletion reads the head's current frame to fence it (ADR 0113
-            // §3.1), so the witness head is a well-formed frameless one.
-            let head_json =
-                serde_json::to_string(&lash_core_execution::store::SessionHeadPayload {
-                    schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                    session_id: SessionId::from(session_id.as_str()),
-                    config: lash_core_execution::PersistedSessionConfig::new(
-                        lash_core_execution::TurnBudget::Unbounded,
-                    ),
-                    current_frame_node_id: None,
-                })
-                .expect("encode witness head");
-            sqlx::query(
-                "INSERT INTO lash_sessions (session_id, head_json, leaf_node_id)
-                 VALUES ($1, $2, NULL)",
-            )
-            .bind(session_id)
-            .bind(head_json)
-            .execute(storage.pool())
-            .await
-            .unwrap_or_else(|error| panic!("seed witness session `{session_id}`: {error}"));
-            sqlx::query(
-                "INSERT INTO lash_session_meta
-                 (session_id, relation_kind)
-                 VALUES ($1, 'root')",
-            )
-            .bind(session_id)
-            .execute(storage.pool())
-            .await
-            .unwrap_or_else(|error| panic!("seed witness metadata `{session_id}`: {error}"));
-        }
-        for (role, session_id, parent_role, generation) in nodes {
-            sqlx::query(
-                "INSERT INTO lash_graph_nodes
-                 (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
-                 VALUES ($1, $2, $3, $4, $2, '{}', 2)",
-            )
-            .bind(session_id)
-            .bind(node(role))
-            .bind(parent_role.map(&node))
-            .bind(generation)
-            .execute(storage.pool())
-            .await
-            .unwrap_or_else(|error| panic!("seed witness node `{role}`: {error}"));
-        }
-        sqlx::query(
-            "INSERT INTO lash_fork_lineage
-             (session_id, ancestor_session_id, fork_node_id, fork_generation)
-             VALUES ($1, $2, $3, 0)",
-        )
-        .bind(&child_session)
-        .bind(&ancestor_session)
-        .bind(node("ancestor-root"))
-        .execute(storage.pool())
-        .await
-        .expect("seed witness fork lineage");
-
-        let session_ids = vec![
-            SessionId::from(ancestor_session),
-            SessionId::from(child_session),
-        ];
-        let ordered_candidates: Vec<String> = sqlx::query_scalar(
-            "SELECT graph.node_id FROM lash_graph_nodes AS graph
-             WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_graph_nodes AS child
-                   WHERE child.parent_node_id = graph.node_id
-                     AND child.tombstoned = FALSE
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_sessions AS head
-                   WHERE head.leaf_node_id = graph.node_id
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_node_anchors AS anchor
-                   WHERE anchor.node_id = graph.node_id
-               )
-             ORDER BY graph.session_id, graph.generation DESC",
-        )
-        .bind(
-            session_ids
-                .iter()
-                .map(SessionId::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .fetch_all(storage.pool())
-        .await
-        .expect("read witness candidate order");
-        let role = |node_id: &str| {
-            if node_id.ends_with(":ancestor-root") {
-                "ancestor-root"
-            } else if node_id.ends_with(":ancestor-leaf") {
-                "ancestor-leaf"
-            } else if node_id.ends_with(":child-root") {
-                "child-root"
-            } else if node_id.ends_with(":child-leaf") {
-                "child-leaf"
-            } else {
-                panic!("unknown witness node `{node_id}`")
-            }
-        };
-        let candidate_roles = ordered_candidates
-            .iter()
-            .map(|node_id| role(node_id))
-            .collect::<Vec<_>>();
-
-        let before: std::collections::BTreeSet<String> = sqlx::query_scalar(
-            "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
-        )
-        .bind(format!("bulk-order:{nonce}:%"))
-        .fetch_all(storage.pool())
-        .await
-        .expect("read witness nodes before bulk delete")
-        .into_iter()
-        .collect();
-        let mut tx = storage
-            .pool()
-            .begin()
-            .await
-            .expect("begin witness bulk delete");
-        crate::session_factory::delete_process_sessions_tx(
-            &mut tx,
-            &session_ids,
-            lash_core_execution::FleetFormat::current(),
-        )
-        .await
-        .expect("bulk delete witness sessions");
-        tx.commit().await.expect("commit witness bulk delete");
-        let after: std::collections::BTreeSet<String> = sqlx::query_scalar(
-            "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
-        )
-        .bind(format!("bulk-order:{nonce}:%"))
-        .fetch_all(storage.pool())
-        .await
-        .expect("read witness nodes after bulk delete")
-        .into_iter()
-        .collect();
-        let retired = before
-            .difference(&after)
-            .map(|node_id| role(node_id))
-            .collect();
-        (candidate_roles, retired)
-    }
-
-    let (ancestor_first_candidates, ancestor_first_retired) = run_fixture(&storage, true).await;
-    let (child_first_candidates, child_first_retired) = run_fixture(&storage, false).await;
-    assert_eq!(
-        ancestor_first_candidates,
-        ["ancestor-leaf", "child-leaf"],
-        "the first fixture must exercise ancestor-session candidate order"
-    );
-    assert_eq!(
-        child_first_candidates,
-        ["child-leaf", "ancestor-leaf"],
-        "the second fixture must reverse the cross-session candidate order"
-    );
-    assert_eq!(ancestor_first_retired, child_first_retired);
-    assert_eq!(
-        ancestor_first_retired,
-        ["ancestor-leaf", "ancestor-root", "child-leaf", "child-root"]
-            .into_iter()
-            .collect(),
-        "both candidate orders must retire the complete fork lineage"
     );
 }
 
@@ -785,7 +526,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect delete fence storage");
-    let factory = storage.session_store_factory_with_shared_process_registry();
+    let factory = storage.store();
     let session_id = SessionId::from(format!("postgres-delete-fence:{}", uuid::Uuid::new_v4()));
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
@@ -909,12 +650,12 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     let intent = {
         let session_id = session_id.clone();
         let attachment_id = attachment_id.clone();
-        move || lash_core_execution::AttachmentIntent {
+        move || lash_core_execution::AttachmentWrite {
             attachment_id: attachment_id.clone(),
-            session_id: session_id.clone(),
-            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-            intent_at_epoch_ms: 1,
-            owner: None,
+            claim: lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+            )
+            .expect("claim"),
         }
     };
 
@@ -922,8 +663,6 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     // unfenced `arm` corrupts is reached on every odd round instead of once
     // in a blue moon. The fence does not care how wide the window is: a
     // concurrent `arm` waits on the per-digest advisory key either way.
-    crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
-        .store(20, std::sync::atomic::Ordering::Relaxed);
 
     let pass = lash_core_execution::AttachmentRootSet::begin_attachment_sweep(&factory)
         .await
@@ -934,7 +673,6 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             lash_core_execution::AttachmentRootSet::condemn_attachment(
                 &factory,
                 &attachment_id,
-                0,
                 &pass
             )
             .await
@@ -947,8 +685,11 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             let store = std::sync::Arc::clone(&store);
             let intent = intent.clone();
             async move {
-                lash_core_execution::AttachmentManifest::begin_attachment_write(&*store, intent())
-                    .await
+                lash_core_execution::AttachmentManifest::begin_attachment_write(
+                    &*store,
+                    &(intent()),
+                )
+                .await
             }
         });
         if round % 2 == 1 {
@@ -968,10 +709,11 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         .expect("arm");
         let fence = writer.await.expect("join writer").expect("fenced write");
 
-        let contains_ref = lash_core_execution::AttachmentManifest::list_all_refs(&*store)
-            .await
-            .map(|refs| refs.contains(&attachment_id))
-            .expect("contains_ref");
+        let contains_ref =
+            lash_core_execution::AttachmentManifest::attachment_referrers(&*store, &attachment_id)
+                .await
+                .map(|refs| !refs.is_empty())
+                .expect("contains_ref");
         match (armed, fence) {
             // The sweeper won: the delete is armed and the writer parked
             // without recording anything, so no bytes can land inside it.
@@ -1019,13 +761,16 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         .await
         .expect("spare");
         if contains_ref {
-            lash_core_execution::AttachmentManifest::forget(&*store, &session_id, &attachment_id)
-                .await
-                .expect("forget the ref");
+            lash_core_execution::AttachmentManifest::forget_attachment_ref(
+                &*store,
+                &intent().claim.referrer(),
+                &attachment_id,
+            )
+            .await
+            .expect("forget the ref");
         }
     }
 
-    crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS.store(0, std::sync::atomic::Ordering::Relaxed);
     factory
         .delete_session(&session_id)
         .await
@@ -1042,7 +787,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect empty attachment-root database");
-    sqlx::query("DELETE FROM lash_attachment_manifest")
+    sqlx::query("DELETE FROM lash_attachment_referrer_edges")
         .execute(storage.pool())
         .await
         .expect("make the configured Postgres manifest empty");
@@ -1078,17 +823,17 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     )
     .await
     .expect("put shared backend blob");
-    let live_intent = lash_core_execution::AttachmentIntent {
+    let live_intent = lash_core_execution::AttachmentWrite {
         attachment_id: attachment.id.clone(),
-        session_id: request.session_id.clone(),
-        canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
-        intent_at_epoch_ms: 1,
-        owner: None,
+        claim: lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::Session(request.session_id.clone()),
+        )
+        .expect("claim"),
     };
     let lash_core_execution::AttachmentWriteFence::Granted(live_permit) =
         lash_core_execution::AttachmentManifest::begin_attachment_write(
             &*live_store,
-            live_intent.clone(),
+            &(live_intent.clone()),
         )
         .await
         .expect("begin live attachment write")
@@ -1102,9 +847,12 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     )
     .await
     .expect("stamp live attachment upload");
-    lash_core_execution::AttachmentManifest::commit_refs(
+    lash_core_execution::AttachmentManifest::acquire_attachment_refs(
         &*live_store,
-        &request.session_id,
+        &lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::Session((&request.session_id).clone()),
+        )
+        .expect("claim"),
         std::slice::from_ref(&attachment.id),
     )
     .await
@@ -1133,30 +881,6 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     lash_core_execution::AttachmentStore::get(&backend, &attachment.id)
         .await
         .expect("live committed blob survives the refused sweep");
-}
-
-#[derive(Clone, Default)]
-struct AttachmentWarnings(Arc<std::sync::Mutex<Vec<std::collections::BTreeMap<String, String>>>>);
-impl<S: tracing::Subscriber> Layer<S> for AttachmentWarnings {
-    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
-        if *event.metadata().level() != tracing::Level::WARN {
-            return;
-        }
-        #[derive(Default)]
-        struct Fields(std::collections::BTreeMap<String, String>);
-        impl tracing::field::Visit for Fields {
-            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-                self.0.insert(field.name().to_string(), value.to_string());
-            }
-            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-                self.0
-                    .insert(field.name().to_string(), format!("{value:?}"));
-            }
-        }
-        let mut fields = Fields::default();
-        event.record(&mut fields);
-        self.0.lock().unwrap().push(fields.0);
-    }
 }
 
 /// A session over `storage` with a committed head and one next-turn input
@@ -1559,7 +1283,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
-        q if q.starts_with("UPDATE lash_attachment_manifest") => "attachment-manifest-commit",
+        q if q.starts_with("UPDATE lash_attachment_referrer_edges") => "attachment-manifest-commit",
         q if q.starts_with("SELECT admission_json FROM lash_session_roots") => {
             "root-admission-read"
         }
@@ -2065,19 +1789,12 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         .expect("the two parks precede the delete")
         .seq;
 
-    let mut tx = storage
-        .pool()
-        .begin()
-        .await
-        .expect("begin the batch delete");
-    crate::session_factory::delete_process_sessions_tx(
-        &mut tx,
-        &session_ids,
-        lash_core_execution::FleetFormat::current(),
-    )
-    .await
-    .expect("batch delete the parked sessions");
-    tx.commit().await.expect("commit the batch delete");
+    for session in &session_ids {
+        factory
+            .delete_session(session)
+            .await
+            .expect("delete parked session");
+    }
 
     let after = factory
         .turn_park_feed(

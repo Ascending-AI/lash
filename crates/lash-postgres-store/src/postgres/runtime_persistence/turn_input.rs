@@ -496,6 +496,21 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         // hold and the block allocated below is contiguous (FIG-3842).
         super::lock_session_history_mutation_tx(&mut tx, session_id).await?;
         let now = self.clock.timestamp_ms();
+        let ids = batch
+            .drafts()
+            .iter()
+            .flat_map(|draft| draft.input.stored_attachment_ids())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let claim = lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+        )
+        .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
+        crate::artifact_store::lock_referrer_tx(&mut tx, claim.referrer())
+            .await
+            .map_err(store_sqlx_error)?;
+        crate::attachments::acquire_attachment_refs_tx(&mut tx, &claim, &ids, now).await?;
         let sql = crate::turn_ingress::turn_ingress_sql();
         let mut interned = std::collections::BTreeSet::new();
         let mut admitted = Vec::with_capacity(batch.drafts().len());

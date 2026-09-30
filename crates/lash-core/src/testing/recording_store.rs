@@ -47,7 +47,7 @@ pub struct RecordingStore {
     session_admission_count: AtomicUsize,
     admission_hook: Mutex<Option<AdmissionHook>>,
     forged_head: Mutex<Option<crate::SessionHeadMeta>>,
-    attachment_intents: Mutex<Vec<crate::store::AttachmentIntent>>,
+    attachment_writes: Mutex<Vec<crate::store::AttachmentWrite>>,
 }
 
 /// A hook a test runs as the next admission reaches the store.
@@ -73,7 +73,7 @@ impl RecordingStore {
             session_admission_count: AtomicUsize::new(0),
             admission_hook: Mutex::new(None),
             forged_head: Mutex::new(None),
-            attachment_intents: Mutex::new(Vec::new()),
+            attachment_writes: Mutex::new(Vec::new()),
         }
     }
 
@@ -90,8 +90,8 @@ impl RecordingStore {
 
     /// Every attachment write intent this store began, in order: the owner
     /// each write was attributed to when it started.
-    pub fn attachment_intents(&self) -> Vec<crate::store::AttachmentIntent> {
-        self.attachment_intents.lock_recover().clone()
+    pub fn attachment_writes(&self) -> Vec<crate::store::AttachmentWrite> {
+        self.attachment_writes.lock_recover().clone()
     }
 
     /// Answer every later head read with `head` until a commit through this
@@ -310,9 +310,9 @@ impl RuntimeStoreDecorator for RecordingStore {
 
     async fn begin_attachment_write(
         &self,
-        intent: crate::store::AttachmentIntent,
+        intent: &crate::store::AttachmentWrite,
     ) -> Result<crate::store::AttachmentWriteFence, StoreError> {
-        self.attachment_intents.lock_recover().push(intent.clone());
+        self.attachment_writes.lock_recover().push(intent.clone());
         self.inner.begin_attachment_write(intent).await
     }
 
@@ -465,11 +465,18 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
 
     async fn begin_attachment_write(
         &self,
-        intent: crate::store::AttachmentIntent,
+        intent: &crate::store::AttachmentWrite,
     ) -> Result<crate::store::AttachmentWriteFence, StoreError> {
-        self.record(&intent.session_id)
-            .begin_attachment_write(intent)
-            .await
+        let session = match intent.claim.referrer() {
+            crate::ArtifactReferrer::Session(session) => Some(session),
+            crate::ArtifactReferrer::Upload(upload) => Some(upload.session_id()),
+            crate::ArtifactReferrer::Execution(journal) => journal.session_id(),
+            _ => None,
+        };
+        match session {
+            Some(session) => self.record(session).begin_attachment_write(intent).await,
+            None => self.inner.begin_attachment_write(intent).await,
+        }
     }
 
     async fn list_queued_work(

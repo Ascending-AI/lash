@@ -46,7 +46,7 @@ table lash_artifact_referrer_edges
   column referrer_kind text not-null
   primary-key (namespace, artifact_ref, referrer_kind, referrer_id)
   foreign-key (namespace, artifact_ref) references lash_lashlang_artifacts (namespace, artifact_ref) on delete cascade
-table lash_artifact_referrer_fences
+table lash_referrer_fences
   column ended_at_ms bigint not-null
   column referrer_id text not-null
   column referrer_kind text not-null

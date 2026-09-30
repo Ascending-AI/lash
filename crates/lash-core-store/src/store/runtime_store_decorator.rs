@@ -40,15 +40,14 @@ macro_rules! runtime_store_operations {
     ($emit:ident) => {
         $emit! {
             AttachmentManifest {
-                [carried intent] fn begin_attachment_write(&self, intent: AttachmentIntent) -> Result<AttachmentWriteFence, StoreError>;
-                [carried intent] fn complete_attachment_write(&self, intent: &AttachmentIntent, permit: AttachmentWritePermit) -> Result<(), StoreError>;
-                [carried intent] fn abort_attachment_write(&self, intent: &AttachmentIntent, permit: AttachmentWritePermit) -> Result<(), StoreError>;
-                [session] fn commit_refs(&self, session_id: &SessionId, attachment_ids: &[crate::AttachmentId]) -> Result<(), StoreError>;
-                [catalog] fn list_uncommitted(&self, older_than_epoch_ms: u64) -> Result<Vec<AttachmentManifestEntry>, StoreError>;
-                [catalog] fn forget_aged_uncommitted_intents(&self, intent_grace_cutoff_epoch_ms: u64) -> Result<(), StoreError>;
-                [catalog] fn has_live_ref_for_id(&self, attachment_id: &crate::AttachmentId, intent_grace_cutoff_epoch_ms: u64) -> Result<bool, StoreError>;
-                [session] fn forget(&self, session_id: &SessionId, attachment_id: &crate::AttachmentId) -> Result<(), StoreError>;
-                [catalog] fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError>;
+                [catalog] fn begin_attachment_write(&self, write: &AttachmentWrite) -> Result<AttachmentWriteFence, StoreError>;
+                [catalog] fn complete_attachment_write(&self, write: &AttachmentWrite, permit: AttachmentWritePermit) -> Result<(), StoreError>;
+                [catalog] fn abort_attachment_write(&self, write: &AttachmentWrite, permit: AttachmentWritePermit) -> Result<(), StoreError>;
+                [catalog] fn acquire_attachment_refs(&self, claim: &crate::artifact_referrer::ReferrerClaim, attachment_ids: &[crate::AttachmentId]) -> Result<(), StoreError>;
+                [catalog] fn forget_attachment_ref(&self, referrer: &crate::artifact_referrer::ArtifactReferrer, attachment_id: &crate::AttachmentId) -> Result<(), StoreError>;
+                [catalog] fn end_attachment_referrer(&self, referrer: &crate::artifact_referrer::ArtifactReferrer) -> Result<(), StoreError>;
+                [session] fn session_referrer_state(&self, session_id: &SessionId) -> Result<SessionReferrerState, StoreError>;
+                [catalog] fn attachment_referrers(&self, attachment_id: &crate::AttachmentId) -> Result<Vec<crate::artifact_referrer::ArtifactReferrer>, StoreError>;
             }
             SessionCatalogStore {
                 [catalog] fn admit_session(&self, request: &SessionStoreCreateRequest) -> Result<SessionAdmission, StoreError>;
@@ -394,31 +393,18 @@ where
     T: RuntimeStoreDecorator + ?Sized,
     T::Inner: crate::attachments::AttachmentRootSet,
 {
-    fn can_prove_process_owner_death(&self) -> bool {
-        self.inner().can_prove_process_owner_death()
-    }
-
     async fn live_attachment_refs(
         &self,
-        intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, StoreError> {
-        self.inner()
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await
+        self.inner().live_attachment_refs().await
     }
 
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
         self.inner().list_condemnations().await
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner()
-            .has_live_attachment_ref(id, intent_grace_cutoff_epoch_ms)
-            .await
+    async fn has_live_attachment_ref(&self, id: &crate::AttachmentId) -> Result<bool, StoreError> {
+        self.inner().has_live_attachment_ref(id).await
     }
 
     fn fence(&self) -> crate::attachments::AttachmentGcFence {
@@ -441,12 +427,9 @@ where
     async fn condemn_attachment(
         &self,
         id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
-        self.inner()
-            .condemn_attachment(id, intent_grace_cutoff_epoch_ms, generation)
-            .await
+        self.inner().condemn_attachment(id, generation).await
     }
 
     async fn arm_attachment_delete(

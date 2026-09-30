@@ -133,26 +133,7 @@ pub(super) async fn prune_terminal_processes(
         .iter()
         .map(|record| record.id.clone())
         .collect::<Vec<_>>();
-    let session_ids = process_ids
-        .iter()
-        .flat_map(facade_support::process_runtime_session_ids)
-        .collect::<Vec<_>>();
-    let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids, registry.fence.fleet())
-        .await
-        .map_err(|failure| {
-            PluginError::Session(format!(
-                "process session blob reclaim {}; partial report: {:?}",
-                failure.stop, failure.partial
-            ))
-        })?;
-
     let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
     tx.commit().await.map_err(plugin_sqlx_error)?;
-    tracing::debug!(
-        enumerated_blob_count = blob_reclaim.enumerated_blob_count,
-        retained_blob_count = blob_reclaim.retained_blob_count,
-        deleted_blob_count = blob_reclaim.deleted_blob_count,
-        "process prune reclaimed process-session checkpoint blobs"
-    );
     Ok(report)
 }

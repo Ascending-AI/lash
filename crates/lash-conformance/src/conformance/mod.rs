@@ -24,8 +24,7 @@ pub use lash_core::testing::coordinate_tool_provider_with_services;
 mod attachment_adoption;
 pub use attachment_adoption::{
     AttachmentBytesFactory, abandoned_attachment_write_recovery_after_cold_reopen,
-    attachment_condemnation_enumeration_conformance,
-    attachment_owner_identity_round_trips_conformance, cross_owner_attachment_adoption_conformance,
+    attachment_condemnation_enumeration_conformance, cross_session_attachment_adoption_conformance,
 };
 mod attachment_condemnation_recovery;
 pub use attachment_condemnation_recovery::{
@@ -36,7 +35,8 @@ pub use attachment_condemnation_recovery::{
 #[cfg(feature = "lashlang")]
 mod artifact_referrers;
 mod artifact_store;
-mod attachment_owner;
+mod attachment_referrers;
+pub use attachment_referrers::*;
 mod attachment_store;
 mod await_event_cold;
 mod law_backend;
@@ -143,7 +143,7 @@ pub use admitted_head_redrive::*;
 #[cfg(feature = "lashlang")]
 pub use artifact_referrers::*;
 pub use artifact_store::*;
-pub use attachment_owner::*;
+
 pub use attachment_store::*;
 pub use await_event_cold::*;
 pub use batch_sugar::*;

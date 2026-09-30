@@ -3,7 +3,7 @@
 //! The SQLite owner of the artifact family: `artifact_refs` (this backend's
 //! pointer from a namespaced reference to its bytes), `artifact_referrer_edges` (the
 //! exact edges that keep an artifact alive) and
-//! `artifact_referrer_fences` (the permanent publication fence). The bytes
+//! `referrer_fences` (the permanent publication fence). The bytes
 //! themselves live in `blobs`, shared with checkpoint storage, which is why
 //! reclaiming one is conditional on every other rooting relation.
 //!
@@ -852,7 +852,7 @@ mod tests {
             [],
         ).is_err());
         assert!(conn.execute(
-            "INSERT INTO artifact_referrer_fences (referrer_kind, referrer_id, ended_at_ms) VALUES ('host_pin', '', 1)",
+            "INSERT INTO referrer_fences (referrer_kind, referrer_id, ended_at_ms) VALUES ('host_pin', '', 1)",
             [],
         ).is_err());
 

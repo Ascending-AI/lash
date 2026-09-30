@@ -50,7 +50,7 @@ mod rendered_statement_sets_tests;
 mod session_deletion;
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -71,8 +71,7 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
+    AttachmentId, AttachmentManifest, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
@@ -87,7 +86,6 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use conn::SqliteConnection;
 use session_deletion::{
     delete_session_from_catalog, delete_wake_allocation_floors_from_process_registry,
-    warn_process_registry_not_wired,
 };
 
 mod artifact_store;
@@ -210,7 +208,6 @@ pub struct SqliteStore {
     artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
     options: StoreOptions,
     commit_count: AtomicU64,
-    process_registry_attached: bool,
     #[cfg(test)]
     checkpoint_probe_count: AtomicUsize,
     #[cfg(test)]
@@ -246,10 +243,6 @@ impl SqliteStore {
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core_execution::Clock>,
-    /// The durable-core catalog holding the two process-owned sessions of
-    /// each process, which the terminal-retention prune deletes before the
-    /// process row.
-    process_session_catalog: DatabaseLocation,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     /// Effect hosts whose scope fence registration lifts (ADR 0049).
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
@@ -361,22 +354,6 @@ fn stored_data_corrupt(record_kind: &'static str, error: impl std::fmt::Display)
         record_kind,
         message: error.to_string(),
     }
-}
-
-/// Rebuild a stored attachment id, refusing a row that no longer satisfies the
-/// id rule. A malformed stored id is corrupt data, not an id: it must surface
-/// as a read failure rather than travel on as a well-formed-looking value.
-fn attachment_id_from_sql(
-    record_kind: &'static str,
-    field: &'static str,
-    value: String,
-) -> rusqlite::Result<lash_core_execution::AttachmentId> {
-    lash_core_execution::AttachmentId::parse(&value).map_err(|err| {
-        sqlite_conversion_error(stored_data_corrupt(
-            record_kind,
-            format!("{field} is not a valid attachment id: {err}"),
-        ))
-    })
 }
 
 fn u64_from_sql(

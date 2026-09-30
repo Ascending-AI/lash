@@ -230,7 +230,6 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        let attachment_owner = current.id.clone();
         let owner = execution_write_authority.owner_identity();
         let attempt = current.first_started.as_deref().map_or(1, |started| {
             if started.owner.same_incarnation(&owner) {
@@ -322,18 +321,6 @@ impl DurableProcessWorker {
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime =
             Box::pin(self.runtime_for_registration(&process_id, &registration)).await?;
-        let _attachment_owner_binding = matches!(
-            registration.input.as_ref(),
-            ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
-        )
-        .then(|| {
-            runtime
-                .host
-                .core
-                .durability
-                .attachment_store
-                .bind_process_scoped(attachment_owner)
-        });
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator
         {

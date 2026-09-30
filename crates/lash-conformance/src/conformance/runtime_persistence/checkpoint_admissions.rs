@@ -1449,12 +1449,11 @@ pub(super) fn caller_frame_node_id(session_id: &SessionId, material: &str) -> cr
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) fn attachment_intent(id: &str) -> AttachmentIntent {
-    AttachmentIntent {
+pub(super) fn attachment_intent(id: &str) -> AttachmentWrite {
+    crate::AttachmentWrite {
         attachment_id: AttachmentId::parse(id).expect("valid attachment id"),
-        session_id: SessionId::from("root"),
-        canonical_uri: format!("sha256:{id}"),
-        intent_at_epoch_ms: 100,
-        owner: None,
+        claim: crate::conformance::attachment_referrers::claim(crate::ArtifactReferrer::Session(
+            SessionId::from("root"),
+        )),
     }
 }

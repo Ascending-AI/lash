@@ -963,14 +963,8 @@ fn decorator_surface_covers_every_component_trait_method() {
     // decorator forwards them rather than composing them over its own
     // primitive: fence revalidation inside the backend's read, and a
     // backend's own single-statement probes.
-    const FORWARDED_PROVIDED: &[&str] = &[
-        "admit_session_state",
-        "enqueue_queued_work",
-        "has_live_ref_for_id",
-    ];
-    // ADR 0112 §1 keeps `AttachmentManifest` verbatim, default included: a
-    // backend with no aged intents to forget answers the no-op.
-    const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &["forget_aged_uncommitted_intents"];
+    const FORWARDED_PROVIDED: &[&str] = &["admit_session_state", "enqueue_queued_work"];
+    const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &[];
 
     let store_mod = include_str!("mod.rs");
     let mut declared =

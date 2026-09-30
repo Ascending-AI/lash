@@ -60,14 +60,6 @@ fn stub_predicate(column: &str) -> String {
     format!("{column} = ?")
 }
 
-fn turn_owner(column: &str) -> String {
-    format!("{column} = 'turn'")
-}
-
-fn process_owner(column: &str) -> String {
-    format!("{column} = 'process'")
-}
-
 const VOCABULARY: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new("live_process_status", live_status),
     VocabularyTerm::new("retired_process_status", retired_status),
@@ -432,13 +424,7 @@ fn every_owned_statement_renders_for_both_backends() {
         TableLayout::new(&[SchemaTables::new("main", crate::TABLES)]);
     const EVERY_TABLE_ATTACHED: TableLayout =
         TableLayout::new(&[SchemaTables::new("effect_journal", crate::TABLES)]);
-    // Stand-ins for the backends' `AttachmentOwnerKind` expansions, which
-    // live in `lash-core` and cannot be reached from this crate. Both
-    // backends really do register these names; the gate and the
-    // `attachment_owner_sql` unit tests hold the expansions themselves.
-    const OWNER_TERMS: Vocabulary = Vocabulary::new(&[
-        VocabularyTerm::new("turn_attachment_owner", turn_owner),
-        VocabularyTerm::new("process_attachment_owner", process_owner),
+    const STORE_TERMS: Vocabulary = Vocabulary::new(&[
         VocabularyTerm::new("live_process_status", stub_predicate),
         VocabularyTerm::new("retired_process_status", stub_predicate),
         VocabularyTerm::new("nonterminal_process_status", stub_predicate),
@@ -460,9 +446,9 @@ fn every_owned_statement_renders_for_both_backends() {
 
     for statement in crate::all_statements() {
         for dialect in [
-            Dialect::sqlite(EVERY_TABLE_IN_MAIN).with_vocabulary(OWNER_TERMS),
-            Dialect::sqlite(EVERY_TABLE_ATTACHED).with_vocabulary(OWNER_TERMS),
-            Dialect::postgres().with_vocabulary(OWNER_TERMS),
+            Dialect::sqlite(EVERY_TABLE_IN_MAIN).with_vocabulary(STORE_TERMS),
+            Dialect::sqlite(EVERY_TABLE_ATTACHED).with_vocabulary(STORE_TERMS),
+            Dialect::postgres().with_vocabulary(STORE_TERMS),
         ] {
             statement
                 .render(dialect)

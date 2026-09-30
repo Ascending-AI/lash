@@ -79,11 +79,10 @@ pub use attachment_manifest::{
     AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
     AttachmentCondemnationPhase, AttachmentCondemnationProvenance, AttachmentCondemnationRecord,
     AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwner,
-    AttachmentOwnerKind, AttachmentSettlementOutcome, AttachmentSweepGeneration,
+    AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
-    MAX_ATTACHMENT_DELETE_ATTEMPTS, StoredAttachmentCondemnation,
-    decode_attachment_condemnation_record, decode_attachment_owner,
+    MAX_ATTACHMENT_DELETE_ATTEMPTS, SessionReferrerState, StoredAttachmentCondemnation,
+    decode_attachment_condemnation_record,
 };
 pub use catalog::SessionCatalogStore;
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};

@@ -105,7 +105,7 @@ pub enum RuntimePersistenceOp {
         #[serde(default)]
         turn_owned: bool,
     },
-    PutAttachmentIntent {
+    PutAttachmentWrite {
         owner_kind: u8,
         attachment_slot: u8,
         value: u8,
@@ -236,7 +236,7 @@ enum RunShapeCounter {
     UsageConfirmations,
     UsageReceiptReplays,
     AttachmentCommits,
-    AttachmentIntentPuts,
+    AttachmentWritePuts,
     AttachmentReceiptReplays,
     AttachmentSessionReclaims,
     AttachmentGcProbes,
@@ -272,7 +272,7 @@ impl run_shape::Counter for RunShapeCounter {
         Self::UsageConfirmations,
         Self::UsageReceiptReplays,
         Self::AttachmentCommits,
-        Self::AttachmentIntentPuts,
+        Self::AttachmentWritePuts,
         Self::AttachmentReceiptReplays,
         Self::AttachmentSessionReclaims,
         Self::AttachmentGcProbes,
@@ -308,7 +308,7 @@ impl run_shape::Counter for RunShapeCounter {
             Self::UsageConfirmations => "usage_confirmations",
             Self::UsageReceiptReplays => "usage_receipt_replays",
             Self::AttachmentCommits => "attachment_commits",
-            Self::AttachmentIntentPuts => "attachment_intent_puts",
+            Self::AttachmentWritePuts => "attachment_intent_puts",
             Self::AttachmentReceiptReplays => "attachment_receipt_replays",
             Self::AttachmentSessionReclaims => "attachment_session_reclaims",
             Self::AttachmentGcProbes => "attachment_gc_probes",
@@ -611,7 +611,7 @@ async fn apply_operation(
         ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
         ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
         attachment_operation @ (CommitWithAttachmentRefs { .. }
-        | PutAttachmentIntent { .. }
+        | PutAttachmentWrite { .. }
         | ReplayAttachmentCommit { .. }
         | ReclaimAttachmentSession { .. }
         | ProbeAttachmentGc) => {

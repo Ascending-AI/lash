@@ -2,7 +2,7 @@
 //! bytes alive.
 //!
 //! An artifact has one exact edge per (artifact, referrer) pair, and a
-//! referrer is a durable reader. There are seven kinds. Each referrer has one
+//! referrer is a durable reader. There are nine kinds. Each referrer has one
 //! canonical `referrer_id` text, which is what the edge, fence and cleanup
 //! tables store; [`ArtifactReferrer::decode`] refuses every stored pair whose
 //! text is not exactly that rendering, and a store classifies the refusal
@@ -24,12 +24,12 @@ use crate::FrameNodeId;
 use crate::process_identity::StartKey;
 use crate::{ProcessId, SessionId};
 
-/// The seven referrer labels and their canonical id encodings at the 1.0 cut.
+/// The referrer labels and their canonical id encodings at the 1.0 cut.
 #[cfg(not(feature = "synthetic-next"))]
 pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) declares the vocabulary one ahead
-/// and still writes only the seven kinds: no new kind is written before
+/// and still writes only the current kinds: no new kind is written before
 /// finalize (ADR 0115 §5). A label a later build writes reaches N as an
 /// unknown kind, which N refuses typed and never counts as absent.
 #[cfg(feature = "synthetic-next")]
@@ -40,7 +40,7 @@ pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 2;
 /// decode refuses it as `Incompatible(UnknownVocabulary)`.
 pub const SYNTHETIC_NEXT_REFERRER_KIND: &str = "synthetic_next";
 
-/// The seven referrer kinds, as the `referrer_kind` column stores them.
+/// The referrer kinds, as the `referrer_kind` column stores them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ArtifactReferrerKind {
     FrameEnvironment,
@@ -50,11 +50,13 @@ pub enum ArtifactReferrerKind {
     Execution,
     HostPin,
     DefinitionRevision,
+    Session,
+    Upload,
 }
 
 impl ArtifactReferrerKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::FrameEnvironment,
         Self::ProcessRecord,
         Self::SubscriptionRevision,
@@ -62,6 +64,8 @@ impl ArtifactReferrerKind {
         Self::Execution,
         Self::HostPin,
         Self::DefinitionRevision,
+        Self::Session,
+        Self::Upload,
     ];
 
     /// `frame_environment`, `process_record`, `subscription_revision`,
@@ -76,6 +80,8 @@ impl ArtifactReferrerKind {
             Self::Execution => "execution",
             Self::HostPin => "host_pin",
             Self::DefinitionRevision => "definition_revision",
+            Self::Session => "session",
+            Self::Upload => "upload",
         }
     }
 
@@ -98,7 +104,19 @@ impl ArtifactReferrerKind {
     pub const fn is_guarded(self) -> bool {
         matches!(
             self,
-            Self::Execution | Self::Start | Self::SubscriptionRevision | Self::DefinitionRevision
+            Self::Execution
+                | Self::Start
+                | Self::SubscriptionRevision
+                | Self::DefinitionRevision
+                | Self::Upload
+        )
+    }
+    /// Whether this referrer may hold external attachment bytes.
+    #[must_use]
+    pub const fn holds_attachments(self) -> bool {
+        matches!(
+            self,
+            Self::Session | Self::Upload | Self::Execution | Self::ProcessRecord
         )
     }
 }
@@ -122,6 +140,8 @@ pub enum ArtifactReferrer {
     Execution(EffectJournalIdentity),
     HostPin(HostArtifactPin),
     DefinitionRevision(DefinitionRevisionId),
+    Session(SessionId),
+    Upload(UploadReferrerId),
 }
 
 /// Hashes the stored pair: two referrers are equal exactly when their kinds
@@ -145,6 +165,8 @@ impl ArtifactReferrer {
             Self::Execution(_) => ArtifactReferrerKind::Execution,
             Self::HostPin(_) => ArtifactReferrerKind::HostPin,
             Self::DefinitionRevision(_) => ArtifactReferrerKind::DefinitionRevision,
+            Self::Session(_) => ArtifactReferrerKind::Session,
+            Self::Upload(_) => ArtifactReferrerKind::Upload,
         }
     }
 
@@ -166,6 +188,8 @@ impl ArtifactReferrer {
             Self::Execution(journal) => journal.key().to_owned(),
             Self::HostPin(pin) => pin.as_str().to_owned(),
             Self::DefinitionRevision(id) => json_text(&(id.definition_id.as_str(), id.revision)),
+            Self::Session(id) => id.to_string(),
+            Self::Upload(id) => json_text(&(id.session_id.as_str(), id.upload_id.as_str())),
         }
     }
 
@@ -225,6 +249,22 @@ impl ArtifactReferrer {
                 HostArtifactPin::try_from(id.to_owned())
                     .map_err(|error| malformed(kind, error.to_string()))?,
             ),
+            ArtifactReferrerKind::Session => {
+                let session = SessionId::from(id);
+                crate::store::validate_session_id(&session)
+                    .map_err(|error| malformed(kind, error.to_string()))?;
+                Self::Session(session)
+            }
+            ArtifactReferrerKind::Upload => {
+                let (session, upload): (String, String) = json_parse(kind, id)?;
+                let session = SessionId::from(session);
+                crate::store::validate_session_id(&session)
+                    .map_err(|error| malformed(kind, error.to_string()))?;
+                Self::Upload(UploadReferrerId::new(
+                    session,
+                    AttachmentUploadId::try_from(upload)?,
+                ))
+            }
             ArtifactReferrerKind::DefinitionRevision => {
                 let (definition_id, revision): (String, u64) = json_parse(kind, id)?;
                 Self::DefinitionRevision(
@@ -462,6 +502,101 @@ impl fmt::Display for HostArtifactPin {
     }
 }
 
+/// One session upload staging identity and its parent session.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct UploadReferrerId {
+    session_id: SessionId,
+    upload_id: AttachmentUploadId,
+}
+impl UploadReferrerId {
+    #[must_use]
+    pub fn new(session_id: SessionId, upload_id: AttachmentUploadId) -> Self {
+        Self {
+            session_id,
+            upload_id,
+        }
+    }
+    #[must_use]
+    pub fn mint(session_id: SessionId) -> Self {
+        Self::new(session_id, AttachmentUploadId::mint())
+    }
+    #[must_use]
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+    #[must_use]
+    pub fn upload_id(&self) -> &AttachmentUploadId {
+        &self.upload_id
+    }
+}
+
+const UPLOAD_PREFIX: &str = "upload:v1:";
+const UPLOAD_HEX_LEN: usize = 32;
+
+/// An opaque, releasable host referrer. Only [`mint`](Self::mint) makes a new
+/// one. Once released, an upload id is fenced for good: a host that wants to publish
+/// again mints a fresh pin.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AttachmentUploadId(String);
+
+impl AttachmentUploadId {
+    /// `upload:v1:` followed by 32 lowercase hex digits of a random v4 UUID.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self(format!("{UPLOAD_PREFIX}{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for AttachmentUploadId {
+    type Error = ArtifactReferrerError;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        let kind = ArtifactReferrerKind::Upload;
+        if text.is_empty() {
+            return Err(ArtifactReferrerError::EmptyId {
+                kind: kind.as_str(),
+            });
+        }
+        let hex = text.strip_prefix(UPLOAD_PREFIX).ok_or_else(|| {
+            malformed(kind, format!("an upload id starts with `{UPLOAD_PREFIX}`"))
+        })?;
+        let uuid = (hex.len() == UPLOAD_HEX_LEN
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .then(|| uuid::Uuid::parse_str(hex).ok())
+        .flatten()
+        .ok_or_else(|| {
+            malformed(
+                kind,
+                format!("an upload id ends with {UPLOAD_HEX_LEN} lowercase hex digits"),
+            )
+        })?;
+        if uuid.get_version_num() != 4 {
+            return Err(malformed(kind, "an upload id is a v4 UUID"));
+        }
+        Ok(Self(text))
+    }
+}
+
+impl From<AttachmentUploadId> for String {
+    fn from(pin: AttachmentUploadId) -> Self {
+        pin.0
+    }
+}
+
+impl fmt::Display for AttachmentUploadId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// Why a stored or constructed referrer is refused.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -508,7 +643,7 @@ pub struct ReferrerClaim {
 }
 
 impl ReferrerClaim {
-    /// Unguarded kinds: `frame_environment`, `process_record`, `host_pin`.
+    /// Unguarded kinds: `frame_environment`, `process_record`, `host_pin`, `session`.
     ///
     /// # Errors
     ///
@@ -529,7 +664,8 @@ impl ReferrerClaim {
 
     /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
     /// `SubscriptionRevision` with `AwaitSubscriptionRevision`,
-    /// `DefinitionRevision` with `AwaitDefinitionRevision`. Any other pairing,
+    /// `DefinitionRevision` with `AwaitDefinitionRevision`, `Upload` with
+    /// `AwaitUploadExpiry`. Any other pairing,
     /// and every `Ended` plan, is refused.
     ///
     /// # Errors
@@ -553,6 +689,9 @@ impl ReferrerClaim {
             ) | (
                 ArtifactReferrer::DefinitionRevision(_),
                 ArtifactCleanupPlan::AwaitDefinitionRevision { .. }
+            ) | (
+                ArtifactReferrer::Upload(_),
+                ArtifactCleanupPlan::AwaitUploadExpiry { .. }
             )
         );
         if !paired {
@@ -685,6 +824,10 @@ pub enum ArtifactCleanupPlan {
     Ended { carries: Vec<ArtifactCarry> },
     /// Guard of an execution referrer: ends when its journal is settled.
     AwaitJournal,
+    /// Upload staging ends at this store-clock instant or when its session ends.
+    AwaitUploadExpiry { expires_at_ms: u64 },
+    /// A deleted session retains attachments until its graph has retired.
+    AwaitSessionGraphRetired,
     /// Guard of a start referrer (ADR 0113 §3.3).
     AwaitStart {
         #[serde(with = "journal_identity")]
@@ -715,6 +858,8 @@ impl ArtifactCleanupPlan {
         match self {
             Self::Ended { .. } => "ended",
             Self::AwaitJournal => "await_journal",
+            Self::AwaitUploadExpiry { .. } => "await_upload_expiry",
+            Self::AwaitSessionGraphRetired => "await_session_graph_retired",
             Self::AwaitStart { .. } => "await_start",
             Self::AwaitSubscriptionRevision { .. } => "await_subscription_revision",
             Self::AwaitDefinitionRevision { .. } => "await_definition_revision",

@@ -22,9 +22,9 @@ crate::statements! {
     /// `attachment_condemnations` statements both backends issue verbatim.
     pub struct CondemnationStatements @ "attachment_condemnation" {
         /// Every condemnation, as the durable authority reports it.
-        select_all = "SELECT attachment_id, phase, write_token, write_session_id,
-                 delete_attempts, last_delete_error, stall_reason
-             FROM attachment_condemnations";
+        select_all = "SELECT condemnation.attachment_id, condemnation.phase, condemnation.write_token, pending.referrer_kind, pending.referrer_id,
+                 condemnation.delete_attempts, condemnation.last_delete_error, condemnation.stall_reason
+             FROM attachment_condemnations AS condemnation LEFT JOIN attachment_pending_writes AS pending ON pending.write_id = condemnation.write_token";
 
         /// Every sweep-owned row a generation older than `?1` left, as
         /// adoption reads it before claiming each one.
@@ -48,23 +48,11 @@ crate::statements! {
              WHERE attachment_id = ?1";
 
         /// The restoring writer's claim on `?1`, if one exists.
-        select_claim = "SELECT write_token, write_session_id
-             FROM attachment_condemnations
-             WHERE attachment_id = ?1
-               AND phase = 'condemned'
-               AND write_token IS NOT NULL";
-
-        /// Own the condemnation of `?1` with attempt `?2` from session `?3`,
-        /// if it is still unclaimed. Zero rows means a peer won the claim.
-        claim_write = "UPDATE attachment_condemnations
-             SET write_token = ?2, write_session_id = ?3
-             WHERE attachment_id = ?1
-               AND phase = 'condemned'
-               AND write_token IS NULL";
-
-        clear_write_claim = "UPDATE attachment_condemnations
-             SET write_token = NULL, write_session_id = NULL
-             WHERE attachment_id = ?1 AND write_token = ?2";
+        select_claim = "SELECT pending.write_id, pending.referrer_kind, pending.referrer_id
+             FROM attachment_condemnations AS condemnation JOIN attachment_pending_writes AS pending ON pending.write_id = condemnation.write_token
+             WHERE condemnation.attachment_id = ?1 AND condemnation.phase = 'condemned'";
+        claim_write = "UPDATE attachment_condemnations SET write_token = ?2
+             WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL";
 
         /// `Condemned -> Deleting` for `?1` under generation `?2`: the
         /// compare-and-swap that authorizes the physical delete. A writer
@@ -85,13 +73,9 @@ crate::statements! {
         /// `?3` committed the digest anyway: the commitment supersedes the
         /// condemnation, so the row goes rather than reverting to sweep-owned.
         delete_superseded_claim = "DELETE FROM attachment_condemnations
-             WHERE attachment_id = ?1 AND write_token = ?2
-               AND phase = 'condemned'
-               AND EXISTS (
-                   SELECT 1 FROM attachment_manifest
-                    WHERE attachment_id = ?1 AND session_id = ?3
-                      AND committed_at_ms IS NOT NULL
-               )";
+             WHERE attachment_id = ?1 AND write_token = ?2 AND phase = 'condemned'
+               AND (EXISTS (SELECT 1 FROM attachment_referrer_edges WHERE attachment_id = ?1 AND (referrer_kind <> ?3 OR referrer_id <> ?4))
+                 OR EXISTS (SELECT 1 FROM attachment_pending_writes WHERE attachment_id = ?1 AND write_id <> ?2))";
 
         /// A fresh committed root supersedes an unarmed, unclaimed
         /// condemnation of `?1`. A restoring writer's claim is left for that

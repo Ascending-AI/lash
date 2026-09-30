@@ -65,11 +65,7 @@ impl PostgresStoreSet {
                     "postgres:{}",
                     storage.catalog_id()
                 )),
-                session_store_factory: Arc::new(
-                    storage
-                        .session_store_factory_with_shared_process_registry()
-                        .with_clock(Arc::clone(&clock)),
-                ),
+                session_store_factory: Arc::new(storage.store().with_clock(Arc::clone(&clock))),
                 process_registry: Arc::new(
                     storage
                         .process_registry_with_wake_delivery_config(wake_delivery)
@@ -134,6 +130,9 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     }
 
     fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
+        PostgresStoreSet::session_store_factory(self)
+    }
+    fn attachment_manifest(&self) -> Arc<dyn lash_core_execution::AttachmentManifest> {
         PostgresStoreSet::session_store_factory(self)
     }
 

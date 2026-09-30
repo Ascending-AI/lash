@@ -36,16 +36,14 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         .await
         .expect("create session store");
     let attachment_id = crate::AttachmentId::parse("c".repeat(64)).expect("valid attachment id");
-    let intent = || crate::AttachmentIntent {
+    let intent = || crate::AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: request.session_id.clone(),
-        canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-        intent_at_epoch_ms: 1,
-        owner: None,
+        claim: crate::conformance::attachment_referrers::claim(
+            crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("fence-writer")),
+        ),
     };
     // Nothing is aged out at cutoff 0, so a recorded intent is unambiguously a
     // root and a forgotten one leaves no row at all.
-    const ROOT_CUTOFF: u64 = 0;
     let pass = crate::AttachmentRootSet::begin_attachment_sweep(&*factory)
         .await
         .expect("open an attachment sweep pass");
@@ -56,9 +54,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         peer.generation() > pass.generation(),
         "every pass mints a newer generation"
     );
-    let condemn = || {
-        crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF, &pass)
-    };
+    let condemn = || crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, &pass);
     let arm = || crate::AttachmentRootSet::arm_attachment_delete(&*factory, &attachment_id, &pass);
     let settle = |settlement| {
         crate::AttachmentRootSet::settle_attachment_condemnation(
@@ -70,31 +66,40 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     };
 
     // A recorded intent is a root: `Free -> Condemned` refuses.
-    assert!(
-        matches!(
-            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
-                .await
-                .expect("first fenced write"),
-            crate::AttachmentWriteFence::Granted(_)
-        ),
-        "a write against a free digest must be granted"
-    );
+    let first_write = intent();
+    let crate::AttachmentWriteFence::Granted(first_permit) = store
+        .store()
+        .begin_attachment_write(&first_write)
+        .await
+        .expect("begin")
+    else {
+        panic!("granted")
+    };
     assert_eq!(
         condemn().await.expect("condemn a rooted digest"),
         crate::AttachmentCondemnation::RootPresent,
         "an uncommitted intent is a root: the condemn CAS must refuse"
     );
 
-    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
+    store
+        .store()
+        .abort_attachment_write(&first_write, first_permit)
         .await
-        .expect("forget the ref");
+        .expect("abort pending root");
+    crate::AttachmentManifest::forget_attachment_ref(
+        store.store().as_ref(),
+        &crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("fence-writer")),
+        &attachment_id,
+    )
+    .await
+    .expect("forget the ref");
     assert_eq!(
         condemn().await.expect("condemn"),
         crate::AttachmentCondemnation::Condemned,
         "a rootless digest must be condemnable"
     );
     assert_eq!(
-        crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF, &peer)
+        crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, &peer)
             .await
             .expect("peer condemn"),
         crate::AttachmentCondemnation::AlreadyCondemned,
@@ -135,7 +140,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     let restoring_intent = intent();
     let restoring_permit = match crate::AttachmentManifest::begin_attachment_write(
         store.store().as_ref(),
-        restoring_intent.clone(),
+        &(restoring_intent.clone()),
     )
     .await
     .expect("write against a condemned digest")
@@ -160,9 +165,13 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
 
     // `Condemned -> Deleting`: a writer now parks instead of putting bytes into
     // an in-flight delete, until the delete settles.
-    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
-        .await
-        .expect("forget the ref again");
+    crate::AttachmentManifest::forget_attachment_ref(
+        store.store().as_ref(),
+        &crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("fence-writer")),
+        &attachment_id,
+    )
+    .await
+    .expect("forget the ref again");
     assert_eq!(
         condemn().await.expect("re-condemn"),
         crate::AttachmentCondemnation::Condemned
@@ -178,7 +187,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     );
     assert!(
         matches!(
-            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
+            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), &(intent()))
                 .await
                 .expect("write against an armed digest"),
             crate::AttachmentWriteFence::ReclamationInFlight
@@ -186,10 +195,12 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "a writer must park while the physical delete is in flight"
     );
     assert!(
-        !crate::AttachmentManifest::list_all_refs(store.store().as_ref())
+        store
+            .store()
+            .attachment_referrers(&attachment_id)
             .await
-            .map(|refs| refs.contains(&attachment_id))
-            .expect("contains_ref"),
+            .expect("refs")
+            .is_empty(),
         "a parked writer must record no intent"
     );
 
@@ -208,7 +219,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     let crate::AttachmentWriteFence::Granted(reclaiming_permit) =
         crate::AttachmentManifest::begin_attachment_write(
             store.store().as_ref(),
-            reclaiming_intent.clone(),
+            &(reclaiming_intent.clone()),
         )
         .await
         .expect("write after the failed delete")
@@ -235,9 +246,13 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // back at `Free`, but the digest is no longer adoptable: condemnation
     // cleared its manifest evidence under the same fence, so only a fresh
     // completed write can make it adoptable again.
-    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
-        .await
-        .expect("forget the ref before the successful-delete path");
+    crate::AttachmentManifest::forget_attachment_ref(
+        store.store().as_ref(),
+        &crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("fence-writer")),
+        &attachment_id,
+    )
+    .await
+    .expect("forget the ref before the successful-delete path");
     assert_eq!(
         condemn().await.expect("condemn before successful delete"),
         crate::AttachmentCondemnation::Condemned
@@ -267,9 +282,12 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         crate::AttachmentSettlementOutcome::NotOwned,
         "retiring is idempotent: a row already dropped is a no-op"
     );
-    let adoption_error = crate::AttachmentManifest::commit_refs(
+    let adoption_error = crate::AttachmentManifest::acquire_attachment_refs(
         store.store().as_ref(),
-        &request.session_id,
+        &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
+            request.session_id.clone(),
+        ))
+        .expect("claim"),
         std::slice::from_ref(&attachment_id),
     )
     .await
@@ -283,7 +301,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     let crate::AttachmentWriteFence::Granted(restored_permit) =
         crate::AttachmentManifest::begin_attachment_write(
             store.store().as_ref(),
-            restored_intent.clone(),
+            &(restored_intent.clone()),
         )
         .await
         .expect("a retired digest grants the next writer")
@@ -297,9 +315,12 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     )
     .await
     .expect("stamp the restoring upload");
-    crate::AttachmentManifest::commit_refs(
+    crate::AttachmentManifest::acquire_attachment_refs(
         store.store().as_ref(),
-        &request.session_id,
+        &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::Session(
+            request.session_id.clone(),
+        ))
+        .expect("claim"),
         std::slice::from_ref(&attachment_id),
     )
     .await

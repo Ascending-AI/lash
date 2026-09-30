@@ -101,17 +101,17 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             turn_owned: true,
         },
         ReplayAttachmentCommit { selection: 1 },
-        PutAttachmentIntent {
+        PutAttachmentWrite {
             owner_kind: 1,
             attachment_slot: 6,
             value: 254,
         },
-        PutAttachmentIntent {
+        PutAttachmentWrite {
             owner_kind: 2,
             attachment_slot: 7,
             value: 255,
         },
-        PutAttachmentIntent {
+        PutAttachmentWrite {
             owner_kind: 0,
             attachment_slot: 5,
             value: 253,
@@ -275,7 +275,7 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
                 new_session, session_selection, attachment_slot, value, turn_owned,
             }),
         3 => (0_u8..3, 0_u8..8, any::<u8>())
-            .prop_map(|(owner_kind, attachment_slot, value)| PutAttachmentIntent {
+            .prop_map(|(owner_kind, attachment_slot, value)| PutAttachmentWrite {
                 owner_kind, attachment_slot, value,
             }),
         2 => any::<u8>().prop_map(|selection| ReplayAttachmentCommit { selection }),

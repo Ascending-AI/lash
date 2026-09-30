@@ -3,7 +3,7 @@
 //! row once, and a delete that keeps failing stalls typed.
 use super::attachment_adoption::{
     AttachmentBytesFactory, FaultingAttachmentStore, create, image_meta, open_pass,
-    record_completed_write, write_intent,
+    record_completed_write, session_write,
 };
 use crate::conformance::DeploymentViewExt as _;
 use lash_core::facade_support::reclaim_unreferenced_attachments;
@@ -53,27 +53,18 @@ impl InterruptedSweepRoot {
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for InterruptedSweepRoot {
-    fn can_prove_process_owner_death(&self) -> bool {
-        self.inner.can_prove_process_owner_death()
-    }
-
     async fn live_attachment_refs(
         &self,
-        cutoff: u64,
     ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
-        self.inner.live_attachment_refs(cutoff).await
+        self.inner.live_attachment_refs().await
     }
 
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
         self.inner.list_condemnations().await
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        cutoff: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner.has_live_attachment_ref(id, cutoff).await
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError> {
+        self.inner.has_live_attachment_ref(id).await
     }
 
     fn fence(&self) -> AttachmentGcFence {
@@ -94,13 +85,9 @@ impl AttachmentRootSet for InterruptedSweepRoot {
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
-        cutoff: u64,
         generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
-        let outcome = self
-            .inner
-            .condemn_attachment(id, cutoff, generation)
-            .await?;
+        let outcome = self.inner.condemn_attachment(id, generation).await?;
         if outcome == AttachmentCondemnation::Condemned {
             self.stop_if(SweepCrashPoint::AfterCondemn).await;
         }
@@ -407,9 +394,7 @@ pub async fn concurrent_adoption_deletes_once(
             .await
             .unwrap();
         assert_eq!(
-            f.condemn_attachment(&reference.id, u64::MAX, &dead)
-                .await
-                .unwrap(),
+            f.condemn_attachment(&reference.id, &dead).await.unwrap(),
             AttachmentCondemnation::Condemned
         );
         if index % 2 == 1 {
@@ -543,7 +528,7 @@ pub async fn persistently_failing_delete_stalls_typed(
     );
     // A writer can still restore the digest: its successful put clears the
     // stalled condemnation, and the digest is adoptable again.
-    record_completed_write(&store, &write_intent(&session_id, &reference.id)).await;
+    record_completed_write(&store, &session_write(&session_id, &reference.id)).await;
     assert!(f.list_condemnations().await.unwrap().is_empty());
 
     // A failure retrying cannot change stalls on the first attempt.

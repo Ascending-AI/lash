@@ -142,7 +142,6 @@ impl SqliteStore {
             None,
         )
         .await?;
-        warn_process_registry_not_wired(constructor);
         Ok(store)
     }
 
@@ -167,7 +166,6 @@ impl SqliteStore {
             Some(injector),
         )
         .await?;
-        warn_process_registry_not_wired(constructor);
         Ok(store)
     }
 
@@ -197,7 +195,6 @@ impl SqliteStore {
         )
         .await
         .map_err(sqlite_async_error)?;
-        warn_process_registry_not_wired("SqliteStore::open_with_fleet_writable_range_for_testing");
         Ok(store)
     }
 
@@ -233,12 +230,9 @@ impl SqliteStore {
             writable,
         )
         .await?;
-        let process_registry_attached = if let Some(process_registry) = process_registry {
+        if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;
-            true
-        } else {
-            false
-        };
+        }
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
             readers.push(SqliteConnection::open_readonly(core.target()).await?);
@@ -258,7 +252,6 @@ impl SqliteStore {
             artifact_publication_pause: Mutex::new(None),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
-            process_registry_attached,
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),
             #[cfg(test)]
@@ -290,7 +283,6 @@ impl SqliteStore {
             artifact_publication_pause: Mutex::new(None),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
-            process_registry_attached: false,
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),
             #[cfg(test)]

@@ -130,10 +130,14 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
     let session = Arc::clone(&factory);
     let attachments: Arc<dyn AttachmentStore> = backend.attachment_store();
 
-    let held = SessionAttachmentStore::new(Arc::clone(&attachments), session.clone(), &session_id)
-        .put(b"held by a committed turn".to_vec(), octet_meta())
-        .await
-        .expect("session put records an intent and stores the bytes");
+    let held = SessionAttachmentStore::new(
+        Arc::clone(&attachments),
+        session.clone(),
+        lash_core_execution::RuntimeOwner::Session((&session_id).clone().into()),
+    )
+    .put(b"held by a committed turn".to_vec(), octet_meta())
+    .await
+    .expect("session put records an intent and stores the bytes");
     let mut commit = lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
         &state_referencing(&session_id, &held),
         &[],

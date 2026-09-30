@@ -146,14 +146,13 @@ async fn postgres_snapshot(url: &str, session: &str) -> Result<Snapshot> {
     let modules = sqlx::query_scalar("SELECT artifact_ref FROM lash_lashlang_artifacts ORDER BY 1")
         .fetch_all(&mut pg)
         .await?;
-    let fences = sqlx::query(
-        "SELECT referrer_kind, referrer_id FROM lash_artifact_referrer_fences ORDER BY 1, 2",
-    )
-    .fetch_all(&mut pg)
-    .await?
-    .iter()
-    .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
-    .collect::<Result<_, sqlx::Error>>()?;
+    let fences =
+        sqlx::query("SELECT referrer_kind, referrer_id FROM lash_referrer_fences ORDER BY 1, 2")
+            .fetch_all(&mut pg)
+            .await?
+            .iter()
+            .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
+            .collect::<Result<_, sqlx::Error>>()?;
     let cleanups = sqlx::query(
         "SELECT referrer_kind, referrer_id, obligation_state, obligation_stall_reason
          FROM lash_artifact_cleanup_obligations ORDER BY 1, 2",
@@ -204,7 +203,7 @@ fn sqlite_snapshot(path: &Path, session: &str) -> Result<Snapshot> {
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let fences = db
-        .prepare("SELECT referrer_kind, referrer_id FROM artifact_referrer_fences ORDER BY 1, 2")?
+        .prepare("SELECT referrer_kind, referrer_id FROM referrer_fences ORDER BY 1, 2")?
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
     let cleanups = db

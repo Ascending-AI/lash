@@ -920,7 +920,7 @@ mod artifact_cleanup_tests {
             .write(|tx| {
                 tx.execute_batch(
                     "CREATE TRIGGER fig_4180_fence_fault BEFORE INSERT \
-                     ON artifact_referrer_fences \
+                     ON referrer_fences \
                      BEGIN SELECT RAISE(ABORT, 'fig-4180 fence fault'); END",
                 )
             })

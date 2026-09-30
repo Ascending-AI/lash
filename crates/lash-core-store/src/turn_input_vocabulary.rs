@@ -1259,6 +1259,21 @@ turn_input_wire!(TurnInputStateKind, pub, as_str, from_wire_str {
 });
 
 impl TurnInput {
+    /// Stored attachments this input carries, sorted and deduplicated.
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                InputItem::Text { .. } => None,
+                InputItem::Attachment { source } => {
+                    source.stored_ref().map(|reference| reference.id.clone())
+                }
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// The part of this input a durable acceptance row can carry.
     ///
     /// The live `TurnContext` (a child turn's process correlation and

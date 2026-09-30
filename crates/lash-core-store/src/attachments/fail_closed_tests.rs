@@ -5,20 +5,13 @@ struct UnsupportedAttachmentRoots;
 
 #[async_trait::async_trait]
 impl AttachmentRootSet for UnsupportedAttachmentRoots {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "live_attachment_refs",
         })
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
+    async fn has_live_attachment_ref(&self, _id: &AttachmentId) -> Result<bool, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "has_live_attachment_ref",
         })

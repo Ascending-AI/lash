@@ -100,13 +100,3 @@ pub(crate) async fn ensure_session_not_pinned_tx(
     }
     Ok(())
 }
-
-pub(crate) async fn ensure_sessions_not_pinned_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_ids: &[SessionId],
-) -> Result<(), StoreError> {
-    for session_id in session_ids {
-        ensure_session_not_pinned_tx(tx, session_id).await?;
-    }
-    Ok(())
-}

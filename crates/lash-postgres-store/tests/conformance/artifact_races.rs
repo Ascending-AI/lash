@@ -81,7 +81,7 @@ async fn assert_no_frame_commit_rows(storage: &PostgresStorage, session_id: &Ses
         .expect("count refused commit rows");
         assert_eq!(count, admitted, "refused commit wrote {table}");
     }
-    let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_artifact_referrer_fences")
+    let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_referrer_fences")
         .fetch_one(storage.pool())
         .await
         .expect("count fences");
@@ -122,7 +122,7 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         .expect("commit first-turn frame switch");
 
     let fenced: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+        "SELECT EXISTS (SELECT 1 FROM lash_referrer_fences
          WHERE referrer_kind = $1 AND referrer_id = $2)",
     )
     .bind(ended_referrer.kind().as_str())
@@ -288,7 +288,7 @@ async fn frame_end(
 ) -> (bool, Option<ArtifactCleanup>) {
     let referrer = ArtifactReferrer::FrameEnvironment(frame.clone());
     let fenced: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+        "SELECT EXISTS (SELECT 1 FROM lash_referrer_fences
          WHERE referrer_kind = $1 AND referrer_id = $2)",
     )
     .bind(referrer.kind().as_str())

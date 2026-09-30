@@ -345,6 +345,11 @@ pub enum StoreError {
         "attachment `{digest}` has no completed upload in this store; put the bytes before committing a reference to them"
     )]
     UnknownAttachment { digest: crate::AttachmentId },
+    #[error("referrer kind `{kind}` cannot hold {store} bytes")]
+    ReferrerKindRefused {
+        kind: crate::artifact_referrer::ArtifactReferrerKind,
+        store: &'static str,
+    },
     /// An attachment write permit was settled after its attempt had been
     /// superseded by a newer `begin_attachment_write` for the same row. A stale
     /// attempt certifies no upload: nothing was stamped.
@@ -887,6 +892,7 @@ impl StoreError {
             | Self::TurnCancelClosureAuthorizationMismatch { .. }
             | Self::TurnCancelClosureLifecyclePinned { .. }
             | Self::TurnCancelClosureScopeRetired { .. }
+            | Self::ReferrerKindRefused { .. }
             | Self::UnknownAttachment { .. }
             | Self::StaleWritePermit { .. }
             | Self::RuntimeTurnCommitConflict { .. }
@@ -999,6 +1005,7 @@ impl StoreError {
             }
             Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
             Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
+            Self::ReferrerKindRefused { .. } => "ReferrerKindRefused",
             Self::UnknownAttachment { .. } => "UnknownAttachment",
             Self::StaleWritePermit { .. } => "StaleWritePermit",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",

@@ -108,7 +108,7 @@ where
     session_store_factory_rejects_writes_after_delete(make()).await;
     let (factory, attachments) = make_attached();
     attachment_reference_lifecycle_with_store(factory, attachments).await;
-    session_store_factory_attachment_large_cutoff_conformance(make()).await;
+    session_store_factory_pending_write_is_a_root(make()).await;
     attachment_fence::session_store_factory_attachment_gc_fence_state_machine(make()).await;
     let (factory, attachments) = make_attached();
     session_store_factory_fenced_sweep_collects_and_records_reclaimed(factory, attachments).await;
@@ -695,248 +695,32 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn process_prune_deletes_owned_session_stores(
+pub async fn ended_process_record_has_no_attachment_edges(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
-    let process = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
+    let _ = (registry, effect_host);
+    let store: Arc<dyn crate::RuntimeStore> = factory.clone();
+    let referrer =
+        crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("pruned-record"));
+    let id = crate::AttachmentId::parse("pruned-record-attachment").expect("id");
+    let write = crate::AttachmentWrite {
+        attachment_id: id.clone(),
+        claim: crate::ReferrerClaim::unguarded(referrer.clone()).expect("claim"),
+    };
+    crate::conformance::helpers::record_completed_attachment_write(&store, write).await;
+    store
+        .end_attachment_referrer(&referrer)
         .await
-        .expect("register process with owned stores");
-    let process_id = process.id.clone();
-
-    let mut requests = Vec::new();
-    for (index, session_id) in crate::process_runtime_session_ids(&process_id)
-        .into_iter()
-        .enumerate()
-    {
-        let request = crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: crate::SessionRelation::default(),
-            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
-        };
-        let store = factory
-            .admit_view(&request)
-            .await
-            .expect("create process-owned session store");
-        crate::conformance::helpers::record_completed_attachment_write(
-            store.store(),
-            crate::AttachmentIntent {
-                attachment_id: crate::AttachmentId::parse(format!(
-                    "process-owned-session-intent-{index}"
-                ))
-                .expect("valid attachment id"),
-                session_id,
-                canonical_uri: format!("lash-attachment://process-owned-{index}"),
-                intent_at_epoch_ms: 1,
-                owner: Some(crate::AttachmentOwner::Process {
-                    process_id: process_id.clone(),
-                }),
-            },
-        )
-        .await;
-        requests.push(request);
-    }
-
-    let pinned_request = &requests[0];
-    let pinned_store = factory
-        .live_view_for(pinned_request)
-        .await
-        .expect("open process-owned session for closure pin")
-        .expect("process-owned session exists");
-    let lease = pinned_store
-        .store()
-        .seal_drive_epoch_for_test(
-            &pinned_request.session_id,
-            &crate::LeaseOwnerIdentity::opaque(
-                "process-prune-conformance-owner",
-                "process-prune-conformance-owner:incarnation",
-            ),
-            "process-prune-conformance-executor",
-            60_000,
-        )
-        .await
-        .expect("claim process-owned closure lane")
-        .acquired()
-        .expect("process-owned closure lane is free");
-    // The substrate's effect host owns turn cancellation: its binding names
-    // the authority and its resolver mints the closure's keys.
-    let authority = crate::TurnCancellationAuthority::new(
-        effect_host.turn_control_binding_id(),
-        Arc::clone(&effect_host) as Arc<dyn crate::AwaitEventResolver>,
-    );
-    let physical_scope = crate::ExecutionScope::process(process_id.clone());
-    let binding_id =
-        crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)
-            .expect("bind process cancellation scope");
-    pinned_store
-        .validate_turn_cancellation_binding(&lease, &binding_id, &physical_scope)
-        .await
-        .expect("bind process-owned cancellation authority");
-    let address = crate::TurnAddress::new(
-        &pinned_request.session_id,
-        crate::TurnId::from("process-prune-closure-turn"),
-    );
-    let resolver = authority.resolver();
-    let authorization = crate::TurnCancelClosureAuthorization::new(
-        address.clone(),
-        binding_id,
-        physical_scope,
-        resolver
-            .await_event_key(
-                &address.execution_scope(),
-                crate::AwaitEventWaitIdentity::TurnCancelGate,
-            )
-            .await
-            .expect("mint process-owned cancellation key"),
-        resolver
-            .await_event_key(
-                &address.execution_scope(),
-                crate::AwaitEventWaitIdentity::TurnCancelEscalation,
-            )
-            .await
-            .expect("mint process-owned escalation key"),
-        resolver
-            .await_event_key(
-                &address.execution_scope(),
-                crate::AwaitEventWaitIdentity::TurnTerminal,
-            )
-            .await
-            .expect("mint process-owned terminal key"),
-        crate::TurnCancelClosureProposal::CompletionSealed,
-        crate::TurnCancelIntentSnapshot::Absent,
-        &lease,
-    )
-    .expect("construct process-owned closure authorization");
-    pinned_store
-        .authorize_turn_cancel_closure(&lease, &authorization)
-        .await
-        .expect("persist process-owned closure authorization");
-
-    let terminal = registry
-        .complete_process(
-            &process_id,
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            crate::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete process with owned stores");
-    let refusal = registry
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect_err("a process-scoped closure pin must win the prune race");
-    assert!(matches!(
-        refusal,
-        crate::PluginError::Session(ref message)
-            if message.contains(pinned_request.session_id.as_str())
-                && message.contains("pending turn cancellation closure pin(s)")
-    ));
+        .expect("end record");
     assert!(
-        registry
-            .get_process(&process_id)
+        store
+            .attachment_referrers(&id)
             .await
-            .expect("read process after refused prune")
-            .is_some(),
-        "the refused prune must retain the terminal process"
+            .expect("refs")
+            .is_empty()
     );
-    let settlement = authority
-        .settle_authorized_closure(&authorization)
-        .await
-        .expect("settle process-owned closure before consumption");
-    turn_cancel::commit_teardown(
-        pinned_store.store().as_ref(),
-        &lease,
-        &address.turn_id,
-        &crate::TurnCancelIntentSnapshot::Absent,
-        &settlement,
-    )
-    .await
-    .expect("consume process-owned closure authorization");
-    let report = registry
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune process with owned stores");
-    assert_eq!(report.pruned_processes, 1);
-
-    for request in requests {
-        assert!(
-            factory
-                .live_view_for(&request)
-                .await
-                .expect("probe pruned process-owned store")
-                .is_none(),
-            "process prune left session store {} behind",
-            request.session_id
-        );
-        // A pruned process-owned id joins the permanent deleted set exactly like
-        // a host-facing one. The set is the reclaim frontier a later delete
-        // reads to drain tombstones orphaned under a gone owner, so an id the
-        // prune omitted would strand rows forever.
-        assert!(
-            factory
-                .is_deleted(&request.session_id)
-                .await
-                .expect("probe the deleted set for a pruned process session"),
-            "process prune must record session {} as deleted",
-            request.session_id
-        );
-        let reuse_error = match factory.admit_view(&request).await {
-            Ok(_) => panic!(
-                "a pruned process-owned session id must stay unbindable: {}",
-                request.session_id
-            ),
-            Err(error) => error,
-        };
-        assert_session_id_was_used_and_deleted(reuse_error, &request.session_id);
-    }
-
-    // FIG-3611 L4: the pruned sessions stay unbindable, and that never blocks
-    // the next process: a minted id is never reused, so the process started
-    // after the prune derives sessions of its own and creates them.
-    let next = registry
-        .register_process(crate::ProcessRegistration::new(
-            crate::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
-        .await
-        .expect("register the next process");
-    assert_ne!(next.id, process_id, "a minted id is never reused");
-    for session_id in crate::process_runtime_session_ids(&next.id) {
-        factory
-            .admit_view(&crate::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id,
-                relation: crate::SessionRelation::default(),
-                config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
-            })
-            .await
-            .expect("the next process creates its own sessions");
-    }
 }
 
 /// Exercise the shared-bytes attachment contract: identical bytes across
@@ -951,154 +735,11 @@ pub async fn attachment_reference_lifecycle_with_store(
     factory: Arc<dyn crate::DeploymentStore>,
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
-    let a_request = session_store_request(
-        &SessionId::from("attachment-owner-a"),
-        "attachment-model",
-        crate::SessionRelation::Root,
-    );
-    let b_request = session_store_request(
-        &SessionId::from("attachment-owner-b"),
-        "attachment-model",
-        crate::SessionRelation::Root,
-    );
-    let a_manifest = factory
-        .admit_view(&a_request)
-        .await
-        .expect("create attachment owner a");
-    let b_manifest = factory
-        .admit_view(&b_request)
-        .await
-        .expect("create attachment owner b");
-    let session_a = crate::SessionAttachmentStore::new(
-        backend.clone(),
-        Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
-                a_manifest.store(),
-            )),
-        ),
-        a_request.session_id.clone(),
-    );
-    let session_b = crate::SessionAttachmentStore::new(
-        backend.clone(),
-        Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
-                b_manifest.store(),
-            )),
-        ),
-        b_request.session_id.clone(),
-    );
-    let png = AttachmentCreateMeta::new(
-        MediaType::parse("image/png").unwrap(),
-        Some(AttachmentTypeMetadata::image(Some(10), Some(20))),
-        Some("a.png".to_string()),
-    );
-    let jpeg = AttachmentCreateMeta::new(
-        MediaType::parse("image/jpeg").unwrap(),
-        Some(AttachmentTypeMetadata::image(Some(30), Some(40))),
-        Some("b.jpg".to_string()),
-    );
-
-    // Session A writes and commits the bytes.
-    let a_ref = session_a
-        .put(vec![6, 2, 6, 4], png)
-        .await
-        .expect("put a attachment");
-    a_manifest
-        .commit_refs(std::slice::from_ref(&a_ref.id))
-        .await
-        .expect("commit a's attachment ref");
-
-    // FIG-653: the reference layer owns liveness, not read authorization.
-    assert_eq!(
-        session_b
-            .get(&a_ref.id)
-            .await
-            .expect("cross-session content read")
-            .bytes,
-        vec![6, 2, 6, 4]
-    );
-    backend
-        .get(&a_ref.id)
-        .await
-        .expect("backend physically holds the shared blob");
-
-    // Session B writes identical bytes: ONE physical blob, divergent reference
-    // presentation. Commit B's ref too, so the multi-session GC narrative below
-    // rests on stable committed roots rather than the age-only fallback used by
-    // these deliberately ownerless facade puts.
-    let b_ref = session_b
-        .put(vec![6, 2, 6, 4], jpeg)
-        .await
-        .expect("put identical bytes for b");
-    assert_eq!(a_ref.id, b_ref.id, "identical bytes share one content id");
-    assert_eq!(a_ref.media_type.as_str(), "image/png");
-    assert_eq!(b_ref.media_type.as_str(), "image/jpeg");
-    assert_eq!(a_ref.label.as_deref(), Some("a.png"));
-    assert_eq!(b_ref.label.as_deref(), Some("b.jpg"));
-    session_b
-        .get(&b_ref.id)
-        .await
-        .expect("b resolves the blob it now references");
-    b_manifest
-        .commit_refs(std::slice::from_ref(&b_ref.id))
-        .await
-        .expect("commit b's attachment ref");
-
-    // Sweep: A's and B's committed refs both count as live roots, so the shared
-    // blob survives.
-    let report = crate::reclaim_unreferenced_attachments(
-        &*factory,
-        &*backend,
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
-        },
+    crate::conformance::attachment_adoption::cross_session_attachment_adoption_conformance(
+        factory,
+        Arc::new(move || backend.clone()),
     )
-    .await
-    .expect("sweep with two live refs");
-    assert_eq!(
-        report.reclaimed_count, 0,
-        "a blob referenced by any session is never swept, got {report:?}"
-    );
-    backend
-        .get(&a_ref.id)
-        .await
-        .expect("blob survives while referenced");
-
-    // Session A releases its ref: B's ref still holds the blob.
-    session_a.delete(&a_ref.id).await.expect("a releases ref");
-    let report = crate::reclaim_unreferenced_attachments(
-        &*factory,
-        &*backend,
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await
-    .expect("sweep with one remaining ref");
-    assert_eq!(report.reclaimed_count, 0, "b still references the blob");
-
-    // Both sessions release: now unreferenced, GC collects the single blob.
-    session_b.delete(&b_ref.id).await.expect("b releases ref");
-    let report = crate::reclaim_unreferenced_attachments(
-        &*factory,
-        &*backend,
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
-    )
-    .await
-    .expect("sweep with no refs");
-    assert_eq!(report.reclaimed_count, 1, "unreferenced blob is reclaimed");
-    assert!(
-        matches!(
-            backend.get(&a_ref.id).await,
-            Err(AttachmentStoreError::NotFound(_))
-        ),
-        "reclaimed blob bytes are gone"
-    );
+    .await;
 }
 
 fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStoreCreateRequest) {
@@ -1239,22 +880,6 @@ async fn session_store_factory_rejects_writes_after_delete(
             .await,
         &request.session_id,
         "queued work",
-    );
-    assert_deleted_write(
-        crate::AttachmentManifest::begin_attachment_write(
-            stale.store().as_ref(),
-            crate::AttachmentIntent {
-                attachment_id: crate::AttachmentId::parse("write-after-delete-attachment")
-                    .expect("valid attachment id"),
-                session_id: request.session_id.clone(),
-                canonical_uri: "lash-attachment://write-after-delete".to_string(),
-                intent_at_epoch_ms: 1,
-                owner: None,
-            },
-        )
-        .await,
-        &request.session_id,
-        "attachment intent",
     );
     assert_deleted_write(
         stale
@@ -2229,13 +1854,12 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
             store.store().as_ref(),
-            crate::AttachmentIntent {
+            &(crate::AttachmentWrite {
                 attachment_id: orphan.id.clone(),
-                session_id: request.session_id.clone(),
-                canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
-                intent_at_epoch_ms: 1,
-                owner: None,
-            },
+                claim: crate::conformance::attachment_referrers::claim(
+                    crate::ArtifactReferrer::Session(request.session_id.clone())
+                )
+            })
         )
         .await
         .expect("write after a completed sweep"),
@@ -2243,172 +1867,44 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     ));
 }
 
-/// Attachment cutoff parameter conformance across large cutoff values (e.g. `u64::MAX`, `(i64::MAX as u64) + 1`).
-///
-/// Verifies that:
-/// 1. `list_uncommitted(cutoff).await` lists uncommitted intents when `cutoff >= intent_at_epoch_ms`.
-/// 2. `has_live_attachment_ref(id, cutoff)` reports `false` for uncommitted aged intents with dead/no owners, and `true` for committed refs.
-/// 3. `condemn_attachment(id, cutoff, pass)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
-/// 4. `live_attachment_refs(cutoff)` forgets uncommitted aged intents and retains committed refs.
+/// A pending write remains a root until abort or referrer end.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_attachment_large_cutoff_conformance(
-    factory: Arc<dyn crate::DeploymentStore>,
-) {
-    let request = session_store_request(
-        &SessionId::from("attachment-large-cutoff-session"),
-        "attachment-large-cutoff-model",
-        crate::SessionRelation::Root,
-    );
-    let store = factory
-        .admit_view(&request)
-        .await
-        .expect("create session store");
-
-    let aged_uncommitted_id =
-        crate::AttachmentId::parse("1".repeat(64)).expect("valid attachment id");
-    let committed_id = crate::AttachmentId::parse("2".repeat(64)).expect("valid attachment id");
-    let cond_target_id = crate::AttachmentId::parse("3".repeat(64)).expect("valid attachment id");
-
-    // Record uncommitted intents at timestamp 1000 with no owner (so they age out immediately when cutoff >= 1000).
-    assert!(matches!(
-        crate::AttachmentManifest::begin_attachment_write(
-            store.store().as_ref(),
-            crate::AttachmentIntent {
-                attachment_id: aged_uncommitted_id.clone(),
-                session_id: request.session_id.clone(),
-                canonical_uri: format!("lash-attachment://blake3/{aged_uncommitted_id}"),
-                intent_at_epoch_ms: 1_000,
-                owner: None,
-            },
-        )
-        .await
-        .expect("record aged_uncommitted intent"),
-        crate::AttachmentWriteFence::Granted(_)
-    ));
-
-    crate::conformance::helpers::record_completed_attachment_write(
-        store.store(),
-        crate::AttachmentIntent {
-            attachment_id: committed_id.clone(),
-            session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://blake3/{committed_id}"),
-            intent_at_epoch_ms: 1_000,
-            owner: None,
-        },
-    )
-    .await;
-    crate::AttachmentManifest::commit_refs(
-        store.store().as_ref(),
-        &request.session_id,
-        std::slice::from_ref(&committed_id),
-    )
-    .await
-    .expect("commit ref");
-
-    assert!(matches!(
-        crate::AttachmentManifest::begin_attachment_write(
-            store.store().as_ref(),
-            crate::AttachmentIntent {
-                attachment_id: cond_target_id.clone(),
-                session_id: request.session_id.clone(),
-                canonical_uri: format!("lash-attachment://blake3/{cond_target_id}"),
-                intent_at_epoch_ms: 1_000,
-                owner: None,
-            },
-        )
-        .await
-        .expect("record cond_target intent"),
-        crate::AttachmentWriteFence::Granted(_)
-    ));
-
-    for large_cutoff in [u64::MAX, (i64::MAX as u64) + 1] {
-        // 1. list_uncommitted must find all uncommitted intents whose intent_at_epoch_ms <= large_cutoff
-        let uncommitted =
-            crate::AttachmentManifest::list_uncommitted(store.store().as_ref(), large_cutoff)
-                .await
-                .expect("list_uncommitted with large cutoff");
-        let uncommitted_ids = uncommitted
-            .iter()
-            .map(|entry| entry.attachment_id.clone())
-            .collect::<std::collections::HashSet<_>>();
-        assert!(
-            uncommitted_ids.contains(&aged_uncommitted_id),
-            "list_uncommitted with large cutoff {large_cutoff} must list uncommitted intent, got: {:?}",
-            uncommitted_ids
-        );
-        assert!(
-            uncommitted_ids.contains(&cond_target_id),
-            "list_uncommitted with large cutoff {large_cutoff} must list cond_target intent, got: {:?}",
-            uncommitted_ids
-        );
-        assert!(
-            !uncommitted_ids.contains(&committed_id),
-            "committed ref must not appear in list_uncommitted"
-        );
-
-        // 2. has_live_attachment_ref:
-        // aged_uncommitted_id is uncommitted and ownerless, so at large_cutoff it has no live ref.
-        let has_aged = crate::AttachmentRootSet::has_live_attachment_ref(
-            &*factory,
-            &aged_uncommitted_id,
-            large_cutoff,
-        )
-        .await
-        .expect("has_live_attachment_ref aged_uncommitted");
-        assert!(
-            !has_aged,
-            "aged uncommitted intent must not be reported as a live ref at cutoff {large_cutoff}"
-        );
-
-        // committed_id is committed, so it is a live ref.
-        let has_committed = crate::AttachmentRootSet::has_live_attachment_ref(
-            &*factory,
-            &committed_id,
-            large_cutoff,
-        )
-        .await
-        .expect("has_live_attachment_ref committed");
-        assert!(
-            has_committed,
-            "committed attachment must be reported as a live ref at cutoff {large_cutoff}"
-        );
-    }
-
-    // 3. condemn_attachment with large cutoff:
-    if crate::AttachmentRootSet::fence(&*factory) != crate::AttachmentGcFence::BestEffort {
-        let pass = crate::AttachmentRootSet::begin_attachment_sweep(&*factory)
+async fn session_store_factory_pending_write_is_a_root(factory: Arc<dyn crate::DeploymentStore>) {
+    let store: Arc<dyn crate::RuntimeStore> = factory.clone();
+    let id = crate::AttachmentId::parse("pending-root-without-age").expect("id");
+    let write = crate::AttachmentWrite {
+        attachment_id: id.clone(),
+        claim: crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::ProcessRecord(
+            crate::ProcessId::fixture("pending-root"),
+        ))
+        .expect("claim"),
+    };
+    let crate::AttachmentWriteFence::Granted(permit) =
+        store.begin_attachment_write(&write).await.expect("begin")
+    else {
+        panic!("granted")
+    };
+    let pass = factory.begin_attachment_sweep().await.expect("sweep");
+    assert_eq!(
+        factory
+            .condemn_attachment(&id, &pass)
             .await
-            .expect("open an attachment sweep pass");
-        let cond_res = crate::AttachmentRootSet::condemn_attachment(
-            &*factory,
-            &cond_target_id,
-            u64::MAX,
-            &pass,
-        )
-        .await
-        .expect("condemn_attachment with u64::MAX");
-        assert_eq!(
-            cond_res,
-            crate::AttachmentCondemnation::Condemned,
-            "condemn_attachment at u64::MAX must succeed for uncommitted ownerless intent"
-        );
-    }
-
-    // 4. live_attachment_refs with large cutoff:
-    // It should forget aged_uncommitted_id and return only committed_id (and not aged_uncommitted_id).
-    let live = crate::AttachmentRootSet::live_attachment_refs(&*factory, u64::MAX)
-        .await
-        .expect("live_attachment_refs with u64::MAX");
-    assert!(
-        live.contains(&committed_id),
-        "committed ref must be present in live_attachment_refs"
+            .expect("condemn"),
+        crate::AttachmentCondemnation::RootPresent
     );
-    assert!(
-        !live.contains(&aged_uncommitted_id),
-        "aged uncommitted intent must be forgotten and not present in live_attachment_refs"
+    store
+        .abort_attachment_write(&write, permit)
+        .await
+        .expect("abort");
+    assert_eq!(
+        factory
+            .condemn_attachment(&id, &pass)
+            .await
+            .expect("condemn"),
+        crate::AttachmentCondemnation::Condemned
     );
 }
 

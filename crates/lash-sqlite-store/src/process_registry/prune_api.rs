@@ -45,40 +45,6 @@ pub(super) async fn prune_terminal_processes(
         lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
         lash_core_execution::ProjectionWatermark::NoProjector => None,
     };
-    let catalog = &registry.process_session_catalog;
-    let selection_filter = filter.clone();
-    let prunable = registry
-        .conn
-        .call(move |conn| {
-            crate::process_registry_change::prunable_terminal_process_ids_conn(
-                conn,
-                cutoff,
-                selection_filter,
-                max_change_seq,
-            )
-            .map_err(|err| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                    err.to_string(),
-                )))
-            })
-        })
-        .await
-        .map_err(process_sqlite_error)?;
-    // If this fails, the terminal process row remains and the prune leaks conservatively;
-    // the final transaction below revalidates eligibility before it removes any process
-    // row.
-    for process_id in prunable {
-        for session_id in facade_support::process_runtime_session_ids(&process_id) {
-            delete_session_from_catalog(
-                catalog,
-                &session_id,
-                SqliteConnectionPolicy::default(),
-                pruned_at_ms as u64,
-            )
-            .await
-            .map_err(lash_core_execution::PluginError::from)?;
-        }
-    }
     registry
         .conn
         .write_flow(move |tx| {

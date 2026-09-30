@@ -555,7 +555,7 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
 }
 
 #[tokio::test]
-async fn unwired_sqlite_catalog_keeps_process_owned_intents_immortal() {
+async fn process_record_is_a_root_without_registry_liveness() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = SqliteStore::open(&dir.path().join("sessions"))
         .await
@@ -572,17 +572,17 @@ async fn unwired_sqlite_catalog_keeps_process_owned_intents_immortal() {
     store.admit_session(&request).await.expect("admit session");
     let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")
         .expect("valid attachment id");
-    let intent = lash_core_execution::AttachmentIntent {
+    let intent = lash_core_execution::AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: request.session_id,
-        canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
-        intent_at_epoch_ms: 1,
-        owner: Some(lash_core_execution::AttachmentOwner::Process {
-            process_id: ProcessId::fixture("missing-process"),
-        }),
+        claim: lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::ProcessRecord(ProcessId::fixture(
+                "lasting-process",
+            )),
+        )
+        .expect("claim"),
     };
     let lash_core_execution::AttachmentWriteFence::Granted(permit) = store
-        .begin_attachment_write(intent.clone())
+        .begin_attachment_write(&(intent.clone()))
         .await
         .expect("begin process-owned write")
     else {
@@ -594,7 +594,7 @@ async fn unwired_sqlite_catalog_keeps_process_owned_intents_immortal() {
         .expect("stamp process-owned upload");
 
     let refs = store
-        .live_attachment_refs(u64::MAX)
+        .live_attachment_refs()
         .await
         .expect("unwired GC root scan");
     assert!(refs.contains(&attachment_id));

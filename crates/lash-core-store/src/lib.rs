@@ -39,6 +39,7 @@ pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod run_spec;
 pub mod runtime_owner;
+pub use runtime_owner::RuntimeOwner;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
@@ -108,9 +109,8 @@ pub(crate) use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use store::{
-    AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
-    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, OperationId,
-    RuntimeStore, SessionMeta, StoreError,
+    AppendRequestIdentity, BlobRef, CheckpointComponentDescriptor, GraphAppend,
+    HydratedCheckpointComponent, OperationId, RuntimeStore, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{
@@ -248,7 +248,7 @@ pub(crate) use session_graph::{
 pub(crate) use session_graph_integrity::graph_node_indices;
 #[allow(unused_imports)]
 pub(crate) use store::attachment_manifest::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentManifest, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit,
 };
 #[allow(unused_imports)]

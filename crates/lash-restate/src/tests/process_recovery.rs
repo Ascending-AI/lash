@@ -13,12 +13,9 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
     let snapshot_registration = snapshot_lashlang_registration(env_ref).await;
@@ -30,12 +27,9 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let worker_b = recovery_worker_with_plugins(
         Arc::clone(&registry_b),
@@ -158,12 +152,9 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:revoked").await;
     let mut requirements_mismatch = snapshot_lashlang_registration(env_ref.clone()).await;
@@ -199,12 +190,9 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     for (process_id, registration) in [
         (&requirements_mismatch, requirements_mismatch_registration),
@@ -862,12 +850,9 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     // the durable row exists and is non-terminal. We register it directly to
     // model exactly that mid-flight crash state.
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let trigger_registration = trigger_lashlang_registration("issue-42").await;
     let trigger_notify = registry_a
@@ -891,12 +876,9 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     // non-terminal process by workflow key; Restate coalesces duplicates and
     // the workflow, run here on the fresh worker, writes the terminal outcome.
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+            .await
+            .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let reopened_record = registry_b
         .get_process(&trigger_notify)

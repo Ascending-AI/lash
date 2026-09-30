@@ -153,12 +153,9 @@ impl Fixture {
         let (dir, registry): (_, Arc<dyn ProcessRegistry>) = if engine_owned {
             let dir = tempfile::tempdir().expect("L8 tempdir");
             let registry = Arc::new(
-                lash_sqlite_store::SqliteProcessRegistry::open(
-                    &dir.path().join("processes.db"),
-                    dir.path().join("sessions"),
-                )
-                .await
-                .expect("open SQLite process registry"),
+                lash_sqlite_store::SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+                    .await
+                    .expect("open SQLite process registry"),
             );
             (Some(dir), registry)
         } else {

@@ -584,33 +584,41 @@ async fn live_attachment_refs_reads_the_catalog() {
     let attachment_id =
         lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
-        let intent = lash_core_execution::AttachmentIntent {
+        let intent = lash_core_execution::AttachmentWrite {
             attachment_id: attachment_id.clone(),
-            session_id: SessionId::from("sess-1"),
-            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-            intent_at_epoch_ms: 1_000,
-            owner: None,
+            claim: lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::Session(SessionId::from("sess-1")),
+            )
+            .expect("claim"),
         };
         let lash_core_execution::AttachmentWriteFence::Granted(permit) =
-            lash_core_execution::AttachmentManifest::begin_attachment_write(&store, intent.clone())
-                .await
-                .expect("begin write")
+            lash_core_execution::AttachmentManifest::begin_attachment_write(
+                &store,
+                &(intent.clone()),
+            )
+            .await
+            .expect("begin write")
         else {
             panic!("a free digest must grant its writer");
         };
         lash_core_execution::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
             .await
             .expect("stamp upload evidence");
-        lash_core_execution::AttachmentManifest::commit_refs(
+        lash_core_execution::AttachmentManifest::acquire_attachment_refs(
             &store,
-            &SessionId::from("sess-1"),
+            &lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::Session(
+                    (&SessionId::from("sess-1")).clone(),
+                ),
+            )
+            .expect("claim"),
             std::slice::from_ref(&attachment_id),
         )
         .await
         .expect("commit ref");
     }
 
-    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&store, 0)
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&store)
         .await
         .expect("root discovery");
     assert!(
@@ -914,7 +922,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("processes.db");
     let proc_persist_id = {
-        let registry = SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
+        let registry = SqliteProcessRegistry::open(&path)
             .await
             .expect("open registry");
         let session_scope = lash_core_execution::SessionScope::new("session");
@@ -945,7 +953,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     };
 
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
+        SqliteProcessRegistry::open(&path)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn lash_core_execution::ProcessRegistry>;

@@ -722,7 +722,11 @@ impl LashRuntime {
                         .core
                         .durability
                         .attachment_store
-                        .recorded_turn_intent_ids(&trace_turn_id),
+                        .recorded_execution_puts(
+                            &scoped_effect_controller
+                                .execution_scope()
+                                .journal_identity()?,
+                        ),
                     interrupted_turn_input_cancellation: cancellation.clone(),
                     interrupted_turn_cancel_intent,
                     turn_cancel_closure_settlement,

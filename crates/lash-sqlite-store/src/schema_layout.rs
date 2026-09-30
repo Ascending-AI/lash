@@ -7,9 +7,8 @@
 //! owns — which is the truth for each storage database provisioned with the
 //! tables its statements name
 //! (`SqliteDatabase` in `schema.rs` is the checked-in list). A layout that
-//! reaches *two* databases at once is declared where it is needed: see
-//! `attachments.rs`, whose GC probes join `main.attachment_manifest` to
-//! `process_registry.processes`.
+//! reaches two databases at once declares that layout at the call site.
+//! Attachment roots reside entirely in the durable core.
 //!
 //! Every statement over a converted table is rendered once per layout at
 //! startup, so a caller names the schema and gets finished SQL rather than

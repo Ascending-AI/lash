@@ -561,12 +561,11 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
         AttachmentId::parse("all-families-attachment").expect("valid attachment id");
     crate::conformance::helpers::record_completed_attachment_write(
         &store,
-        crate::AttachmentIntent {
+        crate::AttachmentWrite {
             attachment_id: attachment_id.clone(),
-            session_id: SessionId::from("root"),
-            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-            intent_at_epoch_ms: 1,
-            owner: None,
+            claim: crate::conformance::attachment_referrers::claim(
+                crate::ArtifactReferrer::Session(SessionId::from("root")),
+            ),
         },
     )
     .await;

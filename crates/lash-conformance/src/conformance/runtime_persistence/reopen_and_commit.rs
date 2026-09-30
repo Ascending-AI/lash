@@ -229,76 +229,32 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_manifest_reference_tracking_and_gc_root_set(store: Arc<dyn RuntimeStore>) {
-    let intent_id = AttachmentId::parse(format!("{:x}", sha256_of(b"intent-only")))
-        .expect("valid attachment id");
-    let committed_id =
-        AttachmentId::parse(format!("{:x}", sha256_of(b"committed"))).expect("valid attachment id");
-    let intent = |id: &AttachmentId, at: u64| AttachmentIntent {
-        attachment_id: id.clone(),
-        session_id: SessionId::from("root"),
-        canonical_uri: format!("lash-attachment://blake3/{id}"),
-        intent_at_epoch_ms: at,
-        owner: None,
-    };
-    crate::conformance::helpers::record_completed_attachment_write(&store, intent(&intent_id, 100))
-        .await;
+pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn RuntimeStore>) {
+    let id = AttachmentId::parse("acquire-reference").expect("id");
+    let source = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("source"));
     crate::conformance::helpers::record_completed_attachment_write(
         &store,
-        intent(&committed_id, 100),
+        crate::AttachmentWrite {
+            attachment_id: id.clone(),
+            claim: crate::ReferrerClaim::unguarded(source.clone()).expect("claim"),
+        },
     )
     .await;
+    let receiver = crate::ArtifactReferrer::Session("root".into());
     store
-        .commit_refs(
-            &SessionId::from("root"),
-            std::slice::from_ref(&committed_id),
+        .acquire_attachment_refs(
+            &crate::ReferrerClaim::unguarded(receiver.clone()).expect("receiver"),
+            std::slice::from_ref(&id),
         )
         .await
-        .expect("commit attachment ref");
-
-    // Root set: every live ref, intent or committed.
-    let refs = store.list_all_refs().await.expect("list all refs");
-    assert!(refs.contains(&intent_id), "intents feed the GC root set");
-    assert!(refs.contains(&committed_id), "commits feed the GC root set");
-
-    // Uncommitted listing still distinguishes intents from commits.
-    let uncommitted = store
-        .list_uncommitted(1_000_000)
-        .await
-        .expect("list uncommitted");
-    assert!(
-        uncommitted
-            .iter()
-            .any(|entry| entry.attachment_id == intent_id),
-        "an uncommitted intent is listed as uncommitted"
-    );
-    assert!(
-        !uncommitted
-            .iter()
-            .any(|entry| entry.attachment_id == committed_id),
-        "a committed attachment is not listed as uncommitted"
-    );
-
-    // Forget drops the ref from the root set.
+        .expect("acquire");
     store
-        .forget(&SessionId::from("root"), &intent_id)
+        .end_attachment_referrer(&source)
         .await
-        .expect("forget intent ref");
-    assert!(
-        !store
-            .list_all_refs()
-            .await
-            .map(|refs| refs.contains(&intent_id))
-            .expect("ref dropped"),
-        "a forgotten ref is no longer held"
-    );
-    assert!(
-        !store
-            .list_all_refs()
-            .await
-            .expect("list after forget")
-            .contains(&intent_id),
-        "a forgotten ref leaves the root set"
+        .expect("end source");
+    assert_eq!(
+        store.attachment_referrers(&id).await.expect("refs"),
+        vec![receiver]
     );
 }
 
@@ -450,12 +406,11 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     let attachment = AttachmentId::parse("reopen-attachment").expect("valid attachment id");
     crate::conformance::helpers::record_completed_attachment_write(
         &factory.open,
-        AttachmentIntent {
+        crate::AttachmentWrite {
             attachment_id: attachment.clone(),
-            session_id: SessionId::from("root"),
-            canonical_uri: "sha256:reopen-attachment".to_string(),
-            intent_at_epoch_ms: 100,
-            owner: None,
+            claim: crate::conformance::attachment_referrers::claim(
+                crate::ArtifactReferrer::Session(SessionId::from("root")),
+            ),
         },
     )
     .await;
@@ -509,16 +464,13 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
         queued_batch_text(&reopened_queue[0]),
         Some("survives reopen")
     );
-    let reopened_intents = factory
-        .reopen
-        .list_uncommitted(200)
-        .await
-        .expect("list reopened attachment intents");
-    assert!(
-        reopened_intents
-            .iter()
-            .any(|intent| intent.attachment_id == attachment),
-        "attachment intent rows must survive reopening a durable store"
+    assert_eq!(
+        factory
+            .reopen
+            .attachment_referrers(&attachment)
+            .await
+            .expect("reopened refs"),
+        vec![crate::ArtifactReferrer::Session("root".into())]
     );
 }
 

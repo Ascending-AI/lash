@@ -229,7 +229,7 @@ impl LashRuntime {
                 crate::SessionAttachmentStore::new_with_clock(
                     backend,
                     manifest,
-                    state.session_id.clone(),
+                    crate::RuntimeOwner::Session(state.session_id.clone()),
                     Arc::clone(&host.core.clock),
                 )
                 .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes()),

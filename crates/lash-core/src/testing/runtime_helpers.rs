@@ -27,7 +27,6 @@ pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::Attachment
 impl crate::AttachmentRootSet for FixedAttachmentRoots {
     async fn live_attachment_refs(
         &self,
-        _intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
         Ok(self.0.clone())
     }
@@ -35,7 +34,6 @@ impl crate::AttachmentRootSet for FixedAttachmentRoots {
     async fn has_live_attachment_ref(
         &self,
         id: &crate::AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::StoreError> {
         Ok(self.0.contains(id))
     }

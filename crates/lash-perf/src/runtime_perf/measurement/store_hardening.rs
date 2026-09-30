@@ -85,7 +85,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                 },
             )
             .await?;
-            let postgres_factory = postgres.session_store_factory_with_shared_process_registry();
+            let postgres_factory = postgres.store();
 
             let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
             let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
@@ -108,7 +108,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
                     &sqlite_root.join("process-registry.sqlite"),
-                    sqlite_root.join("process-sessions"),
                 )
                 .await?,
             );

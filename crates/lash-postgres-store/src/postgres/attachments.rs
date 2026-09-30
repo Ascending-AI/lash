@@ -1,222 +1,194 @@
-//! The attachment write-ahead manifest and its garbage-collection fence.
-//!
-//! The PostgreSQL owner of the attachment family: `lash_attachment_manifest`
-//! and `lash_attachment_condemnations`. Every atom runs in a transaction that
-//! first takes the per-digest advisory key below, which is what buys under
-//! `READ COMMITTED` the mutual exclusion SQLite gets from `BEGIN IMMEDIATE`.
-
+//! Attachment edges and external-byte write state, serialized by referrer then digest.
+use crate::*;
+use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
+use lash_store_sql::Dialect;
+use lash_store_sql::attachment::{
+    condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
+    pending_writes::PendingWriteStatements, sweep_clock::SweepClockStatements,
+    uploads::UploadStatements,
+};
 use std::sync::LazyLock;
 
-use lash_sansio::SessionId;
-use lash_store_sql::attachment::condemnation::CondemnationStatements;
-use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
-use lash_store_sql::attachment::sweep_clock::SweepClockStatements;
-use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
-
-use crate::*;
-
 lash_store_sql::statements! {
-    /// `lash_attachment_manifest` statements only PostgreSQL issues.
-    pub(crate) struct ManifestPostgresStatements @ "attachment_manifest" {
-        /// Reclaim every attachment root a deleted session left behind.
-        ///
-        /// FIG-653: graph retention is a prune precondition for committed
-        /// roots, and owner-level retention deliberately includes suffix
-        /// attachments, because the manifest has no node edge — forks and
-        /// pins keep these rows until their final prefix dies.
-        ///
-        /// Forks on the tombstone literal: `graph_nodes.tombstoned` is
-        /// BOOLEAN on PostgreSQL and INTEGER 0/1 on SQLite.
-        delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
-             WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                           WHERE deleted.session_id = manifest.session_id)
-               AND (
-                   (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-                   OR ({{turn_attachment_owner(manifest.owner_kind)}} AND manifest.owner_id IS NOT NULL)
-                   OR ({{process_attachment_owner(manifest.owner_kind)}}
-                       AND manifest.owner_id ~ '^p_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$')
-               )
-               AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
-                   SELECT 1 FROM graph_nodes AS node
-                   WHERE node.session_id = manifest.session_id AND node.tombstoned = FALSE
-               ))";
-
-        /// Forget `?2` in session `?1` unless a live node still roots it.
-        /// Same tombstone-literal fork as
-        /// [`ManifestPostgresStatements::delete_deleted_session_roots`].
-        forget_for_session = "DELETE FROM attachment_manifest
-             WHERE session_id = ?1 AND attachment_id = ?2 AND (
-                 committed_at_ms IS NULL OR NOT EXISTS (
-                     SELECT 1 FROM graph_nodes AS node
-                     WHERE node.session_id = attachment_manifest.session_id
-                       AND node.tombstoned = FALSE
-                 ))";
-
-        /// Every uncommitted intent older than `?1`.
-        ///
-        /// The ordering is the fork: PostgreSQL reports digest order, SQLite
-        /// reports oldest intent first. Both are total and neither caller
-        /// depends on the other's, so the two orders are left exactly as they
-        /// stand rather than unified inside a refactor.
-        select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                 committed_at_ms, owner_kind, owner_id, written_at_ms
-             FROM attachment_manifest
-             WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
-             ORDER BY attachment_id ASC";
+    pub(crate) struct AttachmentPostgresStatements @ "attachment_referrer_edge" {
+        select_deleting = "SELECT EXISTS (SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1 AND phase = 'deleting')";
+        insert_condemned = "INSERT INTO attachment_condemnations (attachment_id, phase, sweep_generation) VALUES (?1, 'condemned', ?2) ON CONFLICT (attachment_id) DO NOTHING";
+        session_state = "SELECT EXISTS (SELECT 1 FROM session_meta WHERE session_id = ?1), EXISTS (SELECT 1 FROM deleted_sessions WHERE session_id = ?1), EXISTS (SELECT 1 FROM graph_nodes WHERE session_id = ?1 AND tombstoned = FALSE)";
     }
 }
-
-lash_store_sql::statements! {
-    /// `lash_attachment_condemnations` statements only PostgreSQL issues.
-    pub(crate) struct CondemnationPostgresStatements @ "attachment_condemnation" {
-        /// Whether a physical delete is already in flight for `?1`.
-        ///
-        /// Wrapped in `SELECT EXISTS(…)` because this driver reads a scalar
-        /// that is always present; SQLite reads the row's presence instead.
-        select_deleting = "SELECT EXISTS(
-                SELECT 1 FROM attachment_condemnations
-                WHERE attachment_id = ?1 AND phase = 'deleting'
-             )";
-
-        /// Condemn `?1`, reporting whether this sweeper is the one that did.
-        ///
-        /// `ON CONFLICT DO NOTHING` is the fork *and* the contention check:
-        /// `READ COMMITTED` cannot hold "read the absence, then insert"
-        /// atomic, so a peer sweeper is detected by the conflict rather than
-        /// by a prior read. SQLite reads the absence under its write lock.
-        insert_condemned = "INSERT INTO attachment_condemnations
-                 (attachment_id, phase, sweep_generation)
-             VALUES (?1, 'condemned', ?2)
-             ON CONFLICT (attachment_id) DO NOTHING";
-    }
-}
-
-/// The attachment owner classes, spelled once in `lash-core` and named as
-/// tokens by the GC predicates that compare against them.
-const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
-    VocabularyTerm::new(
-        "turn_attachment_owner",
-        lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql,
-    ),
-    VocabularyTerm::new(
-        "process_attachment_owner",
-        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql,
-    ),
-]);
-
-/// Every attachment-family statement, rendered once.
 pub(crate) struct AttachmentSql {
-    /// `attachment_manifest` statements both backends issue verbatim.
-    pub(crate) manifest: ManifestStatements,
-    /// `attachment_manifest` statements only PostgreSQL issues.
-    pub(crate) manifest_postgres: ManifestPostgresStatements,
-    /// The GC probes that prove a process owner dead. PostgreSQL keeps the
-    /// process registry in the same database, so there is one dialect here
-    /// and no layout to choose; whether the tier *shares* a registry is still
-    /// a call-site decision, because a deployment that does not cannot prove
-    /// owner death from rows it has no claim on.
-    pub(crate) manifest_process_owner: ManifestProcessOwnerStatements,
-    /// `attachment_condemnations` statements both backends issue verbatim.
+    pub(crate) edges: AttachmentEdgeStatements,
+    pub(crate) pending: PendingWriteStatements,
+    pub(crate) uploads: UploadStatements,
     pub(crate) condemnation: CondemnationStatements,
-    /// `attachment_condemnations` statements only PostgreSQL issues.
-    pub(crate) condemnation_postgres: CondemnationPostgresStatements,
-    /// `attachment_sweep_clock` statements both backends issue verbatim.
+    pub(crate) postgres: AttachmentPostgresStatements,
     pub(crate) sweep_clock: SweepClockStatements,
 }
-
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let dialect = Dialect::postgres().with_vocabulary(ATTACHMENT_OWNER);
+    let dialect = Dialect::postgres();
     AttachmentSql {
-        manifest: ManifestStatements::render(dialect),
-        manifest_postgres: ManifestPostgresStatements::render(dialect),
-        manifest_process_owner: ManifestProcessOwnerStatements::render(dialect),
+        edges: AttachmentEdgeStatements::render(dialect),
+        pending: PendingWriteStatements::render(dialect),
+        uploads: UploadStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
-        condemnation_postgres: CondemnationPostgresStatements::render(dialect),
+        postgres: AttachmentPostgresStatements::render(dialect),
         sweep_clock: SweepClockStatements::render(dialect),
     }
 });
-
-/// The attachment-family statements, rendered once at first use.
 pub(crate) fn attachment_sql() -> &'static AttachmentSql {
     &ATTACHMENT_SQL
 }
-
-/// The live-root probe this tier may issue, parameterised
-/// `$1 = attachment_id`, `$2 = intent_grace_cutoff_ms`.
-///
-/// The targeted probe and the condemn CAS read the same one so the fence and
-/// the probe cannot drift apart.
-pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> &'static str {
-    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
-        [false, true].map(|shared| {
-            let base = if shared {
-                attachment_sql()
-                    .manifest_process_owner
-                    .select_live_root_proving_process_death
-                    .sql()
-            } else {
-                attachment_sql().manifest.select_live_root.sql()
-            };
-            format!(
-                "SELECT 1 WHERE EXISTS ({base}) OR EXISTS (
-                    SELECT 1 FROM lash_attachment_manifest AS manifest
-                    WHERE manifest.attachment_id = $1
-                      AND NOT COALESCE(({}), FALSE)
-                )",
-                decodable_owner_sql()
-            )
-        })
-    });
-    &GUARDED[usize::from(process_registry_shared)]
+fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
+    if !referrer.kind().holds_attachments() {
+        return Err(StoreError::ReferrerKindRefused {
+            kind: referrer.kind(),
+            store: "attachment",
+        });
+    }
+    ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
+        .map_err(|error| error.into_store_error("attachment referrer"))?;
+    Ok(())
 }
-
-/// The aged-intent forget this tier may issue, the negation of
-/// [`live_attachment_ref_sql`] over every digest at once.
-pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
-    process_registry_shared: bool,
-) -> &'static str {
-    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
-        [false, true].map(|shared| {
-            let base = if shared {
-                attachment_sql()
-                    .manifest_process_owner
-                    .delete_aged_uncommitted_proving_process_death
-                    .sql()
-            } else {
-                attachment_sql().manifest.delete_aged_uncommitted.sql()
-            };
-            format!("{base} AND ({})", decodable_owner_sql())
-        })
-    });
-    &GUARDED[usize::from(process_registry_shared)]
+pub(crate) async fn lock_attachment_referrer_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    referrer: &ArtifactReferrer,
+) -> Result<(), StoreError> {
+    check_kind(referrer)?;
+    crate::artifact_store::lock_referrer_tx(tx, referrer)
+        .await
+        .map_err(store_sqlx_error)
 }
-
-fn decodable_owner_sql() -> String {
-    let turn = lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql(
-        "manifest.owner_kind",
-    );
-    let process =
-        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql(
-            "manifest.owner_kind",
-        );
-    format!(
-        "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-      OR ({turn} AND manifest.owner_id IS NOT NULL)
-      OR ({process}
-          AND manifest.owner_id ~ '^p_[0-9a-f]{{12}}7[0-9a-f]{{3}}[89ab][0-9a-f]{{15}}$')"
+async fn check_fence_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    referrer: &ArtifactReferrer,
+) -> Result<(), StoreError> {
+    let fenced: bool = sqlx::query_scalar(
+        crate::artifact_store::artifact_sql()
+            .fences
+            .select_is_fenced
+            .sql(),
     )
+    .bind(referrer.kind().as_str())
+    .bind(referrer.canonical_id())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if fenced {
+        return Err(StoreError::ArtifactReferrerEnded {
+            referrer: referrer.clone(),
+        });
+    }
+    Ok(())
 }
-
-/// Advisory-lock namespace for the attachment GC fence. Both halves of the
-/// fence — a writer recording an intent and a sweeper condemning a digest —
-/// take this lock keyed on the digest for the duration of their transaction.
-///
-/// A row lock cannot serialize them: at `READ COMMITTED` the writer's manifest
-/// insert and the sweeper's root query can each miss the other's uncommitted row
-/// (write skew), and there is no existing row for either side to lock when the
-/// digest is `Free`. One advisory key per digest makes the two conditional
-/// mutations mutually exclusive without introducing any wait a writer can see
-/// beyond the other side's transaction.
+pub(crate) async fn acquire_attachment_refs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claim: &ReferrerClaim,
+    ids: &[AttachmentId],
+    now: u64,
+) -> Result<(), StoreError> {
+    // The caller took every referrer lock before any artifact lock.
+    check_kind(claim.referrer())?;
+    check_fence_tx(tx, claim.referrer()).await?;
+    let ids = ids.iter().collect::<std::collections::BTreeSet<_>>();
+    for id in &ids {
+        lock_attachment_fence_tx(tx, id.as_str()).await?;
+    }
+    for id in &ids {
+        let deleting: bool = sqlx::query_scalar(attachment_sql().postgres.select_deleting.sql())
+            .bind(id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let evidenced = sqlx::query(attachment_sql().uploads.select_evidence.sql())
+            .bind(id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .is_some();
+        if deleting || !evidenced {
+            return Err(StoreError::UnknownAttachment {
+                digest: (*id).clone(),
+            });
+        }
+    }
+    for id in &ids {
+        sqlx::query(
+            attachment_sql()
+                .condemnation
+                .delete_unclaimed_condemned
+                .sql(),
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        insert_edge_tx(tx, claim.referrer(), id).await?;
+    }
+    if let Some(cleanup) = claim.guard_cleanup() {
+        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now).await?;
+    }
+    Ok(())
+}
+async fn insert_edge_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    referrer: &ArtifactReferrer,
+    id: &AttachmentId,
+) -> Result<(), StoreError> {
+    sqlx::query(attachment_sql().edges.insert.sql())
+        .bind(id.as_str())
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
+}
+async fn has_permit_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    write: &AttachmentWrite,
+    token: &str,
+) -> Result<bool, StoreError> {
+    Ok(sqlx::query(attachment_sql().pending.select_permit.sql())
+        .bind(token)
+        .bind(write.attachment_id.as_str())
+        .bind(write.claim.referrer().kind().as_str())
+        .bind(write.claim.referrer().canonical_id())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .is_some())
+}
+async fn abort_write_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: &AttachmentId,
+    referrer: &ArtifactReferrer,
+    token: &str,
+) -> Result<(), StoreError> {
+    sqlx::query(attachment_sql().condemnation.delete_superseded_claim.sql())
+        .bind(id.as_str())
+        .bind(token)
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query(attachment_sql().pending.delete_permit.sql())
+        .bind(token)
+        .bind(id.as_str())
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query(attachment_sql().edges.delete_unproven_ref.sql())
+        .bind(id.as_str())
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
+}
 pub(crate) const ATTACHMENT_FENCE_LOCK_NAMESPACE: i32 = 715_422;
 
 /// Test-only fault injection: how long the writer half holds its transaction
@@ -535,368 +507,346 @@ pub(crate) fn sweep_generation_sql(
     })
 }
 
-/// Enumerate the durable condemnation authority without exposing write
-/// tokens. Persisted phase/provenance/failure combinations are decoded
-/// strictly so a corrupt row cannot be mistaken for sweep-owned maintenance
-/// work.
 pub(crate) async fn list_attachment_condemnations(
     pool: &PgPool,
 ) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
-    type Row = (
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        i32,
-        Option<String>,
-        Option<String>,
-    );
-    let rows = sqlx::query_as::<_, Row>(attachment_sql().condemnation.select_all.sql())
+    let rows = sqlx::query(attachment_sql().condemnation.select_all.sql())
         .fetch_all(pool)
         .await
         .map_err(store_sqlx_error)?;
-    let mut condemnations = rows
+    let mut rows = rows
         .into_iter()
-        .map(
-            |(
-                digest,
-                phase,
-                write_token,
-                write_session_id,
-                delete_attempts,
-                last_delete_error,
-                stall_reason,
-            )| {
-                let digest =
-                    attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
-                lash_core_execution::store::decode_attachment_condemnation_record(
-                    lash_core_execution::store::StoredAttachmentCondemnation {
-                        digest,
-                        phase,
-                        write_token_present: write_token.is_some(),
-                        write_session_id: write_session_id.map(SessionId::from),
-                        delete_attempts: i64::from(delete_attempts),
-                        last_delete_error,
-                        stall_reason,
-                    },
-                )
-            },
-        )
+        .map(|row| {
+            let write_referrer = match (
+                row.get::<Option<String>, _>(3),
+                row.get::<Option<String>, _>(4),
+            ) {
+                (None, None) => None,
+                (Some(kind), Some(id)) => Some((kind, id)),
+                _ => {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "attachment condemnation",
+                        message: "incomplete writer referrer".into(),
+                    });
+                }
+            };
+            lash_core_execution::store::decode_attachment_condemnation_record(
+                lash_core_execution::store::StoredAttachmentCondemnation {
+                    digest: attachment_id_from_sql(
+                        "attachment condemnation",
+                        "attachment_id",
+                        row.get(0),
+                    )?,
+                    phase: row.get(1),
+                    write_token_present: row.get::<Option<String>, _>(2).is_some(),
+                    write_referrer,
+                    delete_attempts: i64::from(row.get::<i32, _>(5)),
+                    last_delete_error: row.get(6),
+                    stall_reason: row.get(7),
+                },
+            )
+        })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
-    Ok(condemnations)
+    rows.sort_by(|a, b| a.digest.cmp(&b.digest));
+    Ok(rows)
 }
-
-/// Retire `Condemned` only when its associated intent became committed, otherwise preserve it
-/// after removing that unstamped intent.
 pub(crate) async fn recover_abandoned_attachment_write(
     pool: &PgPool,
     fence: &crate::guarded_tx::WriterFence,
-    attachment_id: &str,
+    id: &str,
 ) -> Result<(), StoreError> {
+    // Discover the referrer without a lock, then re-read the claim after taking
+    // its referrer and digest locks in global order. End may have released it.
+    let claim = sqlx::query_as::<_, (String, String, String)>(
+        attachment_sql().condemnation.select_claim.sql(),
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(store_sqlx_error)?;
+    let Some((token, kind, referrer_id)) = claim else {
+        return Ok(());
+    };
+    let referrer = ArtifactReferrer::decode(&kind, &referrer_id)
+        .map_err(|error| error.into_store_error("attachment pending write"))?;
+    let id = AttachmentId::parse(id).map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "attachment condemnation",
+        message: error.to_string(),
+    })?;
     let mut tx = crate::begin_guarded(pool, fence).await?;
-    lock_attachment_fence_tx(&mut tx, attachment_id).await?;
-    let claim =
-        sqlx::query_as::<_, (String, String)>(attachment_sql().condemnation.select_claim.sql())
-            .bind(attachment_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if let Some((token, session_id)) = claim {
-        sqlx::query(attachment_sql().manifest.delete_unproven_for_session.sql())
-            .bind(attachment_id)
-            .bind(&session_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let condemned_superseded =
-            sqlx::query(attachment_sql().condemnation.delete_superseded_claim.sql())
-                .bind(attachment_id)
-                .bind(&token)
-                .bind(&session_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
-        if condemned_superseded == 0 {
-            sqlx::query(attachment_sql().condemnation.clear_write_claim.sql())
-                .bind(attachment_id)
-                .bind(token)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
+    lock_attachment_referrer_tx(&mut tx, &referrer).await?;
+    lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+    let current = sqlx::query_as::<_, (String, String, String)>(
+        attachment_sql().condemnation.select_claim.sql(),
+    )
+    .bind(id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if current
+        .as_ref()
+        .is_some_and(|claim| claim == &(token.clone(), kind, referrer_id))
+    {
+        abort_write_tx(&mut tx, &id, &referrer, &token).await?;
     }
     tx.commit().await.map_err(store_sqlx_error)
 }
-
 #[async_trait::async_trait]
 impl AttachmentManifest for PostgresStore {
-    /// The writer half of the GC fence: the condemnation read, the claim, and
-    /// the intent upsert are one transaction, so a sweeper's condemn CAS either
-    /// runs before all of it or fails against the intent it wrote.
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
-        let pool = self.pool.clone();
+        let referrer = write.claim.referrer();
+        let token = lash_core_execution::AttachmentWriteToken::new();
+        let now = self.clock.timestamp_ms();
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        lock_attachment_referrer_tx(&mut tx, referrer).await?;
+        check_fence_tx(&mut tx, referrer).await?;
+        lock_attachment_fence_tx(&mut tx, write.attachment_id.as_str()).await?;
+        let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
+            attachment_sql().condemnation.select_phase_and_claim.sql(),
+        )
+        .bind(write.attachment_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        #[cfg(test)]
+        if condemnation.is_some() {
+            let delay = FENCE_WRITER_WINDOW_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed);
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+        }
+        match condemnation
+            .as_ref()
+            .map(|(phase, claim)| (phase.as_str(), claim.is_some()))
         {
-            let write_id = lash_core_execution::AttachmentWriteToken::new();
-            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
-            crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
-                .await?;
-            lock_attachment_fence_tx(&mut tx, intent.attachment_id.as_str()).await?;
-            let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
-                attachment_sql().condemnation.select_phase_and_claim.sql(),
-            )
-            .bind(intent.attachment_id.as_str())
-            .fetch_optional(&mut **tx)
+            Some(("deleting", _)) | Some(("condemned", true)) => {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
+            }
+            None | Some(("condemned", false)) => {}
+            Some((phase, _)) => {
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "attachment condemnation",
+                    message: format!("unknown phase {phase}"),
+                });
+            }
+        }
+        sqlx::query(attachment_sql().pending.insert.sql())
+            .bind(token.as_hex())
+            .bind(write.attachment_id.as_str())
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .bind(clamp_epoch_ms(now))
+            .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            #[cfg(test)]
-            if condemnation.is_some() {
-                let window_ms =
-                    FENCE_WRITER_WINDOW_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed);
-                if window_ms > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(window_ms)).await;
-                }
-            }
-            match condemnation
-                .as_ref()
-                .map(|(phase, token)| (phase.as_str(), token.is_some()))
-            {
-                // The physical delete is already in flight: record nothing, so
-                // these bytes cannot land inside it.
-                Some(("deleting", _)) | Some(("condemned", true)) => {
-                    tx.commit().await.map_err(store_sqlx_error)?;
-                    return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
-                }
-                // Keep the condemnation present and own it with this attempt's
-                // identity until the backend put settles.
-                Some(("condemned", false)) => {
-                    let claimed = sqlx::query(attachment_sql().condemnation.claim_write.sql())
-                        .bind(intent.attachment_id.as_str())
-                        .bind(write_id.as_hex())
-                        .bind(intent.session_id.as_str())
-                        .execute(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?
-                        .rows_affected();
-                    if claimed == 0 {
-                        tx.commit().await.map_err(store_sqlx_error)?;
-                        return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
-                    }
-                }
-                None => {}
-                Some((phase, _)) => {
-                    return Err(StoreError::Backend(format!(
-                        "attachment `{}` has unknown condemnation phase `{phase}`",
-                        intent.attachment_id
-                    )));
-                }
-            }
-            // A fresh attempt has proven nothing, so it takes the row with no
-            // upload stamp. Evidence and commitment already on the row were
-            // earned by earlier attempts and are kept.
-            sqlx::query(attachment_sql().manifest.insert_intent.sql())
-                .bind(intent.attachment_id.as_str())
-                .bind(intent.session_id.as_str())
-                .bind(intent.canonical_uri)
-                .bind(intent.intent_at_epoch_ms as i64)
-                .bind(intent.owner.as_ref().map(|owner| owner.kind().as_str()))
-                .bind(intent.owner.as_ref().map(|owner| owner.id().to_string()))
-                .bind(write_id.as_hex())
+        if condemnation.is_some() {
+            sqlx::query(attachment_sql().condemnation.claim_write.sql())
+                .bind(write.attachment_id.as_str())
+                .bind(token.as_hex())
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-            Ok(lash_core_execution::AttachmentWriteFence::Granted(
-                lash_core_execution::AttachmentWritePermit::new(write_id),
-            ))
         }
+        insert_edge_tx(&mut tx, referrer, &write.attachment_id).await?;
+        if let Some(cleanup) = write.claim.guard_cleanup() {
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now).await?;
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(lash_core_execution::AttachmentWriteFence::Granted(
+            lash_core_execution::AttachmentWritePermit::new(token),
+        ))
     }
-
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let pool = self.pool.clone();
-        let digest = intent.attachment_id.clone();
-        let attachment_id = intent.attachment_id.to_string();
-        let session_id = intent.session_id.clone();
-        let write_id = permit.write_id().as_hex();
-        let written_at_ms = clamp_epoch_ms(self.clock.timestamp_ms());
-        {
-            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
-            lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
-            // Id-matched: only the row this attempt still owns is stamped, and
-            // the first proven upload is kept.
-            let stamped = sqlx::query(attachment_sql().manifest.stamp_written.sql())
-                .bind(&attachment_id)
-                .bind(session_id.as_str())
-                .bind(&write_id)
-                .bind(written_at_ms)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
-            if stamped == 0 {
-                return Err(StoreError::StaleWritePermit { digest });
-            }
-            // The bytes exist now, so this attempt's claim on the condemnation
-            // is released with the condemnation itself.
-            sqlx::query(attachment_sql().condemnation.delete_by_write_token.sql())
-                .bind(&attachment_id)
-                .bind(&write_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            tx.commit().await.map_err(store_sqlx_error)
+        let referrer = write.claim.referrer();
+        let token = permit.write_id().as_hex();
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        lock_attachment_referrer_tx(&mut tx, referrer).await?;
+        lock_attachment_fence_tx(&mut tx, write.attachment_id.as_str()).await?;
+        if !has_permit_tx(&mut tx, write, &token).await? {
+            return Err(StoreError::StaleWritePermit {
+                digest: write.attachment_id.clone(),
+            });
         }
+        sqlx::query(attachment_sql().uploads.insert.sql())
+            .bind(write.attachment_id.as_str())
+            .bind(clamp_epoch_ms(self.clock.timestamp_ms()))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(attachment_sql().condemnation.delete_by_write_token.sql())
+            .bind(write.attachment_id.as_str())
+            .bind(&token)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(attachment_sql().pending.delete_permit.sql())
+            .bind(token)
+            .bind(write.attachment_id.as_str())
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
     }
-
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let pool = self.pool.clone();
-        let attachment_id = intent.attachment_id.to_string();
-        let session_id = intent.session_id.clone();
-        let write_id = permit.write_id().as_hex();
-        {
-            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
-            lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
-            // Only this attempt's own unstamped, uncommitted row. A superseded
-            // permit matches nothing and deletes nothing.
-            sqlx::query(attachment_sql().manifest.delete_unproven_for_write.sql())
-                .bind(&attachment_id)
-                .bind(session_id.as_str())
-                .bind(&write_id)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            let condemned_superseded =
-                sqlx::query(attachment_sql().condemnation.delete_superseded_claim.sql())
-                    .bind(&attachment_id)
-                    .bind(&write_id)
-                    .bind(session_id.as_str())
-                    .execute(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?
-                    .rows_affected();
-            if condemned_superseded == 0 {
-                sqlx::query(attachment_sql().condemnation.clear_write_claim.sql())
-                    .bind(&attachment_id)
-                    .bind(&write_id)
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        let token = permit.write_id().as_hex();
+        lock_attachment_referrer_tx(&mut tx, write.claim.referrer()).await?;
+        lock_attachment_fence_tx(&mut tx, write.attachment_id.as_str()).await?;
+        if has_permit_tx(&mut tx, write, &token).await? {
+            abort_write_tx(
+                &mut tx,
+                &write.attachment_id,
+                write.claim.referrer(),
+                &token,
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+    async fn acquire_attachment_refs(
+        &self,
+        claim: &ReferrerClaim,
+        ids: &[AttachmentId],
+    ) -> Result<(), StoreError> {
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        lock_attachment_referrer_tx(&mut tx, claim.referrer()).await?;
+        acquire_attachment_refs_tx(&mut tx, claim, ids, self.clock.timestamp_ms()).await?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+    async fn forget_attachment_ref(
+        &self,
+        referrer: &ArtifactReferrer,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        if let ArtifactReferrer::Session(session) = referrer {
+            crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session).await?;
+        }
+        lock_attachment_referrer_tx(&mut tx, referrer).await?;
+        lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        let fenced: bool = sqlx::query_scalar(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .select_is_fenced
+                .sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if !fenced {
+            let retained = if let ArtifactReferrer::Session(session) = referrer {
+                let row: (bool, bool, bool) =
+                    sqlx::query_as(attachment_sql().postgres.session_state.sql())
+                        .bind(session.as_str())
+                        .fetch_one(&mut **tx)
+                        .await
+                        .map_err(store_sqlx_error)?;
+                row.2
+            } else {
+                false
+            };
+            if !retained {
+                sqlx::query(attachment_sql().edges.delete_ref.sql())
+                    .bind(id.as_str())
+                    .bind(referrer.kind().as_str())
+                    .bind(referrer.canonical_id())
                     .execute(&mut **tx)
                     .await
                     .map_err(store_sqlx_error)?;
             }
-            tx.commit().await.map_err(store_sqlx_error)
         }
+        tx.commit().await.map_err(store_sqlx_error)
     }
-
-    async fn commit_refs(
-        &self,
-        session_id: &SessionId,
-        attachment_ids: &[AttachmentId],
-    ) -> Result<(), StoreError> {
-        let pool = self.pool.clone();
-        let now = self.clock.timestamp_ms();
-        let session_id = SessionId::from(session_id.to_string());
-        let attachment_ids = attachment_ids.to_vec();
-        {
-            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
-            crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
-            commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids, now).await?;
-            tx.commit().await.map_err(store_sqlx_error)
-        }
-    }
-
-    async fn list_uncommitted(
-        &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        let pool = self.pool.clone();
-        let older_than = clamp_epoch_ms(older_than_epoch_ms);
-        {
-            let rows = sqlx::query(attachment_sql().manifest_postgres.select_uncommitted.sql())
-                .bind(older_than)
-                .fetch_all(&pool)
+    async fn end_attachment_referrer(&self, referrer: &ArtifactReferrer) -> Result<(), StoreError> {
+        let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+        lock_attachment_referrer_tx(&mut tx, referrer).await?;
+        let ids: Vec<String> =
+            sqlx::query_scalar(attachment_sql().pending.select_referrer_digests.sql())
+                .bind(referrer.kind().as_str())
+                .bind(referrer.canonical_id())
+                .fetch_all(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            rows.into_iter()
-                .map(|row| {
-                    let owner_kind = row.get::<Option<String>, _>(5);
-                    let owner_id = row.get::<Option<String>, _>(6);
-                    let owner = lash_core_execution::store::decode_attachment_owner(
-                        owner_kind.as_deref(),
-                        owner_id,
-                    )?;
-                    Ok(AttachmentManifestEntry {
-                        attachment_id: attachment_id_from_sql(
-                            "AttachmentManifest",
-                            "attachment_id",
-                            row.get(0),
-                        )?,
-                        session_id: SessionId::from(row.get::<String, _>(1)),
-                        canonical_uri: row.get(2),
-                        intent_at_epoch_ms: u64_from_sql(
-                            "AttachmentManifest",
-                            "intent_at_ms",
-                            row.get(3),
-                        )?,
-                        written_at_epoch_ms: row
-                            .get::<Option<i64>, _>(7)
-                            .map(|value| u64_from_sql("AttachmentManifest", "written_at_ms", value))
-                            .transpose()?,
-                        committed_at_epoch_ms: row
-                            .get::<Option<i64>, _>(4)
-                            .map(|value| {
-                                u64_from_sql("AttachmentManifest", "committed_at_ms", value)
-                            })
-                            .transpose()?,
-                        owner,
-                    })
-                })
-                .collect()
+        for id in ids {
+            lock_attachment_fence_tx(&mut tx, &id).await?;
         }
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .bind(clamp_epoch_ms(self.clock.timestamp_ms()))
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        sqlx::query(attachment_sql().pending.delete_referrer.sql())
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(attachment_sql().edges.delete_referrer.sql())
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
     }
-
-    async fn forget(
+    async fn session_referrer_state(
         &self,
-        session_id: &SessionId,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
-        let pool = self.pool.clone();
-        let session_id = SessionId::from(session_id.to_string());
-        let attachment_id = attachment_id.to_string();
-        {
-            let mut tx = crate::begin_guarded(&pool, &self.fence).await?;
-            sqlx::query(attachment_sql().manifest_postgres.forget_for_session.sql())
-                .bind(session_id.as_str())
-                .bind(attachment_id)
-                .execute(&mut **tx)
+        session: &SessionId,
+    ) -> Result<SessionReferrerState, StoreError> {
+        let (metadata, deleted, retained): (bool, bool, bool) =
+            sqlx::query_as(attachment_sql().postgres.session_state.sql())
+                .bind(session.as_str())
+                .fetch_one(&self.pool)
                 .await
                 .map_err(store_sqlx_error)?;
-            tx.commit().await.map_err(store_sqlx_error)
-        }
+        Ok(if !metadata && !deleted {
+            SessionReferrerState::Absent
+        } else if metadata && !deleted {
+            SessionReferrerState::Live
+        } else if retained {
+            SessionReferrerState::DeletedRetained
+        } else {
+            SessionReferrerState::DeletedRetired
+        })
     }
-
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        let pool = self.pool.clone();
-        {
-            let rows = sqlx::query(attachment_sql().manifest.select_rooted_ids.sql())
-                .fetch_all(&pool)
+    async fn attachment_referrers(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, StoreError> {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as(attachment_sql().edges.select_referrers.sql())
+                .bind(id.as_str())
+                .fetch_all(&self.pool)
                 .await
                 .map_err(store_sqlx_error)?;
-            rows.into_iter()
-                .map(|row| {
-                    attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0))
-                })
-                .collect()
-        }
+        rows.into_iter()
+            .map(|(kind, id)| {
+                ArtifactReferrer::decode(&kind, &id)
+                    .map_err(|error| error.into_store_error("attachment referrer edge"))
+            })
+            .collect()
     }
 }

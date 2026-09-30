@@ -833,68 +833,24 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
     }
 }
 
-impl PostgresStore {
-    /// The read-only delete-time root predicate for one digest, parameterised
-    /// `$1 = attachment_id`, `$2 = intent_grace_cutoff_ms`. A ref is live unless
-    /// it is eligible for the same conditional forget reconciliation applies.
-    /// The targeted probe and the condemn CAS share it so the fence and the
-    /// probe cannot drift apart.
-    fn live_attachment_ref_sql(&self) -> &'static str {
-        crate::attachments::live_attachment_ref_sql(self.process_registry_shared)
-    }
-}
-
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for PostgresStore {
-    fn can_prove_process_owner_death(&self) -> bool {
-        self.process_registry_shared
-    }
-
     async fn live_attachment_refs(
         &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<
-        std::collections::BTreeSet<lash_core_execution::AttachmentId>,
-        lash_core_execution::StoreError,
-    > {
-        // Age is only a post-terminal retention policy. This single DELETE
-        // composes age with durable owner-death proof: a later committed turn
-        // supersedes a turn owner, a missing process row proves a process owner
-        // was pruned, and only unscoped host puts use age alone.
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        sqlx::query(
+    ) -> Result<std::collections::BTreeSet<lash_core_execution::AttachmentId>, StoreError> {
+        let ids: Vec<String> = sqlx::query_scalar(
             crate::attachments::attachment_sql()
-                .manifest_postgres
-                .delete_deleted_session_roots
-                .sql(),
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let delete_sql = crate::attachments::forget_aged_uncommitted_attachment_intents_sql(
-            self.process_registry_shared,
-        );
-        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        sqlx::query(delete_sql)
-            .bind(cutoff)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(
-            crate::attachments::attachment_sql()
-                .manifest
+                .edges
                 .select_rooted_ids
                 .sql(),
         )
-        .fetch_all(&mut **tx)
+        .fetch_all(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        rows.into_iter()
-            .map(|row| attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0)))
+        ids.into_iter()
+            .map(|id| attachment_id_from_sql("attachment root", "attachment_id", id))
             .collect()
     }
-
     async fn list_condemnations(
         &self,
     ) -> Result<
@@ -907,18 +863,19 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     async fn has_live_attachment_ref(
         &self,
         id: &lash_core_execution::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, lash_core_execution::StoreError> {
-        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let row = sqlx::query(self.live_attachment_ref_sql())
-            .bind(id.as_str())
-            .bind(cutoff)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?;
-        Ok(row.is_some())
+    ) -> Result<bool, StoreError> {
+        Ok(sqlx::query(
+            crate::attachments::attachment_sql()
+                .edges
+                .select_live_root
+                .sql(),
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?
+        .is_some())
     }
-
     fn fence(&self) -> lash_core_execution::AttachmentGcFence {
         lash_core_execution::AttachmentGcFence::Fenced
     }
@@ -948,7 +905,6 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     async fn condemn_attachment(
         &self,
         id: &lash_core_execution::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
         let generation = crate::attachments::sweep_generation_sql(generation)?;
@@ -957,21 +913,24 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         // the root predicate below and that writer's manifest insert cannot
         // interleave.
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let rooted = sqlx::query(self.live_attachment_ref_sql())
-            .bind(id.as_str())
-            .bind(cutoff)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .is_some();
+        let rooted = sqlx::query(
+            crate::attachments::attachment_sql()
+                .edges
+                .select_live_root
+                .sql(),
+        )
+        .bind(id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .is_some();
         if rooted {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
         }
         let inserted = sqlx::query(
             crate::attachments::attachment_sql()
-                .condemnation_postgres
+                .postgres
                 .insert_condemned
                 .sql(),
         )
@@ -988,7 +947,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
             // tombstone unnecessary.
             sqlx::query(
                 crate::attachments::attachment_sql()
-                    .manifest
+                    .uploads
                     .delete_by_id
                     .sql(),
             )
@@ -1074,6 +1033,9 @@ async fn fence_deleted_session_frames_tx(
 ) -> Result<(), StoreError> {
     let mut referrers = Vec::new();
     for session_id in session_ids {
+        referrers.push(lash_core_execution::ArtifactReferrer::Session(
+            session_id.clone(),
+        ));
         if let Some(head) =
             crate::support::load_session_head_meta_tx(tx, session_id, false, fleet_format).await?
             && let Some(frame) = head.current_frame_node_id
@@ -1091,28 +1053,34 @@ async fn fence_deleted_session_frames_tx(
         )
     });
     let now = crate::support::postgres_transaction_epoch_ms(tx).await?;
-    for referrer in referrers {
-        crate::artifact_store::lock_referrer_tx(tx, &referrer)
+    for referrer in &referrers {
+        crate::artifact_store::lock_referrer_tx(tx, referrer)
             .await
             .map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::artifact_store::artifact_sql()
-                .fences
-                .insert_fence
-                .sql(),
-        )
-        .bind(referrer.kind().as_str())
-        .bind(referrer.canonical_id())
-        .bind(crate::support::clamp_epoch_ms(now))
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        crate::obligation_ledger::arm_cleanup_tx(
-            tx,
-            &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None),
-            now,
-        )
-        .await?;
+    }
+    for referrer in referrers {
+        let cleanup = if matches!(referrer, lash_core_execution::ArtifactReferrer::Session(_)) {
+            lash_core_execution::ArtifactCleanup {
+                referrer,
+                plan: lash_core_execution::ArtifactCleanupPlan::AwaitSessionGraphRetired,
+                gate: None,
+            }
+        } else {
+            sqlx::query(
+                crate::artifact_store::artifact_sql()
+                    .fences
+                    .insert_fence
+                    .sql(),
+            )
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .bind(crate::support::clamp_epoch_ms(now))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None)
+        };
+        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now).await?;
     }
     Ok(())
 }
@@ -1286,15 +1254,6 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    sqlx::query(
-        crate::attachments::attachment_sql()
-            .manifest_postgres
-            .delete_deleted_session_roots
-            .sql(),
-    )
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
     crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
         tx,
         candidates,
@@ -1302,134 +1261,4 @@ pub(crate) async fn delete_session_tx(
         report,
     )
     .await
-}
-
-/// Deletes process-owned runtime sessions as one batch inside the process
-/// prune transaction.
-///
-/// The batch obeys the same two laws as a single-session delete: every
-/// materialized id it removes joins the permanent deleted set, and the reclaim
-/// arm drops tombstoned rows owned by any already-deleted session, not only by
-/// the batch. Process runtime session ids are lash-minted, but they are just as
-/// unbindable as host-facing ids once deleted, so a row left tombstoned under
-/// one of them could never be reached by a session-scoped vacuum again.
-pub(crate) async fn delete_process_sessions_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_ids: &[SessionId],
-    fleet_format: lash_core_execution::FleetFormat,
-) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
-    if session_ids.is_empty() {
-        return Ok(lash_core_execution::SessionBlobReclaimReport::default());
-    }
-    let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
-    let mut report = lash_core_execution::SessionBlobReclaimReport::default();
-    let outcome: Result<(), StoreError> = async {
-        crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
-        crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
-        fence_deleted_session_frames_tx(tx, session_ids, fleet_format).await?;
-        let checkpoint_refs = sqlx::query_scalar::<_, String>(
-            session_sql().head.select_checkpoints_for_sessions.sql(),
-        )
-        .bind(&session_id_texts[..])
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
-        let candidates = crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(
-            tx,
-            &checkpoint_refs,
-        )
-        .await?;
-        crate::session_blob_reclaim::lock_session_blob_candidates_tx(
-            tx,
-            &candidates,
-            "process-prune session batch",
-        )
-        .await?;
-        report.enumerated_blob_count = candidates.len();
-
-        sqlx::query(
-            session_sql()
-                .deleted_postgres
-                .insert_batch_from_targets
-                .sql(),
-        )
-        .bind(&session_id_texts[..])
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-
-        let (deleted_leaf_node_ids, has_graph_candidates) =
-            sqlx::query_as::<_, (Vec<String>, bool)>(
-                session_sql().head.delete_batch_returning.sql(),
-            )
-            .bind(&session_id_texts[..])
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-
-        if has_graph_candidates {
-            for leaf_node_id in deleted_leaf_node_ids {
-                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id)
-                    .await?;
-            }
-            let unreachable_candidates = sqlx::query_scalar::<_, String>(
-                session_sql()
-                    .graph_postgres
-                    .select_unreachable_leaves_batch
-                    .sql(),
-            )
-            .bind(&session_id_texts[..])
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            for node_id in unreachable_candidates {
-                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
-            }
-        }
-
-        // Delete-time reclaim covers the batch's tombstoned rows plus any
-        // tombstoned row owned by an already-deleted session. The ancestry
-        // retire above tombstones a node regardless of who owns it, so a batch
-        // can strand a row belonging to a session outside it; that owner is
-        // unbindable, so no session-scoped vacuum could ever reach the row.
-        // Live sessions' rows stay resident for their own vacuum, so this is
-        // not a catalog-wide sweep.
-        sqlx::query(session_sql().core.delete_process_session_rows.sql())
-            .bind(&session_id_texts[..])
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-
-        sqlx::query(
-            crate::attachments::attachment_sql()
-                .manifest_postgres
-                .delete_deleted_session_roots
-                .sql(),
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
-            tx,
-            candidates,
-            &checkpoint_refs,
-            &mut report,
-        )
-        .await?;
-        Ok(())
-    }
-    .await;
-    match outcome {
-        Ok(()) => Ok(report),
-        Err(error) => {
-            // The caller owns the transaction and rolls it back on this stop;
-            // no physical delete in the partial report can survive.
-            report.deleted_blob_count = 0;
-            Err(lash_core_execution::MaintenanceFailure::failed(
-                error, report,
-            ))
-        }
-    }
 }

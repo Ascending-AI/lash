@@ -70,8 +70,7 @@ lash_conformance::process_prune_reclaim_tests!({
     };
     reset(&storage).await;
     let storage = Arc::new(storage);
-    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn DeploymentStore>;
+    let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(blob_probe::PostgresBlobProbe::new(
         storage,
@@ -153,7 +152,7 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
 
     let referrer = lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id);
     let fenced: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+        "SELECT EXISTS (SELECT 1 FROM lash_referrer_fences
          WHERE referrer_kind = $1 AND referrer_id = $2)",
     )
     .bind(referrer.kind().as_str())
@@ -204,7 +203,7 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
         .expect("register process");
     let session_id =
         lash_core_execution::facade_support::process_runtime_session_ids(&process.id)[0].clone();
-    let factory = storage.session_store_factory_with_shared_process_registry();
+    let factory = storage.store();
     factory
         .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,

@@ -518,7 +518,7 @@ async fn attachment_prefix_retention(
     let parent = crate::SessionAttachmentStore::new(
         bytes.clone(),
         Arc::clone(store.store()) as Arc<dyn crate::AttachmentManifest>,
-        &request.session_id,
+        crate::RuntimeOwner::Session((request.session_id).clone()),
     );
     let reference = parent
         .put(
@@ -545,14 +545,14 @@ async fn attachment_prefix_retention(
         .unwrap();
     crate::conformance::helpers::record_completed_attachment_write(
         store.store(),
-        crate::AttachmentIntent {
+        crate::AttachmentWrite {
             attachment_id: orphan.id.clone(),
-            session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
-            intent_at_epoch_ms: 0,
-            owner: Some(crate::AttachmentOwner::Turn {
-                id: "orphan-turn".into(),
-            }),
+            claim: crate::conformance::attachment_referrers::claim(
+                crate::conformance::attachment_referrers::execution(
+                    &(request.session_id.clone()),
+                    "completed-fixture",
+                ),
+            ),
         },
     )
     .await;
@@ -622,7 +622,7 @@ async fn attachment_prefix_retention(
     let child = crate::SessionAttachmentStore::new(
         bytes.clone(),
         Arc::clone(fork.store()) as Arc<dyn crate::AttachmentManifest>,
-        &fork_request.session_id,
+        crate::RuntimeOwner::Session((fork_request.session_id).clone()),
     );
     assert_eq!(
         child

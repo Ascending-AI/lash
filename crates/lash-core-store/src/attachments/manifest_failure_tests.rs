@@ -1,4 +1,6 @@
 use super::*;
+use crate::artifact_referrer::{ArtifactReferrer, ReferrerClaim};
+use crate::runtime_owner::RuntimeOwner;
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -93,7 +95,7 @@ impl FailingManifest {
 impl AttachmentManifest for FailingManifest {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        intent: &AttachmentWrite,
     ) -> Result<AttachmentWriteFence, StoreError> {
         self.record("begin");
         if matches!(self.operation, Operation::Begin) {
@@ -104,7 +106,7 @@ impl AttachmentManifest for FailingManifest {
 
     async fn complete_attachment_write(
         &self,
-        _intent: &AttachmentIntent,
+        _intent: &AttachmentWrite,
         _permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         self.record("complete");
@@ -114,7 +116,7 @@ impl AttachmentManifest for FailingManifest {
 
     async fn abort_attachment_write(
         &self,
-        _intent: &AttachmentIntent,
+        _intent: &AttachmentWrite,
         _permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         self.record("abort");
@@ -122,29 +124,37 @@ impl AttachmentManifest for FailingManifest {
         Err(self.cause.error())
     }
 
-    async fn forget(&self, _session: &SessionId, _id: &AttachmentId) -> Result<(), StoreError> {
+    async fn forget_attachment_ref(
+        &self,
+        _referrer: &ArtifactReferrer,
+        _id: &AttachmentId,
+    ) -> Result<(), StoreError> {
         self.record("forget");
         assert!(matches!(self.operation, Operation::Forget));
         Err(self.cause.error())
     }
 
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        _session: &SessionId,
+        _claim: &ReferrerClaim,
         _ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
-        panic!("unexpected commit_refs")
+        panic!("unexpected acquire")
     }
-
-    async fn list_uncommitted(
+    async fn end_attachment_referrer(&self, _r: &ArtifactReferrer) -> Result<(), StoreError> {
+        panic!("unexpected end")
+    }
+    async fn session_referrer_state(
         &self,
-        _cutoff: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, StoreError> {
-        panic!("unexpected list_uncommitted")
+        _s: &SessionId,
+    ) -> Result<crate::SessionReferrerState, StoreError> {
+        panic!("unexpected state")
     }
-
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        panic!("unexpected list_all_refs")
+    async fn attachment_referrers(
+        &self,
+        _id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, StoreError> {
+        panic!("unexpected referrers")
     }
 }
 
@@ -230,7 +240,7 @@ fn probe(
         SessionAttachmentStore::new(
             backend.clone(),
             manifest.clone(),
-            "manifest-failure-session",
+            RuntimeOwner::Session("manifest-failure-session".into()),
         ),
         manifest,
         backend,
@@ -295,7 +305,7 @@ async fn assert_manifest_failure(operation: Operation) {
         let expected_operation = match operation {
             Operation::Begin => "begin_attachment_write",
             Operation::Complete => "complete_attachment_write",
-            Operation::Forget => "forget",
+            Operation::Forget => "forget_attachment_ref",
             Operation::Abort => unreachable!(),
         };
         assert_eq!(*actual_operation, expected_operation);

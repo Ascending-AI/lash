@@ -1,5 +1,4 @@
 use crate::SessionId;
-use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 mod file_store;
 
@@ -14,7 +13,7 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 use crate::store::{
     AttachmentCondemnation, AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
     AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
-    AttachmentIntent, AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration,
+    AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit, MAX_ATTACHMENT_DELETE_ATTEMPTS, StoreError,
 };
 
@@ -315,16 +314,9 @@ pub trait AttachmentStore: Send + Sync {
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError>;
 }
 
-/// A source of the live attachment root set across every session a store
-/// factory owns. Committed refs and intents with owners that can still commit
-/// are roots; terminal-owner intents remain roots through their retention
-/// window. Unscoped host puts use the legacy age-only fallback.
-///
-/// Implemented by session-store factories, which own the full set of sessions.
-/// Every durable backend answers from one factory-wide manifest in a single
-/// pass: a global manifest table for Postgres, and for SQLite the single
-/// factory-wide `durable-core.db` catalog, which the factory opens for the
-/// root-set pass and asks for [`AttachmentManifest::list_all_refs`].
+/// The deployment-wide attachment roots: every explicit referrer edge and
+/// every pending write. Root enumeration never ends a referrer or uses age
+/// to infer that its writer died.
 /// An in-memory factory answers from its live stores. If
 /// the implementor cannot enumerate its roots, it must return an error from
 /// [`Self::live_attachment_refs`]. The sweep then lists the backend only to
@@ -336,23 +328,10 @@ pub trait AttachmentStore: Send + Sync {
 /// assertion.
 #[async_trait::async_trait]
 pub trait AttachmentRootSet: Send + Sync {
-    /// Authorities without a wired process registry conservatively retain process-owned
-    /// intents.
-    fn can_prove_process_owner_death(&self) -> bool {
-        false
-    }
-
-    /// The live root set, reconciled against `intent_grace_cutoff_epoch_ms`.
+    /// Every digest held by an edge or a pending write.
     ///
-    /// A committed ref is always a root. An uncommitted intent remains a root
-    /// until both the cutoff has elapsed and its durable owner is proven unable
-    /// to commit. A turn owner is dead only after a superseding turn commit for
-    /// the session; a process owner is dead only after its durable process row
-    /// is pruned. An ownerless host intent retains the legacy age-only rule.
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, StoreError>;
+    /// A digest is live exactly while it has an edge or pending write.
+    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, StoreError>;
 
     /// Enumerate the factory's durable condemnation authority in digest order.
     ///
@@ -378,11 +357,7 @@ pub trait AttachmentRootSet: Send + Sync {
     /// sweep re-probes just that id. Unlike the snapshot, this is a read-only probe
     /// — it must NOT reconcile (forget) aged intents. Backends answer with a single
     /// indexed query / first-hit scan rather than materializing the whole set.
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError>;
+    async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError>;
 
     /// Whether this root authority implements the condemn/intent CAS fence.
     ///
@@ -494,10 +469,9 @@ pub trait AttachmentRootSet: Send + Sync {
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
         generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
-        let _ = (id, intent_grace_cutoff_epoch_ms, generation);
+        let _ = (id, generation);
         Ok(AttachmentCondemnation::Unsupported)
     }
 
@@ -615,9 +589,6 @@ pub enum AttachmentGcFence {
 /// [`VacuumReport`](crate::VacuumReport) do for the store-side levers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AttachmentReclamationReport {
-    /// True when process-owner death cannot be proven; the sweep is incomplete
-    /// even when it reclaims no blobs, because process intents remain rooted.
-    pub owner_death_proof_degraded: bool,
     /// Blobs enumerated from the backend and considered by the sweep.
     pub scanned_blob_count: usize,
     /// Blobs deleted: unreferenced by any session and past the grace window.
@@ -674,8 +645,7 @@ impl crate::store::MaintenanceReport for AttachmentReclamationReport {
     }
 
     fn sweep(&self) -> crate::store::MaintenanceSweep {
-        if self.owner_death_proof_degraded
-            || !self.failed_ids.is_empty()
+        if !self.failed_ids.is_empty()
             || !self.condemn_deferred_ids.is_empty()
             || !self.stalled_ids.is_empty()
         {
@@ -855,7 +825,6 @@ where
     let grace_period_ms = policy.grace_period_ms;
     let mut fence = root_set.fence();
     let mut report = AttachmentReclamationReport {
-        owner_death_proof_degraded: !root_set.can_prove_process_owner_death(),
         fence,
         ..AttachmentReclamationReport::default()
     };
@@ -921,8 +890,7 @@ where
         }
     }
     let now = now_epoch_ms();
-    let intent_grace_cutoff = now.saturating_sub(grace_period_ms);
-    let live = root_set.live_attachment_refs(intent_grace_cutoff).await;
+    let live = root_set.live_attachment_refs().await;
     let blobs = match backend.list().await {
         Ok(blobs) => blobs,
         Err(error) if report.adopted_count == 0 => {
@@ -1006,10 +974,7 @@ where
             .as_ref()
             .filter(|_| fence == AttachmentGcFence::Fenced)
         {
-            match root_set
-                .condemn_attachment(&blob.id, intent_grace_cutoff, generation)
-                .await
-            {
+            match root_set.condemn_attachment(&blob.id, generation).await {
                 Ok(AttachmentCondemnation::Condemned) => {
                     if live.is_empty()
                         && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll
@@ -1113,10 +1078,7 @@ where
         // before the delete because the facade's `put` records the write-ahead
         // intent BEFORE the backend `put`. It cannot observe one recorded after
         // it, which is the window only the fence closes.
-        match root_set
-            .has_live_attachment_ref(&blob.id, intent_grace_cutoff)
-            .await
-        {
+        match root_set.has_live_attachment_ref(&blob.id).await {
             Ok(true) => continue,
             Ok(false) => {}
             // Could not probe the root set: do not delete a blob we can no longer
@@ -1145,14 +1107,7 @@ where
         match backend.delete(&blob.id).await {
             Ok(()) => {
                 report.reclaimed_count += 1;
-                detect_deleted_while_referenced(
-                    root_set,
-                    &blob.id,
-                    intent_grace_cutoff,
-                    fence,
-                    &mut report,
-                )
-                .await;
+                detect_deleted_while_referenced(root_set, &blob.id, fence, &mut report).await;
             }
             Err(error) => {
                 record_reclamation_failure(&mut report, blob.id, error);
@@ -1280,14 +1235,7 @@ async fn complete_condemnation<R>(
     match backend.delete(id).await {
         Ok(()) => {
             report.reclaimed_count += 1;
-            detect_deleted_while_referenced(
-                root_set,
-                id,
-                now_epoch_ms().saturating_sub(grace_period_ms),
-                AttachmentGcFence::Fenced,
-                report,
-            )
-            .await;
+            detect_deleted_while_referenced(root_set, id, AttachmentGcFence::Fenced, report).await;
             settle(
                 root_set,
                 id,
@@ -1396,16 +1344,12 @@ async fn settle<R>(
 async fn detect_deleted_while_referenced<R>(
     root_set: &R,
     id: &AttachmentId,
-    intent_grace_cutoff: u64,
     fence: AttachmentGcFence,
     report: &mut AttachmentReclamationReport,
 ) where
     R: AttachmentRootSet + ?Sized,
 {
-    if let Ok(true) = root_set
-        .has_live_attachment_ref(id, intent_grace_cutoff)
-        .await
-    {
+    if let Ok(true) = root_set.has_live_attachment_ref(id).await {
         tracing::error!(
             attachment_id = %id,
             fence = ?fence,
@@ -1522,187 +1466,160 @@ pub fn content_id(bytes: &[u8]) -> AttachmentId {
         .expect("BLAKE3 hex digest is a valid attachment id")
 }
 
-/// The concrete, session-bound facade over a flat [`AttachmentStore`] backend —
-/// the only attachment surface the runtime and its consumers ever see.
-///
-/// It binds a flat blob `backend`, an [`AttachmentManifest`] that tracks
-/// `(session_id, attachment_id)` refs, and a `session_id`. Every `put` records
-/// a write-ahead intent in the manifest *before* the bytes hit the backend, so
-/// a crash between `put` and the next durable commit surfaces as an uncommitted
-/// manifest row that GC reconciles. FIG-653: `get` resolves content addresses
-/// directly, including fork-inherited references; hosts own authorization.
-/// `delete` forgets a manifest ref only when retained graph history no longer
-/// needs it. Bytes die through [`reclaim_unreferenced_attachments`] after the
-/// final root disappears.
-///
-/// Ephemeral runtimes use [`NoopAttachmentManifest`] and track no durable roots.
+/// The default lifetime of an unbound session upload's staging referrer.
+pub const DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS: u64 = 86_400_000;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttachmentHolder {
+    Ephemeral,
+    Runtime(crate::runtime_owner::RuntimeOwner),
+}
+/// Attachment bytes held by a session execution, a process record, or one
+/// session upload. Pending writes precede byte publication; completion records
+/// upload evidence. Reads resolve content addresses; deletion releases only
+/// the holder's lasting referrer edge. Reclamation alone deletes bytes.
 pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
     manifest: Arc<dyn AttachmentManifest>,
-    session_id: SessionId,
+    holder: AttachmentHolder,
     max_attachment_bytes: Option<u64>,
-    owner: Mutex<Option<BoundAttachmentOwner>>,
+    upload_expiry_ms: u64,
+    execution: Mutex<Option<BoundAttachmentExecution>>,
     clock: Arc<dyn crate::Clock>,
 }
-
 #[derive(Clone)]
-struct BoundAttachmentOwner {
-    owner: crate::AttachmentOwner,
-    recorded_intent_ids: Arc<Mutex<BTreeSet<AttachmentId>>>,
+struct BoundAttachmentExecution {
+    journal: lash_sansio::EffectJournalIdentity,
+    recorded_puts: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
-
-pub struct AttachmentOwnerBinding {
+pub struct AttachmentExecutionBinding {
     store: Arc<SessionAttachmentStore>,
-    owner: BoundAttachmentOwner,
-    previous: Option<BoundAttachmentOwner>,
+    execution: BoundAttachmentExecution,
+    previous: Option<BoundAttachmentExecution>,
 }
-
-impl Drop for AttachmentOwnerBinding {
+impl Drop for AttachmentExecutionBinding {
     fn drop(&mut self) {
-        self.store.restore_owner(&self.owner, self.previous.take());
+        let mut current = self.store.execution.lock_recover();
+        if current
+            .as_ref()
+            .is_some_and(|bound| Arc::ptr_eq(&bound.recorded_puts, &self.execution.recorded_puts))
+        {
+            *current = self.previous.take();
+        }
     }
 }
-
 impl SessionAttachmentStore {
     pub fn new(
         backend: Arc<dyn AttachmentStore>,
         manifest: Arc<dyn AttachmentManifest>,
-        session_id: impl Into<SessionId>,
+        owner: crate::runtime_owner::RuntimeOwner,
     ) -> Self {
-        Self::new_with_clock(backend, manifest, session_id, Arc::new(crate::SystemClock))
+        Self::new_with_clock(backend, manifest, owner, Arc::new(crate::SystemClock))
     }
-
     pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
         manifest: Arc<dyn AttachmentManifest>,
-        session_id: impl Into<SessionId>,
+        owner: crate::runtime_owner::RuntimeOwner,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             backend,
             manifest,
-            session_id: session_id.into(),
+            holder: AttachmentHolder::Runtime(owner),
             max_attachment_bytes: None,
-            owner: Mutex::new(None),
+            upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
+            execution: Mutex::new(None),
             clock,
         }
     }
-
-    /// Ephemeral facade: wrap `backend` with a no-op manifest and an empty
-    /// session id. No boundary guard, no reference tracking — used by ephemeral
-    /// runtimes and tests with no durable reference store.
     pub fn ephemeral(backend: Arc<dyn AttachmentStore>) -> Self {
-        Self::new(backend, Arc::new(NoopAttachmentManifest), String::new())
+        Self {
+            backend,
+            manifest: Arc::new(NoopAttachmentManifest),
+            holder: AttachmentHolder::Ephemeral,
+            max_attachment_bytes: None,
+            upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
+            execution: Mutex::new(None),
+            clock: Arc::new(crate::SystemClock),
+        }
     }
-
-    /// Ephemeral facade with no attachment port: every put is refused and
-    /// reads find nothing (see [`UnavailableAttachmentStore`]).
     #[cfg(any(test, feature = "testing"))]
     pub fn unavailable() -> Self {
         Self::ephemeral(Arc::new(UnavailableAttachmentStore))
     }
-
     pub fn backend(&self) -> &Arc<dyn AttachmentStore> {
         &self.backend
     }
-
     pub fn manifest(&self) -> &Arc<dyn AttachmentManifest> {
         &self.manifest
     }
-
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    pub fn holder(&self) -> &AttachmentHolder {
+        &self.holder
     }
-
-    /// `None` preserves unbounded attachment puts. `Some(max_bytes)` rejects a
-    /// larger `put` with [`AttachmentStoreError::SizeLimitExceeded`] before
-    /// recording a manifest intent or calling the backend.
     pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
         self.max_attachment_bytes = max_attachment_bytes;
         self
     }
-
-    /// `None` means attachment puts are unbounded.
     pub fn max_attachment_bytes(&self) -> Option<u64> {
         self.max_attachment_bytes
     }
-
+    pub fn with_upload_expiry_ms(mut self, upload_expiry_ms: u64) -> Self {
+        self.upload_expiry_ms = upload_expiry_ms;
+        self
+    }
+    pub fn upload_expiry_ms(&self) -> u64 {
+        self.upload_expiry_ms
+    }
     pub fn reconfigured_max_attachment_bytes(&self, max_attachment_bytes: Option<u64>) -> Self {
         Self {
             backend: Arc::clone(&self.backend),
             manifest: Arc::clone(&self.manifest),
-            session_id: self.session_id.clone(),
+            holder: self.holder.clone(),
             max_attachment_bytes,
-            owner: Mutex::new(self.owner.lock_recover().clone()),
+            upload_expiry_ms: self.upload_expiry_ms,
+            execution: Mutex::new(self.execution.lock_recover().clone()),
             clock: Arc::clone(&self.clock),
         }
     }
-
     pub fn persistence(&self) -> AttachmentStorePersistence {
         self.backend.persistence()
     }
-
-    /// Bind puts for the lifetime of a durable turn execution.
-    pub fn bind_turn_scoped(
+    pub fn bind_execution_scoped(
         self: &Arc<Self>,
-        turn_id: impl Into<TurnId>,
-    ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(crate::AttachmentOwner::Turn {
-            id: turn_id.into().into_inner(),
+        journal: lash_sansio::EffectJournalIdentity,
+    ) -> Result<AttachmentExecutionBinding, AttachmentStoreError> {
+        if !matches!(
+            self.holder,
+            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(_))
+        ) {
+            return Err(AttachmentStoreError::Contract(
+                "only a session runtime can bind an attachment execution".into(),
+            ));
+        }
+        let execution = BoundAttachmentExecution {
+            journal,
+            recorded_puts: Arc::new(Mutex::new(BTreeSet::new())),
+        };
+        let previous = self.execution.lock_recover().replace(execution.clone());
+        Ok(AttachmentExecutionBinding {
+            store: Arc::clone(self),
+            execution,
+            previous,
         })
     }
-
-    /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
-    pub fn bind_process_scoped(
-        self: &Arc<Self>,
-        process_id: crate::ProcessId,
-    ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(crate::AttachmentOwner::Process { process_id })
-    }
-
-    fn bind_owner_scoped(
-        self: &Arc<Self>,
-        owner: crate::AttachmentOwner,
-    ) -> AttachmentOwnerBinding {
-        let owner = BoundAttachmentOwner {
-            owner,
-            recorded_intent_ids: Arc::new(Mutex::new(BTreeSet::new())),
-        };
-        let previous = self.owner.lock_recover().replace(owner.clone());
-        AttachmentOwnerBinding {
-            store: Arc::clone(self),
-            owner,
-            previous,
-        }
-    }
-
-    fn restore_owner(
+    pub fn recorded_execution_puts(
         &self,
-        completed: &BoundAttachmentOwner,
-        previous: Option<BoundAttachmentOwner>,
-    ) {
-        let mut owner = self.owner.lock_recover();
-        if owner
+        journal: &lash_sansio::EffectJournalIdentity,
+    ) -> BTreeSet<AttachmentId> {
+        let recorded = self
+            .execution
+            .lock_recover()
             .as_ref()
-            .is_some_and(|current| current.owner == completed.owner)
-        {
-            *owner = previous;
-        }
-    }
-
-    /// Returns the unique attachment intents recorded by the active durable
-    /// turn. The runtime uses this turn-side evidence while assembling the
-    /// commit budget; stores are never queried during admission.
-    pub fn recorded_turn_intent_ids(&self, turn_id: &TurnId) -> BTreeSet<AttachmentId> {
-        let recorded = self.owner.lock_recover().as_ref().and_then(|owner| {
-            matches!(&owner.owner, crate::AttachmentOwner::Turn { id } if id == turn_id.as_str())
-                .then(|| Arc::clone(&owner.recorded_intent_ids))
-        });
+            .filter(|bound| &bound.journal == journal)
+            .map(|bound| Arc::clone(&bound.recorded_puts));
         recorded
-            .map(|ids| ids.lock_recover().clone())
+            .map(|puts| puts.lock_recover().clone())
             .unwrap_or_default()
     }
-
     pub async fn put(
         &self,
         bytes: Vec<u8>,
@@ -1718,13 +1635,42 @@ impl SessionAttachmentStore {
             });
         }
         let attachment_id = content_id(&bytes);
-        let owner = self.owner.lock_recover().clone();
-        let intent = AttachmentIntent {
+        let execution = self.execution.lock_recover().clone();
+        let claim = match &self.holder {
+            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(id)) => {
+                crate::artifact_referrer::ReferrerClaim::unguarded(
+                    crate::artifact_referrer::ArtifactReferrer::ProcessRecord(id.clone()),
+                )
+            }
+            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(id)) => {
+                match &execution {
+                    Some(bound) => crate::artifact_referrer::ReferrerClaim::guarded(
+                        crate::artifact_referrer::ArtifactReferrer::Execution(
+                            bound.journal.clone(),
+                        ),
+                        crate::artifact_referrer::ArtifactCleanupPlan::AwaitJournal,
+                    ),
+                    None => crate::artifact_referrer::ReferrerClaim::guarded(
+                        crate::artifact_referrer::ArtifactReferrer::Upload(
+                            crate::artifact_referrer::UploadReferrerId::mint(id.clone()),
+                        ),
+                        crate::artifact_referrer::ArtifactCleanupPlan::AwaitUploadExpiry {
+                            expires_at_ms: self
+                                .clock
+                                .timestamp_ms()
+                                .saturating_add(self.upload_expiry_ms),
+                        },
+                    ),
+                }
+            }
+            AttachmentHolder::Ephemeral => crate::artifact_referrer::ReferrerClaim::unguarded(
+                crate::artifact_referrer::ArtifactReferrer::Session(SessionId::from("ephemeral")),
+            ),
+        }
+        .map_err(|error| AttachmentStoreError::Contract(error.to_string()))?;
+        let write = AttachmentWrite {
             attachment_id: attachment_id.clone(),
-            session_id: self.session_id.clone(),
-            canonical_uri: attachment_uri(&attachment_id),
-            intent_at_epoch_ms: self.clock.timestamp_ms(),
-            owner: owner.as_ref().map(|bound| bound.owner.clone()),
+            claim,
         };
         // Acquire the write fence first: the intent is recorded before any bytes
         // land (the write-ahead guarantee) and, in the same mutation, the digest
@@ -1735,7 +1681,7 @@ impl SessionAttachmentStore {
             attempts += 1;
             let fence = self
                 .manifest
-                .begin_attachment_write(intent.clone())
+                .begin_attachment_write(&write)
                 .await
                 .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
                     operation: "begin_attachment_write",
@@ -1769,7 +1715,7 @@ impl SessionAttachmentStore {
                 Ok(reference) => reference,
                 Err(backend_error) => {
                     if let Err(rollback_error) =
-                        self.manifest.abort_attachment_write(&intent, permit).await
+                        self.manifest.abort_attachment_write(&write, permit).await
                     {
                         return Err(AttachmentStoreError::WriteRollbackFailed {
                             attachment_id,
@@ -1786,7 +1732,7 @@ impl SessionAttachmentStore {
                     reference.id
                 ));
                 if let Err(rollback_error) =
-                    self.manifest.abort_attachment_write(&intent, permit).await
+                    self.manifest.abort_attachment_write(&write, permit).await
                 {
                     return Err(AttachmentStoreError::WriteRollbackFailed {
                         attachment_id,
@@ -1798,7 +1744,7 @@ impl SessionAttachmentStore {
             }
             match self
                 .manifest
-                .complete_attachment_write(&intent, permit)
+                .complete_attachment_write(&write, permit)
                 .await
             {
                 Ok(()) => break reference,
@@ -1827,158 +1773,95 @@ impl SessionAttachmentStore {
                 }
             }
         };
-        if let Some(owner) = &owner {
-            owner
-                .recorded_intent_ids
-                .lock_recover()
-                .insert(attachment_id);
+        if let Some(bound) = &execution {
+            bound.recorded_puts.lock_recover().insert(attachment_id);
         }
         Ok(reference)
     }
 
-    /// FIG-653: hosts own read authorization; an absent backend id is NotFound.
     pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
         self.backend.get(id).await
     }
-
     pub async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        // Backend bytes stay put; they are reclaimed by GC once no session references them.
+        let referrer = match &self.holder {
+            AttachmentHolder::Ephemeral => return Ok(()),
+            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(id)) => {
+                crate::artifact_referrer::ArtifactReferrer::Session(id.clone())
+            }
+            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(id)) => {
+                crate::artifact_referrer::ArtifactReferrer::ProcessRecord(id.clone())
+            }
+        };
         self.manifest
-            .forget(&self.session_id, id)
+            .forget_attachment_ref(&referrer, id)
             .await
             .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
-                operation: "forget",
+                operation: "forget_attachment_ref",
                 attachment_id: id.clone(),
                 source: Box::new(source),
-            })?;
-        Ok(())
+            })
     }
 }
-
-/// No-op [`AttachmentManifest`] for ephemeral facades: records nothing and
-/// exposes no refs. The
-/// backend is the sole source of truth for these runtimes.
 pub struct NoopAttachmentManifest;
-
-#[async_trait::async_trait]
-impl AttachmentManifest for NoopAttachmentManifest {
-    async fn begin_attachment_write(
-        &self,
-        _intent: AttachmentIntent,
-    ) -> Result<AttachmentWriteFence, StoreError> {
-        Ok(AttachmentWriteFence::Granted(AttachmentWritePermit::new(
-            crate::AttachmentWriteToken::new(),
-        )))
-    }
-
-    async fn complete_attachment_write(
-        &self,
-        _intent: &AttachmentIntent,
-        _permit: AttachmentWritePermit,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn abort_attachment_write(
-        &self,
-        _intent: &AttachmentIntent,
-        _permit: AttachmentWritePermit,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn commit_refs(
-        &self,
-        _session_id: &SessionId,
-        _attachment_ids: &[AttachmentId],
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn list_uncommitted(
-        &self,
-        _older_than_epoch_ms: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn forget(
-        &self,
-        _session_id: &SessionId,
-        _attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        Ok(Vec::new())
-    }
-}
-
-fn attachment_uri(attachment_id: &AttachmentId) -> String {
-    format!("lash-attachment://blake3/{attachment_id}")
-}
-
+crate::impl_noop_attachment_manifest!(NoopAttachmentManifest);
 fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
-
-/// Adapter that exposes the [`AttachmentManifest`] segment of an
-/// `Arc<dyn RuntimeStore>` as an `Arc<dyn AttachmentManifest>`.
-/// Rust's trait-object upcasting does not yet allow direct coercion
-/// between the two; this thin forwarder is the bridge.
+/// The attachment port of a runtime store.
 pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimeStore>);
-
 #[async_trait::async_trait]
 impl AttachmentManifest for PersistenceManifestAdapter {
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
-    ) -> Result<AttachmentWriteFence, crate::StoreError> {
-        AttachmentManifest::begin_attachment_write(&*self.0, intent).await
+        write: &AttachmentWrite,
+    ) -> Result<AttachmentWriteFence, StoreError> {
+        self.0.begin_attachment_write(write).await
     }
-
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: AttachmentWritePermit,
-    ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::complete_attachment_write(&*self.0, intent, permit).await
+    ) -> Result<(), StoreError> {
+        self.0.complete_attachment_write(write, permit).await
     }
-
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: AttachmentWritePermit,
-    ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::abort_attachment_write(&*self.0, intent, permit).await
+    ) -> Result<(), StoreError> {
+        self.0.abort_attachment_write(write, permit).await
     }
-
-    async fn commit_refs(
+    async fn acquire_attachment_refs(
         &self,
-        session_id: &SessionId,
-        attachment_ids: &[AttachmentId],
-    ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::commit_refs(&*self.0, session_id, attachment_ids).await
+        claim: &crate::artifact_referrer::ReferrerClaim,
+        ids: &[AttachmentId],
+    ) -> Result<(), StoreError> {
+        self.0.acquire_attachment_refs(claim, ids).await
     }
-
-    async fn list_uncommitted(
+    async fn forget_attachment_ref(
         &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        AttachmentManifest::list_uncommitted(&*self.0, older_than_epoch_ms).await
+        referrer: &crate::artifact_referrer::ArtifactReferrer,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        self.0.forget_attachment_ref(referrer, id).await
     }
-
-    async fn forget(
+    async fn end_attachment_referrer(
         &self,
-        session_id: &SessionId,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::forget(&*self.0, session_id, attachment_id).await
+        referrer: &crate::artifact_referrer::ArtifactReferrer,
+    ) -> Result<(), StoreError> {
+        self.0.end_attachment_referrer(referrer).await
     }
-
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
-        AttachmentManifest::list_all_refs(&*self.0).await
+    async fn session_referrer_state(
+        &self,
+        session: &SessionId,
+    ) -> Result<crate::store::SessionReferrerState, StoreError> {
+        self.0.session_referrer_state(session).await
+    }
+    async fn attachment_referrers(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<Vec<crate::artifact_referrer::ArtifactReferrer>, StoreError> {
+        self.0.attachment_referrers(id).await
     }
 }
 

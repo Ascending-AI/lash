@@ -244,6 +244,9 @@ impl crate::StoreSet for StoreLawStores {
     fn session_store_factory(&self) -> Arc<dyn crate::DeploymentStore> {
         Self::no_second_substrate("session catalog")
     }
+    fn attachment_manifest(&self) -> Arc<dyn crate::AttachmentManifest> {
+        Self::no_second_substrate("attachment manifest")
+    }
 
     fn process_registry(&self) -> Arc<dyn crate::ProcessRegistry> {
         Self::no_second_substrate("process registry")

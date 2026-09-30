@@ -411,9 +411,7 @@ pub mod persistence {
         SettleOutcome,
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
-    pub use lash_core::{
-        AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
-    };
+    pub use lash_core::{AttachmentManifest, AttachmentWrite, SessionReferrerState};
     /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.

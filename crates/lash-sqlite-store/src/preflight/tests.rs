@@ -484,7 +484,7 @@ mod walk {
     async fn a_parked_segment_is_listed_with_its_owner_and_a_terminal_one_is_not() {
         let root = super::temp_root();
         let path = root.path().join("processes.db");
-        let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
+        let registry = SqliteProcessRegistry::open(&path)
             .await
             .expect("open registry");
         let live = park_segment(&registry).await;
@@ -546,7 +546,7 @@ mod walk {
     async fn a_live_process_is_walked_with_its_record_and_a_terminal_one_is_not() {
         let root = super::temp_root();
         let path = root.path().join("processes.db");
-        let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
+        let registry = SqliteProcessRegistry::open(&path)
             .await
             .expect("open registry");
         let live = registry
@@ -585,7 +585,7 @@ mod walk {
     async fn paging_returns_every_item_exactly_once() {
         let root = super::temp_root();
         let path = root.path().join("processes.db");
-        let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
+        let registry = SqliteProcessRegistry::open(&path)
             .await
             .expect("open registry");
         let first_process = park_segment(&registry).await;

@@ -81,8 +81,6 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
 mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]
 mod attachment_catalog;
-#[path = "conformance/attachment_owner_kind.rs"]
-mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
 #[path = "conformance/claim_atomicity.rs"]
@@ -1262,188 +1260,6 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_error_when_configured()
-{
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres unknown attachment-owner regression: database URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
-         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("drop owner-kind CHECK for corruption injection");
-    sqlx::query(
-        "INSERT INTO lash_attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id)
-         VALUES ('unknown-owner', 'unknown-attachment-owner',
-                 'lash-attachment://unknown', 0, NULL, 'unknown', 'owner')",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("insert unknown owner kind");
-
-    let store = storage.store();
-    let result = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await;
-
-    sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unknown-owner'")
-        .execute(storage.pool())
-        .await
-        .expect("remove corrupt owner-kind row");
-    sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         ADD CONSTRAINT ck_attachment_manifest_owner_kind
-             CHECK (owner_kind IN ('turn', 'process')),
-         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
-             CHECK (
-                 (owner_kind IS NULL AND owner_id IS NULL)
-                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
-             )",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("restore owner-kind CHECK");
-
-    let error = result.expect_err("unknown Postgres attachment owner kind must refuse");
-    assert!(
-        matches!(error, StoreError::Incompatible { .. }),
-        "Postgres must return the typed attachment-owner incompatibility, got {error:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping PostgreSQL GC owner test: database URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
-         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("allow future owner fixture");
-    sqlx::query(
-        "INSERT INTO lash_attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
-         VALUES ('future-owner-root', 'future-owner-session', 'uri', 1, 'future', 'opaque'),
-                ('invalid-process-root', 'future-owner-session', 'uri', 1, 'process', 'p_invalid')",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("seed undecodable owners");
-    sqlx::query("INSERT INTO lash_deleted_sessions (session_id) VALUES ('future-owner-session')")
-        .execute(storage.pool())
-        .await
-        .expect("seed deleted session");
-
-    let factory = storage.session_store_factory_with_shared_process_registry();
-    let mut rooted = Vec::new();
-    for name in ["future-owner-root", "invalid-process-root"] {
-        let id = lash_core_execution::AttachmentId::parse(name).expect("attachment id");
-        rooted.push(
-            lash_core_execution::AttachmentRootSet::has_live_attachment_ref(&factory, &id, 100)
-                .await
-                .expect("probe unknown owner"),
-        );
-    }
-    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 100)
-        .await
-        .expect("reconcile roots");
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_attachment_manifest
-         WHERE session_id = 'future-owner-session'",
-    )
-    .fetch_one(storage.pool())
-    .await
-    .expect("count retained roots");
-
-    sqlx::query("DELETE FROM lash_attachment_manifest WHERE session_id = 'future-owner-session'")
-        .execute(storage.pool())
-        .await
-        .expect("remove fixture");
-    sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = 'future-owner-session'")
-        .execute(storage.pool())
-        .await
-        .expect("remove deleted session");
-    sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         ADD CONSTRAINT ck_attachment_manifest_owner_kind
-             CHECK (owner_kind IN ('turn', 'process')),
-         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
-             CHECK (
-                 (owner_kind IS NULL AND owner_id IS NULL)
-                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
-             )",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("restore owner checks");
-
-    assert_eq!(rooted, vec![true, true]);
-    assert_eq!(count, 2, "reconciliation must retain both roots");
-    assert!(refs.contains(&lash_core_execution::AttachmentId::parse("future-owner-root").unwrap()));
-    assert!(
-        refs.contains(&lash_core_execution::AttachmentId::parse("invalid-process-root").unwrap())
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_unminted_process_attachment_owner_refuses_with_canonical_typed_error_when_configured()
- {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres unminted process attachment-owner regression: database URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    sqlx::query(
-        "INSERT INTO lash_attachment_manifest
-         (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id)
-         VALUES ('unminted-process-owner', 'unminted-process-attachment-owner',
-                 'lash-attachment://unminted-process', 0, NULL, 'process', 'process-1')",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("insert a process owner no registrar minted");
-
-    let store = storage.store();
-    let result = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await;
-
-    sqlx::query(
-        "DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unminted-process-owner'",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("remove unminted process-owner row");
-
-    let error = result.expect_err("an unminted Postgres process attachment owner must refuse");
-    let expected = lash_core_execution::ProcessId::parse("process-1")
-        .expect_err("a host-chosen name is not a process id")
-        .to_string();
-    assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner",
-                ref message,
-            } if *message == expected
-        ),
-        "Postgres must return the canonical unminted-process-owner refusal, got {error:?}"
-    );
-}
-
 lash_conformance::process_prune_session_store_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
@@ -1452,8 +1268,7 @@ lash_conformance::process_prune_session_store_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn DeploymentStore>;
+    let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let (promise_guard, effect_host) = promise_authority().await;
     (
@@ -1477,9 +1292,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     const TURN_ID: &str = "postgres-injected-clock-turn";
     const NOW_MS: u64 = 1_234_567;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(NOW_MS));
-    let factory = storage
-        .session_store_factory_with_shared_process_registry()
-        .with_clock(clock);
+    let factory = storage.store().with_clock(clock);
     factory
         .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,
@@ -1495,18 +1308,16 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .await
         .expect("admit clocked Postgres session");
     let store = factory.clone();
-    let clock_intent = lash_core_execution::AttachmentIntent {
+    let clock_intent = lash_core_execution::AttachmentWrite {
         attachment_id: lash_core_execution::AttachmentId::parse("postgres-clock-attachment")
             .expect("valid attachment id"),
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
-        intent_at_epoch_ms: NOW_MS.saturating_sub(1),
-        owner: Some(lash_core_execution::AttachmentOwner::Turn {
-            id: TURN_ID.to_string(),
-        }),
+        claim: lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::Session(SessionId::from(SESSION_ID)),
+        )
+        .expect("session claim"),
     };
     let lash_core_execution::AttachmentWriteFence::Granted(clock_permit) = store
-        .begin_attachment_write(clock_intent.clone())
+        .begin_attachment_write(&clock_intent)
         .await
         .expect("begin turn-owned write")
     else {
@@ -1538,6 +1349,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "final");
     let operation_key = operation.storage_key().expect("canonical operation key");
     let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_committed_attachments(vec![clock_intent.attachment_id.clone()])
         .with_operation(operation)
         .expect("stamp clock test commit");
     store
@@ -1546,11 +1358,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("commit with injected clock");
 
     let manifest_stamp: i64 = sqlx::query_scalar(
-        "SELECT committed_at_ms FROM lash_attachment_manifest
-         WHERE session_id = $1 AND owner_id = $2",
+        "SELECT written_at_ms FROM lash_attachment_uploads WHERE attachment_id = $1",
     )
-    .bind(SESSION_ID)
-    .bind(TURN_ID)
+    .bind(clock_intent.attachment_id.as_str())
     .fetch_one(storage.pool())
     .await
     .expect("read manifest commit stamp");
@@ -1739,7 +1549,7 @@ lash_conformance::process_trigger_retention_tests!({
             lash_conformance::ProcessTriggerRetentionHandles {
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
-                sessions: Arc::new(storage.session_store_factory_with_shared_process_registry())
+                sessions: Arc::new(storage.store())
                     as Arc<dyn lash_core_execution::DeploymentStore>,
                 deliveries: storage
                     .obligation_ledger(lash_core_execution::store::ObligationKind::TriggerDelivery),
@@ -1788,9 +1598,8 @@ lash_conformance::runtime_persistence_state_machine_tests!({
         async move {
             reset(storage.pool()).await;
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
-                Arc::new(storage.session_store_factory_with_shared_process_registry()),
+                Arc::new(storage.store()),
                 attachments,
-                true,
             )
             .await
             .expect("create Postgres runtime-persistence property handles")
@@ -1882,22 +1691,6 @@ lash_conformance::session_read_view_tests!({
     (
         _database_lock,
         Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>,
-    )
-});
-
-lash_conformance::attachment_owner_degraded_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
-        return;
-    };
-    reset(storage.pool()).await;
-    let attachments = tempfile::tempdir().expect("attachment root");
-    let bytes =
-        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path()))
-            as Arc<dyn lash_core_execution::AttachmentStore>;
-    (
-        (_database_lock, attachments),
-        Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>,
-        bytes,
     )
 });
 
@@ -2093,3 +1886,35 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     }
     storage.pool().close().await;
 }
+
+lash_conformance::attachment_referrer_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = attachment_bytes(&bytes_root);
+    let pool = storage.pool().clone();
+    let insert_edge: lash_conformance::InsertAttachmentEdge = Arc::new(move |id, kind, key| {
+        let pool = pool.clone();
+        Box::pin(async move {
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("ALTER TABLE lash_attachment_referrer_edges DROP CONSTRAINT IF EXISTS ck_attachment_edges_kind").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ($1, $2, $3)").bind(id.as_str()).bind(kind).bind(key).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')) NOT VALID").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            tx.commit()
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))
+        })
+    });
+    let handles = lash_conformance::AttachmentReferrerHandles {
+        factory: Arc::new(storage.store()),
+        cleanup: storage.artifact_cleanup(),
+        bytes: make_bytes,
+        insert_edge,
+    };
+    ((database_lock, bytes_root), handles)
+});

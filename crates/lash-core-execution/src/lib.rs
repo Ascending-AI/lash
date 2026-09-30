@@ -24,9 +24,10 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::artifact_referrer::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
-    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
-    SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
+    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
+    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
+    ResolvedArtifactCleanup, SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
+    UploadReferrerId,
 };
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
@@ -37,6 +38,7 @@ pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::process_id_for_test;
 pub use lash_core_store::process_identity::process_id_from_handle_json;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
+pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::surface_format;
 mod backend;
 pub use backend::{Backend, EffectEngine, StoreBindingId, StoreSet};
@@ -860,24 +862,23 @@ pub use store::{
     AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
-    AttachmentDeleteStallReason, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwner, AttachmentOwnerKind, AttachmentSettlementOutcome, AttachmentSweepGeneration,
-    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, BlobRef,
-    CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit,
-    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
+    AttachmentDeleteStallReason, AttachmentManifest, AttachmentSettlementOutcome,
+    AttachmentSweepGeneration, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
+    AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor,
+    CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage,
+    DurableSurface, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
+    GcReport, HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
     MAX_ATTACHMENT_DELETE_ATTEMPTS, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimeStore,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     ScanCoverage, SemanticBoundaryOperation, SessionAdmission, SessionBinding,
     SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
-    SessionLookup, SessionMeta, SessionStateAdmission, SessionStore, StoreBackend,
-    StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
-    StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore, VacuumReport, WriterPin,
-    compare_releases, release_stamp_advances,
+    SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
+    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
+    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
+    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

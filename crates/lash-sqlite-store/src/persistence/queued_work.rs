@@ -17,6 +17,20 @@ impl SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
+                    .and_then(|()| {
+                        let claim = lash_core_execution::ReferrerClaim::unguarded(
+                            lash_core_execution::ArtifactReferrer::Session(
+                                batch.session_id.clone(),
+                            ),
+                        )
+                        .map_err(|error| error.into_store_error("queued attachment referrer"))?;
+                        crate::attachments::acquire_attachment_refs_conn(
+                            tx,
+                            &claim,
+                            &batch.stored_attachment_ids(),
+                            now,
+                        )
+                    })
                     .and_then(|()| enqueue_queued_work_conn(tx, &batch, now, nonce));
                 // Roll back the partially-inserted batch/items on a
                 // `StoreError` while still returning the typed error.
@@ -41,6 +55,20 @@ impl SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
+                    .and_then(|()| {
+                        let claim = lash_core_execution::ReferrerClaim::unguarded(
+                            lash_core_execution::ArtifactReferrer::Session(
+                                batch.session_id.clone(),
+                            ),
+                        )
+                        .map_err(|error| error.into_store_error("queued attachment referrer"))?;
+                        crate::attachments::acquire_attachment_refs_conn(
+                            tx,
+                            &claim,
+                            &batch.stored_attachment_ids(),
+                            now,
+                        )
+                    })
                     .and_then(|()| enqueue_queued_work_conn_with_outcome(tx, &batch, now, nonce));
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),

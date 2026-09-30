@@ -545,32 +545,51 @@ CREATE TABLE IF NOT EXISTS session_run_specs (
 -- and it is NULL on a row created by adoption, which owns no write attempt.
 -- `written_at_ms` is the upload evidence: set when the owning attempt reported
 -- a successful backend put. Adoption of a digest requires some row to carry it.
-CREATE TABLE IF NOT EXISTS attachment_manifest (
-    attachment_id    TEXT NOT NULL,
-    session_id       TEXT NOT NULL,
-    canonical_uri    TEXT NOT NULL,
-    intent_at_ms     INTEGER NOT NULL,
-    write_id         TEXT,
-    written_at_ms    INTEGER,
-    committed_at_ms  INTEGER,
-    owner_kind       TEXT CONSTRAINT ck_attachment_manifest_owner_kind CHECK (owner_kind IN ('turn', 'process')),
-    owner_id         TEXT,
-    CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL) OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)),
-    PRIMARY KEY (session_id, attachment_id)
+-- Exact attachment referrer edges (ADR 0124). The edge is the liveness fact.
+-- The kind CHECK admits any non-empty label (ADR 0115 section 5): every write
+-- binds ArtifactReferrerKind::as_str, and every read decodes through
+-- ArtifactReferrer::decode.
+CREATE TABLE IF NOT EXISTS attachment_referrer_edges (
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (length(attachment_id) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (length(referrer_kind) > 0),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (length(referrer_id) > 0),
+    PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_attachment_referrer_edges_referrer
+    ON attachment_referrer_edges(referrer_kind, referrer_id);
+
+-- One row per granted write attempt that has neither completed nor aborted.
+-- `write_id` is AttachmentWriteToken::as_hex.
+CREATE TABLE IF NOT EXISTS attachment_pending_writes (
+    write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (length(write_id) = 32),
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (length(attachment_id) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (length(referrer_kind) > 0),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (length(referrer_id) > 0),
+    begun_at_ms   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachment_pending_writes_attachment
+    ON attachment_pending_writes(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_attachment_pending_writes_referrer
+    ON attachment_pending_writes(referrer_kind, referrer_id);
+
+-- Upload evidence: one row per digest a completed write proved uploaded.
+-- Deleted only by condemnation, under the digest fence.
+CREATE TABLE IF NOT EXISTS attachment_uploads (
+    attachment_id TEXT PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (length(attachment_id) > 0),
+    written_at_ms INTEGER NOT NULL
 );
 
--- Attachment GC fence per condemned digest, owned by a sweep generation (ADR 0067 §6).
+-- Attachment GC fence per condemned digest (ADR 0067 section 6). A claim is the
+-- pending write that holds it; deleting that write releases the claim.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
-    attachment_id TEXT PRIMARY KEY,
-    phase         TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
-    write_token   TEXT,
-    write_session_id TEXT,
+    attachment_id     TEXT PRIMARY KEY,
+    phase             TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
+    write_token       TEXT REFERENCES attachment_pending_writes(write_id) ON DELETE SET NULL,
     next_delete_at_ms BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_next_delete CHECK (next_delete_at_ms >= 0),
-    sweep_generation INTEGER NOT NULL,
-    delete_attempts  INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_delete_attempts CHECK (delete_attempts >= 0),
+    sweep_generation  INTEGER NOT NULL,
+    delete_attempts   INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_delete_attempts CHECK (delete_attempts >= 0),
     last_delete_error TEXT CONSTRAINT ck_attachment_condemnations_failure_pairing CHECK ((delete_attempts = 0) = (last_delete_error IS NULL)),
-    stall_reason     TEXT CONSTRAINT ck_attachment_condemnations_stall_reason CHECK (stall_reason IN ('attempts_exhausted', 'refused')) CONSTRAINT ck_attachment_condemnations_stall_attempts CHECK (stall_reason IS NULL OR delete_attempts > 0),
-    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    stall_reason      TEXT CONSTRAINT ck_attachment_condemnations_stall_reason CHECK (stall_reason IN ('attempts_exhausted', 'refused')) CONSTRAINT ck_attachment_condemnations_stall_attempts CHECK (stall_reason IS NULL OR delete_attempts > 0),
     CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned')
 );
 CREATE TABLE IF NOT EXISTS attachment_sweep_clock (singleton INTEGER PRIMARY KEY CONSTRAINT ck_attachment_sweep_clock_singleton CHECK (singleton = 1), generation INTEGER NOT NULL);
@@ -613,24 +632,15 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
 );
 
 -- Every ended referrer has a permanent publication fence.
-CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (length(referrer_kind) > 0),
-    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (length(referrer_id) > 0),
-    ended_at_ms INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (length(referrer_kind) > 0),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (length(referrer_id) > 0),
+    ended_at_ms   INTEGER NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
-    ON attachment_manifest(session_id, committed_at_ms);
-CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
-    ON attachment_manifest(committed_at_ms)
-    WHERE committed_at_ms IS NULL;
 -- Adoption asks one question of the whole table: does any row for this digest
 -- carry upload evidence?
-CREATE INDEX IF NOT EXISTS idx_attachment_manifest_written
-    ON attachment_manifest(attachment_id, written_at_ms);
-CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
-    ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 

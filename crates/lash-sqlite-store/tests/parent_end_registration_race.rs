@@ -88,7 +88,7 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
     let process_path = dir.path().join("processes.db");
     let sessions = dir.path().join("sessions");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&process_path, &sessions)
+        SqliteProcessRegistry::open(&process_path)
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;

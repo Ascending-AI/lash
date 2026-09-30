@@ -34,8 +34,6 @@ mod suite;
 
 const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::File;
 
-#[path = "conformance/attachment_owner_kind.rs"]
-mod attachment_owner_kind;
 #[path = "conformance/schema_refusal.rs"]
 mod schema_refusal;
 
@@ -49,16 +47,12 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     let sessions = dir.path().join("sessions");
     let injector = lash_sqlite_store::testing::SqliteFaultInjector::default();
     let reader = Arc::new(
-        SqliteProcessRegistry::open_with_fault_injector_for_testing(
-            &path,
-            &sessions,
-            injector.clone(),
-        )
-        .await
-        .expect("open paused process registry reader"),
+        SqliteProcessRegistry::open_with_fault_injector_for_testing(&path, injector.clone())
+            .await
+            .expect("open paused process registry reader"),
     );
     let writer = Arc::new(
-        SqliteProcessRegistry::open(&path, &sessions)
+        SqliteProcessRegistry::open(&path)
             .await
             .expect("open competing process registry writer"),
     );

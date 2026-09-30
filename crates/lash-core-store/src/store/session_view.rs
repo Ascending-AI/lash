@@ -130,7 +130,6 @@ carries_session_field! {
     crate::QueuedWorkBatchDraft => |request| &request.session_id;
     TurnParkWrite => |request| &request.session_id;
     SessionMeta => |request| &request.session_id;
-    AttachmentIntent => |request| &request.session_id;
 }
 
 /// One view forwarder per session-scoped entry; nothing for a catalog entry.

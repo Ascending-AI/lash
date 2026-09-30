@@ -216,7 +216,6 @@ impl SqliteStoreSet {
             SqliteProcessRegistry::open_at(
                 &registry,
                 Arc::clone(&clock),
-                core.clone(),
                 #[cfg(feature = "testing")]
                 None,
             )
@@ -231,7 +230,6 @@ impl SqliteStoreSet {
         )
         .await?;
         process_env_store.process_registry = Some(registry.target().clone());
-        process_env_store.process_registry_attached = true;
         let process_env_store = Arc::new(process_env_store);
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
@@ -331,6 +329,9 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     }
 
     fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
+        SqliteStoreSet::session_store_factory(self)
+    }
+    fn attachment_manifest(&self) -> Arc<dyn lash_core_execution::AttachmentManifest> {
         SqliteStoreSet::session_store_factory(self)
     }
 

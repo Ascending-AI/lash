@@ -584,56 +584,45 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_obligation_stalled
 CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
     ON lash_control_intents(session_id, kind);
 
-CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
-    attachment_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    canonical_uri TEXT NOT NULL,
-    intent_at_ms BIGINT NOT NULL,
-    -- Identity of the write attempt that currently owns this row, minted by
-    -- begin_attachment_write.
-    -- NULL on a row created by adoption, which owns no write attempt.
-    write_id TEXT,
-    -- Upload evidence: set when the owning attempt reported a successful backend
-    -- put. Adoption of a digest requires some row to carry it.
-    written_at_ms BIGINT,
-    committed_at_ms BIGINT,
-    owner_kind TEXT CONSTRAINT ck_attachment_manifest_owner_kind CHECK (owner_kind IN ('turn', 'process')),
-    owner_id TEXT,
-    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL) OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)),
-    PRIMARY KEY (session_id, attachment_id)
+CREATE TABLE IF NOT EXISTS lash_attachment_referrer_edges (
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (char_length(attachment_id) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (char_length(referrer_id) > 0),
+    PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
 );
-CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_uncommitted
-    ON lash_attachment_manifest(committed_at_ms)
-    WHERE committed_at_ms IS NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
-    ON lash_attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
--- Adoption asks one question of the whole table: does any row for this digest
--- carry upload evidence?
-CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_written
-    ON lash_attachment_manifest(attachment_id, written_at_ms);
+CREATE INDEX IF NOT EXISTS idx_lash_attachment_referrer_edges_referrer
+    ON lash_attachment_referrer_edges(referrer_kind, referrer_id);
 
--- Attachment GC fence state, one row per condemned digest.
--- Ownership uses CAS transitions, never an expiry.
--- `sweep_generation` is the sweep pass that owns the row; a later pass adopts
--- it only once that pass is dead (ADR 0067 §6). A failed delete counts in
--- `delete_attempts`; `next_delete_at_ms` paces retries, including stalled rows.
+CREATE TABLE IF NOT EXISTS lash_attachment_pending_writes (
+    write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (char_length(write_id) = 32),
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (char_length(attachment_id) > 0),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (char_length(referrer_id) > 0),
+    begun_at_ms   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_attachment_pending_writes_attachment
+    ON lash_attachment_pending_writes(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_lash_attachment_pending_writes_referrer
+    ON lash_attachment_pending_writes(referrer_kind, referrer_id);
+
+CREATE TABLE IF NOT EXISTS lash_attachment_uploads (
+    attachment_id TEXT PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (char_length(attachment_id) > 0),
+    written_at_ms BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
-    attachment_id TEXT PRIMARY KEY,
-    phase TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
-    write_token TEXT,
-    write_session_id TEXT,
+    attachment_id     TEXT PRIMARY KEY,
+    phase             TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
+    write_token       TEXT REFERENCES lash_attachment_pending_writes(write_id) ON DELETE SET NULL,
     next_delete_at_ms BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_next_delete CHECK (next_delete_at_ms >= 0),
-    sweep_generation BIGINT NOT NULL,
-    delete_attempts INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_delete_attempts CHECK (delete_attempts >= 0),
+    sweep_generation  BIGINT NOT NULL,
+    delete_attempts   INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_delete_attempts CHECK (delete_attempts >= 0),
     last_delete_error TEXT,
-    stall_reason TEXT CONSTRAINT ck_attachment_condemnations_stall_reason CHECK (stall_reason IN ('attempts_exhausted', 'refused')),
-    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    stall_reason      TEXT CONSTRAINT ck_attachment_condemnations_stall_reason CHECK (stall_reason IN ('attempts_exhausted', 'refused')),
     CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned'),
     CONSTRAINT ck_attachment_condemnations_failure_pairing CHECK ((delete_attempts = 0) = (last_delete_error IS NULL)),
     CONSTRAINT ck_attachment_condemnations_stall_attempts CHECK (stall_reason IS NULL OR delete_attempts > 0)
 );
-
--- The counter every attachment sweep pass mints its generation from.
 CREATE TABLE IF NOT EXISTS lash_attachment_sweep_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     generation BIGINT NOT NULL,
@@ -1076,14 +1065,14 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
-CREATE TABLE IF NOT EXISTS lash_artifact_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
-    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (char_length(referrer_id) > 0),
-    ended_at_ms BIGINT NOT NULL,
+CREATE TABLE IF NOT EXISTS lash_referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
+    referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
+    ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,

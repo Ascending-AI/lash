@@ -152,7 +152,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     const RETARGET_PROCESS_ID: &str = "process-operations-retarget";
     const OLD_SESSION_ID: &str = "process-operations-retarget-old";
     const NEW_SESSION_ID: &str = "process-operations-retarget-new";
-    let factory = storage.session_store_factory_with_shared_process_registry();
+    let factory = storage.store();
     for session_id in [OLD_SESSION_ID, NEW_SESSION_ID] {
         factory
             .admit_session(&SessionStoreCreateRequest {
@@ -293,7 +293,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
 
 async fn prepare(storage: &PostgresStorage) -> Result<()> {
     storage
-        .session_store_factory_with_shared_process_registry()
+        .store()
         .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
@@ -381,8 +381,7 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
 async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
     let process_id = crash_recovery_process(registry.as_ref()).await?;
-    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn lash_core::DeploymentStore>;
+    let factory = Arc::new(storage.store()) as Arc<dyn lash_core::DeploymentStore>;
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let report = WakeDeliveryDriver::drive_pending_once(

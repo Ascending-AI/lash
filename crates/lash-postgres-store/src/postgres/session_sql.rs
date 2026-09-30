@@ -767,160 +767,6 @@ lash_store_sql::statements! {
     }
 }
 
-lash_store_sql::statements! {
-    /// The one statement of this family that is not about a single table: the
-    /// process-prune cascade, which removes a batch of sessions' rows from
-    /// every table a session owns, in one statement.
-    pub(crate) struct SessionCoreStatements @ "session_core" {
-        /// One statement rather than fourteen, and that is the point: the parts
-        /// would race. The prune has already taken each session's advisory
-        /// lock, but a delete split across fourteen statements leaves thirteen
-        /// windows in which a peer can observe a session whose queue is gone
-        /// and whose metadata is not, and the tombstoned-row reclaim in the
-        /// first arm depends on the ancestry retire that ran before it.
-        ///
-        /// The reclaim arm reaches past the batch on purpose: the ancestry
-        /// retire tombstones a node regardless of who owns it, so a batch can
-        /// strand a row belonging to a session outside it. That owner is
-        /// unbindable, so no session-scoped vacuum could ever reach the row.
-        /// Live sessions' rows stay resident for their own vacuum.
-        delete_process_session_rows = "WITH deleted_graph_nodes AS (
-             DELETE FROM graph_nodes
-             WHERE tombstoned = TRUE
-               AND (session_id = ANY(?1)
-                    OR session_id IN (SELECT session_id FROM deleted_sessions))
-             RETURNING node_id
-         ),
-         deleted_queued_work_items AS (
-             DELETE FROM queued_work_items AS item
-             WHERE EXISTS (
-                 SELECT 1 FROM queued_work_batches AS batch
-                 WHERE batch.batch_id = item.batch_id
-                   AND batch.session_id = ANY(?1)
-             )
-             RETURNING item.batch_id
-         ),
-         deleted_queued_work_batches AS (
-             DELETE FROM queued_work_batches
-             WHERE session_id = ANY(?1)
-               AND (SELECT count(*) FROM deleted_queued_work_items) >= 0
-             RETURNING batch_id
-         ),
-         deleted_wake_redelivery_fences AS (
-             DELETE FROM wake_redelivery_fences
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_wake_allocation_floors AS (
-             DELETE FROM wake_allocation_floors
-             WHERE target_session_id = ANY(?1)
-             RETURNING target_session_id
-         ),
-         deleted_pending_turn_inputs AS (
-             DELETE FROM pending_turn_inputs
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_run_specs AS (
-             DELETE FROM session_run_specs
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_parks AS (
-             DELETE FROM turn_parks
-             WHERE session_id = ANY(?1)
-             RETURNING session_id, turn_id, park_id
-         ),
-         -- Every deleted park gets a Cancelled{SessionDeleted} event at the
-         -- transaction's own instant: the ledger is the only place the park
-         -- transition stays durable once the session rows are gone
-         -- (FIG-3659). The batch bump allocates the block's sequences in one
-         -- update — and only when a park was actually deleted, so a batch
-         -- with no parks neither locks nor bumps the clock nor costs a
-         -- clock-probe round trip; each event takes
-         -- first_seq + row_number - 1.
-         deleted_turn_park_clock AS (
-             UPDATE turn_park_clock
-             SET current_seq = current_seq + (SELECT count(*) FROM deleted_turn_parks)
-             WHERE singleton = TRUE
-               AND EXISTS (SELECT 1 FROM deleted_turn_parks)
-             RETURNING current_seq - (SELECT count(*) FROM deleted_turn_parks) + 1 AS first_seq
-         ),
-         deleted_turn_park_events AS (
-             INSERT INTO turn_park_events
-                 (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms)
-             SELECT clock.first_seq + row_number() OVER (ORDER BY park.session_id) - 1,
-                    park.session_id, park.turn_id, park.park_id,
-                    'cancelled', 'session_deleted', NULL,
-                    floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             FROM deleted_turn_parks AS park
-             CROSS JOIN deleted_turn_park_clock AS clock
-         ),
-         deleted_session_ingress_sequence AS (
-             DELETE FROM session_ingress_sequence
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_requests AS (
-             DELETE FROM turn_cancel_requests
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_closures AS (
-             DELETE FROM turn_cancel_closure_authorizations
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancellation_bindings AS (
-             DELETE FROM turn_cancellation_bindings
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_fork_lineage AS (
-             DELETE FROM fork_lineage
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_meta AS (
-             DELETE FROM session_meta
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_roots AS (
-             DELETE FROM session_roots
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         deleted_session_root_inputs AS (
-             DELETE FROM session_root_inputs
-             WHERE session_id = ANY(?1)
-             RETURNING session_id
-         ),
-         -- A `close_session` intent outlives its session: it is the
-         -- deletion tombstone the session's roots answer from.
-         deleted_control_intents AS (
-             DELETE FROM control_intents
-             WHERE session_id = ANY(?1) AND kind <> 'close_session'
-             RETURNING session_id
-         )
-         SELECT (SELECT count(*) FROM deleted_graph_nodes)
-              + (SELECT count(*) FROM deleted_queued_work_batches)
-              + (SELECT count(*) FROM deleted_wake_redelivery_fences)
-              + (SELECT count(*) FROM deleted_wake_allocation_floors)
-              + (SELECT count(*) FROM deleted_pending_turn_inputs)
-              + (SELECT count(*) FROM deleted_session_run_specs)
-              + (SELECT count(*) FROM deleted_turn_parks)
-              + (SELECT count(*) FROM deleted_session_ingress_sequence)
-              + (SELECT count(*) FROM deleted_turn_cancel_closures)
-              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
-              + (SELECT count(*) FROM deleted_fork_lineage)
-              + (SELECT count(*) FROM deleted_session_meta)
-              + (SELECT count(*) FROM deleted_session_roots)
-              + (SELECT count(*) FROM deleted_session_root_inputs)
-              + (SELECT count(*) FROM deleted_control_intents)";
-    }
-}
-
 /// Every session-core statement this store issues, rendered once.
 pub(crate) struct SessionSql {
     /// `session_meta` statements both backends issue verbatim.
@@ -956,8 +802,6 @@ pub(crate) struct SessionSql {
     pub(crate) release_stamp: ReleaseStampStatements,
     /// `fleet_format` statements only PostgreSQL issues.
     pub(crate) fleet_format: FleetFormatStatements,
-    /// The cross-table process-prune cascade.
-    pub(crate) core: SessionCoreStatements,
 }
 
 static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
@@ -980,7 +824,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         checkpoint_edges: CheckpointBlobRefPostgresStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),
         fleet_format: FleetFormatStatements::render(dialect),
-        core: SessionCoreStatements::render(dialect),
     }
 });
 

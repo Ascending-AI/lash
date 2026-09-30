@@ -27,6 +27,7 @@ async fn end_frames_left_tx(
         })
         .collect::<Vec<_>>();
     let mut referrers = ended_frames.clone();
+    referrers.push(ArtifactReferrer::Session(session_id.clone()));
     referrers.extend(
         transition
             .map(|transition| ArtifactReferrer::FrameEnvironment(transition.successor.clone())),
@@ -972,28 +973,17 @@ impl PostgresStore {
         // it, each verdict taken under the row's lock (FIG-3927).
         let turn_cancel_input_outcome =
             super::ingress_settlement::settle_commit_ingress_tx(&mut tx, commit, now).await?;
-        commit_attachment_refs_tx(
+        let claim = lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone()),
+        )
+        .map_err(|error| error.into_store_error("attachment session referrer"))?;
+        crate::attachments::acquire_attachment_refs_tx(
             &mut tx,
-            &commit.session_id,
+            &claim,
             &commit.committed_attachment_ids,
             now,
         )
         .await?;
-        if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
-            sqlx::query(
-                crate::attachments::attachment_sql()
-                    .manifest
-                    .commit_owned
-                    .sql(),
-            )
-            .bind(now as i64)
-            .bind(commit.session_id.as_str())
-            .bind(turn_id.as_str())
-            .bind(AttachmentOwnerKind::Turn.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        }
         // The root's final commit writes its terminal evidence in this
         // transaction (FIG-3600 S7).
         if let Some(write) = commit.root_terminal.as_deref().cloned() {

@@ -1141,9 +1141,8 @@ pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
-    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
-        postgres.session_store_factory_with_shared_process_registry(),
-    ));
+    let factory =
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(postgres.store()));
     let metrics = factory.metrics();
     (Arc::new(factory), metrics)
 }

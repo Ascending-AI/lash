@@ -78,7 +78,7 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await
         .expect("provision PostgreSQL store");
-    let store = storage.session_store_factory_with_shared_process_registry();
+    let store = storage.store();
     let witness =
         lash_core::perf_witness::Collector::install().expect("install pool checkout witness");
 
@@ -107,7 +107,7 @@ async fn affected_postgres_scenarios_leave_base_database_clean() {
     let base_storage = lash_postgres_store::PostgresStorage::connect(base_database.url())
         .await
         .expect("provision clean PostgreSQL base database");
-    let base_factory = base_storage.session_store_factory_with_shared_process_registry();
+    let base_factory = base_storage.store();
     let before = base_factory
         .list_sessions(&SessionListFilter::default())
         .await

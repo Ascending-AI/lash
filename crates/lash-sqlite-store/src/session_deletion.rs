@@ -2,15 +2,6 @@ use super::*;
 use crate::session_sql::session_sql;
 use lash_core_execution::FleetFormat;
 
-pub(super) fn warn_process_registry_not_wired(path: &'static str) {
-    tracing::warn!(
-        store = "sqlite",
-        path,
-        consequence = "process-owned uncommitted intents are never reclaimed",
-        "SQLite attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Open a SqliteStoreSet for process registry integration."
-    );
-}
-
 pub(super) async fn delete_session_from_catalog(
     catalog: &DatabaseLocation,
     session_id: &SessionId,
@@ -151,6 +142,20 @@ pub(super) async fn delete_session_from_catalog(
                     crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")?;
                 }
             }
+            if existed {
+                crate::obligation_ledger::arm_cleanup_tx(
+                    tx,
+                    &lash_core_execution::ArtifactCleanup {
+                        referrer: lash_core_execution::ArtifactReferrer::Session(
+                            session_id.clone(),
+                        ),
+                        plan: lash_core_execution::ArtifactCleanupPlan::AwaitSessionGraphRetired,
+                        gate: None,
+                    },
+                    now_ms,
+                    "core",
+                )?;
+            }
             let mut candidates = std::collections::BTreeSet::new();
             if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
                 candidates.insert(checkpoint_ref.to_string());
@@ -290,15 +295,6 @@ pub(super) async fn delete_session_from_catalog(
                 crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
-            crate::conn::cached_execute(
-                tx,
-                crate::attachments::attachment_sql()
-                    .manifest_sqlite
-                    .delete_deleted_session_roots
-                    .sql(),
-                [],
-            )
-            .map_err(sqlite_error)?;
             if let Some(checkpoint_ref) = checkpoint_ref.as_ref() {
                 // Sever this root's outgoing projection before any blob delete
                 // when the owner transaction removed its final head/anchor.

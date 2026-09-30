@@ -3,7 +3,7 @@ pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::Duration;
 
 pub(crate) use crate::{
-    AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
+    AgentFrameReason, AttachmentId, AttachmentWrite, AwaitEventWaitIdentity, DeliveryPolicy,
     EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginState, ProtocolEvent,
     ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload, Resolution,

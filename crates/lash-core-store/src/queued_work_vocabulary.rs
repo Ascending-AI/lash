@@ -401,6 +401,18 @@ impl QueuedWorkBatchDraft {
         self.kind().work_class()
     }
 
+    /// Stored references carried by typed queued payloads, sorted and deduplicated.
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        let ids = std::collections::BTreeSet::new();
+        for payload in self.payloads.iter() {
+            match payload {
+                QueuedWorkPayload::ProcessWake { .. }
+                | QueuedWorkPayload::SessionCommand { .. } => {}
+            }
+        }
+        ids.into_iter().collect()
+    }
+
     pub fn validate_process_wake_source(&self) -> Result<(), String> {
         let mut payloads = self.payloads.iter();
         match (

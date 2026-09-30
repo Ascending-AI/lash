@@ -1,135 +1,25 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn RuntimeStore>) {
-    let committed_by_runtime = AttachmentId::parse("runtime-commit").expect("valid attachment id");
-    let committed_out_of_band = AttachmentId::parse("manual-commit").expect("valid attachment id");
-    let orphan = AttachmentId::parse("orphan").expect("valid attachment id");
-    for id in [&committed_by_runtime, &committed_out_of_band, &orphan] {
+#[expect(clippy::expect_used, reason = "conformance setup")]
+pub async fn attachment_writes_keep_independent_referrers(store: Arc<dyn RuntimeStore>) {
+    let id = AttachmentId::parse("independent-reference").expect("id");
+    let a = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("a"));
+    let b = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("b"));
+    for referrer in [&a, &b] {
         crate::conformance::helpers::record_completed_attachment_write(
             &store,
-            attachment_intent(id.as_str()),
-        )
-        .await;
-    }
-
-    let mut uncommitted = store
-        .list_uncommitted(200)
-        .await
-        .expect("list uncommitted attachment intents");
-    uncommitted.sort_by(|left, right| left.attachment_id.cmp(&right.attachment_id));
-    assert_eq!(uncommitted.len(), 3);
-
-    store
-        .commit_refs(
-            &SessionId::from("root"),
-            std::slice::from_ref(&committed_out_of_band),
-        )
-        .await
-        .expect("commit attachment ref out of band");
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[])
-            .with_committed_attachments([committed_by_runtime.clone()]),
-        "attachment-manifest",
-    )
-    .await
-    .expect("runtime commit stamps attachment manifest");
-
-    let still_uncommitted = store
-        .list_uncommitted(200)
-        .await
-        .expect("list remaining uncommitted attachments");
-    assert_eq!(still_uncommitted.len(), 1);
-    assert_eq!(still_uncommitted[0].attachment_id, orphan);
-    assert!(still_uncommitted[0].committed_at_epoch_ms.is_none());
-
-    store
-        .forget(&SessionId::from("root"), &orphan)
-        .await
-        .expect("forget orphan attachment");
-    assert!(
-        store
-            .list_uncommitted(200)
-            .await
-            .expect("list after forget")
-            .is_empty()
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let attachment = AttachmentId::parse("same-content").expect("valid attachment id");
-    for session_id in ["committed-owner", "orphan-owner"] {
-        crate::conformance::helpers::record_completed_attachment_write(
-            &store,
-            AttachmentIntent {
-                attachment_id: attachment.clone(),
-                session_id: SessionId::from(session_id.to_string()),
-                canonical_uri: format!("session:{session_id}:sha256:{attachment}"),
-                intent_at_epoch_ms: 100,
-                owner: None,
+            crate::AttachmentWrite {
+                attachment_id: id.clone(),
+                claim: crate::ReferrerClaim::unguarded(referrer.clone()).expect("claim"),
             },
         )
         .await;
     }
-    store
-        .commit_refs(
-            &SessionId::from("committed-owner"),
-            std::slice::from_ref(&attachment),
-        )
-        .await
-        .expect("commit first owner");
-
-    let uncommitted = store
-        .list_uncommitted(200)
-        .await
-        .expect("list owner orphan");
-    assert!(
-        uncommitted.iter().any(|entry| {
-            entry.session_id == "orphan-owner" && entry.attachment_id == attachment
-        })
-    );
-    assert!(!uncommitted.iter().any(|entry| {
-        entry.session_id == "committed-owner" && entry.attachment_id == attachment
-    }));
-
-    store
-        .forget(&SessionId::from("orphan-owner"), &attachment)
-        .await
-        .expect("forget only orphan owner");
-    crate::conformance::helpers::record_completed_attachment_write(
-        &store,
-        AttachmentIntent {
-            attachment_id: attachment.clone(),
-            session_id: SessionId::from("committed-owner"),
-            canonical_uri: format!("session:committed-owner:sha256:{attachment}"),
-            intent_at_epoch_ms: 150,
-            owner: None,
-        },
-    )
-    .await;
-    assert!(
-        !store
-            .list_uncommitted(200).await
-            .expect("committed ownership remains stamped")
-            .iter()
-            .any(|entry| entry.session_id == "committed-owner"
-                && entry.attachment_id == attachment),
-        "a colliding owner or repeated put must not erase another session's commit stamp"
+    store.end_attachment_referrer(&a).await.expect("end a");
+    assert_eq!(
+        store.attachment_referrers(&id).await.expect("refs"),
+        vec![b]
     );
 }
 

@@ -797,24 +797,8 @@ impl SqliteStore {
                     }
                     let turn_cancel_input_outcome =
                         super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
-                    crate::attachments::commit_attachment_refs_conn(
-                        tx, &commit.session_id, &commit.committed_attachment_ids, now as i64,
-                    )?;
-                    if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
-                        crate::conn::cached_execute(tx,
-                            crate::attachments::attachment_sql()
-                                .manifest
-                                .commit_owned
-                                .sql(),
-                            params![
-                                now as i64,
-                                commit.session_id.as_str(),
-                                turn_id.as_str(),
-                                AttachmentOwnerKind::Turn.as_str()
-                            ],
-                        )
-                        .map_err(sqlite_error)?;
-                    }
+                    let claim = lash_core_execution::ReferrerClaim::unguarded(lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone())).map_err(|error| error.into_store_error("attachment session referrer"))?;
+                    crate::attachments::acquire_attachment_refs_conn(tx, &claim, &commit.committed_attachment_ids, now)?;
                     crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,

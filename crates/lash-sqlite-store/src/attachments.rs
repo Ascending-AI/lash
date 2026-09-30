@@ -1,303 +1,117 @@
-//! The attachment write-ahead manifest and its garbage-collection fence.
-//!
-//! The SQLite owner of the attachment family: `attachment_manifest` (one row
-//! per session/digest intent) and `attachment_condemnations` (the CAS fence
-//! that decides whether a digest's bytes may be deleted).
-//!
-//! Every atom runs inside `SqliteConnection::write`/`write_flow`
-//! (`BEGIN IMMEDIATE`) or an explicit read, so the condemnation check, the
-//! root predicate and the write they guard cannot interleave with a competing
-//! writer. That is the whole of SQLite's half of the fence: PostgreSQL needs a
-//! per-digest advisory lock to buy the same thing under `READ COMMITTED`.
-//!
-//! Every DB body is a synchronous rusqlite closure handed to `conn.call`
-//! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
-
+//! Attachment edges and external-byte write state in the durable-core catalog.
+use super::*;
+use crate::schema_layout::Schema;
+use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
+use lash_sansio::sync::MutexExt;
+use lash_store_sql::attachment::{
+    condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
+    pending_writes::PendingWriteStatements, sweep_clock::SweepClockStatements,
+    uploads::UploadStatements,
+};
 use std::sync::LazyLock;
 
-use crate::schema_layout::Schema;
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
-use lash_store_sql::attachment::condemnation::CondemnationStatements;
-use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
-use lash_store_sql::attachment::sweep_clock::SweepClockStatements;
-use lash_store_sql::{SchemaTables, TableLayout, Vocabulary, VocabularyTerm};
-
-use super::*;
-
 lash_store_sql::statements! {
-    /// `attachment_manifest` statements only SQLite issues.
-    pub(crate) struct ManifestSqliteStatements @ "attachment_manifest" {
-        /// Reclaim every attachment root a deleted session left behind.
-        ///
-        /// FIG-653: graph retention is a prune precondition for committed
-        /// roots, and owner-level retention deliberately includes suffix
-        /// attachments, because the manifest has no node edge — forks and
-        /// pins keep these rows until their final prefix dies.
-        ///
-        /// Forks on the tombstone literal: `graph_nodes.tombstoned` is
-        /// INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL.
-        delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
-             WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                           WHERE deleted.session_id = manifest.session_id)
-               AND (
-                   (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-                   OR ({{turn_attachment_owner(manifest.owner_kind)}} AND manifest.owner_id IS NOT NULL)
-                   OR ({{process_attachment_owner(manifest.owner_kind)}}
-                       AND length(manifest.owner_id) = 34
-                       AND substr(manifest.owner_id, 1, 2) = 'p_'
-                       AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
-                       AND substr(manifest.owner_id, 15, 1) = '7'
-                       AND substr(manifest.owner_id, 19, 1) IN ('8', '9', 'a', 'b'))
-               )
-               AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
-                   SELECT 1 FROM graph_nodes AS node
-                   WHERE node.session_id = manifest.session_id AND node.tombstoned = 0
-               ))";
-
-        /// Forget `?2` in session `?1` unless a live node still roots it.
-        /// Same tombstone-literal fork as
-        /// [`ManifestSqliteStatements::delete_deleted_session_roots`].
-        forget_for_session = "DELETE FROM attachment_manifest
-             WHERE session_id = ?1 AND attachment_id = ?2 AND (
-                 committed_at_ms IS NULL OR NOT EXISTS (
-                     SELECT 1 FROM graph_nodes AS node
-                     WHERE node.session_id = attachment_manifest.session_id
-                       AND node.tombstoned = 0
-                 ))";
-
-        /// Every uncommitted intent older than `?1`.
-        ///
-        /// The ordering is the fork: SQLite reports oldest intent first,
-        /// PostgreSQL reports digest order. Both are total and neither caller
-        /// depends on the other's, so the two orders are left exactly as they
-        /// stand rather than unified inside a refactor.
-        select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                 committed_at_ms, owner_kind, owner_id, written_at_ms
-             FROM attachment_manifest
-             WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
-             ORDER BY intent_at_ms ASC";
+    pub(crate) struct AttachmentSqliteStatements @ "attachment_referrer_edge" {
+        select_deleting = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1 AND phase = 'deleting'";
+        select_condemned = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1";
+        insert_condemned = "INSERT INTO attachment_condemnations (attachment_id, phase, sweep_generation) VALUES (?1, 'condemned', ?2)";
+        session_state = "SELECT EXISTS (SELECT 1 FROM session_meta WHERE session_id = ?1), EXISTS (SELECT 1 FROM deleted_sessions WHERE session_id = ?1), EXISTS (SELECT 1 FROM graph_nodes WHERE session_id = ?1 AND tombstoned = 0)";
     }
 }
-
-lash_store_sql::statements! {
-    /// `attachment_condemnations` statements only SQLite issues.
-    pub(crate) struct CondemnationSqliteStatements @ "attachment_condemnation" {
-        /// Whether a physical delete is already in flight for `?1`.
-        ///
-        /// SQLite answers with the row's presence; PostgreSQL wraps the same
-        /// predicate in `SELECT EXISTS(…)` because its driver reads a scalar
-        /// rather than an optional row.
-        select_deleting = "SELECT 1 FROM attachment_condemnations
-             WHERE attachment_id = ?1 AND phase = 'deleting'";
-
-        /// SQLite alone asks this: it reads the absence and inserts under one
-        /// `BEGIN IMMEDIATE` lock, so the read is the contention check.
-        /// PostgreSQL cannot hold that across statements and detects a peer
-        /// sweeper through the insert's `ON CONFLICT` instead.
-        select_exists = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1";
-
-        /// Condemn `?1` for sweep generation `?2`. No `ON CONFLICT`: the
-        /// absence of the row was read under the same write lock this insert
-        /// commits under, so a conflict here is a defect and the constraint
-        /// error is kept rather than swallowed.
-        insert_condemned = "INSERT INTO attachment_condemnations
-                 (attachment_id, phase, sweep_generation)
-             VALUES (?1, 'condemned', ?2)";
-    }
-}
-
-/// The attachment owner classes, spelled once in `lash-core` and named as
-/// tokens by the GC predicates that compare against them.
-const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
-    VocabularyTerm::new(
-        "turn_attachment_owner",
-        lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql,
-    ),
-    VocabularyTerm::new(
-        "process_attachment_owner",
-        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql,
-    ),
-]);
-
-/// The tables the attachment family's statements name that live in the
-/// session catalog: its own two, and the three root sets its GC predicates
-/// consult. Every one of them is in the catalog's own file, so they are
-/// addressed through `main` on the connection that owns it.
-const CATALOG_TABLES: &[&str] = &[
-    lash_store_sql::attachment::manifest::TABLE,
-    lash_store_sql::attachment::condemnation::TABLE,
-    lash_store_sql::attachment::sweep_clock::TABLE,
-    "deleted_sessions",
-    "graph_nodes",
-    "runtime_turn_commits",
-];
-
-/// The session catalog alone: no process registry is bound, so `processes` is
-/// not placed and the statements that prove a process owner dead cannot be
-/// rendered for this layout at all.
-const CATALOG: TableLayout =
-    TableLayout::new(&[SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES)]);
-
-/// The session catalog beside a bound process registry.
-///
-/// This is the layout FIG-3406 exists for: one statement addressing
-/// `main.attachment_manifest` and `process_registry.processes`, so the
-/// owner-death proof is part of the same SQLite statement and transaction as
-/// the forget it guards rather than a read-then-forget pair racing a
-/// registration.
-const CATALOG_BESIDE_REGISTRY: TableLayout = TableLayout::new(&[
-    SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES),
-    SchemaTables::new(Schema::ProcessRegistry.qualifier(), &["processes"]),
-]);
-
-/// Every attachment-family statement, rendered once.
 pub(crate) struct AttachmentSql {
-    /// `attachment_manifest` statements both backends issue verbatim.
-    pub(crate) manifest: ManifestStatements,
-    /// `attachment_manifest` statements only SQLite issues.
-    pub(crate) manifest_sqlite: ManifestSqliteStatements,
-    /// The GC probes that prove a process owner dead, rendered for the layout
-    /// that reaches a bound registry. A store with none never reads them.
-    pub(crate) manifest_process_owner: ManifestProcessOwnerStatements,
-    /// `attachment_condemnations` statements both backends issue verbatim.
+    pub(crate) edges: AttachmentEdgeStatements,
+    pub(crate) pending: PendingWriteStatements,
+    pub(crate) uploads: UploadStatements,
     pub(crate) condemnation: CondemnationStatements,
-    /// `attachment_condemnations` statements only SQLite issues.
-    pub(crate) condemnation_sqlite: CondemnationSqliteStatements,
-    /// `attachment_sweep_clock` statements both backends issue verbatim.
+    pub(crate) sqlite: AttachmentSqliteStatements,
     pub(crate) sweep_clock: SweepClockStatements,
 }
-
-/// The family's own tables live in the session catalog and are never reached
-/// through an `ATTACH`ed name; the process registry its GC consults is. Two
-/// layouts, both rendered once here, and the call site picks by whether a
-/// registry is bound.
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let catalog = lash_store_sql::Dialect::sqlite(CATALOG).with_vocabulary(ATTACHMENT_OWNER);
-    let beside_registry =
-        lash_store_sql::Dialect::sqlite(CATALOG_BESIDE_REGISTRY).with_vocabulary(ATTACHMENT_OWNER);
+    let dialect = Schema::Main.dialect();
     AttachmentSql {
-        manifest: ManifestStatements::render(catalog),
-        manifest_sqlite: ManifestSqliteStatements::render(catalog),
-        manifest_process_owner: ManifestProcessOwnerStatements::render(beside_registry),
-        condemnation: CondemnationStatements::render(catalog),
-        condemnation_sqlite: CondemnationSqliteStatements::render(catalog),
-        sweep_clock: SweepClockStatements::render(catalog),
+        edges: AttachmentEdgeStatements::render(dialect),
+        pending: PendingWriteStatements::render(dialect),
+        uploads: UploadStatements::render(dialect),
+        condemnation: CondemnationStatements::render(dialect),
+        sqlite: AttachmentSqliteStatements::render(dialect),
+        sweep_clock: SweepClockStatements::render(dialect),
     }
 });
-
-/// The attachment-family statements, rendered once at first use.
 pub(crate) fn attachment_sql() -> &'static AttachmentSql {
     &ATTACHMENT_SQL
 }
-
-/// The live-root probe this store may issue: the one that proves a process
-/// owner dead only when a registry is attached to read it from.
-fn live_root_sql(process_registry_attached: bool) -> &'static str {
-    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
-        [false, true].map(|attached| {
-            let base = if attached {
-                attachment_sql()
-                    .manifest_process_owner
-                    .select_live_root_proving_process_death
-                    .sql()
-            } else {
-                attachment_sql().manifest.select_live_root.sql()
-            };
-            format!(
-                "SELECT 1 WHERE EXISTS ({base}) OR EXISTS (
-                    SELECT 1 FROM attachment_manifest AS manifest
-                    WHERE manifest.attachment_id = ?1
-                      AND NOT COALESCE(({}), 0)
-                )",
-                decodable_owner_sql()
-            )
-        })
-    });
-    &GUARDED[usize::from(process_registry_attached)]
+fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
+    if !referrer.kind().holds_attachments() {
+        return Err(StoreError::ReferrerKindRefused {
+            kind: referrer.kind(),
+            store: "attachment",
+        });
+    }
+    ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
+        .map_err(|error| error.into_store_error("attachment referrer"))?;
+    Ok(())
 }
-
-fn aged_forget_sql(process_registry_attached: bool) -> &'static str {
-    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
-        [false, true].map(|attached| {
-            let base = if attached {
-                attachment_sql()
-                    .manifest_process_owner
-                    .delete_aged_uncommitted_proving_process_death
-                    .sql()
-            } else {
-                attachment_sql().manifest.delete_aged_uncommitted.sql()
-            };
-            format!("{base} AND ({})", decodable_owner_sql())
-        })
-    });
-    &GUARDED[usize::from(process_registry_attached)]
+fn check_fence(tx: &rusqlite::Connection, referrer: &ArtifactReferrer) -> Result<(), StoreError> {
+    check_kind(referrer)?;
+    if crate::artifact_store::artifact_fenced_tx(tx, referrer).map_err(sqlite_error)? {
+        return Err(StoreError::ArtifactReferrerEnded {
+            referrer: referrer.clone(),
+        });
+    }
+    Ok(())
 }
-
-fn decodable_owner_sql() -> String {
-    let turn = lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql(
-        "manifest.owner_kind",
-    );
-    let process =
-        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql(
-            "manifest.owner_kind",
-        );
-    format!(
-        "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
-      OR ({turn} AND manifest.owner_id IS NOT NULL)
-      OR ({process}
-          AND length(manifest.owner_id) = 34
-          AND substr(manifest.owner_id, 1, 2) = 'p_'
-          AND substr(manifest.owner_id, 3) NOT GLOB '*[^0-9a-f]*'
-          AND substr(manifest.owner_id, 15, 1) = '7'
-          AND substr(manifest.owner_id, 19, 1) IN ('8', '9', 'a', 'b'))"
-    )
-}
-
-/// Adopt stored references under the boundary transaction.
-///
-/// Validate every digest for upload evidence first, so a batch containing one
-/// unknown digest writes nothing at all, then acquire this session's roots.
-pub(crate) fn commit_attachment_refs_conn(
+fn insert_edge(
     tx: &rusqlite::Connection,
-    session_id: &SessionId,
-    attachment_ids: &[AttachmentId],
-    now: i64,
+    referrer: &ArtifactReferrer,
+    id: &AttachmentId,
 ) -> Result<(), StoreError> {
-    let mut evidence = std::collections::BTreeMap::new();
-    for id in attachment_ids {
+    crate::conn::cached_execute(
+        tx,
+        attachment_sql().edges.insert.sql(),
+        params![
+            id.as_str(),
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+pub(crate) fn acquire_attachment_refs_conn(
+    tx: &rusqlite::Connection,
+    claim: &ReferrerClaim,
+    ids: &[AttachmentId],
+    now: u64,
+) -> Result<(), StoreError> {
+    let referrer = claim.referrer();
+    check_fence(tx, referrer)?;
+    let ids = ids.iter().collect::<std::collections::BTreeSet<_>>();
+    for id in &ids {
         let deleting = tx
             .query_row(
-                attachment_sql().condemnation_sqlite.select_deleting.sql(),
+                attachment_sql().sqlite.select_deleting.sql(),
                 params![id.as_str()],
                 |_| Ok(()),
             )
             .optional()
             .map_err(sqlite_error)?
             .is_some();
-        if deleting {
-            return Err(StoreError::UnknownAttachment { digest: id.clone() });
-        }
-        // Evidence from any session: the uploader and the adopter need not be
-        // the same, and the earliest proven upload is the one that is copied.
-        let written_at_ms = tx
+        let evidenced = tx
             .query_row(
-                attachment_sql().manifest.select_earliest_written_at.sql(),
+                attachment_sql().uploads.select_evidence.sql(),
                 params![id.as_str()],
-                |row| row.get::<_, Option<i64>>(0),
+                |_| Ok(()),
             )
             .optional()
             .map_err(sqlite_error)?
-            .flatten();
-        let Some(written_at_ms) = written_at_ms else {
-            return Err(StoreError::UnknownAttachment { digest: id.clone() });
-        };
-        evidence.insert(id.clone(), written_at_ms);
+            .is_some();
+        if deleting || !evidenced {
+            return Err(StoreError::UnknownAttachment {
+                digest: (*id).clone(),
+            });
+        }
     }
-    for id in attachment_ids {
-        // The fresh committed root supersedes an unarmed, unclaimed
-        // condemnation. A restoring writer's claim is left for that writer to
-        // settle.
+    for id in &ids {
         crate::conn::cached_execute(
             tx,
             attachment_sql()
@@ -307,28 +121,119 @@ pub(crate) fn commit_attachment_refs_conn(
             params![id.as_str()],
         )
         .map_err(sqlite_error)?;
-        // Copy the evidence onto the adopter's row so it outlives the
-        // uploader's intent being forgotten.
-        crate::conn::cached_execute(
-            tx,
-            attachment_sql().manifest.upsert_adopted.sql(),
-            params![
-                now,
-                id.as_str(),
-                session_id.as_str(),
-                format!("lash-attachment://blake3/{id}"),
-                evidence.get(id).copied(),
-            ],
-        )
-        .map_err(sqlite_error)?;
+        insert_edge(tx, referrer, id)?;
+    }
+    if let Some(cleanup) = claim.guard_cleanup() {
+        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now, "core")?;
     }
     Ok(())
 }
-
+fn has_permit(
+    tx: &rusqlite::Connection,
+    write: &AttachmentWrite,
+    token: &str,
+) -> Result<bool, StoreError> {
+    tx.query_row(
+        attachment_sql().pending.select_permit.sql(),
+        params![
+            token,
+            write.attachment_id.as_str(),
+            write.claim.referrer().kind().as_str(),
+            write.claim.referrer().canonical_id()
+        ],
+        |_| Ok(()),
+    )
+    .optional()
+    .map_err(sqlite_error)
+    .map(|row| row.is_some())
+}
+fn abort_write_conn(
+    tx: &rusqlite::Connection,
+    write: &AttachmentWrite,
+    token: &str,
+) -> Result<(), StoreError> {
+    if !has_permit(tx, write, token)? {
+        return Ok(());
+    }
+    let referrer = write.claim.referrer();
+    crate::conn::cached_execute(
+        tx,
+        attachment_sql().condemnation.delete_superseded_claim.sql(),
+        params![
+            write.attachment_id.as_str(),
+            token,
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )
+    .map_err(sqlite_error)?;
+    crate::conn::cached_execute(
+        tx,
+        attachment_sql().pending.delete_permit.sql(),
+        params![
+            token,
+            write.attachment_id.as_str(),
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )
+    .map_err(sqlite_error)?;
+    crate::conn::cached_execute(
+        tx,
+        attachment_sql().edges.delete_unproven_ref.sql(),
+        params![
+            write.attachment_id.as_str(),
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+fn outcome<T>(value: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Result<T, StoreError>>> {
+    Ok(match value {
+        Ok(value) => TxOutcome::Commit(Ok(value)),
+        Err(error) => TxOutcome::Rollback(Err(error)),
+    })
+}
 impl SqliteStore {
-    /// Enumerate the durable condemnation authority without exposing write
-    /// tokens. Persisted phase/provenance combinations are decoded strictly so
-    /// a corrupt row cannot be mistaken for sweep-owned maintenance work.
+    pub(crate) async fn rooted_attachment_ids(
+        &self,
+    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
+        let ids = self
+            .conn
+            .call(|conn| {
+                let mut statement =
+                    conn.prepare_cached(attachment_sql().edges.select_rooted_ids.sql())?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        ids.into_iter()
+            .map(|id| {
+                AttachmentId::parse(&id)
+                    .map_err(|error| stored_data_corrupt("attachment root", error))
+            })
+            .collect()
+    }
+    pub(crate) async fn has_attachment_root(&self, id: &AttachmentId) -> Result<bool, StoreError> {
+        let id = id.to_string();
+        self.conn
+            .call(move |conn| {
+                Ok(conn
+                    .query_row(
+                        attachment_sql().edges.select_live_root.sql(),
+                        params![id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
     pub(crate) async fn list_attachment_condemnations(
         &self,
     ) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
@@ -344,51 +249,49 @@ impl SqliteStore {
                             row.get::<_, String>(1)?,
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, Option<String>>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, i64>(5)?,
                             row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
                         ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
             .map_err(sqlite_error)?;
-        let mut condemnations = rows
+        let mut rows = rows
             .into_iter()
             .map(
-                |(
-                    digest,
-                    phase,
-                    write_token,
-                    write_session_id,
-                    delete_attempts,
-                    last_delete_error,
-                    stall_reason,
-                )| {
-                    let digest = AttachmentId::parse(&digest).map_err(|error| {
-                        stored_data_corrupt(
-                            "attachment condemnation",
-                            format!("attachment_id is not a valid attachment id: {error}"),
-                        )
-                    })?;
+                |(id, phase, token, kind, referrer, attempts, error, stall)| {
+                    let digest = AttachmentId::parse(&id)
+                        .map_err(|error| stored_data_corrupt("attachment condemnation", error))?;
+                    let write_referrer = match (kind, referrer) {
+                        (None, None) => None,
+                        (Some(kind), Some(id)) => Some((kind, id)),
+                        _ => {
+                            return Err(stored_data_corrupt(
+                                "attachment condemnation",
+                                "incomplete writer referrer",
+                            ));
+                        }
+                    };
                     lash_core_execution::store::decode_attachment_condemnation_record(
                         lash_core_execution::store::StoredAttachmentCondemnation {
                             digest,
                             phase,
-                            write_token_present: write_token.is_some(),
-                            write_session_id: write_session_id.map(SessionId::from),
-                            delete_attempts,
-                            last_delete_error,
-                            stall_reason,
+                            write_token_present: token.is_some(),
+                            write_referrer,
+                            delete_attempts: attempts,
+                            last_delete_error: error,
+                            stall_reason: stall,
                         },
                     )
                 },
             )
             .collect::<Result<Vec<_>, StoreError>>()?;
-        condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
-        Ok(condemnations)
+        rows.sort_by(|a, b| a.digest.cmp(&b.digest));
+        Ok(rows)
     }
-
     /// Open one sweep pass: mint the next generation and register it live in
     /// this process. SQLite runs in one process (ADR 0106), so the registry
     /// is the whole liveness proof: a pass that ended, was cancelled, or died
@@ -516,73 +419,6 @@ impl SqliteStore {
         self.location.target().to_string()
     }
 
-    /// `Free -> Condemned` for one digest, conditional on there being no live
-    /// root. The root predicate, the existing-condemnation check, and the insert
-    /// share one SQLite transaction, so this is one CAS against every concurrent
-    /// [`AttachmentManifest::begin_attachment_write`].
-    pub(crate) async fn condemn_attachment(
-        &self,
-        attachment_id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentCondemnation, StoreError> {
-        let generation = sweep_generation_sql(generation)?;
-        let attachment_id = attachment_id.as_str().to_string();
-        let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-        let live_ref_sql = live_root_sql(self.process_registry_attached);
-        self.conn
-            .write_flow(move |tx| {
-                let outcome: Result<lash_core_execution::AttachmentCondemnation, StoreError> =
-                    (|| {
-                        let rooted = tx
-                            .query_row(live_ref_sql, params![attachment_id, cutoff], |_| Ok(()))
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .is_some();
-                        if rooted {
-                            return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
-                        }
-                        let condemned = tx
-                            .query_row(
-                                attachment_sql().condemnation_sqlite.select_exists.sql(),
-                                params![attachment_id],
-                                |_| Ok(()),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .is_some();
-                        if condemned {
-                            return Ok(
-                                lash_core_execution::AttachmentCondemnation::AlreadyCondemned,
-                            );
-                        }
-                        crate::conn::cached_execute(
-                            tx,
-                            attachment_sql().condemnation_sqlite.insert_condemned.sql(),
-                            params![attachment_id, generation],
-                        )
-                        .map_err(sqlite_error)?;
-                        // The digest is proven unrooted, so every remaining manifest
-                        // row for it is stale evidence of an upload whose bytes this
-                        // sweep is about to delete. Clearing them here is what makes
-                        // a negative byte-absence tombstone unnecessary.
-                        crate::conn::cached_execute(
-                            tx,
-                            attachment_sql().manifest.delete_by_id.sql(),
-                            params![attachment_id],
-                        )
-                        .map_err(sqlite_error)?;
-                        Ok(lash_core_execution::AttachmentCondemnation::Condemned)
-                    })();
-                Ok(match outcome {
-                    Ok(condemnation) => TxOutcome::Commit(Ok(condemnation)),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-
     /// `Condemned -> Deleting` under `generation`: the CAS that authorizes the
     /// physical delete. A writer that revoked or claimed the condemnation, or
     /// a pass that adopted it, leaves nothing to match, and the delete is never
@@ -663,59 +499,116 @@ impl SqliteStore {
         })
     }
 
-    /// Retire `Condemned` only when its associated intent became committed, otherwise preserve
-    /// it after removing that unstamped intent.
-    pub(crate) async fn recover_abandoned_attachment_write(
+    pub(crate) async fn condemn_attachment(
         &self,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
-        let attachment_id = attachment_id.as_str().to_string();
+        id: &AttachmentId,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnation, StoreError> {
+        let generation = sweep_generation_sql(generation)?;
+        let id = id.to_string();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<(), StoreError> = (|| {
+                outcome((|| {
+                    if tx
+                        .query_row(
+                            attachment_sql().edges.select_live_root.sql(),
+                            params![id],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some()
+                    {
+                        return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
+                    }
+                    if tx
+                        .query_row(
+                            attachment_sql().sqlite.select_condemned.sql(),
+                            params![id],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some()
+                    {
+                        return Ok(lash_core_execution::AttachmentCondemnation::AlreadyCondemned);
+                    }
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().sqlite.insert_condemned.sql(),
+                        params![id, generation],
+                    )
+                    .map_err(sqlite_error)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().uploads.delete_by_id.sql(),
+                        params![id],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(lash_core_execution::AttachmentCondemnation::Condemned)
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+    pub(crate) async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let id = id.clone();
+        self.conn
+            .write_flow(move |tx| {
+                outcome((|| {
                     let claim = tx
                         .query_row(
                             attachment_sql().condemnation.select_claim.sql(),
-                            params![attachment_id],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            params![id.as_str()],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, String>(2)?,
+                                ))
+                            },
                         )
                         .optional()
                         .map_err(sqlite_error)?;
-                    let Some((token, session_id)) = claim else {
-                        return Ok(());
-                    };
-                    crate::conn::cached_execute(
-                        tx,
-                        attachment_sql().manifest.delete_unproven_for_session.sql(),
-                        params![attachment_id, session_id],
-                    )
-                    .map_err(sqlite_error)?;
-                    let condemned_superseded = tx
-                        .execute(
-                            attachment_sql().condemnation.delete_superseded_claim.sql(),
-                            params![attachment_id, token, session_id],
-                        )
-                        .map_err(sqlite_error)?;
-                    if condemned_superseded == 0 {
-                        crate::conn::cached_execute(
+                    if let Some((token, kind, referrer)) = claim {
+                        let referrer = ArtifactReferrer::decode(&kind, &referrer)
+                            .map_err(|error| error.into_store_error("attachment pending write"))?;
+                        // Abort needs only the referrer; the claim's guard has already been armed.
+                        let cleanup = match &referrer {
+                            ArtifactReferrer::Execution(_) => {
+                                Some(lash_core_execution::ArtifactCleanupPlan::AwaitJournal)
+                            }
+                            ArtifactReferrer::Upload(_) => Some(
+                                lash_core_execution::ArtifactCleanupPlan::AwaitUploadExpiry {
+                                    expires_at_ms: 0,
+                                },
+                            ),
+                            _ => None,
+                        };
+                        let claim = match cleanup {
+                            Some(guard) => ReferrerClaim::guarded(referrer, guard),
+                            None => ReferrerClaim::unguarded(referrer),
+                        }
+                        .map_err(|error| error.into_store_error("attachment pending write"))?;
+                        abort_write_conn(
                             tx,
-                            attachment_sql().condemnation.clear_write_claim.sql(),
-                            params![attachment_id, token],
-                        )
-                        .map_err(sqlite_error)?;
+                            &AttachmentWrite {
+                                attachment_id: id,
+                                claim,
+                            },
+                            &token,
+                        )?;
                     }
                     Ok(())
-                })();
-                Ok(match outcome {
-                    Ok(()) => TxOutcome::Commit(Ok(())),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
+                })())
             })
             .await
             .map_err(sqlite_error)?
     }
 }
-
 /// The sweep passes running in this process, by catalog and generation.
 static LIVE_SWEEPS: LazyLock<std::sync::Mutex<std::collections::HashSet<(String, u64)>>> =
     LazyLock::new(Default::default);
@@ -799,726 +692,272 @@ fn adopted_condemnation(
 
 #[async_trait::async_trait]
 impl AttachmentManifest for SqliteStore {
-    /// The writer half of the GC fence: the condemnation check, the claim, and
-    /// the intent upsert are one SQLite transaction, so a sweeper's condemn CAS
-    /// either precedes this whole mutation or fails against the intent it wrote.
     async fn begin_attachment_write(
         &self,
-        intent: AttachmentIntent,
+        write: &AttachmentWrite,
     ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
-        {
-            let attachment_id = intent.attachment_id.as_str().to_string();
-            let session_id = intent.session_id.clone();
-            let canonical_uri = intent.canonical_uri.as_str().to_string();
-            let intent_at_ms = intent.intent_at_epoch_ms as i64;
-            let owner_kind = intent.owner.as_ref().map(|owner| owner.kind().as_str());
-            let owner_id = intent.owner.as_ref().map(|owner| owner.id().to_string());
-            let write_id = lash_core_execution::AttachmentWriteToken::new();
-            self.conn
-                .write_flow(move |tx| {
-                    let outcome: Result<lash_core_execution::AttachmentWriteFence, StoreError> = (|| {
-                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        let condemnation = tx
-                            .query_row(
-                                attachment_sql().condemnation.select_phase_and_claim.sql(),
-                                params![attachment_id],
-                                |row| {
-                                    Ok((
-                                        row.get::<_, String>(0)?,
-                                        row.get::<_, Option<String>>(1)?,
-                                    ))
-                                },
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        match condemnation
-                            .as_ref()
-                            .map(|(phase, token)| (phase.as_str(), token.is_some()))
-                        {
-                            // The physical delete is already in flight: record
-                            // nothing, so these bytes cannot land inside it.
-                            Some(("deleting", _)) | Some(("condemned", true)) => {
-                                return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
-                            }
-                            // Keep the condemnation present and own it with this
-                            // attempt's identity until the backend put settles.
-                            Some(("condemned", false)) => {
-                                let claimed = tx
-                                    .execute(
-                                        attachment_sql().condemnation.claim_write.sql(),
-                                        params![
-                                            attachment_id,
-                                            write_id.as_hex(),
-                                            session_id.as_str()
-                                        ],
-                                    )
-                                    .map_err(sqlite_error)?;
-                                if claimed == 0 {
-                                    return Ok(
-                                        lash_core_execution::AttachmentWriteFence::ReclamationInFlight,
-                                    );
-                                }
-                            }
-                            None => {}
-                            Some((phase, _)) => {
-                                return Err(StoreError::Backend(format!(
-                                    "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
-                                )));
-                            }
+        let write = write.clone();
+        let now = self.clock.timestamp_ms();
+        let token = lash_core_execution::AttachmentWriteToken::new();
+        self.conn
+            .write_flow(move |tx| {
+                outcome((|| {
+                    let referrer = write.claim.referrer();
+                    check_fence(tx, referrer)?;
+                    let condemnation = tx
+                        .query_row(
+                            attachment_sql().condemnation.select_phase_and_claim.sql(),
+                            params![write.attachment_id.as_str()],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    match condemnation
+                        .as_ref()
+                        .map(|(phase, claim)| (phase.as_str(), claim.is_some()))
+                    {
+                        Some(("deleting", _)) | Some(("condemned", true)) => {
+                            return Ok(
+                                lash_core_execution::AttachmentWriteFence::ReclamationInFlight,
+                            );
                         }
-                        // A fresh attempt has proven nothing, so it takes the row
-                        // with no upload stamp. Evidence and commitment already on
-                        // the row were earned by earlier attempts and are kept.
-                        crate::conn::cached_execute(tx,
-                            attachment_sql().manifest.insert_intent.sql(),
-                            params![
-                                attachment_id,
-                                session_id.as_str(),
-                                canonical_uri,
-                                intent_at_ms,
-                                owner_kind,
-                                owner_id,
-                                write_id.as_hex()
-                            ],
+                        None | Some(("condemned", false)) => {}
+                        Some((phase, _)) => {
+                            return Err(stored_data_corrupt(
+                                "attachment condemnation",
+                                format!("unknown phase {phase}"),
+                            ));
+                        }
+                    }
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().pending.insert.sql(),
+                        params![
+                            token.as_hex(),
+                            write.attachment_id.as_str(),
+                            referrer.kind().as_str(),
+                            referrer.canonical_id(),
+                            crate::clamp_epoch_ms(now)
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    if condemnation.is_some() {
+                        crate::conn::cached_execute(
+                            tx,
+                            attachment_sql().condemnation.claim_write.sql(),
+                            params![write.attachment_id.as_str(), token.as_hex()],
                         )
                         .map_err(sqlite_error)?;
-                        Ok(lash_core_execution::AttachmentWriteFence::Granted(
-                            lash_core_execution::AttachmentWritePermit::new(write_id),
-                        ))
-                    })(
-                    );
-                    Ok(match outcome {
-                        Ok(fence) => TxOutcome::Commit(Ok(fence)),
-                        Err(err) => TxOutcome::Rollback(Err(err)),
-                    })
-                })
-                .await
-                .map_err(sqlite_error)?
-        }
+                    }
+                    insert_edge(tx, referrer, &write.attachment_id)?;
+                    if let Some(cleanup) = write.claim.guard_cleanup() {
+                        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now, "core")?;
+                    }
+                    Ok(lash_core_execution::AttachmentWriteFence::Granted(
+                        lash_core_execution::AttachmentWritePermit::new(token),
+                    ))
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
     }
-
     async fn complete_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let digest = intent.attachment_id.clone();
-        let attachment_id = intent.attachment_id.as_str().to_string();
-        let session_id = intent.session_id.clone();
-        let write_id = permit.write_id().as_hex();
-        let written_at_ms = crate::clamp_epoch_ms(self.clock.timestamp_ms());
-        {
-            self.conn
-                .write_flow(move |tx| {
-                    let outcome: Result<(), StoreError> = (|| {
-                        // Id-matched: only the row this attempt still owns is
-                        // stamped, and the first proven upload is kept.
-                        let stamped = tx
-                            .execute(
-                                attachment_sql().manifest.stamp_written.sql(),
-                                params![
-                                    attachment_id,
-                                    session_id.as_str(),
-                                    write_id,
-                                    written_at_ms
-                                ],
-                            )
-                            .map_err(sqlite_error)?;
-                        if stamped == 0 {
-                            return Err(StoreError::StaleWritePermit { digest });
-                        }
-                        // The bytes exist now, so this attempt's claim on the
-                        // condemnation is released with the condemnation itself.
-                        crate::conn::cached_execute(
-                            tx,
-                            attachment_sql().condemnation.delete_by_write_token.sql(),
-                            params![attachment_id, write_id],
-                        )
-                        .map_err(sqlite_error)?;
-                        Ok(())
-                    })();
-                    Ok(match outcome {
-                        Ok(()) => TxOutcome::Commit(Ok(())),
-                        Err(err) => TxOutcome::Rollback(Err(err)),
-                    })
-                })
-                .await
-                .map_err(sqlite_error)?
-        }
+        let write = write.clone();
+        let token = permit.write_id().as_hex();
+        let now = crate::clamp_epoch_ms(self.clock.timestamp_ms());
+        self.conn
+            .write_flow(move |tx| {
+                outcome((|| {
+                    if !has_permit(tx, &write, &token)? {
+                        return Err(StoreError::StaleWritePermit {
+                            digest: write.attachment_id,
+                        });
+                    }
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().uploads.insert.sql(),
+                        params![write.attachment_id.as_str(), now],
+                    )
+                    .map_err(sqlite_error)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().condemnation.delete_by_write_token.sql(),
+                        params![write.attachment_id.as_str(), token],
+                    )
+                    .map_err(sqlite_error)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().pending.delete_permit.sql(),
+                        params![
+                            token,
+                            write.attachment_id.as_str(),
+                            write.claim.referrer().kind().as_str(),
+                            write.claim.referrer().canonical_id()
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
     }
-
     async fn abort_attachment_write(
         &self,
-        intent: &AttachmentIntent,
+        write: &AttachmentWrite,
         permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let attachment_id = intent.attachment_id.as_str().to_string();
-        let session_id = intent.session_id.clone();
-        let write_id = permit.write_id().as_hex();
-        {
-            self.conn
-                .write_flow(move |tx| {
-                    let outcome: Result<(), StoreError> = (|| {
-                        // Only this attempt's own unstamped, uncommitted row. A
-                        // superseded permit matches nothing and deletes nothing.
-                        crate::conn::cached_execute(
-                            tx,
-                            attachment_sql().manifest.delete_unproven_for_write.sql(),
-                            params![attachment_id, session_id.as_str(), write_id],
-                        )
-                        .map_err(sqlite_error)?;
-                        let condemned_superseded = tx
-                            .execute(
-                                attachment_sql().condemnation.delete_superseded_claim.sql(),
-                                params![attachment_id, write_id, session_id.as_str()],
+        let write = write.clone();
+        let token = permit.write_id().as_hex();
+        self.conn
+            .write_flow(move |tx| outcome(abort_write_conn(tx, &write, &token)))
+            .await
+            .map_err(sqlite_error)?
+    }
+    async fn acquire_attachment_refs(
+        &self,
+        claim: &ReferrerClaim,
+        ids: &[AttachmentId],
+    ) -> Result<(), StoreError> {
+        let claim = claim.clone();
+        let ids = ids.to_vec();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| outcome(acquire_attachment_refs_conn(tx, &claim, &ids, now)))
+            .await
+            .map_err(sqlite_error)?
+    }
+    async fn forget_attachment_ref(
+        &self,
+        referrer: &ArtifactReferrer,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        check_kind(referrer)?;
+        let referrer = referrer.clone();
+        let id = id.clone();
+        self.conn
+            .write_flow(move |tx| {
+                outcome((|| {
+                    if crate::artifact_store::artifact_fenced_tx(tx, &referrer)
+                        .map_err(sqlite_error)?
+                    {
+                        return Ok(());
+                    }
+                    if let ArtifactReferrer::Session(session) = &referrer {
+                        let retained: bool = tx
+                            .query_row(
+                                attachment_sql().sqlite.session_state.sql(),
+                                params![session.as_str()],
+                                |row| row.get(2),
                             )
                             .map_err(sqlite_error)?;
-                        if condemned_superseded == 0 {
-                            crate::conn::cached_execute(
-                                tx,
-                                attachment_sql().condemnation.clear_write_claim.sql(),
-                                params![attachment_id, write_id],
-                            )
-                            .map_err(sqlite_error)?;
+                        if retained {
+                            return Ok(());
                         }
-                        Ok(())
-                    })();
-                    Ok(match outcome {
-                        Ok(()) => TxOutcome::Commit(Ok(())),
-                        Err(err) => TxOutcome::Rollback(Err(err)),
-                    })
-                })
-                .await
-                .map_err(sqlite_error)?
-        }
-    }
-
-    async fn commit_refs(
-        &self,
-        session_id: &SessionId,
-        attachment_ids: &[AttachmentId],
-    ) -> Result<(), StoreError> {
-        if attachment_ids.is_empty() {
-            return Ok(());
-        }
-        {
-            let session_id = SessionId::from(session_id.to_string());
-            let attachment_ids = attachment_ids.to_vec();
-            let now = self.clock.timestamp_ms() as i64;
-            self.conn
-                .write_flow(move |tx| {
-                    let outcome: Result<(), StoreError> = (|| {
-                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        commit_attachment_refs_conn(tx, &session_id, &attachment_ids, now)
-                    })();
-                    Ok(match outcome {
-                        Ok(()) => TxOutcome::Commit(Ok(())),
-                        Err(err) => TxOutcome::Rollback(Err(err)),
-                    })
-                })
-                .await
-                .map_err(sqlite_error)?
-        }
-    }
-
-    async fn list_uncommitted(
-        &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        {
-            let older_than = crate::clamp_epoch_ms(older_than_epoch_ms);
-            self.conn
-                .call(move |conn| {
-                    let mut stmt = conn.prepare_cached(
-                        attachment_sql().manifest_sqlite.select_uncommitted.sql(),
-                    )?;
-                    let rows = stmt.query_map(params![older_than], |row| {
-                        let id: String = row.get(0)?;
-                        let session_id: SessionId = SessionId::from(row.get::<_, String>(1)?);
-                        let canonical_uri: String = row.get(2)?;
-                        let intent_at_ms: i64 = row.get(3)?;
-                        let committed_at_ms: Option<i64> = row.get(4)?;
-                        let owner_kind: Option<String> = row.get(5)?;
-                        let owner_id: Option<String> = row.get(6)?;
-                        let written_at_ms: Option<i64> = row.get(7)?;
-                        let owner = lash_core_execution::store::decode_attachment_owner(
-                            owner_kind.as_deref(),
-                            owner_id,
-                        )
-                        .map_err(sqlite_conversion_error)?;
-                        Ok(AttachmentManifestEntry {
-                            attachment_id: crate::attachment_id_from_sql(
-                                "AttachmentManifest",
-                                "attachment_id",
-                                id,
-                            )?,
-                            session_id,
-                            canonical_uri,
-                            intent_at_epoch_ms: u64_from_sql(
-                                "AttachmentManifest",
-                                "intent_at_ms",
-                                intent_at_ms,
-                            )?,
-                            written_at_epoch_ms: written_at_ms
-                                .map(|value| {
-                                    u64_from_sql("AttachmentManifest", "written_at_ms", value)
-                                })
-                                .transpose()?,
-                            committed_at_epoch_ms: committed_at_ms
-                                .map(|value| {
-                                    u64_from_sql("AttachmentManifest", "committed_at_ms", value)
-                                })
-                                .transpose()?,
-                            owner,
-                        })
-                    })?;
-                    rows.collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .await
-                .map_err(sqlite_error)
-        }
-    }
-
-    async fn forget_aged_uncommitted_intents(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<(), StoreError> {
-        {
-            let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-            // One conditional DELETE composes age with owner-death proof. The
-            // attached process registry makes the NOT EXISTS predicate part of
-            // this same SQLite statement and transaction, avoiding a
-            // read-process-then-forget race across the per-session topology —
-            // which is why the two shapes are two statements rendered for two
-            // layouts. Without a registry the owner-death statement has no
-            // layout to render for, so process-owned rows are conservatively
-            // retained rather than guessed at.
-            let forget = aged_forget_sql(self.process_registry_attached);
-            self.conn
-                .write(move |tx| {
+                    }
                     crate::conn::cached_execute(
                         tx,
-                        attachment_sql()
-                            .manifest_sqlite
-                            .delete_deleted_session_roots
-                            .sql(),
-                        [],
-                    )?;
-                    crate::conn::cached_execute(tx, forget, params![cutoff])?;
+                        attachment_sql().edges.delete_ref.sql(),
+                        params![
+                            id.as_str(),
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
                     Ok(())
-                })
-                .await
-                .map_err(sqlite_error)?;
-            Ok(())
-        }
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
     }
-
-    async fn has_live_ref_for_id(
-        &self,
-        attachment_id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        {
-            let attachment_id = attachment_id.as_str().to_string();
-            let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
-            let sql = live_root_sql(self.process_registry_attached);
-            // With the registry attached the probe reads the catalog and the
-            // registry in one statement. It runs under `BEGIN IMMEDIATE` so it
-            // takes both in the global lock order (catalog, then registry)
-            // rather than holding the catalog while it waits for a registry a
-            // multi-database writer holds.
-            self.conn
-                .write(move |tx| {
-                    tx.query_row(sql, params![attachment_id, cutoff], |_| Ok(()))
-                        .optional()
-                        .map(|found| found.is_some())
-                })
-                .await
-                .map_err(sqlite_error)
-        }
-    }
-
-    async fn forget(
-        &self,
-        session_id: &SessionId,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
-        {
-            let session_id = SessionId::from(session_id.to_string());
-            let attachment_id = attachment_id.as_str().to_string();
-            self.conn
-                .write(move |tx| {
+    async fn end_attachment_referrer(&self, referrer: &ArtifactReferrer) -> Result<(), StoreError> {
+        check_kind(referrer)?;
+        let referrer = referrer.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                outcome((|| {
+                    crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now)
+                        .map_err(sqlite_error)?;
                     crate::conn::cached_execute(
                         tx,
-                        attachment_sql().manifest_sqlite.forget_for_session.sql(),
-                        params![session_id.as_str(), attachment_id.as_str()],
+                        attachment_sql().pending.delete_referrer.sql(),
+                        params![referrer.kind().as_str(), referrer.canonical_id()],
                     )
-                })
-                .await
-                .map_err(sqlite_error)?;
-            Ok(())
-        }
-    }
-
-    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        {
-            self.conn
-                .call(move |conn| {
-                    let mut stmt =
-                        conn.prepare_cached(attachment_sql().manifest.select_rooted_ids.sql())?;
-                    let rows = stmt.query_map([], |row| {
-                        let id: String = row.get(0)?;
-                        crate::attachment_id_from_sql("AttachmentManifest", "attachment_id", id)
-                    })?;
-                    rows.collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .await
-                .map_err(sqlite_error)
-        }
-    }
-}
-
-#[cfg(test)]
-mod cross_database_plan_tests {
-    use super::*;
-
-    #[test]
-    fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
-        let (_directory, connection) = catalog_with_registry();
-        connection
-            .pragma_update(None, "ignore_check_constraints", true)
-            .expect("inject future owner kind");
-        connection
-            .execute_batch(
-                "INSERT INTO attachment_manifest
-                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
-                 VALUES
-                     ('blake3:future', 'future-session', 'uri', 1, 'future-owner', 'opaque'),
-                     ('blake3:invalid-process', 'future-session', 'uri', 1, 'process', 'p_invalid'),
-                     ('blake3:missing-owner', 'future-session', 'uri', 1, 'turn', NULL);
-                 INSERT INTO deleted_sessions
-                     (session_id, created_at_ms, head_revision, relation_kind)
-                 VALUES ('future-session', 2, 0, 'root');",
-            )
-            .expect("seed unknown owner and deleted session");
-        for digest in [
-            "blake3:future",
-            "blake3:invalid-process",
-            "blake3:missing-owner",
-        ] {
-            let rooted = connection
-                .query_row(live_root_sql(true), params![digest, 100_i64], |_| Ok(()))
-                .optional()
-                .expect("probe")
-                .is_some();
-            assert!(
-                rooted,
-                "undecodable owner of {digest} must remain a GC root"
-            );
-        }
-        connection
-            .execute(
-                attachment_sql()
-                    .manifest_sqlite
-                    .delete_deleted_session_roots
-                    .sql(),
-                [],
-            )
-            .expect("deleted-session forget");
-        connection
-            .execute(aged_forget_sql(true), params![100_i64])
-            .expect("aged forget");
-        let remaining: i64 = connection
-            .query_row("SELECT COUNT(*) FROM attachment_manifest", [], |row| {
-                row.get(0)
+                    .map_err(sqlite_error)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().edges.delete_referrer.sql(),
+                        params![referrer.kind().as_str(), referrer.canonical_id()],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })())
             })
-            .expect("read owner roots");
-        assert_eq!(remaining, 3, "GC must keep every undecodable owner");
+            .await
+            .map_err(sqlite_error)?
     }
-
-    /// The text the live-root probe was built with per call before FIG-3406,
-    /// reproduced verbatim, including the `format!` site's indentation.
-    ///
-    /// It is the oracle: the named statement is meant to be the *same query*,
-    /// not merely a similar one, so the two must plan identically. Whitespace
-    /// is deliberately not matched — an authored statement is indented like
-    /// the block it lives in — which is exactly what makes the comparison a
-    /// test of the plan rather than of the bytes.
-    fn historical_live_ref_sql() -> String {
-        let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
-        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
-        let process_dead = format!(
-            "OR (
-            manifest.owner_kind = '{process_owner_kind}'
-            AND NOT EXISTS (
-                SELECT 1 FROM process_registry.processes AS process
-                WHERE process.process_id = manifest.owner_id
-            )
-        )"
-        );
-        format!(
-            "SELECT 1 FROM attachment_manifest AS manifest
-         WHERE manifest.attachment_id = ?1
-           AND NOT (
-                manifest.committed_at_ms IS NULL
-                AND manifest.intent_at_ms <= ?2
-                AND (
-                    manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                    OR (
-                        manifest.owner_kind = '{turn_owner_kind}'
-                        AND EXISTS (
-                            SELECT 1 FROM runtime_turn_commits AS turn_commit
-                            WHERE turn_commit.session_id = manifest.session_id
-                              AND turn_commit.turn_id <> manifest.owner_id
-                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                        )
-                    )
-                    {process_dead}
+    async fn session_referrer_state(
+        &self,
+        session: &SessionId,
+    ) -> Result<SessionReferrerState, StoreError> {
+        let session = session.clone();
+        self.conn
+            .call(move |conn| {
+                conn.query_row(
+                    attachment_sql().sqlite.session_state.sql(),
+                    params![session.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, bool>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, bool>(2)?,
+                        ))
+                    },
                 )
-           )
-         LIMIT 1"
-        )
-    }
-
-    /// The historical aged-intent forget, same provenance.
-    fn historical_forget_sql() -> String {
-        let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
-        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
-        let process_dead = format!(
-            "OR (
-                            manifest.owner_kind = '{process_owner_kind}'
-                            AND NOT EXISTS (
-                                SELECT 1 FROM process_registry.processes AS process
-                                WHERE process.process_id = manifest.owner_id
-                            )
-                        )"
-        );
-        format!(
-            "DELETE FROM attachment_manifest AS manifest
-                         WHERE manifest.committed_at_ms IS NULL
-                           AND manifest.intent_at_ms <= ?1
-                           AND (
-                                manifest.owner_kind IS NULL
-                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-                               WHERE deleted.session_id = manifest.session_id)
-                                OR (
-                                    manifest.owner_kind = '{turn_owner_kind}'
-                                    AND EXISTS (
-                                        SELECT 1 FROM runtime_turn_commits AS turn_commit
-                                        WHERE turn_commit.session_id = manifest.session_id
-                                          AND turn_commit.turn_id <> manifest.owner_id
-                                          AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                                    )
-                                )
-                                {process_dead}
-                           )"
-        )
-    }
-
-    /// A session catalog with a real process registry attached under the name
-    /// production attaches it by, both provisioned from this crate's own
-    /// schema so the planner sees the real indexes.
-    fn catalog_with_registry() -> (tempfile::TempDir, rusqlite::Connection) {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let registry_path = directory.path().join("registry.sqlite3");
-        {
-            let registry =
-                rusqlite::Connection::open(&registry_path).expect("open process registry");
-            registry
-                .execute_batch(crate::schema::PROCESS_SCHEMA)
-                .expect("apply the process registry schema");
-        }
-        let connection = rusqlite::Connection::open(directory.path().join("catalog.sqlite3"))
-            .expect("open session catalog");
-        connection
-            .execute_batch(crate::schema::SCHEMA)
-            .expect("apply the durable-core schema");
-        connection
-            .execute(
-                "ATTACH DATABASE ?1 AS process_registry",
-                params![registry_path.to_string_lossy().into_owned()],
-            )
-            .expect("attach the process registry");
-        (directory, connection)
-    }
-
-    fn seed(connection: &rusqlite::Connection) {
-        connection
-            .execute_batch(
-                "WITH RECURSIVE n(i) AS (
-                     SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000
-                 )
-                 INSERT INTO attachment_manifest (
-                     attachment_id, session_id, canonical_uri, intent_at_ms,
-                     owner_kind, owner_id
-                 )
-                 SELECT printf('blake3:%064d', i), printf('session-%04d', i), 'uri', i,
-                        CASE WHEN i % 2 = 0 THEN 'turn' ELSE 'process' END,
-                        printf('owner-%04d', i)
-                 FROM n;
-                 ANALYZE;",
-            )
-            .expect("seed the manifest");
-    }
-
-    fn plan(connection: &rusqlite::Connection, sql: &str, parameters: usize) -> String {
-        let mut statement = connection
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap_or_else(|error| panic!("prepare `{sql}`: {error}"));
-        let bindings: Vec<rusqlite::types::Value> = (0..parameters)
-            .map(|_| rusqlite::types::Value::Integer(0))
-            .collect();
-        statement
-            .query_map(rusqlite::params_from_iter(bindings), |row| {
-                row.get::<_, String>(3)
             })
-            .expect("explain")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("explain rows")
-            .join(" | ")
+            .await
+            .map_err(sqlite_error)
+            .map(|(metadata, deleted, retained)| {
+                if !metadata && !deleted {
+                    SessionReferrerState::Absent
+                } else if metadata && !deleted {
+                    SessionReferrerState::Live
+                } else if retained {
+                    SessionReferrerState::DeletedRetained
+                } else {
+                    SessionReferrerState::DeletedRetired
+                }
+            })
     }
-
-    /// FIG-3406's load-bearing claim on the hot path: making the probe a
-    /// named, per-table-rendered statement did not change what SQLite does
-    /// with it.
-    #[test]
-    fn the_live_root_probe_and_the_aged_forget_plan_exactly_as_they_did() {
-        let (_directory, connection) = catalog_with_registry();
-        seed(&connection);
-
-        let probe = plan(
-            &connection,
-            attachment_sql()
-                .manifest_process_owner
-                .select_live_root_proving_process_death
-                .sql(),
-            2,
-        );
-        assert_eq!(
-            probe,
-            plan(&connection, &historical_live_ref_sql(), 2),
-            "the named live-root probe must plan exactly as the format!ed one did"
-        );
-        let forget = plan(
-            &connection,
-            attachment_sql()
-                .manifest_process_owner
-                .delete_aged_uncommitted_proving_process_death
-                .sql(),
-            1,
-        );
-        assert_eq!(
-            forget,
-            plan(&connection, &historical_forget_sql(), 1),
-            "the named aged-intent forget must plan exactly as the format!ed one did"
-        );
-
-        // And the plan is the one worth keeping: the probe reaches its digest
-        // through an index rather than reading the whole manifest, and the
-        // owner-death proof reaches the attached registry through its primary
-        // key.
-        assert!(
-            probe.contains("idx_attachment_manifest_written")
-                || probe.contains("USING INDEX")
-                || probe.contains("USING COVERING INDEX"),
-            "the live-root probe must find its digest through an index: {probe}"
-        );
-        assert!(
-            !probe.contains("SCAN manifest"),
-            "the live-root probe must not scan the manifest: {probe}"
-        );
-        assert!(
-            probe.contains("process") && probe.contains("INDEX"),
-            "the owner-death proof must reach the registry through an index: {probe}"
-        );
-    }
-
-    /// The shape a store with no registry issues is the same query minus the
-    /// clause it cannot answer — and it plans without ever naming the
-    /// registry, which is the observable half of "unrenderable for that
-    /// layout".
-    #[test]
-    fn the_registryless_probe_never_reaches_the_process_registry() {
-        let (_directory, connection) = catalog_with_registry();
-        seed(&connection);
-
-        let without = live_root_sql(false);
-        assert!(
-            !without.contains("processes"),
-            "a store with no registry must not name the registry's table: {without}"
-        );
-        assert!(!plan(&connection, without, 2).contains("process "));
-        assert!(
-            !attachment_sql()
-                .manifest
-                .delete_aged_uncommitted
-                .sql()
-                .contains("processes")
-        );
-    }
-
-    /// The live-root probe and the reconciliation forget are the same
-    /// predicate asked two ways; a digest that the sweep would forget must be
-    /// exactly a digest the probe reports unrooted, or the GC can delete
-    /// bytes something still roots.
-    #[test]
-    fn the_probe_and_the_forget_agree_on_every_seeded_row() {
-        let (_directory, connection) = catalog_with_registry();
-        connection
-            .execute_batch(
-                "INSERT INTO attachment_manifest
-                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
-                 VALUES
-                     ('blake3:aged-host', 's1', 'uri', 10, NULL, NULL),
-                     ('blake3:live-turn', 's2', 'uri', 10, 'turn', 't2'),
-                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p_00000000000070008000000000000003');",
-            )
-            .expect("seed the three owner classes");
-
-        let mut unrooted = Vec::new();
-        for digest in [
-            "blake3:aged-host",
-            "blake3:live-turn",
-            "blake3:dead-process",
-        ] {
-            let rooted = connection
-                .query_row(live_root_sql(true), params![digest, 100_i64], |_| Ok(()))
-                .optional()
-                .expect("probe")
-                .is_some();
-            if !rooted {
-                unrooted.push(digest.to_string());
-            }
-        }
-
-        connection
-            .execute(aged_forget_sql(true), params![100_i64])
-            .expect("forget");
-        let survivors: Vec<String> = {
-            let mut statement = connection
-                .prepare("SELECT attachment_id FROM attachment_manifest ORDER BY attachment_id")
-                .expect("read survivors");
-            let rows = statement
-                .query_map([], |row| row.get::<_, String>(0))
-                .expect("rows");
-            rows.collect::<Result<_, _>>().expect("survivors")
-        };
-
-        unrooted.sort();
-        assert_eq!(
-            unrooted,
-            vec![
-                "blake3:aged-host".to_string(),
-                "blake3:dead-process".to_string()
-            ],
-            "an unscoped aged put and a dead process owner are unrooted; a live turn owner is not"
-        );
-        assert_eq!(
-            survivors,
-            vec!["blake3:live-turn".to_string()],
-            "the sweep forgets exactly the digests the probe reported unrooted"
-        );
+    async fn attachment_referrers(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, StoreError> {
+        let id = id.clone();
+        let rows = self
+            .conn
+            .call(move |conn| {
+                let mut statement =
+                    conn.prepare_cached(attachment_sql().edges.select_referrers.sql())?;
+                statement
+                    .query_map(params![id.as_str()], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        rows.into_iter()
+            .map(|(kind, id)| {
+                ArtifactReferrer::decode(&kind, &id)
+                    .map_err(|error| error.into_store_error("attachment referrer edge"))
+            })
+            .collect()
     }
 }
