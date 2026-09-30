@@ -240,6 +240,8 @@ case "${suite}" in
 
   # Package-wide by design: the integration and schema binaries are part of
   # this gate, so narrowing to the conformance binary would silently drop them.
+  # The label file carries the synthetic successor's variants too, so the
+  # synthetic tier's PostgreSQL suites run against the same service.
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
   # a time against the one database. Bazel runs the sharded binaries' shards
@@ -270,6 +272,10 @@ case "${suite}" in
         //crates/lash-restate:lash-restate__unit_test
     else
       cargo test -p lash-internal-postgres-store --locked
+      # The synthetic successor's suites (FIG-4262), the Cargo spelling of
+      # the feature-lane variants the generated label file adds above.
+      cargo test -p lash-internal-postgres-store --locked --no-default-features \
+        --features synthetic-next
       cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
     ;;

@@ -21,6 +21,10 @@ use crate::{PostgresStorage, PostgresStoreConfig};
 /// The epoch the synthetic next release finalizes to.
 const NEXT: u32 = 2;
 
+/// An epoch past every one this build writes under: a newer release
+/// finalized it.
+const PAST_WRITABLE: u32 = FleetFormat::writable().max() + 1;
+
 async fn isolated() -> Option<IsolatedDatabase> {
     let Some(database_url) = crate::postgres_test_support::database_url() else {
         eprintln!("skipping writer-fence proof: database URL is not set");
@@ -147,9 +151,10 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     let storage = PostgresStorage::connect(database.url())
         .await
         .expect("open the isolated store");
-    finalize_fleet_epoch(storage.pool(), NEXT)
+    let seeded = storage.fleet_format().version();
+    finalize_fleet_epoch(storage.pool(), PAST_WRITABLE)
         .await
-        .expect("finalize the next release");
+        .expect("finalize a release past this build");
 
     let session_id = SessionId::from("fence-refuses-writer");
     let error = storage
@@ -160,10 +165,10 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     assert!(
         matches!(
             error,
-            StoreError::WriterFenced { recorded: NEXT, writable }
+            StoreError::WriterFenced { recorded: PAST_WRITABLE, writable }
                 if writable == FleetFormat::writable()
         ),
-        "expected WriterFenced at epoch {NEXT}, got {error:?}"
+        "expected WriterFenced at epoch {PAST_WRITABLE}, got {error:?}"
     );
     assert_eq!(meta_rows(&storage, &session_id).await, 0);
 
@@ -174,7 +179,13 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
         .await
         .expect_err("a drain mark after finalize is fenced");
     assert!(
-        matches!(error, StoreError::WriterFenced { recorded: NEXT, .. }),
+        matches!(
+            error,
+            StoreError::WriterFenced {
+                recorded: PAST_WRITABLE,
+                ..
+            }
+        ),
         "expected WriterFenced, got {error:?}"
     );
     let marks: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_draining_generations")
@@ -184,7 +195,7 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     assert_eq!(marks, 0, "a fenced writer wrote nothing");
     assert_eq!(
         storage.fleet_format().version(),
-        1,
+        seeded,
         "a refused epoch is not the one this build writes under"
     );
 }

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
+use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::{
     StoreError, StorePreflight, StoreReleaseState, StoreSchemaStatus, StoreSchemaVerdict,
 };
@@ -56,6 +56,19 @@ impl ReleaseStampDeployment for SqliteBackend {
     }
 }
 
+/// Raises the durable core's stamp and reader floor one above what this
+/// build reads, answering the raised version.
+fn raise_reader_floor_above_this_build(connection: &rusqlite::Connection) -> u32 {
+    let above = crate::sqlite_core().reads.max() + 1;
+    connection
+        .execute(
+            "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+            [above],
+        )
+        .expect("raise the reader floor above this build");
+    above
+}
+
 #[tokio::test]
 async fn sqlite_release_stamp_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
@@ -79,9 +92,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
     );
 
     let connection = rusqlite::Connection::open(&path).expect("open the stamped database");
-    connection
-        .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
-        .expect("raise the reader floor above this build");
+    let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
     let status = SqliteStorePreflight::for_durable_core(&path)
@@ -93,9 +104,9 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::ReaderFloorAbove {
                 component: "sqlite-core".to_owned(),
-                found: 2,
-                min_reader: 2,
-                reads: VersionRange::exactly(1),
+                found: above,
+                min_reader: above,
+                reads: crate::sqlite_core().reads,
                 writing_release: None,
             },
         }
@@ -121,9 +132,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     connection
         .execute("DROP TABLE release_stamp", [])
         .expect("remove the stamp a pre-stamp build never wrote");
-    connection
-        .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
-        .expect("raise the reader floor above this build");
+    let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
     let status = SqliteStorePreflight::for_durable_core(&path)
@@ -135,9 +144,9 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::ReaderFloorAbove {
                 component: "sqlite-core".to_owned(),
-                found: 2,
-                min_reader: 2,
-                reads: VersionRange::exactly(1),
+                found: above,
+                min_reader: above,
+                reads: crate::sqlite_core().reads,
                 writing_release: None,
             },
         }

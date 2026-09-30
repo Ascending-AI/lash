@@ -97,10 +97,48 @@ async fn ledger_rows(url: &str) -> Vec<(String, String, Option<i32>, i32)> {
     rows
 }
 
-/// The 1.0 compatibility stamp this build writes, as `(version, min_reader)`
-/// (ADR 0115 §1.2, §7): what open admits by. The pre-1.0 DDL revision is the
-/// migration ledger's, never the stamp's.
+/// The 1.0 compatibility stamp `schema.sql` provisions, as
+/// `(version, min_reader)` (ADR 0115 §1.2, §7): what open admits by. The
+/// pre-1.0 DDL revision is the migration ledger's, never the stamp's.
 const COMPAT_STAMP: (i32, i32) = (1, 1);
+
+/// The expand steps this build's migrate runs past the DDL revision it
+/// provisions, by ledger id, in the active tier: the synthetic successor
+/// carries its one post-cut expand (ADR 0115 §6), and N carries none.
+#[cfg(not(feature = "synthetic-next"))]
+const COMPONENT_EXPANDS: &[&str] = &[];
+#[cfg(feature = "synthetic-next")]
+const COMPONENT_EXPANDS: &[&str] = &["synthetic-next-expand"];
+
+/// The ledger rows [`COMPONENT_EXPANDS`] record: each moves the component
+/// stamp, not the DDL revision.
+fn component_expand_rows() -> Vec<(String, String, Option<i32>, i32)> {
+    COMPONENT_EXPANDS
+        .iter()
+        .map(|id| {
+            (
+                "expand".to_string(),
+                (*id).to_string(),
+                Some(PostgresStorage::schema_version()),
+                PostgresStorage::schema_version(),
+            )
+        })
+        .collect()
+}
+
+/// The stamp a migrate leaves: the component version this build writes, over
+/// the reader floor `schema.sql` provisioned.
+fn migrated_stamp() -> (i32, i32) {
+    let writes =
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .expect("the build declares the PostgreSQL store")
+            .writes
+            .max();
+    (
+        i32::try_from(writes).expect("the component version fits"),
+        COMPAT_STAMP.1,
+    )
+}
 
 /// The component's compatibility stamp, as `(version, min_reader)`.
 async fn compat_stamp(url: &str) -> (i32, i32) {
@@ -177,13 +215,15 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
     assert_eq!(report.found_version, None, "a fresh schema has no stamp");
     assert!(report.applied.is_empty(), "a fresh ledger has no rows");
     assert_eq!(
-        report.executed.len(),
-        1,
-        "a fresh migrate applies exactly the bootstrap: {report:?}"
-    );
-    assert_eq!(
-        report.executed[0].migration,
-        format!("bootstrap-{}", PostgresStorage::schema_version())
+        report
+            .executed
+            .iter()
+            .map(|step| step.migration.clone())
+            .collect::<Vec<_>>(),
+        std::iter::once(format!("bootstrap-{}", PostgresStorage::schema_version()))
+            .chain(COMPONENT_EXPANDS.iter().map(|id| (*id).to_string()))
+            .collect::<Vec<_>>(),
+        "a fresh migrate applies the bootstrap and this build's component expands: {report:?}"
     );
     assert!(report.executed[0].started_at_ms.is_some());
     assert_eq!(report.executed[0].state, "applied");
@@ -192,18 +232,20 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
     let ledger = ledger_rows(&url).await;
     assert_eq!(
         ledger,
-        vec![(
+        std::iter::once((
             "expand".to_string(),
             format!("bootstrap-{}", PostgresStorage::schema_version()),
             None,
             PostgresStorage::schema_version()
-        )],
-        "the ledger records the bootstrap"
+        ))
+        .chain(component_expand_rows())
+        .collect::<Vec<_>>(),
+        "the ledger records the bootstrap and the component expands"
     );
     assert_eq!(
         compat_stamp(&url).await,
-        COMPAT_STAMP,
-        "the bootstrap writes this build's compatibility stamp"
+        migrated_stamp(),
+        "the migrate writes this build's compatibility stamp"
     );
 
     // And the provisioned catalog is openable: the gate a worker takes passes.
@@ -239,12 +281,12 @@ async fn a_migrate_rerun_is_a_no_op() {
     assert_eq!(rerun.found_version, Some(PostgresStorage::schema_version()));
     assert_eq!(
         rerun.applied.len(),
-        1,
-        "the ledger still records the first run's step"
+        1 + COMPONENT_EXPANDS.len(),
+        "the ledger still records the first run's steps"
     );
     assert_eq!(
         ledger_rows(&url).await.len(),
-        1,
+        1 + COMPONENT_EXPANDS.len(),
         "a rerun writes no new ledger rows"
     );
     drop_scratch_schema(&database_url, &schema).await;
@@ -435,14 +477,14 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate the predecessor forward");
-    assert_eq!(report.executed.len(), 1);
+    assert_eq!(report.executed.len(), 1 + COMPONENT_EXPANDS.len());
     assert_eq!(
         report.executed[0].migration, step.migration,
         "migrate executes the step the plan named"
     );
     assert_eq!(
         ledger_rows(&url).await,
-        vec![
+        [
             ledger_before[0].clone(),
             (
                 "expand".to_string(),
@@ -450,13 +492,17 @@ async fn migrate_advances_a_stamped_predecessor_component() {
                 Some(predecessor),
                 PostgresStorage::schema_version()
             ),
-        ],
-        "the ledger keeps the predecessor's row and records the step"
+        ]
+        .into_iter()
+        .chain(component_expand_rows())
+        .collect::<Vec<_>>(),
+        "the ledger keeps the predecessor's row and records the steps"
     );
     assert_eq!(
         compat_stamp(&url).await,
-        COMPAT_STAMP,
-        "an expand step keeps the stamp and its reader floor"
+        migrated_stamp(),
+        "a DDL expand step keeps the stamp and its reader floor; a component expand moves \
+         the stamp to this build's"
     );
     PostgresStorage::connect(&url)
         .await
@@ -623,10 +669,11 @@ async fn concurrent_migrates_serialize_and_converge() {
     let second = second.expect("second concurrent migrate");
     let executed_total = first.executed.len() + second.executed.len();
     assert_eq!(
-        executed_total, 1,
-        "exactly one racer may execute the bootstrap: {first:?} {second:?}"
+        executed_total,
+        1 + COMPONENT_EXPANDS.len(),
+        "exactly one racer may execute each step: {first:?} {second:?}"
     );
-    assert_eq!(ledger_rows(&url).await.len(), 1);
+    assert_eq!(ledger_rows(&url).await.len(), 1 + COMPONENT_EXPANDS.len());
     drop_scratch_schema(&database_url, &schema).await;
 }
 

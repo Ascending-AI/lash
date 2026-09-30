@@ -4,6 +4,12 @@ use sqlx::{Connection, Executor};
 use super::*;
 use lash_core_execution::compat::CompatRefusal;
 
+/// The PostgreSQL component's descriptor in the active tier.
+fn postgres_descriptor() -> &'static lash_core_execution::compat::CompatDescriptor {
+    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        .expect("the build declares the PostgreSQL store")
+}
+
 struct Scratch {
     pool: PgPool,
     name: String,
@@ -88,10 +94,19 @@ async fn postgres_opens_an_expanded_catalog_under_its_floor() {
             "ALTER TABLE lash_sessions ADD COLUMN next_release_note TEXT;
          CREATE TABLE next_release_table (id BIGINT PRIMARY KEY);
          CREATE VIEW next_release_view AS SELECT session_id FROM lash_sessions;
-         CREATE INDEX next_release_lookup ON lash_sessions(next_release_note);
-         UPDATE lash_schema_versions SET version = 2, min_reader = 1
-           WHERE component = 'lash-postgres-store'",
+         CREATE INDEX next_release_lookup ON lash_sessions(next_release_note);",
         )
+        .await;
+    // A release past this build's own expanded the catalog and kept this
+    // build's oldest read as its floor.
+    let descriptor = postgres_descriptor();
+    scratch
+        .apply(&format!(
+            "UPDATE lash_schema_versions SET version = {}, min_reader = {}
+               WHERE component = 'lash-postgres-store'",
+            descriptor.writes.max() + 1,
+            descriptor.reads.min()
+        ))
         .await;
     scratch
         .open()
@@ -106,11 +121,12 @@ async fn postgres_refuses_a_raised_floor_typed() {
         return;
     };
     let scratch = Scratch::new(&url).await;
+    let above = postgres_descriptor().reads.max() + 1;
     scratch
-        .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 2
-           WHERE component = 'lash-postgres-store'",
-        )
+        .apply(&format!(
+            "UPDATE lash_schema_versions SET version = {above}, min_reader = {above}
+               WHERE component = 'lash-postgres-store'"
+        ))
         .await;
     let error = scratch
         .open()
@@ -120,11 +136,11 @@ async fn postgres_refuses_a_raised_floor_typed() {
         error,
         StoreError::Incompatible {
             refusal: CompatRefusal::ReaderFloorAbove {
-                found: 2,
-                min_reader: 2,
+                found,
+                min_reader,
                 ..
             }
-        }
+        } if found == above && min_reader == above
     ));
     scratch.cleanup().await;
 }

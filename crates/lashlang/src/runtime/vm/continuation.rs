@@ -483,10 +483,6 @@ impl VmHeapContinuation {
         self.heap.live_logical_bytes()
     }
 
-    pub fn size_schedule_version(&self) -> u32 {
-        self.heap.schedule_version()
-    }
-
     #[cfg(test)]
     pub(crate) fn live_object_count(&self) -> usize {
         self.heap.objects_in_id_order().count()
@@ -969,7 +965,11 @@ mod continuation_serde {
             next_id: heap.next_id,
             allocation_counter: heap.allocations(),
             live_logical_bytes: heap.live_logical_bytes(),
-            size_schedule_version: heap.schedule_version(),
+            // A continuation resumes on the generation that parked it (ADR
+            // 0115 §3.5), so it carries its own epoch's schedule.
+            size_schedule_version: crate::runtime::heap::size_schedule_writer(
+                lash_core_execution::FleetFormat::current(),
+            ),
             objects,
             list_holes: heap.list_holes_to_wire(),
         }
@@ -981,6 +981,11 @@ mod continuation_serde {
         D: Deserializer<'de>,
     {
         let wire = HeapWire::deserialize(deserializer)?;
+        crate::runtime::heap::admit_size_schedule(
+            wire.size_schedule_version,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .map_err(serde::de::Error::custom)?;
         let objects = wire
             .objects
             .into_iter()
@@ -992,7 +997,6 @@ mod continuation_serde {
                 next_id: wire.next_id,
                 allocation_counter: wire.allocation_counter,
                 live_logical_bytes: wire.live_logical_bytes,
-                size_schedule_version: wire.size_schedule_version,
                 objects,
             },
             &[],

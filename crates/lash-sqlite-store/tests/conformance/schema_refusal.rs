@@ -13,8 +13,19 @@ async fn sqlite_open_refusal_names_the_writing_release() {
             .expect("stamp store"),
     );
     let conn = rusqlite::Connection::open(&path).expect("open stamp");
-    conn.execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
-        .expect("raise reader floor");
+    // One above the durable-core versions this build reads, in its tier.
+    let above = lash_core_execution::compat::descriptor(
+        lash_core_execution::compat::ComponentId::SQLITE_CORE,
+    )
+    .expect("the build declares the durable core")
+    .reads
+    .max()
+        + 1;
+    conn.execute(
+        "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+        [above],
+    )
+    .expect("raise reader floor");
     conn.execute(
         "UPDATE release_stamp SET schema_versions = 'unreadable'",
         [],

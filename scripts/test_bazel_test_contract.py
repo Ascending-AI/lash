@@ -1097,9 +1097,12 @@ class BazelTestContractTests(unittest.TestCase):
             service_labels.update(labels)
         self.assertFalse(service_labels & bazel_labels)
 
+        # A feature-lane variant (`<target>__fv_<hash>`) runs in the service
+        # job its default-feature target is gated to.
         by_label = {target["label"]: target for target in test_targets()}
         for label in service_labels:
-            self.assertIn("cargo-service-gate", by_label[label]["tags"])
+            target = label.split("__fv_", 1)[0]
+            self.assertIn("cargo-service-gate", by_label[target]["tags"])
 
         script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
         self.assertIn("--nocache_test_results", script)

@@ -144,9 +144,10 @@ impl RuntimeCommitPlanner {
     /// [`super::FleetFormat::writer_version`], so a finalized fleet move needs
     /// no planner change.
     pub fn prepare(
-        commit: RuntimeCommit,
+        mut commit: RuntimeCommit,
         fleet_format: super::FleetFormat,
     ) -> Result<Self, StoreError> {
+        commit.stamp_turn_options_for_fleet(fleet_format);
         commit.validate_budget()?;
         validate_interrupted_turn_plan(&commit)?;
         commit.validate_operation_session()?;

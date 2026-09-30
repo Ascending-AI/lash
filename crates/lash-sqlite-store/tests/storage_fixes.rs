@@ -15,7 +15,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
+use lash_core_execution::compat::CompatRefusal;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::future::Future;
@@ -479,7 +479,7 @@ async fn unsupported_compatibility_floor_reports_real_versions() {
                 component: "sqlite-core".to_owned(),
                 found: 1099,
                 min_reader: 1099,
-                reads: VersionRange::exactly(1),
+                reads: crate::sqlite_core().reads,
                 writing_release: None,
             },
         }
@@ -519,7 +519,21 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .expect("read compatibility stamp");
-    assert_eq!(stamp, ("sqlite-core".to_owned(), 1, 1, 1));
+    // A provisioned database records the version this build writes, the
+    // oldest it reads as the floor, and the epoch an installer seeds.
+    let core = crate::sqlite_core();
+    assert_eq!(
+        stamp,
+        (
+            "sqlite-core".to_owned(),
+            i64::from(core.writes.max()),
+            i64::from(core.reads.min()),
+            i64::from(lash_core_execution::FleetFormat::seed(
+                lash_core_execution::FleetFormat::writable()
+            )
+            .version()),
+        )
+    );
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -625,7 +639,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
                 component: "sqlite-core".to_owned(),
                 found: 51,
                 min_reader: 51,
-                reads: VersionRange::exactly(1),
+                reads: crate::sqlite_core().reads,
                 writing_release: None,
             },
         }

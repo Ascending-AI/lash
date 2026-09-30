@@ -50,12 +50,49 @@ use super::{
 /// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
 /// computed under. Version 3 charges a closure's `name`/`length` own-property
 /// values (FIG-3655); version 2 charged a measured `VALUE_SLOT_BYTES`;
-/// version 1 charged a quarter of it. A heap restored under a foreign
-/// schedule is refused by name rather than failing its own byte-counter
-/// cross-check.
+/// version 1 charged a quarter of it. A heap restored under a schedule its
+/// reader's window does not admit is refused by name rather than failing its
+/// own byte-counter cross-check.
+///
+/// The stamp is chosen where a heap is encoded, never carried by the heap:
+/// a durable writer stamps the version its store's `F` assigns the surface,
+/// and a reader admits the surface's read window (FIG-4262).
+#[cfg(not(feature = "synthetic-next"))]
 pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 3;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the schedule with version 3's
+/// charges; its registered lift reads the heaps N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 4;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// The size schedule stamp a heap encoded under `fleet_format` carries: the
+/// version the fleet's writers emit for the surface (FIG-3796, FIG-4262).
+pub(crate) fn size_schedule_writer(fleet_format: lash_core_execution::FleetFormat) -> u32 {
+    fleet_format.writer_version(lash_core_execution::surface_format!(
+        HEAP_SIZE_SCHEDULE_VERSION
+    ))
+}
+
+/// Admits a stored heap's size schedule stamp against the surface's read
+/// window under `fleet_format`: this build's newest, each older version its
+/// registered lift reads natively, and the version `F` pins its writers to.
+pub(crate) fn admit_size_schedule(
+    version: u32,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<(), String> {
+    if fleet_format
+        .read_window(lash_core_execution::surface_format!(
+            HEAP_SIZE_SCHEDULE_VERSION
+        ))
+        .admits(version)
+    {
+        Ok(())
+    } else {
+        Err(format!("unsupported heap size schedule version {version}"))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeapEntry {
@@ -73,7 +110,6 @@ pub(crate) struct Heap {
     pub(crate) next_id: u64,
     pub(crate) allocations: u64,
     pub(crate) live_logical_bytes: u64,
-    pub(crate) schedule_version: u32,
     next_collection_at: u64,
     collect_every_allocation: bool,
     stress_pins: Vec<Value>,
@@ -150,7 +186,6 @@ pub(crate) struct HeapRestoreWire {
     pub(crate) next_id: u64,
     pub(crate) allocation_counter: u64,
     pub(crate) live_logical_bytes: u64,
-    pub(crate) size_schedule_version: u32,
     pub(crate) objects: Vec<(HeapId, HeapObject)>,
 }
 
@@ -162,7 +197,6 @@ impl Default for Heap {
             next_id: 1,
             allocations: 0,
             live_logical_bytes: 0,
-            schedule_version: HEAP_SIZE_SCHEDULE_VERSION,
             next_collection_at: HEAP_GC_ALLOCATION_INTERVAL,
             collect_every_allocation: false,
             stress_pins: Vec::new(),
@@ -191,13 +225,9 @@ impl Heap {
         }
     }
 
+    /// Rebuilds a heap from its wire. The caller has admitted the wire's
+    /// size schedule stamp against its read window ([`admit_size_schedule`]).
     pub(crate) fn from_wire(wire: HeapRestoreWire, roots: &[Value]) -> Result<Self, String> {
-        if wire.size_schedule_version != HEAP_SIZE_SCHEDULE_VERSION {
-            return Err(format!(
-                "unsupported heap size schedule version {}",
-                wire.size_schedule_version
-            ));
-        }
         let expected_next_id = wire
             .allocation_counter
             .checked_add(1)
@@ -209,7 +239,6 @@ impl Heap {
         let mut heap = Self {
             next_id: wire.next_id,
             allocations: wire.allocation_counter,
-            schedule_version: wire.size_schedule_version,
             ..Self::default()
         };
         let mut prior_id = None;
@@ -348,10 +377,6 @@ impl Heap {
             });
         }
         Ok(())
-    }
-
-    pub(crate) fn schedule_version(&self) -> u32 {
-        self.schedule_version
     }
 
     pub(crate) fn needs_collection(&self) -> bool {
@@ -1416,7 +1441,6 @@ impl Clone for Heap {
             next_id: self.next_id,
             allocations: self.allocations,
             live_logical_bytes: self.live_logical_bytes,
-            schedule_version: self.schedule_version,
             next_collection_at: self.next_collection_at,
             collect_every_allocation: self.collect_every_allocation,
             stress_pins: Vec::new(),

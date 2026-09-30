@@ -199,11 +199,17 @@ pub(crate) async fn synthetic_next_findings(
              JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = index_relation.relnamespace
              JOIN pg_catalog.pg_index AS index_row ON index_row.indexrelid = index_relation.oid
              JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_row.indrelid
+             JOIN pg_catalog.pg_attribute AS indexed_column
+               ON indexed_column.attrelid = table_relation.oid
+              AND indexed_column.attnum = index_row.indkey[0]
              WHERE namespace.nspname = $1
                AND index_relation.relname = 'idx_lash_synthetic_next_note'
                AND table_relation.relname = 'lash_synthetic_next'
                AND NOT index_row.indisunique
-               AND pg_catalog.pg_get_indexdef(index_relation.oid) LIKE '%(note)'
+               AND index_row.indnatts = 1
+               AND index_row.indexprs IS NULL
+               AND index_row.indpred IS NULL
+               AND indexed_column.attname = 'note'
          )",
     )
     .bind(schema)

@@ -417,7 +417,7 @@ fn intent_hash_golden_vector() {
     // follow-on enters it only when the commit leaves one on the head.
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "82dc94164093c73412c843b78f2772efdb66ca10c0f01858562c5e72c3f6bdd2"
+        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854"
     );
 }
 
@@ -426,7 +426,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "82dc94164093c73412c843b78f2772efdb66ca10c0f01858562c5e72c3f6bdd2",
+        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -460,7 +460,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "82dc94164093c73412c843b78f2772efdb66ca10c0f01858562c5e72c3f6bdd2"
+        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854"
     );
 
     let mut with_evidence = baseline;

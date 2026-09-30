@@ -123,7 +123,8 @@ pub fn every_guarded_surface_decodes_its_supported_range(owner: &str, probes: &[
 /// Law: `unknown_version_is_refused_with_zero_mutation`. A record stamped
 /// above the newest, or below the oldest version the window admits, is
 /// refused typed under every epoch, and the stored bytes are left exactly
-/// as they were.
+/// as they were. The version `F` pins the surface's writers to is not
+/// unknown: a derived projection's window admits it below its oldest.
 pub fn unknown_version_is_refused_with_zero_mutation(owner: &str, probes: &[SurfaceProbe]) {
     for probe in owned(owner, probes) {
         let newest = probe.written_at(probe.newest);
@@ -133,6 +134,7 @@ pub fn unknown_version_is_refused_with_zero_mutation(owner: &str, probes: &[Surf
             if window.oldest() > 1 {
                 unknown.push(window.oldest() - 1);
             }
+            unknown.retain(|version| !window.admits(*version));
             for version in unknown {
                 let stored = (probe.restamp)(&newest, version);
                 let before = stored.clone();
@@ -196,6 +198,95 @@ pub fn upcast_preserves_immutable_bytes_and_hashes(owner: &str, probes: &[Surfac
                 probe.written_at(version),
                 stored,
                 "{} version {version} is rewritten by no one: its writer reproduces it",
+                probe.constant
+            );
+        }
+    }
+}
+
+/// Law: `n_written_records_read_across_the_roll` (FIG-4262). The surface's
+/// writer consults `F`: under N's epoch — the epoch a store records until
+/// finalize — it stamps the version N reads, under this build's own epoch
+/// it stamps the newest, and under a fleet pinning any other version it
+/// stamps that. A record written under N's epoch then reads under every
+/// epoch this build writes as the record written at the newest does, as
+/// long as the epoch's window admits it; a derived projection's window stops
+/// admitting it once finalize moves `F`, and there the record is refused
+/// typed and the projection regenerated under that epoch reads instead.
+///
+/// `stamp` reads the version a stored record carries.
+pub fn n_written_records_read_across_the_roll(
+    owner: &str,
+    probe: &SurfaceProbe,
+    stamp: fn(&[u8]) -> u32,
+) {
+    let row = GUARDED_SURFACES
+        .iter()
+        .find(|row| row.constant == probe.constant)
+        .unwrap_or_else(|| panic!("{} is a guarded surface", probe.constant));
+    assert_eq!(row.owner, owner, "{} is owned by {owner}", probe.constant);
+    let surface = probe.surface();
+
+    let n = FleetFormat::seed(FLEET_WRITABLE_RANGE);
+    let written_by_n = (probe.write)(n);
+    let n_version = n.writer_version(surface);
+    assert_eq!(
+        stamp(&written_by_n),
+        n_version,
+        "{} writes N's version under N's epoch F={n}",
+        probe.constant
+    );
+    assert_eq!(
+        stamp(&(probe.write)(FleetFormat::current())),
+        probe.newest,
+        "{} writes its newest version under this build's own epoch",
+        probe.constant
+    );
+    let foreign = probe.newest + 1;
+    assert_eq!(
+        stamp(&probe.written_at(foreign)),
+        foreign,
+        "{} writes whatever version F pins it to",
+        probe.constant
+    );
+
+    for fleet in epochs() {
+        let regenerated = (probe.read)(&(probe.write)(fleet), fleet).unwrap_or_else(|error| {
+            panic!(
+                "{} reads what it writes under F={fleet}: {error}",
+                probe.constant
+            )
+        });
+        let read = (probe.read)(&written_by_n, fleet);
+        if fleet.read_window(surface).admits(n_version) {
+            let newest =
+                (probe.read)(&probe.written_at(probe.newest), fleet).unwrap_or_else(|error| {
+                    panic!(
+                        "{} reads its newest under F={fleet}: {error}",
+                        probe.constant
+                    )
+                });
+            assert_eq!(
+                read.as_ref(),
+                Ok(&newest),
+                "{} reads the version {n_version} N wrote under F={fleet}",
+                probe.constant
+            );
+        } else {
+            assert_eq!(
+                row.reads,
+                SurfaceReads::Derived,
+                "only a derived projection stops reading what N wrote: {} under F={fleet}",
+                probe.constant
+            );
+            assert!(
+                read.is_err(),
+                "{} refuses the version {n_version} N wrote under F={fleet}: {read:?}",
+                probe.constant
+            );
+            assert!(
+                !regenerated.is_empty(),
+                "{} regenerates under F={fleet}",
                 probe.constant
             );
         }

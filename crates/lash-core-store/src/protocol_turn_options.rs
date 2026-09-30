@@ -5,9 +5,12 @@ pub struct ProtocolTurnOptions {
     pub payload: serde_json::Value,
     /// The durable stamp this value emits when a session body serializes it:
     /// the protocol turn-options surface's writer version (FIG-3796). Values
-    /// minted outside a fleet-aware site carry this build's newest version;
-    /// values decoded from durable bytes carry the version that was recorded;
-    /// writers bound to a store restamp through [`Self::restamped_for_fleet`].
+    /// minted where no store's `F` is known carry [`unbound_schema_version`],
+    /// which every epoch this build writes under reads; values decoded from
+    /// durable bytes carry the version that was recorded; writers bound to a
+    /// store restamp through [`Self::restamped_for_fleet`]. The stamp is write
+    /// metadata, never identity: request identities and intent hashes cover
+    /// the payload alone (FIG-4262).
     schema_version: u32,
 }
 
@@ -84,16 +87,13 @@ impl ProtocolTurnOptions {
     pub const RENDER_OPTIONS_KEY: &'static str = "render";
 
     pub fn empty() -> Self {
-        Self {
-            payload: serde_json::Value::Object(serde_json::Map::new()),
-            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
-        }
+        Self::from_payload(serde_json::Value::Object(serde_json::Map::new()))
     }
 
     pub fn from_payload(payload: serde_json::Value) -> Self {
         Self {
             payload,
-            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+            schema_version: unbound_schema_version(),
         }
     }
 
@@ -246,12 +246,27 @@ fn parse_protocol_turn_options_schema_version(
 }
 
 /// Schema version stamped on the persisted protocol turn-options envelope.
-///
-/// Phase A's synthetic N+1 does not move it: the stamp is part of the
-/// semantic-boundary request identities and intent hashes a retried request
-/// reproduces, so a successor that moves it must first decide how those
-/// identities cross the roll.
+#[cfg(not(feature = "synthetic-next"))]
 pub const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope with version 1's
+/// shape; its registered lift reads what N wrote. Request identities cover
+/// the payload, not the stamp, so a request retried across the roll keeps
+/// its identity (FIG-4262).
+#[cfg(feature = "synthetic-next")]
+pub const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 2;
+
+/// The stamp a value minted where no store's `F` is known carries: the
+/// version the fleet's writers emit at the floor of this build's writable
+/// range, `F_prev`. Every build of that range reads it, so a value that
+/// reaches a durable write without passing a fleet-aware site is never
+/// unreadable by the release before this one; a writer bound to a store
+/// moves it to its `F`'s version through
+/// [`ProtocolTurnOptions::restamped_for_fleet`].
+fn unbound_schema_version() -> u32 {
+    crate::store::FleetFormat::seed(crate::store::FleetFormat::writable())
+        .writer_version(crate::surface_format!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION))
+}
 fn ensure_protocol_turn_options_schema_version(
     actual: u32,
 ) -> Result<(), ProtocolTurnOptionsError> {
@@ -259,8 +274,8 @@ fn ensure_protocol_turn_options_schema_version(
     // The serde path cannot consult a store's `F`, so the envelope admits the
     // build's newest version plus any recorded version an upcaster chain can
     // lift to it — the fleetless leg of the `[N-1, N]` reader window
-    // (FIG-3796). No chain is registered while no `N-1` exists, so the admit
-    // set is exactly `{N}`.
+    // (FIG-3796). The surface keeps its shape across the chain, so the value
+    // keeps the version it recorded and re-serializes as stored.
     if actual == expected
         || crate::store::upcast_chain_covers(
             crate::surface_format!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION),
@@ -387,8 +402,13 @@ mod schema_version_tests {
         // Byte-level: `serde_json::Value` compares as a `BTreeMap` here, so only the emitted
         // string pins field order — the property the persisted envelope actually depends on.
         let encoded = serde_json::to_string(&options).expect("serialize options");
-        assert_eq!(encoded, r#"{"schema_version":1,"payload":{"mode":"test"}}"#);
-        assert_eq!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, 1);
+        assert_eq!(
+            encoded,
+            format!(
+                r#"{{"schema_version":{},"payload":{{"mode":"test"}}}}"#,
+                unbound_schema_version()
+            )
+        );
 
         let round_tripped: ProtocolTurnOptions =
             serde_json::from_str(&encoded).expect("deserialize roundtrip");

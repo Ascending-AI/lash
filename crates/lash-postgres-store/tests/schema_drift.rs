@@ -578,6 +578,16 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
     scratch.cleanup().await;
 }
 
+/// A component version one above every version this build reads, in the
+/// active tier: a release past this build raised the reader floor to it.
+fn above_this_build() -> u32 {
+    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        .expect("the build declares the PostgreSQL store")
+        .reads
+        .max()
+        + 1
+}
+
 /// Rewrites a connection URL's credentials, so a test can connect as a role other
 /// than the one the suite is configured with.
 fn with_credentials(database_url: &str, role: &str, password: &str) -> String {
@@ -864,11 +874,12 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
+    let above = above_this_build();
     scratch
-        .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 2
-             WHERE component = 'lash-postgres-store'",
-        )
+        .apply(&format!(
+            "UPDATE lash_schema_versions SET version = {above}, min_reader = {above}
+             WHERE component = 'lash-postgres-store'"
+        ))
         .await;
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
         let error = PostgresStorage::from_pool_with(
@@ -886,11 +897,11 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
                 error,
                 StoreError::Incompatible {
                     refusal: CompatRefusal::ReaderFloorAbove {
-                        found: 2,
-                        min_reader: 2,
+                        found,
+                        min_reader,
                         ..
                     }
-                }
+                } if found == above && min_reader == above
             ),
             "{check:?}: {error}"
         );
@@ -1023,8 +1034,9 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
+    let above = above_this_build();
     scratch
-        .apply(
+        .apply(&format!(
             "ALTER TABLE lash_session_meta
                  DROP CONSTRAINT ck_session_meta_relation_kind,
                  DROP CONSTRAINT ck_session_meta_caused_by_kind;
@@ -1039,9 +1051,9 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
              UPDATE lash_schema_versions
-                SET version = 2, min_reader = 2
+                SET version = {above}, min_reader = {above}
               WHERE component = 'lash-postgres-store'",
-        )
+        ))
         .await;
 
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
@@ -1060,11 +1072,11 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
                 error,
                 StoreError::Incompatible {
                     refusal: CompatRefusal::ReaderFloorAbove {
-                        found: 2,
-                        min_reader: 2,
+                        found,
+                        min_reader,
                         ..
                     }
-                }
+                } if found == above && min_reader == above
             ),
             "{check:?}: {error}"
         );
@@ -1076,7 +1088,11 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read component version after refusal");
-    assert_eq!(version, 2, "the refused open must not advance the stamp");
+    assert_eq!(
+        u32::try_from(version).ok(),
+        Some(above),
+        "the refused open must not advance the stamp"
+    );
 
     let installed: i64 = sqlx::query_scalar(
         "SELECT count(*)
@@ -1301,10 +1317,11 @@ async fn report_remedies_match_the_finding_class() {
     );
 
     scratch
-        .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 2
-                WHERE component = 'lash-postgres-store'",
-        )
+        .apply(&format!(
+            "UPDATE lash_schema_versions SET version = {above}, min_reader = {above}
+                    WHERE component = 'lash-postgres-store'",
+            above = above_this_build()
+        ))
         .await;
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
         let error = scratch

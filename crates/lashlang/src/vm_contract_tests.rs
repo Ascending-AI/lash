@@ -42,11 +42,14 @@ async fn n_parked_state_resumes_on_synthetic_next() {
     );
     let mut wire = serde_json::to_value(vm.suspend().expect("park N's process"))
         .expect("serialize the continuation");
-    // The synthetic predecessor and successor have the same payload shape.
+    // The synthetic predecessor and successor have the same payload shape;
+    // N charged its heap under schedule 3.
     wire["format_version"] = serde_json::json!(29);
+    wire["heap"]["size_schedule_version"] = serde_json::json!(3);
     let mut predecessor = vm_contract_versions();
     predecessor.continuation = 29;
     predecessor.snapshot = 14;
+    predecessor.heap = 3;
     let owner = VmOwner::new("process:upgrade-witness");
     let parked = OpaqueVmState::seal(
         VmStateKind::Continuation,
@@ -105,10 +108,18 @@ fn a_component_outside_its_range_is_refused_typed() {
         OpaqueStateRefusal::ComponentOutsideReadRange {
             component: VmContractComponent::Heap,
             found: HEAP_SIZE_SCHEDULE_VERSION + 1,
-            reads: VersionRange::exactly(HEAP_SIZE_SCHEDULE_VERSION),
+            reads: vm_contract_reads().heap,
         }
     );
-    assert!(refusal.to_string().contains("heap") && refusal.to_string().contains("[3,3]"));
+    let expected_range = if cfg!(feature = "synthetic-next") {
+        "[3,4]"
+    } else {
+        "[3,3]"
+    };
+    assert!(
+        refusal.to_string().contains("heap") && refusal.to_string().contains(expected_range),
+        "{refusal}"
+    );
 }
 
 #[cfg(feature = "synthetic-next")]
@@ -119,7 +130,32 @@ fn rollback_admits_only_versions_inside_n_ranges() {
     let mut predecessor = next;
     predecessor.continuation = 29;
     predecessor.snapshot = 14;
+    predecessor.heap = 3;
     let reads = predecessor.exact_reads();
+    // A state N+1 charged under its own heap schedule is outside N's range,
+    // whatever else it shares with N.
+    let mut next_heap = predecessor;
+    next_heap.heap = next.heap;
+    let state = OpaqueVmState::seal(
+        VmStateKind::Continuation,
+        owner.clone(),
+        next_heap,
+        predecessor.continuation,
+        Vec::new(),
+    );
+    assert_eq!(
+        state.check(&StateExpectation {
+            kind: VmStateKind::Continuation,
+            owner: &owner,
+            reads: &reads,
+            max_bytes: 1024
+        }),
+        Err(OpaqueStateRefusal::ComponentOutsideReadRange {
+            component: VmContractComponent::Heap,
+            found: next.heap,
+            reads: reads.heap
+        }),
+    );
     for (kind, format, component, range) in [
         (
             VmStateKind::Continuation,
@@ -187,7 +223,11 @@ fn component_ranges_match_the_vm_decoders() {
     );
     assert_eq!(
         reads.heap,
-        VersionRange::exactly(HEAP_SIZE_SCHEDULE_VERSION)
+        lash_core_execution::FleetFormat::current()
+            .read_window(lash_core_execution::surface_format!(
+                HEAP_SIZE_SCHEDULE_VERSION
+            ))
+            .supported()
     );
     assert_eq!(
         reads.bytecode,
@@ -209,11 +249,15 @@ fn component_ranges_match_the_vm_decoders() {
 fn n_snapshot_reaches_the_guarded_decoder_on_synthetic_next() {
     let snapshot = Snapshot::new(Record::new());
     let bytes = snapshot
-        .to_canonical_bytes_at_version(14)
+        .to_canonical_bytes_stamped(crate::runtime::SnapshotStamps {
+            snapshot: 14,
+            heap_schedule: 3,
+        })
         .expect("encode N's snapshot");
     let mut contract = vm_contract_versions();
     contract.continuation = 29;
     contract.snapshot = 14;
+    contract.heap = 3;
     let owner = VmOwner::new("session:upgrade-witness");
     let parked = OpaqueVmState::seal(VmStateKind::Snapshot, owner.clone(), contract, 14, bytes);
     assert_eq!(

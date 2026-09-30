@@ -1223,7 +1223,7 @@ fn failure_evidence_is_empty(evidence: &&[crate::TurnFailureEvidence]) -> bool {
 #[derive(serde::Serialize)]
 struct RuntimeCommitIntent<'a> {
     session_id: &'a SessionId,
-    config: &'a crate::PersistedSessionConfig,
+    config: super::identity_projection::ConfigIntent<'a>,
     current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
@@ -1272,7 +1272,11 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
         };
         Self {
             session_id: &commit.session_id,
-            config: commit.execution_config.as_deref().unwrap_or(&commit.config),
+            config: commit
+                .execution_config
+                .as_deref()
+                .unwrap_or(&commit.config)
+                .into(),
             current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
@@ -1324,7 +1328,7 @@ struct GraphCommitIntent<'a> {
 struct SessionNodeIntent<'a> {
     node_id: &'a str,
     parent_node_id: Option<&'a str>,
-    payload: &'a crate::SessionNodePayload,
+    payload: super::identity_projection::NodePayloadIntent<'a>,
 }
 
 impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
@@ -1332,28 +1336,30 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
         Self {
             node_id: &node.node_id,
             parent_node_id: node.parent_node_id.as_deref(),
-            payload: &node.payload,
+            payload: (&node.payload).into(),
         }
     }
 }
 
 #[derive(serde::Serialize)]
 struct CheckpointIntent<'a> {
-    turn_state: &'a crate::PersistedTurnState,
+    turn_state: super::identity_projection::TurnStateIntent<'a>,
     components: Vec<CheckpointComponentIntent<'a>>,
 }
 
+/// A checkpoint component as intent: its key and the content hash of its
+/// body. The encoding stamp is write metadata the fleet selects, not intent
+/// (FIG-4262).
 #[derive(serde::Serialize)]
 struct CheckpointComponentIntent<'a> {
     key: &'a str,
     blob_ref: Option<BlobRef>,
-    encoding_version: u32,
 }
 
 impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
     fn from(checkpoint: &'a HydratedSessionCheckpoint) -> Self {
         Self {
-            turn_state: &checkpoint.turn_state,
+            turn_state: (&checkpoint.turn_state).into(),
             components: checkpoint
                 .components
                 .iter()
@@ -1372,11 +1378,7 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                             Some(blob_ref)
                         }
                     };
-                    CheckpointComponentIntent {
-                        key,
-                        blob_ref,
-                        encoding_version: component.encoding_version(),
-                    }
+                    CheckpointComponentIntent { key, blob_ref }
                 })
                 .collect(),
         }

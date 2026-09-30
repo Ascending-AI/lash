@@ -57,7 +57,15 @@ pub use projection::{
 /// refused. Version 21 (FIG-4038) retires the surface dialect's IR: the
 /// comprehension container kind and the declaration and expression spellings
 /// TypeScript never produces are gone; v20 graph documents are refused.
+#[cfg(not(feature = "synthetic-next"))]
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the document with version
+/// 21's shape. A derived projection registers no lift: while `F` is N's epoch
+/// its readers admit the version `F` pins its writers to, and after finalize
+/// an older document is regenerated from its module (FIG-4262).
+#[cfg(feature = "synthetic-next")]
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 22;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(
@@ -127,8 +135,18 @@ impl WorkflowGraph {
 
     /// Decodes an already-parsed JSON graph with the same version-first fence
     /// as [`Self::decode_json`].
-    pub fn decode_json_value(
+    pub fn decode_json_value(value: serde_json::Value) -> Result<Self, WorkflowGraphDecodeError> {
+        Self::decode_json_value_for_fleet(value, lash_core_execution::FleetFormat::current())
+    }
+
+    /// The fleet leg of [`Self::decode_json_value`]: the version fence admits
+    /// the graph surface's read window under `fleet_format` — this build's
+    /// newest, and the version `F` pins the projection's writers to. A
+    /// derived projection lifts nothing, so an older document is refused and
+    /// regenerated from its module.
+    pub fn decode_json_value_for_fleet(
         mut value: serde_json::Value,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Self, WorkflowGraphDecodeError> {
         let found = value
             .get("schema_version")
@@ -136,10 +154,13 @@ impl WorkflowGraph {
             .as_u64()
             .and_then(|version| u32::try_from(version).ok())
             .ok_or(WorkflowGraphDecodeError::InvalidSchemaVersion)?;
-        if found != WORKFLOW_GRAPH_SCHEMA_VERSION {
+        let window = fleet_format.read_window(lash_core_execution::surface_format!(
+            WORKFLOW_GRAPH_SCHEMA_VERSION
+        ));
+        if !window.admits(found) {
             return Err(WorkflowGraphDecodeError::UnsupportedSchemaVersion {
                 found,
-                expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
+                expected: window.newest(),
             });
         }
         let facets_are_current = value

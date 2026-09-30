@@ -81,22 +81,22 @@ impl RootFingerprint {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct CanonicalDurableHeader {
+pub(super) struct CanonicalDurableHeader {
     version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    heap: Option<CanonicalHeapCounters>,
+    pub(super) heap: Option<CanonicalHeapCounters>,
     /// [`State::expired_functions`], strictly sorted; absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     expired_functions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct CanonicalHeapCounters {
+pub(super) struct CanonicalHeapCounters {
     reference_semantics: bool,
     next_id: u64,
     allocation_counter: u64,
     live_logical_bytes: u64,
-    size_schedule_version: u32,
+    pub(super) size_schedule_version: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     list_holes: Vec<(HeapId, Vec<usize>)>,
 }
@@ -123,26 +123,21 @@ impl State {
     /// from `since`.
     ///
     /// `fleet_format` is the `F` the bound writer's store recorded: the header
-    /// stamps the fleet's writer version for the `LASHLANG_SNAPSHOT_VERSION`
-    /// surface (FIG-3796); the fixed-point read re-encodes at the version the
-    /// recorded header carried.
+    /// stamps the fleet's writer versions for the `LASHLANG_SNAPSHOT_VERSION`
+    /// and `HEAP_SIZE_SCHEDULE_VERSION` surfaces (FIG-3796, FIG-4262); the
+    /// fixed-point read re-encodes at the stamps the recorded header carried.
     pub fn durable_parts(
         &self,
         since: &DurableBaseline,
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<DurableParts, ContinuationError> {
-        self.durable_parts_stamped(
-            since,
-            fleet_format.writer_version(lash_core_execution::surface_format!(
-                LASHLANG_SNAPSHOT_VERSION
-            )),
-        )
+        self.durable_parts_stamped(since, SnapshotStamps::for_fleet(fleet_format))
     }
 
     fn durable_parts_stamped(
         &self,
         since: &DurableBaseline,
-        snapshot_version: u32,
+        stamps: SnapshotStamps,
     ) -> Result<DurableParts, ContinuationError> {
         let (record, heap) = match &self.mode {
             StateMode::Plain(globals) => (globals.as_ref(), None),
@@ -161,7 +156,7 @@ impl State {
             })
             .transpose()?;
         let header = CanonicalDurableHeader {
-            version: snapshot_version,
+            version: stamps.snapshot,
             heap: heap
                 .zip(partition.as_ref())
                 .map(|(heap, partition)| CanonicalHeapCounters {
@@ -169,7 +164,7 @@ impl State {
                     next_id: heap.next_id,
                     allocation_counter: heap.allocations(),
                     live_logical_bytes: partition.live_logical_bytes,
-                    size_schedule_version: heap.schedule_version(),
+                    size_schedule_version: stamps.heap_schedule,
                     list_holes: heap
                         .list_holes_to_wire()
                         .into_iter()
@@ -243,7 +238,14 @@ impl State {
                 found: decoded_header.version,
             });
         }
-        let recorded_version = decoded_header.version;
+        let recorded = SnapshotStamps::recorded(
+            decoded_header.version,
+            decoded_header
+                .heap
+                .as_ref()
+                .map(|counters| counters.size_schedule_version),
+            fleet_format,
+        )?;
         let fragments = fragments.into_iter().collect::<BTreeMap<_, _>>();
         let mut roots = Vec::with_capacity(fragments.len());
         let mut objects = Vec::new();
@@ -297,7 +299,7 @@ impl State {
         // non-canonical scalar, a reordered or duplicated key, an object
         // carried by the wrong root, and counters that disagree with the heap.
         let parts = state
-            .durable_parts_stamped(&DurableBaseline::default(), recorded_version)
+            .durable_parts_stamped(&DurableBaseline::default(), recorded)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
         if parts.header != header {
             return Err(non_fixed_point("snapshot header"));

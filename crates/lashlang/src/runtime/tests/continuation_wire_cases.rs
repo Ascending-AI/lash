@@ -74,7 +74,6 @@ fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
     assert_eq!(continuation.instructions_executed, 3);
     assert_eq!(continuation.heap.allocation_counter(), 1);
     assert_eq!(continuation.heap.live_logical_bytes(), 153);
-    assert_eq!(continuation.heap.size_schedule_version(), 3);
     assert_eq!(
         continuation
             .heap

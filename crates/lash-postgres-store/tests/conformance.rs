@@ -1446,8 +1446,16 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         ),
         "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
     );
-    let newer_version = current_version + 1;
-    // A newer catalog whose floor passed this build must refuse adoption.
+    // A newer catalog whose floor passed every version this build reads, in
+    // its tier, must refuse adoption.
+    let newer_version = i32::try_from(
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .expect("the build declares the PostgreSQL store")
+            .reads
+            .max()
+            + 1,
+    )
+    .expect("the component version fits");
     sqlx::query(
         "UPDATE lash_schema_versions SET version = $1, min_reader = $1
          WHERE component = 'lash-postgres-store'",
@@ -1463,11 +1471,12 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         result,
         Err(StoreError::Incompatible {
             refusal: CompatRefusal::ReaderFloorAbove {
-                found: 2,
-                min_reader: 2,
+                found,
+                min_reader,
                 ..
             }
-        })
+        }) if i32::try_from(found) == Ok(newer_version)
+            && i32::try_from(min_reader) == Ok(newer_version)
     ));
 }
 
@@ -1936,7 +1945,9 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     let storage = PostgresStorage::connect(database.url())
         .await
         .expect("open older writer");
-    lash_postgres_store::testing::finalize_fleet_epoch(storage.pool(), 2)
+    // An epoch past this build's writable range: a newer release finalized.
+    let newer = lash_core_execution::FleetFormat::writable().max() + 1;
+    lash_postgres_store::testing::finalize_fleet_epoch(storage.pool(), newer)
         .await
         .expect("finalize newer fleet format");
     lash_conformance::fenced_process_and_trigger_registration_stays_typed(

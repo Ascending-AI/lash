@@ -40,13 +40,20 @@ pub fn vm_contract_versions() -> VmContract {
 }
 
 /// The versions the VM decodes, independent of the fleet's writer epoch.
-/// Snapshot history uses the FIG-3802 guarded window and its lift table.
+/// The snapshot and the heap size schedule use their FIG-3802 guarded
+/// windows and lift tables: the same windows their decoders admit
+/// (FIG-4262).
 pub fn vm_contract_reads() -> VmContractReads {
     VmContractReads {
         continuation: VM_CONTINUATION_READ_RANGE,
         snapshot: lash_core_execution::FleetFormat::current()
             .read_window(lash_core_execution::surface_format!(
                 LASHLANG_SNAPSHOT_VERSION
+            ))
+            .supported(),
+        heap: lash_core_execution::FleetFormat::current()
+            .read_window(lash_core_execution::surface_format!(
+                HEAP_SIZE_SCHEDULE_VERSION
             ))
             .supported(),
         ..vm_contract_versions().exact_reads()

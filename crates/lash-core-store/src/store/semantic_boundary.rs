@@ -80,12 +80,12 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
 struct SemanticBoundaryRequestIntent<'a> {
     operation_key: &'a str,
     session_id: &'a SessionId,
-    config: &'a crate::PersistedSessionConfig,
+    config: super::identity_projection::ConfigIntent<'a>,
     /// Appended payload content only. Graph placement (node ids, parent
     /// linkage, the committed leaf) is derived position — it moves when other
     /// operations advance the head, exactly the retry window this identity
     /// exists to answer — so it is excluded like the CAS revision.
-    appended_payloads: Vec<&'a crate::SessionNodePayload>,
+    appended_payloads: Vec<super::identity_projection::NodePayloadIntent<'a>>,
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
 }
 
@@ -126,8 +126,12 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
     let projection = SemanticBoundaryRequestIntent {
         operation_key: &operation_key,
         session_id,
-        config: execution_config.as_deref().unwrap_or(config),
-        appended_payloads: graph.nodes().iter().map(|node| &node.payload).collect(),
+        config: execution_config.as_deref().unwrap_or(config).into(),
+        appended_payloads: graph
+            .nodes()
+            .iter()
+            .map(|node| (&node.payload).into())
+            .collect(),
         usage_deltas,
     };
     let value = serde_json::to_value(&projection).map_err(|err| {

@@ -187,14 +187,51 @@ fn read_head(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
     .map_err(|error| error.to_string())
 }
 
-// --- PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: the value-carried envelope. ---
+// --- PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: the value-carried envelope,
+// written by the commit a store persists. ---
 
+/// The options a runtime commit records on the session head once a store
+/// encodes it under `fleet`: a value minted with no store in sight, stamped
+/// by the store's commit plan.
 fn write_turn_options(fleet: FleetFormat) -> Vec<u8> {
-    serde_json::to_vec(
-        &crate::ProtocolTurnOptions::from_payload(serde_json::json!({"mode": "law"}))
-            .restamped_for_fleet(fleet),
-    )
-    .expect("encode the options")
+    let mut state =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.session_id = SessionId::from("guarded-turn-options");
+    state.protocol_turn_options =
+        crate::ProtocolTurnOptions::from_payload(serde_json::json!({"mode": "law"}));
+    let commit = super::RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        super::OperationId::new(
+            crate::ExecutionScope::runtime_operation("guarded-turn-options"),
+            "commit",
+        ),
+    );
+    let planner = super::RuntimeCommitPlanner::prepare(commit, fleet).expect("plan the commit");
+    let commit = planner.commit();
+    let options = commit
+        .config
+        .protocol_turn_options
+        .as_ref()
+        .expect("the commit records the options on the head");
+    assert_eq!(
+        options.schema_version(),
+        commit
+            .checkpoint
+            .turn_state
+            .protocol_turn_options
+            .schema_version(),
+        "the head and the checkpoint stamp the options alike"
+    );
+    serde_json::to_vec(options).expect("encode the options")
+}
+
+fn turn_options_stamp(bytes: &[u8]) -> u32 {
+    let value: serde_json::Value = serde_json::from_slice(bytes).expect("a JSON record");
+    value["schema_version"]
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .expect("a stamped envelope")
 }
 
 fn read_turn_options(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
@@ -332,4 +369,16 @@ fn unknown_version_is_refused_with_zero_mutation() {
 #[test]
 fn upcast_preserves_immutable_bytes_and_hashes() {
     laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
+}
+
+/// FIG-4262: the synthetic N+1 moves the turn-options envelope; the commit a
+/// store persists stamps what `F` assigns, and N's records read on N+1.
+#[test]
+fn turn_options_written_by_n_read_across_the_roll() {
+    let probes = probes();
+    let probe = probes
+        .iter()
+        .find(|probe| probe.constant == "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION")
+        .expect("the turn-options probe");
+    laws::n_written_records_read_across_the_roll(OWNER, probe, turn_options_stamp);
 }

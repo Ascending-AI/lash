@@ -1216,10 +1216,6 @@ async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meter
         restored.heap.live_logical_bytes(),
         before.heap.live_logical_bytes()
     );
-    assert_eq!(
-        restored.heap.size_schedule_version(),
-        HEAP_SIZE_SCHEDULE_VERSION
-    );
 
     let prior_allocations = restored.heap.allocation_counter();
     let prior_instructions = restored.instructions_executed;

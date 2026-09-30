@@ -1423,7 +1423,9 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     bzl.append("}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
     outputs[ROOT / "tools/bazel/pool_sizes.bzl"] = pool_sizes_bzl()
-    feature_chunks, feature_bzl, feature_units = feature_lane_outputs(metadata)
+    feature_chunks, feature_bzl, feature_units, feature_service_tests = feature_lane_outputs(
+        metadata
+    )
     for package in inventory:
         chunk = feature_chunks.get(package["package"])
         if not chunk:
@@ -1482,15 +1484,29 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     )
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new
-    # service-gated binary reaches the service job without a hand edit.
+    # service-gated binary reaches the service job without a hand edit. A
+    # feature lane's `cargo test` of a service package adds its variants: the
+    # synthetic successor's PostgreSQL suites run in the same job (FIG-4262).
+    feature_service_units = {
+        unit["label"]: unit["package"]
+        for unit in feature_units
+        if unit["label"] in feature_service_tests
+    }
     for service, package_names in PACKAGE_POLICY["service_packages"].items():
         labels = sorted(
-            target["label"]
-            for package in inventory
-            if package["package"] in package_names
-            for target in package["targets"]
-            if target["label"] is not None
-            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+            [
+                target["label"]
+                for package in inventory
+                if package["package"] in package_names
+                for target in package["targets"]
+                if target["label"] is not None
+                and target["kind"] in ("bin-unit-test", "test", "unit-test")
+            ]
+            + [
+                label
+                for label, package_name in feature_service_units.items()
+                if package_name in package_names
+            ]
         )
         outputs[ROOT / f"tools/bazel/{service}_test_labels.txt"] = (
             "".join(f"{label}\n" for label in labels)
@@ -1757,6 +1773,10 @@ class FeatureLaneGraph:
         self._chunk_names: set[tuple[str, str]] = set()
         self.lanes: dict[str, dict[str, list[str]]] = {}
         self.units: list[dict] = []
+        # Runnable variants of service-gated test targets: the partition
+        # cannot run them, so the service job that stands the service up
+        # runs them beside the default build's labels.
+        self.service_tests: set[str] = set()
         self.clippy: set[str] = set()
         self.activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
         self._workspace_edges: dict[str, set[str]] = {}
@@ -2385,8 +2405,11 @@ class FeatureLaneGraph:
                     "package": package_name,
                 }
             )
-            if runnable and not cargo_test_policy(package_name, "unit-test", library["name"])[0]:
+            tags = cargo_test_policy(package_name, "unit-test", library["name"])[0]
+            if runnable and not tags:
                 test_labels.append(label)
+            elif runnable and "cargo-service-gate" in tags:
+                self.service_tests.add(label)
         for target in package["targets"]:
             kind = target["kind"][0]
             if kind in ("lib", "custom-build"):
@@ -2412,8 +2435,11 @@ class FeatureLaneGraph:
                 }
             )
             if kind == "test" and runnable:
-                if not cargo_test_policy(package_name, kind, target["name"])[0]:
+                tags = cargo_test_policy(package_name, kind, target["name"])[0]
+                if not tags:
                     test_labels.append(label)
+                elif "cargo-service-gate" in tags:
+                    self.service_tests.add(label)
             if (
                 kind == "bin"
                 and target.get("test", False)
@@ -2441,8 +2467,11 @@ class FeatureLaneGraph:
         return labels
 
 
-def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict]]:
-    """Per-package variant chunks plus the generated lane label table."""
+def feature_lane_outputs(
+    metadata: dict,
+) -> tuple[dict[str, str], str, list[dict], set[str]]:
+    """Per-package variant chunks, the generated lane label table, the lane
+    units, and the runnable service-gated variants."""
     graph = FeatureLaneGraph(metadata, feature_coverage_plan())
     graph.build()
     chunks = {
@@ -2519,7 +2548,7 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
             indent=8,
         ) + ",\n")
     bzl.append("}\n")
-    return chunks, "".join(bzl), graph.units
+    return chunks, "".join(bzl), graph.units, graph.service_tests
 
 
 def verify_resolution(metadata: dict) -> int:

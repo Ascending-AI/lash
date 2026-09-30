@@ -1,10 +1,5 @@
 //! Phase A's synthetic N+1 (ADR 0115 §6): the compatibility policy of a
-//! successor that moves every guarded surface one version on — every one
-//! but three: the derived workflow projections, which regenerate rather than
-//! lift; the heap size schedule, whose writer a new heap mints without
-//! consulting `F`, so a bumped schedule would reach N before finalize; and
-//! the protocol turn options, whose stamp is part of the request identities
-//! and intent hashes a retried request must reproduce across the roll.
+//! successor that moves every guarded surface one version on.
 //!
 //! Each surface keeps N's shape, so every lift is exact: a tree lift moves
 //! the record's own version field, an object family's lift keeps the body as
@@ -12,7 +7,9 @@
 //! reads it natively. While `F` is N's epoch every writer is pinned to the
 //! version N reads, so before finalize N+1 writes only what N reads; after
 //! finalize it writes its own, and it reads N's for as long as a record of
-//! it can exist.
+//! it can exist. The derived workflow projections register no lift: under
+//! N's epoch their readers admit the pinned version, and after finalize an
+//! older projection is regenerated from its module (FIG-4262).
 //!
 //! The versions of surfaces this crate does not own are spelled as literals:
 //! `lash-core-store` sits below their crates. Each owner's
@@ -155,6 +152,10 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
+    decoder(
+        "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
+        crate::protocol_turn_options::PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION - 1,
+    ),
     tree(
         "PROCESS_EVENT_VOCABULARY_VERSION",
         1,
@@ -166,6 +167,7 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         lift_scope_storage_payload,
     ),
     decoder("LASHLANG_SNAPSHOT_VERSION", 14),
+    decoder("HEAP_SIZE_SCHEDULE_VERSION", 3),
     decoder("RLM_SNAPSHOT_VERSION", 26),
     decoder("NATIVE_TRANSPORT_VERSION", 1),
     tree("NATIVE_DRIVER_STATE_VERSION", 2, lift_native_driver_state),
@@ -219,9 +221,15 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
+    pin(
+        "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
+        crate::protocol_turn_options::PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION - 1,
+    ),
     pin("PROCESS_EVENT_VOCABULARY_VERSION", 1),
     pin("SCOPE_STORAGE_PAYLOAD_VERSION", 2),
     pin("LASHLANG_SNAPSHOT_VERSION", 14),
+    pin("HEAP_SIZE_SCHEDULE_VERSION", 3),
+    pin("WORKFLOW_GRAPH_SCHEMA_VERSION", 21),
     pin("RLM_SNAPSHOT_VERSION", 26),
     pin("NATIVE_TRANSPORT_VERSION", 1),
     pin("NATIVE_DRIVER_STATE_VERSION", 2),

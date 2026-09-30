@@ -23,6 +23,9 @@ use expired::expired_functions_from_wire;
 
 mod projections;
 
+mod stamps;
+pub(crate) use stamps::SnapshotStamps;
+
 mod canonical_messagepack;
 pub use canonical_messagepack::{
     CanonicalMapOrder, CanonicalPathSegment, validate_canonical_messagepack_structure,
@@ -512,19 +515,19 @@ impl Snapshot {
     /// Snapshot equality does not imply byte equality for `-0.0` and `+0.0`:
     /// they compare equal under `PartialEq`, but preserve their distinct bits.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, ContinuationError> {
-        self.to_canonical_bytes_at_version(LASHLANG_SNAPSHOT_VERSION)
+        self.to_canonical_bytes_stamped(SnapshotStamps::for_fleet(
+            lash_core_execution::FleetFormat::current(),
+        ))
     }
 
-    /// The canonical encode carrying `version` as its stamped snapshot
-    /// generation: the fixed-point read re-encodes at the version the wire
-    /// recorded, so a held snapshot proves byte-identical under the stamp it
-    /// was written with.
-    pub(crate) fn to_canonical_bytes_at_version(
+    /// The canonical encode carrying `stamps`: the fixed-point read
+    /// re-encodes at the stamps the wire recorded, so a held snapshot proves
+    /// byte-identical under the stamps it was written with.
+    pub(crate) fn to_canonical_bytes_stamped(
         &self,
-        version: u32,
+        stamps: SnapshotStamps,
     ) -> Result<Vec<u8>, ContinuationError> {
-        let mut wire = CanonicalSnapshot::try_from(self)?;
-        wire.version = version;
+        let wire = CanonicalSnapshot::encode(self, stamps)?;
         rmp_serde::to_vec_named(&wire).map_err(|_| ContinuationError::UnserializableValue {
             location: "snapshot".to_string(),
             variant: "canonical encoding",
@@ -559,9 +562,14 @@ impl Snapshot {
                 found: recorded_version,
             });
         }
+        let recorded = SnapshotStamps::recorded(
+            recorded_version,
+            wire.heap.as_ref().map(|heap| heap.size_schedule_version),
+            fleet_format,
+        )?;
         let snapshot: Self = wire.try_into()?;
         let canonical = snapshot
-            .to_canonical_bytes_at_version(recorded_version)
+            .to_canonical_bytes_stamped(recorded)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
         if canonical.as_slice() != bytes {
             return Err(SnapshotDecodeError::NonCanonicalEncoding {
@@ -660,16 +668,14 @@ use super::projected_wire::CanonicalProjectedValue;
 #[cfg(test)]
 use super::projected_wire::{CanonicalJsonField, CanonicalJsonValue};
 
-impl TryFrom<&Snapshot> for CanonicalSnapshot {
-    type Error = ContinuationError;
-
-    fn try_from(snapshot: &Snapshot) -> Result<Self, Self::Error> {
+impl CanonicalSnapshot {
+    fn encode(snapshot: &Snapshot, stamps: SnapshotStamps) -> Result<Self, ContinuationError> {
         let (runtime_globals, mut heap) = match &snapshot.mode {
             StateMode::Plain(globals) => {
                 let mut globals = globals.iter().collect::<Vec<_>>();
                 globals.sort_unstable_by_key(|(name, _)| *name);
                 return Ok(Self {
-                    version: LASHLANG_SNAPSHOT_VERSION,
+                    version: stamps.snapshot,
                     globals: Some(
                         globals
                             .into_iter()
@@ -717,7 +723,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         let mut roots = runtime_globals.iter().collect::<Vec<_>>();
         roots.sort_unstable_by_key(|(name, _)| *name);
         Ok(Self {
-            version: LASHLANG_SNAPSHOT_VERSION,
+            version: stamps.snapshot,
             globals: None,
             heap: Some(CanonicalHeap {
                 reference_semantics,
@@ -725,7 +731,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
                 next_id: heap.next_id,
                 allocation_counter: heap.allocations(),
                 live_logical_bytes: heap.live_logical_bytes(),
-                size_schedule_version: heap.schedule_version(),
+                size_schedule_version: stamps.heap_schedule,
                 roots: roots
                     .into_iter()
                     .map(|(name, value)| {
@@ -770,7 +776,9 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     next_id,
                     allocation_counter,
                     live_logical_bytes,
-                    size_schedule_version,
+                    // Admitted by the fleet-aware decoder that read the wire;
+                    // its heap is charged alike under every admitted schedule.
+                    size_schedule_version: _,
                     roots,
                     objects,
                     list_holes,
@@ -785,7 +793,6 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                         next_id,
                         allocation_counter,
                         live_logical_bytes,
-                        size_schedule_version,
                         objects,
                     },
                     &runtime_globals.values().cloned().collect::<Vec<_>>(),

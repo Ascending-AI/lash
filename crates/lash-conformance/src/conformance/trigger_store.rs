@@ -2335,8 +2335,9 @@ async fn bind_fixture_process(
     process_id
 }
 
-/// Both plugin-facing writers keep the refusal after a newer fleet format
-/// was finalized while their handles remained open.
+/// Both plugin-facing writers keep the refusal after a newer fleet format —
+/// the epoch past this build's writable range — was finalized while their
+/// handles remained open.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the finalized epoch must refuse both older writers"
@@ -2368,7 +2369,7 @@ pub async fn fenced_process_and_trigger_registration_stays_typed(
         .expect_err("the older trigger writer is fenced");
     for (port, error) in [("process registry", process), ("trigger store", trigger)] {
         assert!(
-            matches!(&error, crate::PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced { recorded: 2, writable }) if *writable == crate::FleetFormat::writable()),
+            matches!(&error, crate::PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced { recorded, writable }) if *recorded == crate::FleetFormat::writable().max() + 1 && *writable == crate::FleetFormat::writable()),
             "{port} erased the store refusal: {error:?}"
         );
         let controller = crate::RuntimeEffectControllerError::from(error);

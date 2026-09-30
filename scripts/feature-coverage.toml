@@ -401,7 +401,10 @@ commands = [
 
 # Phase A's synthetic N+1 (ADR 0115 §6): `lash-upgrade-harness` forwards
 # `synthetic-next` to the crates whose blocks it moves, and `just e2e-rolling`
-# builds the node binary both ways.
+# builds the node binary both ways. The SQLite store's every test target runs
+# in `//:feature_lane_tests`; the PostgreSQL store's synthetic `cargo test`
+# variants are service-gated, so `scripts/ci/store-tests.sh pg-store` runs
+# them beside the default build's (FIG-4262).
 [[lane]]
 name = "upgrade-harness-synthetic-next"
 features = [
@@ -451,10 +454,11 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-remote-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-postgres-store", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--all-targets", "--no-default-features", "--features", "perf-witness,synthetic-next,lash-core-execution/synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-sqlite-store", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-restate", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],

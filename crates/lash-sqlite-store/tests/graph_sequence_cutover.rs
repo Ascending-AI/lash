@@ -1,4 +1,4 @@
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
+use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::{StorePreflight, StoreSchemaVerdict};
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
@@ -52,7 +52,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
                 component: "sqlite-core".to_owned(),
                 found: 70,
                 min_reader: 70,
-                reads: VersionRange::exactly(1),
+                reads: crate::sqlite_core().reads,
                 writing_release: None,
             },
         }
@@ -95,7 +95,13 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
         )
         .expect("add a constraint this build cannot safely write beside");
     connection
-        .execute("UPDATE lash_compat SET version = 2, min_reader = 1", [])
+        .execute(
+            "UPDATE lash_compat SET version = ?1, min_reader = ?2",
+            [
+                crate::sqlite_core().writes.max() + 1,
+                crate::sqlite_core().reads.min(),
+            ],
+        )
         .expect("stamp an expanded catalog under this build's reader floor");
     drop(connection);
 
@@ -129,7 +135,8 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
         .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
         .expect("read refused compatibility stamp");
     assert_eq!(
-        version, 2,
+        version,
+        i64::from(crate::sqlite_core().writes.max() + 1),
         "the rejected open must not relabel the graph shape"
     );
 }

@@ -25,12 +25,17 @@ pub(super) async fn session_state_version_admission_contract(
         .admit_view(&request)
         .await
         .expect("admit the session-state marker fixture");
+    // A fresh marker is the version the store's `F` assigns the surface.
     assert_eq!(
         store
             .read_session_state_version()
             .await
             .expect("read fresh marker"),
-        crate::store::CURRENT_SESSION_STATE_VERSION
+        store
+            .fleet_format()
+            .writer_version(lash_core::surface_format!(
+                crate::store::CURRENT_SESSION_STATE_VERSION
+            ))
     );
 
     let mut state = crate::RuntimeSessionState {

@@ -29,6 +29,7 @@ mod graph_commit;
 pub mod history;
 #[cfg(test)]
 mod history_gate_tests;
+mod identity_projection;
 pub mod ingress_obligation;
 mod lease_timings;
 mod maintenance;
@@ -229,6 +230,8 @@ mod prompt_persistence_compat_tests;
 
 #[cfg(test)]
 mod guarded_surface_tests;
+#[cfg(test)]
+mod identity_roll_tests;
 #[cfg(test)]
 mod persisted_state_tests;
 

@@ -94,7 +94,6 @@ impl PartialEq for Heap {
         self.next_id == other.next_id
             && self.allocations == other.allocations
             && self.live_logical_bytes == other.live_logical_bytes
-            && self.schedule_version == other.schedule_version
             && self.entries == other.entries
     }
 }

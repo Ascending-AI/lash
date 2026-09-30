@@ -168,7 +168,9 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     let stores = lash_sqlite_store::SqliteStoreSet::open(root.path())
         .await
         .expect("open older writer");
-    lash_sqlite_store::testing::finalize_fleet_format(stores.location(), 2)
+    // An epoch past this build's writable range: a newer release finalized.
+    let newer = lash_core_execution::FleetFormat::writable().max() + 1;
+    lash_sqlite_store::testing::finalize_fleet_format(stores.location(), newer)
         .expect("finalize newer fleet format");
     let snapshot = || {
         let mut rows = std::collections::BTreeMap::new();

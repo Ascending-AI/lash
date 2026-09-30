@@ -1237,11 +1237,11 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
                     .expect("encode frame plugin options"),
                 serde_json::json!({})
             );
+            // The options' content; their stamp is the version the writing
+            // store's `F` assigned, which the fixture does not pin.
             assert_eq!(
-                serde_json::to_value(protocol_turn_options)
-                    .expect("encode frame protocol-turn options"),
-                serde_json::to_value(ProtocolTurnOptions::default())
-                    .expect("encode expected protocol-turn options")
+                protocol_turn_options.payload,
+                ProtocolTurnOptions::default().payload
             );
         }
         other => {

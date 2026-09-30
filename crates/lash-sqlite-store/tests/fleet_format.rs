@@ -7,8 +7,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use lash_conformance::{FleetFormatDeployment, fleet_format_conformance};
 use lash_core_execution::{
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatStore, StoreError, StorePreflight,
-    StoreSchemaStatus, WriterPin,
+    FleetFormat, FleetFormatStore, StoreError, StorePreflight, StoreSchemaStatus, WriterPin,
 };
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
@@ -64,16 +63,21 @@ async fn sqlite_fleet_format_conformance() {
     fleet_format_conformance(&backend).await;
 }
 
+/// The epoch a freshly provisioned store records: the floor of this build's
+/// writable range.
+const SEEDED: u32 = FleetFormat::seed(FleetFormat::writable()).version();
+
 /// A durable writer stamps the version `F` assigns: stood up on a fleet
-/// format whose pin table holds `CURRENT_SESSION_STATE_VERSION` at 7, the
-/// session-meta writer records 7, not the constant it would stamp anyway.
+/// format whose pin table holds `CURRENT_SESSION_STATE_VERSION` at 7 under
+/// the epoch the store records, the session-meta writer records 7, not the
+/// constant it would stamp anyway.
 #[tokio::test]
 async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
     let root = tempfile::tempdir().expect("scratch directory");
     let durable_core = root.path().join("durable-core.db");
-    let fleet = FleetFormat::current().with_writer_pins(&[WriterPin {
+    let fleet = FleetFormat::from_version(SEEDED).with_writer_pins(&[WriterPin {
         constant: "CURRENT_SESSION_STATE_VERSION",
-        generation: FLEET_FORMAT_VERSION,
+        generation: SEEDED,
         version: 7,
     }]);
     let store = SqliteStore::open_file_for_testing(&durable_core)

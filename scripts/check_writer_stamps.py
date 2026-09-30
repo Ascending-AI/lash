@@ -67,26 +67,6 @@ EXEMPTIONS: list[tuple[str, str, str]] = [
         "not govern",
     ),
     (
-        "crates/lash-core-store/src/protocol_turn_options.rs",
-        "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
-        "empty()/from_payload mint the value-carried stamp at the build "
-        "default for non-durable callers; durable boundaries restamp with "
-        "restamped_for_fleet",
-    ),
-    (
-        "crates/lashlang/src/runtime/state.rs",
-        "LASHLANG_SNAPSHOT_VERSION",
-        "CanonicalSnapshot::try_from seeds the wire header at the build "
-        "default; to_canonical_bytes_at_version restamps it at the durable "
-        "boundary",
-    ),
-    (
-        "crates/lashlang/src/runtime/heap.rs",
-        "HEAP_SIZE_SCHEDULE_VERSION",
-        "Heap::default mints the heap's own schedule stamp at birth; durable "
-        "wires carry the heap's recorded value",
-    ),
-    (
         "crates/lash/src/preflight/",
         "*",
         "read-side extraction and probe reports, not durable writes",

@@ -1159,3 +1159,70 @@ outside N's ranges and N refuses it typed. Such a continuation remains routed
 to N+1's recorded generation, whose deployment must remain until it drains
 (§3.5). A state N+1 writes wholly within N's ranges is admitted on rollback.
 These are synthetic bumps only; the pre-1.0 version freeze still holds.
+
+## Amendment (FIG-4262, 2026-09-30)
+
+The synthetic successor now moves every guarded surface, which supersedes
+the FIG-3802 amendment's "three surfaces stay at N". The version freeze
+still holds: each move is synthetic-only (`synthetic-next`), and N's
+constants are unchanged. The decisions the lane took:
+
+- **Request identities exclude format-version stamps.** This is option (a)
+  of FIG-4262. A request retried across a rolling upgrade (first attempted
+  by N, or by N+1 before finalize, and retried by N+1 after it) carries the
+  turn-options stamp its writer's `F` selected on each attempt. The
+  semantic-boundary request identities and the whole-commit intent hash
+  therefore cover the protocol turn options as their payload alone, in the
+  config, the checkpoint's turn state and each opened frame. They drop the
+  checkpoint component's encoding stamp too and keep its content hash. The
+  projections live in `crates/lash-core-store/src/store/identity_projection.rs`,
+  and each one lists its record's fields explicitly. Nothing depends on the
+  stamps being in a preimage: the receipt decision compares only hashes and
+  encoding versions of the identity families themselves. The identity-family
+  versions (`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION` and the others)
+  do not move. Under the freeze, the golden corpora were re-blessed in place.
+  Option (b), identities that pin the minting generation's version, was
+  rejected: a retry would have to know which generation minted its first
+  attempt.
+- **The turn-options stamp is chosen by the store's commit plan.**
+  `RuntimeCommitPlanner::prepare`, which runs under the `F` a commit is
+  encoded under and again when a fence finds `F` moved, restamps every
+  turn-options value the commit writes. A value minted where no store's `F`
+  is known carries the version of the writable range's floor, `F_prev`, which
+  every build of the range reads. The synthetic successor moves
+  `PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION` to 2, with a `Decoder` lift and a
+  writer pin.
+- **The heap size schedule is stamped where a heap is encoded.** A heap no
+  longer carries a schedule stamp from its birth. The snapshot and durable
+  writers stamp what `F` assigns the surface, and their fixed-point reads
+  re-encode at the recorded stamps. The readers admit the surface's window. A
+  continuation carries its own epoch's schedule, because it resumes on the
+  generation that parked it (§3.5). The synthetic successor moves
+  `HEAP_SIZE_SCHEDULE_VERSION` to 4, with a `Decoder` lift and a writer pin.
+  The FIG-4261 handover admits the VM contract's heap component against
+  that same window, so it is no longer an exact range. N+1 reads schedules
+  `[3,4]` and N's parked state still resumes on it. A state N+1 writes with
+  schedule 4 is outside N's `[3,3]`, and N refuses it typed.
+- **A derived projection moves without a lift.** The synthetic successor
+  moves `WORKFLOW_GRAPH_SCHEMA_VERSION` to 22 and pins its projector to 21
+  while `F` is N's epoch. The graph decoder admits the surface's read window,
+  so N+1 reads the documents N projected until finalize. After finalize, it
+  refuses them typed and regenerates from the module.
+- **A law per surface.** `n_written_records_read_across_the_roll` in
+  `lash-core-store`'s testing laws checks each writer's stamp under N's
+  epoch, under this build's own epoch and under any pinned version. It then
+  reads N's record under every epoch the build writes, and for the derived
+  projection it regenerates where N's record is refused. The heap and graph
+  laws run in `lashlang`, and the turn-options law runs in
+  `lash-core-store` through the commit plan.
+  `a_request_retried_across_the_roll_keeps_its_identity` proves the
+  identity decision. The shared `unknown_version_is_refused_with_zero_mutation`
+  law no longer counts the version `F` pins as unknown.
+- **The synthetic tier's store suites run.** The SQLite integration,
+  conformance and fixture suites derive their expectations from the active
+  tier: component descriptors, the seeded epoch, and the store's own `F`. The
+  synthetic lane's `cargo test` of the SQLite store puts them in
+  `//:feature_lane_tests`, which `just floor` runs. A feature lane's
+  `cargo test` of a service package adds its variants to that service's
+  generated label file, so `scripts/ci/store-tests.sh pg-store` runs the
+  synthetic PostgreSQL suites beside the default ones.
