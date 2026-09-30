@@ -1020,6 +1020,10 @@ mod cancelled_queued_append {
 lash_conformance::append_receipt_rewrite_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend.store().await;
+    store
+        .admit_session(&root_session_request("root"))
+        .await
+        .expect("admit old-format receipt root");
     let mutation = backend.clone();
     (
         backend,
