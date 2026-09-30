@@ -27,15 +27,10 @@ section numbers. Within an ADR, a bare section reference names that ADR's own
 heading; an explicit "its" or "there" can refer to a nearby cited ADR in the
 same paragraph. Section numbers must appear in Markdown headings outside code fences.
 
-Narration and citation findings are report-only while the FIG-4326 rewrite
-batches are open. Index mismatches fail immediately. The check's small allowlist
-names exact exceptions with reasons: the convention's list of prohibited words
-and a present-tense size comparison. It does not exempt entire ADRs.
-
-After all 11 rewrite batches are Done, set `ENFORCE_NARRATION` and
-`ENFORCE_CITATIONS` in the script to `True`, run the check and land the
-enforcement change. The explicit `--enforce-narration` and `--enforce-citations`
-options let a batch validate its changes before that switch.
+Narration, citation and index findings all fail the check. The check's small
+allowlist names exact exceptions with reasons: the convention's list of
+prohibited words and a present-tense size comparison. It does not exempt
+entire ADRs.
 
 Run `python3 scripts/check_adr_current.py --write-index` after changing a title,
 adding a decision or deleting one. Commit the README change with the ADR change.
