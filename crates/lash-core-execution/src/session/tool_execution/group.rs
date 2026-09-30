@@ -14,7 +14,8 @@
 //! early is handed to the opener with the consumer's cursor; its losers keep
 //! running, and the opener's end closes it (`opener_groups.rs`, §7). A
 //! cancelled await closes its group under `Cancel` through the FIG-3410
-//! closing driver.
+//! closing driver; a batch surface then presents every member it had not
+//! consumed by that member's durable final, never by the cancelled cursor.
 //!
 //! Settlement facts are incorporated through FIG-3411's
 //! `incorporate_group_prefix`: the consumer journals the consumed prefix as
@@ -141,13 +142,13 @@ impl GroupChildSettled {
 /// maps back to input indices for `ToolBatchReplies::settlement_order`.
 pub(crate) struct ToolChildGroupSettled {
     /// One slot per group position. After exhaustion every slot is filled;
-    /// after a cancelled await, unconsumed tool positions carry the cancelled
-    /// completion; after a decision, only the consumed prefix is filled — a
-    /// loser's value is never synthesized (§10 L6).
+    /// after a decision or a cancelled await, only the consumed prefix is
+    /// filled — a value is never synthesized (§10 L6). A surface that
+    /// presents a cancelled group's rows fills the rest from the durable
+    /// finals with [`RuntimeExecutionContext::present_cancelled_tool_group`].
     pub settled: Vec<Option<GroupChildSettled>>,
-    /// Positions in the order the group settled them (durable commit order,
-    /// ADR 0099 §5), with cancel-unconsumed positions appended in position
-    /// order so `validate_batch_settlement_order` still sees a permutation.
+    /// Positions in the order the group settled them: durable rank order
+    /// (ADR 0099 §5), one per filled slot.
     pub settlement_positions: Vec<usize>,
     /// The position whose settlement decided the aggregate. When the group
     /// was not yet exhausted at that settlement it is the opener's: its losers
@@ -309,7 +310,7 @@ impl RuntimeExecutionContext<'_> {
             };
             let ids = crate::tool_dispatch::ToolCallIds::of(&leaf.call.call);
             self.emit_tool_call_started(
-                &format!("{group_key}:child:{position}"),
+                &group_child_replay_key(&group_key, position),
                 &ids,
                 &leaf.call.call.tool_name,
                 leaf.call.call.args.clone(),
@@ -334,7 +335,7 @@ impl RuntimeExecutionContext<'_> {
                         crate::RuntimeEffectInvocation::new(
                             crate::EffectAddress::new(
                                 scope.clone(),
-                                format!("{group_key}:child:{position}"),
+                                group_child_replay_key(&group_key, position),
                             )?,
                             self.effect_attribution(),
                             format!("tool-batch:{batch_id}:child:{position}"),
@@ -385,7 +386,7 @@ impl RuntimeExecutionContext<'_> {
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
                         scope.clone(),
-                        format!("{group_key}:child:{position}"),
+                        group_child_replay_key(&group_key, position),
                     )?,
                     self.effect_attribution(),
                     format!("tool-batch:{batch_id}:child:{position}"),
@@ -542,16 +543,17 @@ impl RuntimeExecutionContext<'_> {
     /// nothing (§0 *live*), and the opener's end closes it (§7).
     ///
     /// **Cancelled** (`RuntimeEffectGroupAwaitCancelled`): the turn was
-    /// cancelled. Consumption stops, every unsettled tool position is filled
-    /// with the batch surface's cancelled reply and appended to the settlement
-    /// order in position order, and the group is closed under
-    /// [`LoserPolicy::Cancel`]: the close records `closing` through the
-    /// FIG-3410 driver, seats a cancelled terminal for every undecided child
-    /// and fires the group's token, so a child that ignores cooperative
-    /// cancellation is dropped as the batch path's cancel grace dropped it.
-    /// The group — with the cursor after its incorporated prefix — is then
-    /// handed to the opener, whose end incorporates the ranks that land after
-    /// the close.
+    /// cancelled. Consumption stops with only the consumed prefix filled, and
+    /// the group is closed under [`LoserPolicy::Cancel`]: the close records
+    /// `closing` through the FIG-3410 driver, cancel-decides and seats every
+    /// undecided child and fires the group's token, so a child that ignores
+    /// cooperative cancellation is dropped as the batch path's cancel grace
+    /// dropped it. A committed child keeps its authority to finish its drain
+    /// (§4) and seats its own final. The group — with the cursor after its
+    /// incorporated prefix — is then handed to the opener, whose end
+    /// incorporates the ranks that land after the close. The consumer answers
+    /// without waiting for those seats; a surface that presents one row per
+    /// member reads them with [`Self::present_cancelled_tool_group`].
     ///
     /// **Exhausted**: the group is closed under the declared `RunToCompletion`
     /// disposition to release consumer interest: the close CASes the journaled
@@ -609,18 +611,12 @@ impl RuntimeExecutionContext<'_> {
                 Err(error)
                     if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
                 {
-                    let mut abandoned = Vec::new();
-                    for (position, child) in children.iter().enumerate() {
-                        if settled[position].is_none()
-                            && let PreparedGroupChild::Tool(leaf) = child
-                        {
-                            settled[position] = Some(GroupChildSettled::Tool(Box::new(
-                                cancelled_group_leaf(leaf),
-                            )));
-                            settlement_positions.push(position);
-                            abandoned.push(position);
-                        }
-                    }
+                    let abandoned = (0..children.len())
+                        .filter(|position| {
+                            settled[*position].is_none()
+                                && matches!(children[*position], PreparedGroupChild::Tool(_))
+                        })
+                        .collect::<Vec<_>>();
                     // Incorporate the consumed prefix before abandoning the
                     // await: settled ranks are durable facts and the journaled
                     // `IncorporateGroupSettlements` record names them so a
@@ -633,7 +629,8 @@ impl RuntimeExecutionContext<'_> {
                     // cancellation is dropped rather than left running under
                     // the turn's sessions — the batch path's cancel-grace
                     // observable. A committed child keeps its authority to
-                    // finish its drain (§4) and ranks after this close.
+                    // finish its drain (§4) and seats its own final, which a
+                    // batch surface presents (`present_cancelled_tool_group`).
                     let cursor = crate::EffectGroupHandle::restored(
                         handle.group_key(),
                         handle.children(),
@@ -677,60 +674,18 @@ impl RuntimeExecutionContext<'_> {
                 }
             };
             let position = settlement.position;
-            let child = match (children.get(position), settlement.outcome) {
-                (
-                    Some(PreparedGroupChild::Tool(leaf)),
-                    Ok(crate::RuntimeEffectOutcome::ToolInvocation {
-                        outcome,
-                        settlement,
-                    }),
-                ) => match self
-                    .apply_tool_child_settlement(
-                        &format!("{}:child:{position}", handle.group_key()),
-                        leaf,
-                        *outcome,
-                        *settlement,
-                        self.dispatch
-                            .clock
-                            .now()
-                            .saturating_duration_since(consume_started)
-                            .as_millis() as u64,
-                    )
-                    .await
-                {
-                    Ok(completed) => GroupChildSettled::Tool(Box::new(completed)),
-                    Err(error) => {
-                        self.retain_outstanding_group(handle);
-                        return Err(error);
-                    }
-                },
-                (
-                    Some(PreparedGroupChild::Timer { .. }),
-                    Ok(crate::RuntimeEffectOutcome::Sleep),
-                ) => GroupChildSettled::Timer,
-                (_, Ok(other)) => {
-                    let error = crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                        format!(
-                            "durable effect group {} settled position {position} with a {} \
-                             outcome, which is not what that child was admitted as",
-                            handle.group_key(),
-                            other.kind().as_str(),
-                        ),
-                    );
-                    self.retain_outstanding_group(handle);
-                    return Err(error);
-                }
-                // A child that refused with a live fault (`ControllerAborted`:
-                // its attempt's journal claim, renew or finalize failed) is a
-                // refusal, not the tool's settlement, even where the group
-                // sealed it as the child's `Failed` terminal. It aborts the
-                // turn as the live fault it is (FIG-3528, FIG-3575); only a
-                // child's recorded outcome stays on the result surface.
-                (_, Err(mut error)) => {
-                    if error.code.turn_failure_cause().aborts_invocation() {
-                        error.journaled = false;
-                    }
+            let child = match self
+                .present_group_settlement(
+                    handle.group_key(),
+                    children,
+                    position,
+                    settlement.outcome,
+                    consume_started,
+                )
+                .await
+            {
+                Ok(child) => child,
+                Err(error) => {
                     self.retain_outstanding_group(handle);
                     return Err(error);
                 }
@@ -782,6 +737,194 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
+    /// One settled rank of `group_key`, presented at its group `position`.
+    ///
+    /// A tool child's recorded outcome becomes its completed call, and a timer
+    /// child's `Sleep` becomes a settled timer. A child that refused with a
+    /// live fault (`ControllerAborted`: its attempt's journal claim, renew or
+    /// finalize failed) is a refusal, not the tool's settlement, even where
+    /// the group sealed it as the child's `Failed` terminal: it aborts the
+    /// turn as the live fault it is (FIG-3528, FIG-3575). Only a child's
+    /// recorded outcome stays on the result surface.
+    async fn present_group_settlement(
+        &self,
+        group_key: &str,
+        children: &[PreparedGroupChild],
+        position: usize,
+        outcome: Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>,
+        consume_started: std::time::Instant,
+    ) -> Result<GroupChildSettled, crate::RuntimeEffectControllerError> {
+        match (children.get(position), outcome) {
+            (
+                Some(PreparedGroupChild::Tool(leaf)),
+                Ok(crate::RuntimeEffectOutcome::ToolInvocation {
+                    outcome,
+                    settlement,
+                }),
+            ) => self
+                .apply_tool_child_settlement(
+                    &group_child_replay_key(group_key, position),
+                    leaf,
+                    *outcome,
+                    *settlement,
+                    self.dispatch
+                        .clock
+                        .now()
+                        .saturating_duration_since(consume_started)
+                        .as_millis() as u64,
+                )
+                .await
+                .map(|completed| GroupChildSettled::Tool(Box::new(completed))),
+            (Some(PreparedGroupChild::Timer { .. }), Ok(crate::RuntimeEffectOutcome::Sleep)) => {
+                Ok(GroupChildSettled::Timer)
+            }
+            (_, Ok(other)) => Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
+                format!(
+                    "durable effect group {group_key} settled position {position} with a {} \
+                     outcome, which is not what that child was admitted as",
+                    other.kind().as_str(),
+                ),
+            )),
+            (_, Err(mut error)) => {
+                if error.code.turn_failure_cause().aborts_invocation() {
+                    error.journaled = false;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Fills every member a cancelled consumer left unconsumed with its
+    /// durable final, for a surface that presents one row per member — the
+    /// standard protocol's batch and a code executor's tool batch (ADR 0116
+    /// §2.6).
+    ///
+    /// A cancelled rank wait only says the consumer stopped waiting. A member
+    /// may already have seated a successful final the wait did not deliver, or
+    /// may hold a committed final whose seat is still coming; presenting either
+    /// as cancelled would tell the model a tool did not run when it did
+    /// (FIG-4364). So after the consumer's close, this waits at the closing
+    /// barrier past the last rank until every committed member has seated, as
+    /// the opener's end does (§7), then reads each unconsumed rank and presents
+    /// it at its position, in rank order: a committed member's recorded result,
+    /// and the cancelled reply for each member whose final is the cancel
+    /// decision. Rows therefore never disagree with the durable finals.
+    ///
+    /// Reads only: the group stays the opener's, and its end incorporates
+    /// these ranks. Each read is of a seated, immutable rank, so a replay
+    /// presents the same rows.
+    pub(crate) async fn present_cancelled_tool_group(
+        &self,
+        group_key: &str,
+        children: &[PreparedGroupChild],
+        settled: &mut ToolChildGroupSettled,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let controller = self.dispatch.effect_controller.controller();
+        let presentation_started = self.dispatch.clock.now();
+        // The consumer fills the rank-ordered prefix it consumed, one position
+        // per rank, so the next unconsumed rank follows its length.
+        let (first_unconsumed, last_rank) = u64::try_from(settled.settlement_positions.len() + 1)
+            .ok()
+            .zip(u64::try_from(children.len()).ok())
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!("effect group {group_key} has more children than ranks"),
+                )
+            })?;
+        // Past the last rank: every committed child of the closed group has
+        // seated, or retirement released the wait.
+        controller
+            .await_group_child_drain_admission(group_key, last_rank + 1)
+            .await?;
+        for rank in first_unconsumed..=last_rank {
+            let ranked = controller
+                .read_group_settlement(group_key, rank)
+                .await?
+                .ok_or_else(|| {
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        format!(
+                            "cancelled effect group {group_key} has no durable final at rank \
+                             {rank} after every committed child seated"
+                        ),
+                    )
+                })?;
+            let (position, child) = self
+                .present_cancelled_group_rank(
+                    group_key,
+                    children,
+                    rank,
+                    ranked,
+                    presentation_started,
+                )
+                .await?;
+            if settled.settled[position].is_some() {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!("cancelled effect group {group_key} ranked position {position} twice"),
+                ));
+            }
+            settled.settled[position] = Some(child);
+            settled.settlement_positions.push(position);
+        }
+        Ok(())
+    }
+
+    /// One unconsumed rank of a cancelled group, read back by
+    /// [`Self::present_cancelled_tool_group`]: its position and its
+    /// presentation.
+    async fn present_cancelled_group_rank(
+        &self,
+        group_key: &str,
+        children: &[PreparedGroupChild],
+        rank: u64,
+        ranked: crate::runtime::effect::RankedGroupSettlement,
+        presentation_started: std::time::Instant,
+    ) -> Result<(usize, GroupChildSettled), crate::RuntimeEffectControllerError> {
+        let position = (0..children.len())
+            .find(|position| {
+                group_child_replay_key(group_key, *position) == ranked.child_replay_key
+            })
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!(
+                        "cancelled effect group {group_key} rank {rank} names child {}, which \
+                         is not one of its {} children",
+                        ranked.child_replay_key,
+                        children.len()
+                    ),
+                )
+            })?;
+        match (&children[position], ranked.outcome) {
+            (PreparedGroupChild::Tool(leaf), Err(error))
+                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
+            {
+                Ok((
+                    position,
+                    GroupChildSettled::Tool(Box::new(cancelled_group_leaf(leaf))),
+                ))
+            }
+            (PreparedGroupChild::Timer { .. }, Err(error))
+                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
+            {
+                Ok((position, GroupChildSettled::Timer))
+            }
+            (_, outcome) => self
+                .present_group_settlement(
+                    group_key,
+                    children,
+                    position,
+                    outcome,
+                    presentation_started,
+                )
+                .await
+                .map(|child| (position, child)),
+        }
+    }
+
     /// Drains the cancel obligation of each call this opener's cancel
     /// abandoned (ADR 0116 §3.4). A cancelled child's own invocation may never
     /// reach its park site's discharge, so the opener cancels, from its own
@@ -821,7 +964,7 @@ impl RuntimeExecutionContext<'_> {
                     continue;
                 }
             };
-            let effect_id = format!("{group_key}:child:{position}");
+            let effect_id = group_child_replay_key(group_key, position);
             let owed = match crate::tool_dispatch::consumer_hold_owner(&self.process_scope(None)) {
                 Some(owner) => self.recorded_owed_cancels(&effect_id, &key, owner).await?,
                 None => Vec::new(),
@@ -977,7 +1120,8 @@ impl RuntimeExecutionContext<'_> {
     /// physical turn and protocol iteration (ADR 0099 §3).
     /// Formation and infrastructure failures surface as the controller error
     /// the caller maps onto its existing error type; a cancelled turn yields
-    /// cancelled completions, not an error.
+    /// each member's durable final — its result if it committed, a cancelled
+    /// completion if the cancel decided it — not an error.
     pub async fn execute_prepared_tool_group(
         &self,
         batch_id: &str,
@@ -1016,10 +1160,11 @@ impl RuntimeExecutionContext<'_> {
             })));
         }
         let consumer = ToolAggregateConsumer::AllSettled;
+        let group_key = self.tool_child_group_key(batch_id);
         let handle = self
             .open_tool_child_group(
                 group_invocation,
-                self.tool_child_group_key(batch_id),
+                group_key.clone(),
                 batch_id,
                 &leaves,
                 consumer.wake(),
@@ -1029,6 +1174,10 @@ impl RuntimeExecutionContext<'_> {
         let mut settled = self
             .consume_tool_child_group(handle, &leaves, consumer)
             .await?;
+        if settled.cancelled {
+            self.present_cancelled_tool_group(&group_key, &leaves, &mut settled)
+                .await?;
+        }
         let mut results = Vec::with_capacity(leaves.len());
         for (position, leaf) in leaves.iter().enumerate() {
             let (Some(leaf), Some(GroupChildSettled::Tool(completed))) =
@@ -1048,9 +1197,16 @@ impl RuntimeExecutionContext<'_> {
     }
 }
 
-/// The completed call a cancelled await fills unsettled positions with: the
-/// batch surface's cancelled reply (batch.rs's `"tool call cancelled"` shape)
-/// as a `CompletedProtocolToolCall`.
+/// A group child's own invocation replay key, `{group}:child:{position}`: the
+/// effect address formation mints for it, and the `child_replay_key` its
+/// durable final names.
+fn group_child_replay_key(group_key: &str, position: usize) -> String {
+    format!("{group_key}:child:{position}")
+}
+
+/// The presentation of a tool child whose durable final is the cancel
+/// decision: the batch surface's cancelled reply (batch.rs's `"tool call
+/// cancelled"` shape) as a `CompletedProtocolToolCall`.
 fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCall {
     let completed = cancelled_completed_tool_call(
         crate::tool_dispatch::ToolCallIds::of(&leaf.call.call),

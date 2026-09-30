@@ -80,6 +80,51 @@ impl RecordedBatch {
         }).await.expect("the selected member's final is durably recorded within the watchdog");
     }
 
+    /// Whether each member of the law's one group recorded a successful
+    /// durable final, in group position order: what every assembled batch
+    /// row must say.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture reads its tier's durable records"
+    )]
+    pub(crate) async fn member_successes(
+        &self,
+        host: &dyn crate::EffectHost,
+        admitted: crate::AdmittedScope,
+    ) -> Vec<bool> {
+        let scoped = host
+            .scoped(admitted)
+            .expect("scope the durable finals read");
+        let groups = self.groups.lock_recover().clone();
+        let [group] = groups.as_slice() else {
+            panic!(
+                "the law opened exactly one tool group, not {}",
+                groups.len()
+            );
+        };
+        let mut successes = vec![None; group.children().len()];
+        for rank in 1..=group.children().len() as u64 {
+            let final_record = scoped
+                .controller()
+                .read_group_settlement(group.group_key(), rank)
+                .await
+                .expect("reread a durable final")
+                .expect("every batch member has a recorded final");
+            let position = group
+                .children()
+                .iter()
+                .position(|child| {
+                    child.invocation.effect_replay_key() == final_record.child_replay_key
+                })
+                .expect("a recorded final names one of the group's members");
+            successes[position] = Some(final_record.outcome.is_ok());
+        }
+        successes
+            .into_iter()
+            .map(|success| success.expect("every member position has a recorded final"))
+            .collect()
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "conformance fixture reads its tier's durable records"

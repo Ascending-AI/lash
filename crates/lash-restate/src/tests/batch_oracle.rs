@@ -227,41 +227,47 @@ async fn recorded_batch_boundaries_on_sqlite_double() {
     for always_replay in [false, true] {
         for file in [false, true] {
             let (harness, _directory, stores) = sqlite_double_fixture(always_replay, file).await;
-            if always_replay && file {
-                let prefix = format!("recorded-batch-sqlite-file-{}", harness.run_nonce());
-                lash_conformance::registration_macro_support::batch_redrive_reuses_children(
-                    &prefix,
-                    harness.endpoint_host(),
-                    stores,
-                    harness.turn_runner(),
-                    factories(),
-                )
-                .await;
-            } else {
-                recorded_boundaries(
-                    &harness,
-                    stores,
-                    if file { "sqlite-file" } else { "sqlite-memory" },
-                )
-                .await;
-            }
+            recorded_boundaries(
+                &harness,
+                stores,
+                if file { "sqlite-file" } else { "sqlite-memory" },
+            )
+            .await;
         }
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "FIG-4364: assembled batch row contradicts durable final under cancel+replay"]
-async fn cancellation_on_sqlite_file_with_forced_replay() {
-    let (harness, _directory, stores) = sqlite_double_fixture(true, true).await;
-    let prefix = format!("recorded-batch-sqlite-file-{}", harness.run_nonce());
-    lash_conformance::registration_macro_support::batch_cancel_preserves_committed_drains(
-        &prefix,
+/// FIG-4364: a committed member held between its commit and its seat while
+/// the turn is cancelled keeps its committed row. Each fixture is a fresh
+/// double, so the law's layered host is the one its children run under.
+async fn late_seat_cancellation(
+    harness: &LiveConformanceHarness,
+    stores: Arc<dyn lash_core::StoreSet>,
+    storage: &str,
+) {
+    lash_conformance::registration_macro_support::batch_cancel_presents_a_committed_member_seated_after_the_cancel(
+        &format!("late-seat-{storage}-{}", harness.run_nonce()),
         harness.endpoint_host(),
         stores,
         harness.turn_runner(),
         factories(),
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn late_seat_cancellation_on_sqlite_double() {
+    for always_replay in [false, true] {
+        for file in [false, true] {
+            let (harness, _directory, stores) = sqlite_double_fixture(always_replay, file).await;
+            late_seat_cancellation(
+                &harness,
+                stores,
+                if file { "sqlite-file" } else { "sqlite-memory" },
+            )
+            .await;
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -361,33 +367,15 @@ async fn postgres_double_fixture(
 async fn postgres_recorded_batch_boundaries_on_double() {
     for always_replay in [false, true] {
         let (harness, _directory, stores) = postgres_double_fixture(always_replay).await;
-        if always_replay {
-            let prefix = format!("recorded-batch-postgres-{}", harness.run_nonce());
-            lash_conformance::registration_macro_support::batch_redrive_reuses_children(
-                &prefix,
-                harness.endpoint_host(),
-                stores,
-                harness.turn_runner(),
-                factories(),
-            )
-            .await;
-        } else {
-            recorded_boundaries(&harness, stores, "postgres").await;
-        }
+        recorded_boundaries(&harness, stores, "postgres").await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "FIG-4364: assembled batch row contradicts durable final under cancel+replay"]
-async fn cancellation_on_postgres_with_forced_replay() {
-    let (harness, _directory, stores) = postgres_double_fixture(true).await;
-    let prefix = format!("recorded-batch-postgres-{}", harness.run_nonce());
-    lash_conformance::registration_macro_support::batch_cancel_preserves_committed_drains(
-        &prefix,
-        harness.endpoint_host(),
-        stores,
-        harness.turn_runner(),
-        factories(),
-    )
-    .await;
+#[ignore = "requires isolated PostgreSQL; run through the effect-group suite with pg16"]
+async fn postgres_late_seat_cancellation_on_double() {
+    for always_replay in [false, true] {
+        let (harness, _directory, stores) = postgres_double_fixture(always_replay).await;
+        late_seat_cancellation(&harness, stores, "postgres").await;
+    }
 }

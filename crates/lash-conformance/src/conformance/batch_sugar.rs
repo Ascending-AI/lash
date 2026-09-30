@@ -1478,7 +1478,204 @@ pub async fn batch_cancel_preserves_committed_drains(
             undecided.to_string().to_lowercase().contains("cancel"),
             "{context}: an undecided row says it was cancelled: {undecided}"
         );
+        assert_rows_match_durable_finals(&context, &law, &rows).await;
     }
+    assert_no_member_is_a_call(&context, &turn);
+}
+
+/// Every assembled row says what its member's durable final says: a row is
+/// successful exactly when the member recorded a successful final.
+async fn assert_rows_match_durable_finals(
+    context: &str,
+    law: &SugarTurn,
+    rows: &[(u64, String, bool)],
+) {
+    let durable = law
+        .witness
+        .recorded
+        .member_successes(law.host.as_ref(), law.admitted())
+        .await;
+    assert_eq!(
+        rows.iter()
+            .map(|(_, _, success)| *success)
+            .collect::<Vec<_>>(),
+        durable,
+        "{context}: every assembled row matches its member's durable final"
+    );
+}
+
+/// Holds the committed member between its §4 commit and its seat: its rank
+/// is reserved, and its successful final is not yet published. Observes the
+/// opener's close under `Cancel`, the point after which a cancelled consumer
+/// assembles its rows.
+#[derive(Default)]
+struct HeldCommittedSeat {
+    /// The committed member reached its presentation, after its commit.
+    entered: tokio_util::sync::CancellationToken,
+    /// The law lets the committed member present and seat.
+    released: tokio_util::sync::CancellationToken,
+    /// The opener closed the group under `Cancel`.
+    cancel_closed: tokio_util::sync::CancellationToken,
+}
+
+#[async_trait::async_trait]
+impl crate::testing::EffectLayer for HeldCommittedSeat {
+    async fn execute_effect(
+        &self,
+        inner: &dyn crate::RuntimeEffectController,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        if matches!(&envelope.command, crate::RuntimeEffectCommand::PresentToolResult { tool_name, args, .. }
+            if tool_name == "echo" && args["value"] == "committed")
+        {
+            self.entered.cancel();
+            self.released.cancelled().await;
+        }
+        inner.execute_effect(envelope, local_executor).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        inner: &dyn crate::RuntimeEffectController,
+        handle: crate::EffectGroupHandle,
+        disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let cancel = disposition == crate::LoserPolicy::Cancel;
+        let closed = inner.close_effect_group(handle, disposition).await;
+        if cancel && closed.is_ok() {
+            self.cancel_closed.cancel();
+        }
+        closed
+    }
+}
+
+/// A member that committed before the cancel but seats after it is presented
+/// by its durable final (FIG-4364).
+///
+/// The committed member is held between its commit and its seat, so the
+/// opener's rank wait can only end by losing to the turn's cancellation: the
+/// ordering is fixed, not sampled. The cancel closes the group, deciding the
+/// two held gates; only then is the committed member released to seat its
+/// success. Its row must say what its durable final says — the member ran
+/// and succeeded — and each gate's row says cancelled, as its final does.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn batch_cancel_presents_a_committed_member_seated_after_the_cancel(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    factories: BatchSugarFactories,
+) {
+    let context = format!("{prefix}/batch-cancel-late-seat");
+    let held = Arc::new(HeldCommittedSeat::default());
+    // Children present on controllers the host lends, and the opener closes
+    // on the controller the runner lends: the one layer sees both.
+    let host: Arc<dyn crate::EffectHost> = Arc::new(crate::testing::LayeredEffectHost::new(
+        host,
+        Arc::clone(&held) as Arc<dyn crate::testing::EffectLayer>,
+    ));
+    let mut law = SugarTurn::new(
+        prefix,
+        "cancel-late-seat",
+        &host,
+        &stores,
+        &factories.enabled,
+        vec![response(vec![wrapper(
+            "w",
+            serde_json::json!([
+                member("echo", serde_json::json!("committed")),
+                member("gate", serde_json::json!("undecided-a")),
+                member("gate", serde_json::json!("undecided-b")),
+            ]),
+        )])],
+    );
+    law.layer = Some(Arc::clone(&held) as Arc<dyn crate::testing::EffectLayer>);
+    law.witness.hold(&["undecided-a", "undecided-b"]);
+    let store = crate::conformance::law_session_store(stores.as_ref(), &law.session_id).await;
+    let (turns, mut ran) = tokio::sync::mpsc::unbounded_channel();
+    let running = {
+        let runner = Arc::clone(&runner);
+        let admitted = law.admitted();
+        let attempt = law.attempt(turns);
+        crate::task::spawn(async move { runner.run_turn(admitted, attempt).await })
+    };
+    tokio::time::timeout(TURN_BUDGET, async {
+        held.entered.cancelled().await;
+        while !(law.witness.started("undecided-a") && law.witness.started("undecided-b")) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("{context}: the committed member holds before its seat while the gates run")
+    });
+    let driver =
+        crate::TurnWorkDriver::for_session(Arc::clone(&host), law.session_id.clone(), store);
+    driver
+        .request_cancel(crate::TurnCancelRequest::new(
+            crate::TurnAddress::new(law.session_id.clone(), law.turn_id.clone()),
+            "cancel-batch-late-seat",
+            None,
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("{context}: request the cancel: {error}"));
+    tokio::time::timeout(TURN_BUDGET, held.cancel_closed.cancelled())
+        .await
+        .unwrap_or_else(|_| panic!("{context}: the cancelled opener closes its group"));
+    held.released.cancel();
+    tokio::time::timeout(TURN_BUDGET, running)
+        .await
+        .unwrap_or_else(|_| panic!("{context}: the cancelled runner completes within its watchdog"))
+        .unwrap_or_else(|error| {
+            panic!("{context}: the cancelled runner completes successfully: {error}")
+        });
+    let mut turn = None;
+    while let Ok(next) = ran.try_recv() {
+        turn = next;
+    }
+    let turn = turn
+        .unwrap_or_else(|| panic!("{context}: the cancelled turn assembles"))
+        .unwrap_or_else(|error| panic!("{context}: the cancelled turn assembles: {error}"));
+    law.witness.release_held();
+    tokio::time::timeout(
+        TURN_BUDGET,
+        runner.await_group_quiescence(&law.witness.recorded.group_keys()),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("{context}: late settlements reach quiescence within the watchdog"));
+
+    assert!(
+        matches!(
+            turn.outcome,
+            crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
+        ),
+        "{context}: the turn stops cancelled: {:?}",
+        turn.outcome
+    );
+    assert_eq!(
+        law.witness.executed("echo", "committed"),
+        1,
+        "{context}: nothing runs twice"
+    );
+    let wrapper = record(&turn, "w");
+    let wrapper = wrapper
+        .first()
+        .expect("the cancelled step still answers its wrapper");
+    let rows = rows(wrapper);
+    assert_eq!(
+        rows,
+        vec![
+            (0, "echo".to_string(), true),
+            (1, "gate".to_string(), false),
+            (2, "gate".to_string(), false),
+        ],
+        "{context}: the member that seated after the cancel keeps its committed row"
+    );
+    assert_rows_match_durable_finals(&context, &law, &rows).await;
     assert_no_member_is_a_call(&context, &turn);
 }
 

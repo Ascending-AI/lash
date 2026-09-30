@@ -178,11 +178,17 @@ group, without waves
 
 Members use the group's cancellation, settlement and intent-drain rules in
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
-The group observes its recorded consumed prefix, completes protected drains,
-and presents cancellation for calls outside that boundary. Folding preserves
-the returned member order and does not execute a second drain
-(`crates/lash-core-execution/src/session/tool_execution/group.rs:212`, `:563`,
-`crates/lash-protocol-standard/src/batch.rs:257`).
+A rank wait cancelled with the turn closes the group under `Cancel`, which
+cancel-decides every member whose final has not committed. Each row then
+presents its member's durable final, never the cancelled wait: the batch waits
+at the closing barrier until every committed member has seated, and reads each
+rank the consumer had not consumed. A committed member presents its recorded
+result, and a cancel-decided member presents cancellation. A row therefore
+never contradicts its member's durable final, however the wait and the cancel
+raced. Folding preserves the returned member order and does not execute a
+second drain
+(`crates/lash-core-execution/src/session/tool_execution/group.rs:213`, `:565`,
+`:810`, `crates/lash-protocol-standard/src/batch.rs:257`).
 Infrastructure faults remain runtime failures.
 
 #### 2.7 Configuration
