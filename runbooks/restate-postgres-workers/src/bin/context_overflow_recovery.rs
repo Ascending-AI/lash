@@ -348,7 +348,12 @@ impl Harness {
                         .build(),
                     std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                     &backend,
-                );
+                )
+                .with_worker_service(lash::rlm::WorkerService::subprocess(
+                    std::env::var_os("LASH_CONTEXT_OVERFLOW_VM_WORKER").context(
+                        "the companion host must select LASH_CONTEXT_OVERFLOW_VM_WORKER",
+                    )?,
+                ));
                 lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
             }
             Protocol::Standard => {

@@ -81,6 +81,7 @@ impl CellOutcome {
 pub(crate) struct Session {
     mode: HarnessMode,
     state: RlmExecutionState,
+    workers: lash_vm_client::service::Service,
     /// The Restate server double every cell of the session runs over:
     /// lash-restate's engine and services over a SQLite memory store set,
     /// the twin the SQLite memory backend was (FIG-3668 B1). Each cell gets
@@ -110,6 +111,14 @@ impl Session {
         mode: HarnessMode,
         host: &BTreeMap<String, serde_json::Value>,
     ) -> Self {
+        Self::open_with_workers(mode, host, lash_vm_client::service::Service::default())
+    }
+
+    pub(crate) fn open_with_workers(
+        mode: HarnessMode,
+        host: &BTreeMap<String, serde_json::Value>,
+        workers: lash_vm_client::service::Service,
+    ) -> Self {
         let mut host_bindings = RlmProjectedBindings::new();
         for (name, value) in host {
             host_bindings = host_bindings
@@ -124,9 +133,11 @@ impl Session {
             SEED,
             lash_restate_test::ServerConfig::default(),
         ));
+        let workers = workers.with_recovery_store(double.lash_backend().worker_recovery());
         Self {
             mode,
-            state: RlmExecutionState::for_engine(LANGUAGE_ID),
+            state: RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, workers.clone()),
+            workers,
             double,
             runtime,
             history: Vec::new(),
@@ -263,7 +274,8 @@ impl Session {
             root: snapshot.root.expect("a capture carries its root"),
             components,
         };
-        let mut restored = RlmExecutionState::for_engine(LANGUAGE_ID);
+        let mut restored =
+            RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone());
         restored
             .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
             .expect("restore the RLM execution state");
@@ -342,8 +354,10 @@ impl Session {
     /// executor above, while this method supplies the missing continuation
     /// composition without adding a production suspension policy.
     pub(crate) fn run_parked(&mut self, code: &str) -> ParkedCellEvidence {
-        let mut state =
-            std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
+        let mut state = std::mem::replace(
+            &mut self.state,
+            RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone()),
+        );
         let double = &self.double;
         let evidence = self
             .runtime
@@ -381,8 +395,10 @@ impl Session {
     /// Injects the retention defect used by the red-proof law. The broken
     /// continuation must fail before it can produce a terminal value.
     pub(crate) fn run_parked_broken(&mut self, code: &str) -> String {
-        let mut state =
-            std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
+        let mut state = std::mem::replace(
+            &mut self.state,
+            RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone()),
+        );
         let double = &self.double;
         let result = self.runtime.block_on(async {
             // A parked cell runs on a handler of its own, as it ran on a host
