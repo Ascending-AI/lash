@@ -70,9 +70,9 @@ pub use executor::{
 };
 pub use group::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{
-    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
-    GroupReopen, GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy,
-    RankedGroupSettlement, RuntimeEffectGroup, refuse_unhonored_group_membership,
+    EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupReopen, GroupSettlement,
+    GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
+    refuse_unhonored_group_membership,
 };
 pub use group_executors::GroupExecutors;
 pub use identity_types::{

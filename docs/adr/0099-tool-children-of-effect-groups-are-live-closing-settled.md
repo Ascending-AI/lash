@@ -75,7 +75,7 @@ is recorded, and retirement has completed.
 Two latencies, and they are separate numbers: **winner latency** (when `race`
 resumes — at the first settlement) and **finalization latency** (when the opener
 reports success — after closing drains its protected obligations). No successful
-turn latency bound follows from the cancel grace.
+turn latency bound exists: every protected committed obligation must finish.
 
 **Background work that must survive `finish` is a process the program named.**
 
@@ -658,17 +658,11 @@ resumes the first incomplete step:
 3. record parent end (ADR 0094);
 4. complete retirement.
 
-**A close deadline is an attempt-local drain budget**, `EffectGroupDrainBudget`
-(30 s by default), supplied as controller construction-time input beside the
-segment effect budget in `crates/lash-restate/src/controller/mod.rs`. It
-**starts when that
-attempt's cancel decision commits**, not when closing began and not when the
-group opened, so a slow sibling cannot consume another child's budget. On expiry
-the attempt is logically cancelled and **closing stays recorded and discoverable
-by the existing work driver**; finalization does not commit an ordinary terminal
-that would fence out the remaining obligations. **Changing the budget never
-changes committed obligations**: a redrive under a different budget still owes
-every declaration the first attempt recorded.
+**Close seats cancel-decided children immediately without joining their attempt
+bodies.** The drain barrier waits only for committed children that still owe
+declarations or projection. Every protected committed obligation must finish
+before finalization commits the opener's outcome and accounting, including
+across recovery. Cancellation does not impose a deadline on those obligations.
 
 The drain's queue is the group authority's own record of unsettled children,
 not a second table: nothing is enqueued, and no synthetic queued-work item
@@ -977,8 +971,8 @@ into its group identity: two timer aggregates at two sites are two groups. The c
 **`processes.await(h)` is a resumable child on the existing Durable Wait protocol.**
 A group child is an independently durable unit that need not settle inside one
 resource operation, so the wait is a child of this kind — resumable, retained
-across segments, not subject to the cancel grace a running attempt is, because
-there is no attempt body to interrupt.
+across segments. Its attempt parks on the Durable Wait, and opener close
+cancels and releases the wait without joining an attempt body.
 
 **Selection never cancels the wait.** A winning timer in
 `race([processes.await(job), sleep(10_000)])` leaves the losing wait **admitted
@@ -1005,7 +999,7 @@ what `await handle`".
 
 `processes.await` is admitted as a group
 tool child whose attempt parks on the Durable Wait at once, so there is no
-attempt body for a cancel grace to interrupt; selection leaves it admitted, and
+attempt body to join at close; selection leaves it admitted, and
 the opener's close cancels and releases the wait without cancelling the
 process.
 
@@ -1082,7 +1076,7 @@ both.
 | W9 | **closing recorded, before any cancel was issued** | Recovery resumes closing. No child is retried as though the opener were live, and the recorded terminal disposition is reused rather than re-decided. |
 | W10 | **all drains complete, before the terminal/accounting commit** | Recovery resumes at finalization step 2 (§7). Obligations are not re-run and usage is not double-counted. |
 | W11 | **terminal/accounting committed, before parent-end recording and retirement** | Recovery resumes at step 3, then step 4. Both are idempotent; ADR 0094's own commit-to-ledger window is the same shape. |
-| W12 | close deadline expires with an attempt still draining | The attempt is logically cancelled; **closing stays recorded** and the work driver rediscovers it. No ordinary terminal is committed that would fence out remaining obligations. |
+| W12 | closing recorded with a committed child still draining | Recovery finishes every protected committed obligation; **closing stays recorded** until they finish. Finalization waits at the drain barrier before committing the opener's outcome and accounting. |
 | W13 | segment handover: continuation committed, successor not started | ADR 0025's three handover requirements apply unchanged, and outstanding children are reattached by the successor (§8). Handover does not enter closing. |
 | W14 | child handler death with the opener alive | The child invocation is retried or reattached by invocation id. Abandonment is never inferred from a dead handler. |
 | W15 | attach retention expired before the successor attached | A typed recovery failure. Never a re-execution of an opaque tool body, never a synthesized terminal. |
