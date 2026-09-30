@@ -2022,6 +2022,7 @@ fn type_facets_are_ignored_by_put_and_canonicalization() {
         .push(WorkflowTypeDiagnostic {
             node_id: terminal_id,
             kind: WorkflowDiagnosticKind::UnknownName,
+            classification: lashlang::WorkflowDiagnosticClassification::Definite,
             slot: None,
             message: "must not become source".to_string(),
             span: None,
@@ -2469,3 +2470,45 @@ mod goldens;
 
 #[path = "workflow_graph/adr_claims.rs"]
 mod adr_claims;
+
+#[test]
+fn workflow_diagnostic_classification_is_required_and_closed_on_the_wire() {
+    let mut value = serde_json::to_value(populated_facet_graph()).expect("graph encodes");
+    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
+        "node_id": value["main"]["nodes"][0]["id"].clone(),
+        "kind": "unknown_name",
+        "classification": "definite",
+        "message": "fixture"
+    }]);
+    for classification in ["definite", "advisory"] {
+        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+            serde_json::json!(classification);
+        let decoded =
+            WorkflowGraph::decode_json_value(value.clone()).expect("closed classification decodes");
+        let encoded = serde_json::to_value(decoded).expect("graph encodes");
+        assert_eq!(
+            encoded["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"],
+            classification
+        );
+    }
+    for classification in [
+        serde_json::Value::Null,
+        serde_json::json!("future"),
+        serde_json::json!(0),
+    ] {
+        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+            classification;
+        assert!(
+            WorkflowGraph::decode_json_value(value.clone()).is_err(),
+            "invalid classification must be refused"
+        );
+    }
+    value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]
+        .as_object_mut()
+        .expect("diagnostic object")
+        .remove("classification");
+    assert!(
+        WorkflowGraph::decode_json_value(value).is_err(),
+        "unclassified diagnostics must be refused"
+    );
+}

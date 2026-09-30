@@ -544,6 +544,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                     .map(|diagnostic| TypeDiagnostic {
                         node_id: diagnostic.node_id.to_string(),
                         kind: diagnostic_kind_text(diagnostic.kind),
+                        classification: diagnostic.classification,
                         slot: diagnostic.slot.as_ref().map(ToString::to_string),
                         message: diagnostic.message.clone(),
                         span: diagnostic.span,

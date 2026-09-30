@@ -13,6 +13,7 @@ mod process_signature_tests;
 mod schema_witness_tests;
 mod trigger_tests;
 mod type_flow_tests;
+mod workflow_classification_tests;
 
 #[test]
 fn empty_union_normalizes_to_null_for_empty_lists() {

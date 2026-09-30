@@ -77,6 +77,7 @@ pub(crate) struct WorkflowLinkNodeFacts {
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkflowLinkDiagnostic {
+    pub(crate) classification: crate::WorkflowDiagnosticClassification,
     pub(crate) error: LinkError,
     pub(crate) span: Option<Span>,
     pub(crate) path: AstPath,

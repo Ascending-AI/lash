@@ -34,6 +34,10 @@ export type NodeData = {
   [k: string]: unknown;
 } & NodeData1;
 /**
+ * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ */
+export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
+/**
  * An editable field carries its authored kind at every depth. Literal keys are data, including `$expr`, `kind` and `value`.
  */
 export type EditableValue =
@@ -127,6 +131,7 @@ export interface ChildGroup {
   [k: string]: unknown;
 }
 export interface TypeDiagnostic {
+  classification: WorkflowDiagnosticClassification;
   kind: string;
   message: string;
   nodeId: string;

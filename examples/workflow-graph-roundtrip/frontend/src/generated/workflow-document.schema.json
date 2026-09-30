@@ -493,6 +493,9 @@
     },
     "TypeDiagnostic": {
       "properties": {
+        "classification": {
+          "$ref": "#/definitions/WorkflowDiagnosticClassification"
+        },
         "kind": {
           "type": "string"
         },
@@ -520,6 +523,7 @@
         }
       },
       "required": [
+        "classification",
         "kind",
         "message",
         "nodeId"
@@ -540,6 +544,14 @@
         "type"
       ],
       "type": "object"
+    },
+    "WorkflowDiagnosticClassification": {
+      "description": "Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.",
+      "enum": [
+        "definite",
+        "advisory"
+      ],
+      "type": "string"
     }
   },
   "properties": {

@@ -8,7 +8,7 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 /// Version of the optional, derived workflow type-facet contract. Version 4
 /// (FIG-4038) drops `incompatible_binary_operands`: the retired surface
 /// dialect's operand check has no JavaScript equivalent; v3 facet documents
-/// are refused.
+/// are refused. The pre-1.0 freeze changes this shape in place.
 pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -154,11 +154,21 @@ fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
 pub struct WorkflowTypeDiagnostic {
     pub node_id: WorkflowNodeId,
     pub kind: WorkflowDiagnosticKind,
+    pub classification: WorkflowDiagnosticClassification,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<WorkflowSlotPath>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
+}
+
+/// Whether a diagnostic establishes an admission failure for the analyzed
+/// program and host environment or gives advice without establishing a failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowDiagnosticClassification {
+    Definite,
+    Advisory,
 }
 
 /// Closed host-facing vocabulary for linker diagnostics.
@@ -270,6 +280,65 @@ impl WorkflowDiagnosticKind {
         Self::ModuleHash,
         Self::InvalidAst,
     ];
+
+    /// The classification of diagnostics produced for this kind.
+    ///
+    /// Every current kind reports a linker refusal. Advisory diagnostics do
+    /// not establish an admission failure and have no current producer.
+    pub fn classification(self) -> WorkflowDiagnosticClassification {
+        match self {
+            Self::DuplicateDeclaration
+            | Self::DuplicateProcessParam
+            | Self::DuplicateProcessSignal
+            | Self::UnknownProcess
+            | Self::UnknownName
+            | Self::UnknownBuiltin
+            | Self::UnknownResource
+            | Self::UnknownType
+            | Self::IncompatibleConstructorInput
+            | Self::IncompatibleOperationInput
+            | Self::AwaitedSettledExpression
+            | Self::IncompatibleExpectedLiteral
+            | Self::IncompatibleProcessReturn
+            | Self::IncompatibleFunctionReturn
+            | Self::DuplicateFunctionParam
+            | Self::FunctionArgumentCount
+            | Self::IncompatibleFunctionArgument
+            | Self::ForbiddenInFunction
+            | Self::FunctionNameIsNotAValue
+            | Self::FunctionShadowsBuiltin
+            | Self::InvalidTriggerRegistration
+            | Self::InvalidTriggerSubscriptionKey
+            | Self::ProcessLiteralOutsideProcessSlot
+            | Self::ConflictingSignalPayload
+            | Self::InvalidTriggerInputs
+            | Self::DuplicateTriggerInput
+            | Self::MissingTriggerInput
+            | Self::UnknownTriggerInput
+            | Self::MissingTriggerEventInput
+            | Self::TriggerTargetTakesNoEvent
+            | Self::AmbiguousOmittedTriggerInputs
+            | Self::TriggerEventOutsideInputs
+            | Self::TriggerEventProjection
+            | Self::InvalidTriggerList
+            | Self::UnknownTriggerEventType
+            | Self::InvalidTriggerTarget
+            | Self::TriggerEventMismatch
+            | Self::UnresolvedReceiver
+            | Self::UnknownResourceOperation
+            | Self::AmbiguousModuleOperation
+            | Self::BareToolCall
+            | Self::IncompatibleProcessArgument
+            | Self::FeatureDisabled
+            | Self::ProcessLifecycleOutsideProcess
+            | Self::OpaqueHostDescriptorAccess
+            | Self::UnknownObjectField
+            | Self::IncompatibleBuiltinOperands
+            | Self::IncompatibleIterationTarget
+            | Self::ModuleHash
+            | Self::InvalidAst => WorkflowDiagnosticClassification::Definite,
+        }
+    }
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -432,6 +501,7 @@ pub fn projected_node_type_facets(
             .map(|diagnostic| WorkflowTypeDiagnostic {
                 node_id: id.clone(),
                 kind: WorkflowDiagnosticKind::from_link_error(&diagnostic.error),
+                classification: diagnostic.classification,
                 slot: diagnostic_slot(&diagnostic.path, &facts.expected_arguments),
                 message: diagnostic.error.to_string(),
                 span: diagnostic.span,

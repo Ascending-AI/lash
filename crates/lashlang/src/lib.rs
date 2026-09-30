@@ -214,14 +214,14 @@ pub use workflow_graph::{
 };
 pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraph,
-    WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError, WorkflowGraphReconcilePair,
-    WorkflowGraphReconcileSide, WorkflowGraphReconciliation, WorkflowGraphStructuralLocation,
-    WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot, WorkflowGraphUnmatchedNode,
-    WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets, WorkflowOwnership,
-    WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClassification,
+    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError,
+    WorkflowGraphReconcilePair, WorkflowGraphReconcileSide, WorkflowGraphReconciliation,
+    WorkflowGraphStructuralLocation, WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot,
+    WorkflowGraphUnmatchedNode, WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId,
+    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
+    WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
     WorkflowTypedVariable, child_path, execution_sites,
 };

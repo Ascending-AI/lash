@@ -153,7 +153,11 @@ text into IR and prints IR for display or output. Canonical text is derived.
 Call receivers and arguments use structured expressions and typed positional,
 named, nested-call, field, and index slot paths. Type facets are derived,
 read-only facts. Diagnostics carry an optional slot path and a closed Definite
-or Advisory classification.
+or Advisory classification. Definite reports an admission failure for the
+analyzed program and host environment. Advisory gives advice without
+establishing an admission failure. Every current linker diagnostic kind is
+Definite. The facet reader requires the classification and refuses unknown
+classification variants.
 
 Evidence: `crates/lashlang/src/workflow_graph.rs:665`, `:735`, and
 `crates/lashlang/src/workflow_graph/facets.rs:96`, `:154`.
