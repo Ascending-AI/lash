@@ -72,6 +72,7 @@ pub use super::trigger_store::*;
 pub use super::turn_config::*;
 pub use super::turn_control::*;
 pub use super::turn_crash_matrix::*;
+pub use super::vm_broker::*;
 pub use super::wake_delivery::*;
 pub use lash_core::ProcessRegistry;
 

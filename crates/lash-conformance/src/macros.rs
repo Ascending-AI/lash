@@ -9,6 +9,7 @@ mod tool_call_identity;
 mod tool_child;
 mod turn_crash;
 mod turn_ingress;
+mod vm_broker;
 
 /// Expansion machinery for the runtime-persistence registration macros.
 #[macro_export]

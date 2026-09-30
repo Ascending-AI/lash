@@ -87,15 +87,16 @@ pub(crate) use schema::{
     ValidationPlan, compile_schema_value, execute_validate_builtin, execute_validation_plan,
 };
 pub(crate) use vm::SlotState;
+pub(crate) use vm::VmParkableRun;
 #[allow(unused_imports)]
 pub use vm::{
     ContinuationError, TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
     TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
     TypeScriptRegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
-    VmProfileContinuation, VmResumePoint, VmRunOutcome, VmSuspendedOperation,
-    validate_typescript_regexp, validate_typescript_regexp_shape,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
+    VmSuspendedOperation, validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

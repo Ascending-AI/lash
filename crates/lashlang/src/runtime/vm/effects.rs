@@ -45,13 +45,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
         effect: VmEffect,
         instruction_ip: usize,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
+        // An operation issued again after a declined park resumes normally:
+        // a continuation captured past it resumes at the next instruction.
+        self.resume_point = super::VmResumePoint::NextInstruction;
         let active = self.begin_lashlang_execution(instruction_ip);
         let result =
             Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
             // A handed-over wait did not complete: its node is left for the
-            // continuation that issues the wait again.
-            (Ok(Some(VmOutcome::HandedOver)), _) => {}
+            // continuation that issues the wait again. An operation the run
+            // parked on also takes back the occurrence its node began with,
+            // so the resumed run numbers it as an unparked run does.
+            (Ok(Some(VmOutcome::HandedOver)), active) => {
+                if let (Some(active), true) = (active, self.parked_on_effect()) {
+                    self.rewind_lashlang_execution(active);
+                }
+            }
             (Ok(Some(VmOutcome::ProcessFailed(value))), Some(active)) => {
                 self.emit_lashlang_execution_failure(
                     active,
@@ -83,6 +92,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let (receiver, args) = self.drain_receiver_call(argc)?;
                 ensure_no_tool_handle_arguments(&args)?;
                 let operation_name = self.chunk.names[operation].text.to_string();
+                let operands = reissue_operands(&receiver, &args);
                 let result = match self
                     .host
                     .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
@@ -104,10 +114,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         ExecutionHostError::new("module operation returned no value"),
                         &operation_name,
                     ),
-                    Ok(AbilityOutcome::HandedOver) => execution_host_error_value(
-                        ExecutionHostError::new("module operation returned a hand-over"),
-                        &operation_name,
-                    ),
+                    Ok(AbilityOutcome::HandedOver) => {
+                        return Ok(Some(self.park_on_operation(
+                            instruction_ip,
+                            operands,
+                            super::VmSuspendedOperation::ResourceOperation {
+                                operation: operation_name,
+                            },
+                        )));
+                    }
                     Err(error) => execution_host_error_value(error, &operation_name),
                 };
                 self.stack.push(result);
@@ -115,15 +130,27 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::ResourceCallUnwrap { operation, argc } => {
                 let (receiver, args) = self.drain_receiver_call(argc)?;
                 ensure_no_tool_handle_arguments(&args)?;
-                let value = self
+                let operation_name = self.chunk.names[operation].text.to_string();
+                let operands = reissue_operands(&receiver, &args);
+                let result = self
                     .host
                     .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
                         receiver,
-                        operation: self.chunk.names[operation].text.to_string(),
+                        operation: operation_name.clone(),
                         args,
                         call_site: active.map(lashlang_execution_call_site),
                     })))
-                    .await
+                    .await;
+                if matches!(result, Ok(AbilityOutcome::HandedOver)) {
+                    return Ok(Some(self.park_on_operation(
+                        instruction_ip,
+                        operands,
+                        super::VmSuspendedOperation::ResourceOperation {
+                            operation: operation_name,
+                        },
+                    )));
+                }
+                let value = result
                     .and_then(|result| result.into_value("module operation"))
                     .map_err(|source| RuntimeError::UnwrappedModuleOperationFailed { source })?;
                 self.stack.push(value);
@@ -173,13 +200,23 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::Sleep(kind) => {
                 let value = self.pop_stack()?;
-                self.host
+                let operands = vec![value.clone()];
+                let result = self
+                    .host
                     .perform(AbilityOp::Sleep(Sleep {
                         kind,
                         value,
                         call_site: active.map(lashlang_execution_call_site),
                     }))
-                    .await
+                    .await;
+                if matches!(result, Ok(AbilityOutcome::HandedOver)) {
+                    return Ok(Some(self.park_on_operation(
+                        instruction_ip,
+                        operands,
+                        super::VmSuspendedOperation::Sleep,
+                    )));
+                }
+                result
                     .and_then(|result| result.into_value("sleep"))
                     .map_err(|source| RuntimeError::SleepFailed { source })?;
                 self.last_value = Some(Value::Null);
@@ -204,6 +241,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         operation: super::VmSuspendedOperation::WaitSignal {
                             name: self.chunk.names[name].text.to_string(),
                         },
+                        loop_phase: None,
                     };
                     return Ok(Some(VmOutcome::HandedOver));
                 }
@@ -252,6 +290,40 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
         Ok(None)
+    }
+
+    /// Whether the run stands on an operation its host parked it on, rather
+    /// than a signal wait handed to a successor segment.
+    fn parked_on_effect(&self) -> bool {
+        matches!(
+            &self.resume_point,
+            super::VmResumePoint::ReissueOperation {
+                operation: super::VmSuspendedOperation::ResourceOperation { .. }
+                    | super::VmSuspendedOperation::Sleep,
+                ..
+            }
+        )
+    }
+
+    /// Parks the run on the operation its host kept open (FIG-4159): the
+    /// operands go back on the stack, the instruction pointer stands on the
+    /// instruction again and its dispatch is uncharged, so a continuation
+    /// captured now issues exactly this operation again, and a run resumed
+    /// from it counts every instruction as a run that never parked does.
+    fn park_on_operation(
+        &mut self,
+        instruction_ip: usize,
+        operands: Vec<Value>,
+        operation: super::VmSuspendedOperation,
+    ) -> VmOutcome {
+        self.stack.extend(operands);
+        self.ip = instruction_ip;
+        self.instructions_executed = self.instructions_executed.saturating_sub(1);
+        self.resume_point = super::VmResumePoint::ReissueOperation {
+            operation,
+            loop_phase: None,
+        };
+        VmOutcome::HandedOver
     }
 
     async fn resolve_resource_operation_batch(
@@ -1082,4 +1154,14 @@ fn host_success(value: Value, operation: &str) -> Value {
         }
         None => success(value),
     }
+}
+
+/// The operands a resource call drained, in stack order, kept so a run its
+/// host parks on the call can stand on it again. Values are shared handles,
+/// so the copy is shallow.
+fn reissue_operands(receiver: &Value, args: &[Value]) -> Vec<Value> {
+    let mut operands = Vec::with_capacity(args.len() + 1);
+    operands.push(receiver.clone());
+    operands.extend(args.iter().cloned());
+    operands
 }

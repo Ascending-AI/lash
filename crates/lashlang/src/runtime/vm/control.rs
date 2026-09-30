@@ -48,8 +48,10 @@ pub(super) enum VmOutcome {
     Finished(Value),
     ProcessFinished(Value),
     ProcessFailed(Value),
-    /// A process's signal wait was handed over to a successor segment; the
-    /// instruction pointer stands on the wait again.
+    /// The host kept the operation open without completing it: a process's
+    /// signal wait handed over to a successor segment, or an operation the
+    /// host parked the run on (FIG-4159). The instruction pointer stands on
+    /// the operation again.
     HandedOver,
     #[cfg(test)]
     Suspended,
@@ -63,6 +65,14 @@ fn handed_over_outside_a_segment() -> RuntimeError {
             "wait_signal was handed over outside a segmented process run",
         ),
     }
+}
+
+/// How a whole run its host may park ended ([`Vm::run_parkable`]).
+pub(crate) enum VmParkableRun {
+    Ended(Result<ExecutionOutcome, RuntimeFailure>),
+    /// The host parked the run on the operation it awaits; the instruction
+    /// pointer stands on it.
+    ParkedOnOperation,
 }
 
 struct VmTrap {
@@ -198,6 +208,49 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    /// Runs a whole (foreground) run whose host may park it on an operation
+    /// it awaits (FIG-4159): the run stops standing on that operation, with
+    /// its iterators left open for the continuation to capture. Every other
+    /// end is [`Self::run`]'s, or [`Self::run_traced`]'s when `traced`.
+    pub(crate) async fn run_parkable(&mut self, traced: bool) -> VmParkableRun {
+        let result = self.run_loop(false).await;
+        if matches!(result, Ok(VmOutcome::HandedOver)) {
+            return VmParkableRun::ParkedOnOperation;
+        }
+        let result = result.map_err(|trap| RuntimeFailure {
+            span: if traced {
+                trap.span
+                    .or_else(|| self.chunk.spans.get(trap.instruction_ip).copied().flatten())
+            } else {
+                None
+            },
+            error: trap.error,
+        });
+        self.unwind_iterators();
+        VmParkableRun::Ended(result.and_then(|outcome| match outcome {
+            VmOutcome::Continued | VmOutcome::EffectCompleted => Ok(ExecutionOutcome::Continued),
+            VmOutcome::Finished(value) => Ok(ExecutionOutcome::Finished(value)),
+            #[cfg(test)]
+            VmOutcome::Suspended => Ok(ExecutionOutcome::Continued),
+            VmOutcome::ProcessFinished(_) => Err(RuntimeFailure {
+                error: RuntimeError::SessionProcessAdminOutsideProcess {
+                    keyword: "finish".into(),
+                },
+                span: None,
+            }),
+            VmOutcome::ProcessFailed(_) => Err(RuntimeFailure {
+                error: RuntimeError::SessionProcessAdminOutsideProcess {
+                    keyword: "fail".into(),
+                },
+                span: None,
+            }),
+            VmOutcome::HandedOver => Err(RuntimeFailure {
+                error: handed_over_outside_a_segment(),
+                span: None,
+            }),
+        }))
+    }
+
     async fn run_raw(&mut self) -> Result<VmOutcome, RuntimeError> {
         let result = self.run_loop(false).await.map_err(|trap| trap.error);
         #[cfg(test)]
@@ -250,8 +303,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// and when the loop ends. Where the loop checks its bounds, and so the
     /// instruction a cancellation lands on, is unchanged.
     async fn run_loop(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
-        let mut budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
-        let mut checkpoint = cancel_checkpoint_reached(self.instructions_executed);
+        // A whole-run loop resumed from a park on an operation picks up the
+        // yield phase it parked in (FIG-4159), so its cancel checkpoints fall
+        // where an unparked run's do.
+        let (mut budget, mut checkpoint) = match self.resume_loop_phase.take() {
+            Some(phase) => (
+                usize::try_from(phase.yield_budget)
+                    .unwrap_or(COOPERATIVE_YIELD_INSTRUCTION_BUDGET)
+                    .clamp(1, COOPERATIVE_YIELD_INSTRUCTION_BUDGET),
+                phase.announced_checkpoint,
+            ),
+            None => (
+                COOPERATIVE_YIELD_INSTRUCTION_BUDGET,
+                cancel_checkpoint_reached(self.instructions_executed),
+            ),
+        };
         // Whether VM state held no inline compound after the last instruction:
         // only then may an instruction that keeps it so skip the import pass.
         let mut heapified = false;
@@ -379,6 +445,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             match result {
                 Ok(Some(outcome)) => {
+                    if matches!(outcome, VmOutcome::HandedOver) && !stop_after_effect {
+                        self.record_park_loop_phase(budget, checkpoint);
+                    }
                     return self.finish_run_loop(Ok(outcome), instruction_ip);
                 }
                 Ok(None) => {}
@@ -421,6 +490,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
         self.finish_run_loop(Ok(VmOutcome::Continued), self.ip.saturating_sub(1))
+    }
+
+    /// A whole-run loop parked on an operation: the resume point it stands
+    /// on records where the loop stood in its yield schedule.
+    fn record_park_loop_phase(&mut self, budget: usize, checkpoint: u64) {
+        if let super::VmResumePoint::ReissueOperation { loop_phase, .. } = &mut self.resume_point {
+            *loop_phase = Some(super::VmLoopPhase {
+                yield_budget: budget as u64,
+                announced_checkpoint: checkpoint,
+            });
+        }
     }
 
     fn finish_run_loop(

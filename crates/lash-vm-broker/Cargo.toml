@@ -1,0 +1,42 @@
+[package]
+name = "lash-internal-vm-broker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Parent-side broker for lash's model-code workers: authority, ordinals, recovery and slot release."
+
+[lib]
+name = "lash_vm_broker"
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# The in-process fake worker the broker's laws run behind the protocol types.
+testing = []
+
+# The broker is parent code: it depends on the protocol and the parent's
+# identity vocabulary, and on nothing that could decode or run guest state
+# (ADR 0123).
+[dependencies]
+lash-core-store = { workspace = true }
+lash-sansio = { workspace = true }
+lash-vm-protocol = { workspace = true }
+async-trait = { workspace = true }
+blake3 = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

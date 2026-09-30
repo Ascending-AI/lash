@@ -71,6 +71,8 @@ impl VmContinuation {
             #[serde(deserialize_with = "continuation_serde::deserialize_heap")]
             heap: VmHeapContinuation,
             resume: VmResumePoint,
+            #[serde(default)]
+            expired_functions: std::collections::BTreeSet<String>,
         }
 
         let wire = Wire::deserialize(raw).map_err(|error| undecodable(error.to_string()))?;
@@ -98,6 +100,7 @@ impl VmContinuation {
             instructions_executed: wire.instructions_executed,
             heap: wire.heap,
             resume: wire.resume,
+            expired_functions: wire.expired_functions,
         };
         validate_continuation(&continuation)?;
         Ok(continuation)
@@ -132,7 +135,17 @@ pub enum VmResumePoint {
     NextInstruction,
     /// Parked on an operation that did not complete: the instruction pointer
     /// stands on it, and resuming issues exactly this operation again.
-    ReissueOperation { operation: VmSuspendedOperation },
+    ///
+    /// `loop_phase` is the dispatch loop's cooperative-yield phase at the
+    /// park, when the run was a whole-run (foreground) loop that would have
+    /// carried on past the operation: the resumed loop picks it up, so its
+    /// cancel checkpoints fall where an unparked run's do. A run that stops
+    /// after every effect (a process segment) restarts its phase after each
+    /// one anyway, and carries none.
+    ReissueOperation {
+        operation: VmSuspendedOperation,
+        loop_phase: Option<VmLoopPhase>,
+    },
 }
 
 /// The operation a continuation parked on without completing.
@@ -141,6 +154,24 @@ pub enum VmResumePoint {
 pub enum VmSuspendedOperation {
     /// A process signal wait the host handed to a successor segment.
     WaitSignal { name: String },
+    /// A resource operation the run parked awaiting (FIG-4159): its host kept
+    /// the admitted operation open and asked the run to park on it, so the
+    /// worker holding the run could be released. Resuming issues the same
+    /// operation again, and the host answers it with the outcome it held.
+    ResourceOperation { operation: String },
+    /// A sleep the run parked awaiting, the same way.
+    Sleep,
+}
+
+/// Where a whole-run dispatch loop stood in its cooperative-yield schedule
+/// when it parked on an operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmLoopPhase {
+    /// Dispatches left before the loop's next cooperative yield.
+    pub yield_budget: u64,
+    /// The last cancel checkpoint the loop announced.
+    pub announced_checkpoint: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

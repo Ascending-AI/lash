@@ -2074,6 +2074,8 @@ dependencies = [
  "lash-internal-plugin-standard-compaction",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-vm-broker",
+ "lash-internal-vm-protocol",
  "pretty_assertions",
  "proptest",
  "rmp-serde",
@@ -2301,6 +2303,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-trace",
+ "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "serde",
  "serde_json",
@@ -2794,6 +2797,24 @@ dependencies = [
  "swc_ecma_parser",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "lash-internal-vm-broker"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "lash-internal-vm-protocol",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

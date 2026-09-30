@@ -21,7 +21,7 @@ pub use config::{Deadlines, PoolConfig, WorkerEntry};
 pub use entry::worker_entry;
 pub use error::PoolError;
 #[cfg(unix)]
-pub use pool::{Checkout, ExecutionBudget, PoolStats, WorkerPool};
+pub use pool::{Checkout, ExecutionBudget, ParkOutcome, PoolStats, WorkerPool};
 #[cfg(unix)]
 pub use worker::RunContext;
 

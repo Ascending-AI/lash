@@ -13,8 +13,6 @@ pub enum PoolError {
     RestartStorm,
     #[error("the execution exhausted its replacement attempt budget")]
     RetryLimitExceeded,
-    #[error("releasing this slot needs the broker's pending-effect checkpoint")]
-    PendingEffectParkingRequired,
     #[error("worker pool configuration is invalid")]
     InvalidConfiguration,
     #[error("this platform has no worker descriptor adapter")]

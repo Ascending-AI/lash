@@ -11,6 +11,11 @@
 //!   driven step by step, and a process run parked at every boundary and
 //!   reopened from its bytes on a fresh instance, match the same program run
 //!   straight through.
+//! * [`effect_park_matches_straight_through_for_every_corpus_program`]
+//!   (FIG-4159): a run of either mode parked on every operation it awaits,
+//!   reopened from its bytes on a fresh instance and answered there with the
+//!   outcome its host held, matches the same program run straight through:
+//!   the same requests, the same cancel checkpoints, the same end and state.
 
 use std::future::Future;
 use std::num::NonZeroU64;
@@ -77,6 +82,7 @@ fn encoded(state: &State) -> String {
 /// one-shot `execute`, against a host that records what it is asked.
 struct StraightHost {
     mode: ExecutionMode,
+    bounds: ExecutionBounds,
     transcript: Mutex<Vec<String>>,
 }
 
@@ -95,7 +101,7 @@ impl ExecutionHost for StraightHost {
     }
 
     fn execution_bounds(&self) -> ExecutionBounds {
-        bounds()
+        self.bounds
     }
 }
 
@@ -109,8 +115,18 @@ impl StraightHost {
 }
 
 fn straight_through(program: &CompiledProgram, globals: &State, mode: ExecutionMode) -> Run {
+    straight_through_within(program, globals, mode, bounds())
+}
+
+fn straight_through_within(
+    program: &CompiledProgram,
+    globals: &State,
+    mode: ExecutionMode,
+    bounds: ExecutionBounds,
+) -> Run {
     let host = StraightHost {
         mode,
+        bounds,
         transcript: Mutex::new(Vec::new()),
     };
     let mut state = globals.clone();
@@ -136,6 +152,12 @@ enum Boundaries {
     /// Park, carry the continuation's bytes to a pristine instance, and
     /// resume there.
     ParkAndReopen,
+    /// Run on at every boundary, and park on every operation the run awaits
+    /// that can be parked: the host settles the operation and holds its
+    /// outcome, the continuation's bytes go to a pristine instance, and the
+    /// operation the resumed run issues again is answered with the held
+    /// outcome, recorded once.
+    ParkEveryEffectAndReopen,
 }
 
 /// The program driven through the owned interface on `instance`.
@@ -145,10 +167,24 @@ fn stepped(
     mode: ExecutionMode,
     boundaries: Boundaries,
 ) -> Run {
-    let config = VmRunConfig::new(mode, bounds());
+    stepped_within(instance, program, mode, boundaries, bounds())
+}
+
+fn stepped_within(
+    instance: &mut VmInstance,
+    program: &std::sync::Arc<CompiledProgram>,
+    mode: ExecutionMode,
+    boundaries: Boundaries,
+    bounds: ExecutionBounds,
+) -> Run {
+    let config = VmRunConfig::new(mode, bounds);
     let mut transcript = Vec::new();
     let mut parks = 0_usize;
     let mut owner = None::<VmInstance>;
+    // The operation a parked run awaits and the outcome its host holds.
+    let mut held = None::<(String, Result<lashlang::AbilityOutcome, ExecutionHostError>)>;
+    let mut effect_parks = 0_usize;
+    let mut declined_parks = Vec::new();
     let mut step = instance
         .start(program.clone(), VmExecutionStart::Session, config.clone())
         .unwrap_or_else(|error| panic!("the run starts: {error}"));
@@ -156,7 +192,25 @@ fn stepped(
         let current = owner.as_mut().unwrap_or(&mut *instance);
         step = match step {
             VmStep::Suspended(suspended) => {
+                let parkable = suspended.request.parkable();
                 let resume = match suspended.request {
+                    VmRequest::Effect(op) if held.is_some() => {
+                        let (issued, outcome) = held.take().expect("checked above");
+                        assert_eq!(
+                            format!("{op:?}"),
+                            issued,
+                            "a resumed run issues the operation it parked on again"
+                        );
+                        VmResume::Effect(outcome)
+                    }
+                    VmRequest::Effect(op)
+                        if parkable && boundaries == Boundaries::ParkEveryEffectAndReopen =>
+                    {
+                        let issued = format!("{op:?}");
+                        transcript.push(format!("effect {issued}"));
+                        held = Some((issued, answer(op)));
+                        VmResume::Park
+                    }
                     VmRequest::Effect(op) => {
                         transcript.push(format!("effect {op:?}"));
                         VmResume::Effect(answer(op))
@@ -166,10 +220,17 @@ fn stepped(
                         VmResume::CancelCheckpoint { cancelled: false }
                     }
                     VmRequest::Boundary => match boundaries {
-                        Boundaries::RunOn => VmResume::Continue,
+                        Boundaries::RunOn | Boundaries::ParkEveryEffectAndReopen => {
+                            VmResume::Continue
+                        }
                         Boundaries::ParkAndReopen => VmResume::Park,
                     },
-                    VmRequest::ParkDeclined(_) => VmResume::Continue,
+                    VmRequest::ParkDeclined(error) => {
+                        if held.is_some() {
+                            declined_parks.push(error.to_string());
+                        }
+                        VmResume::Continue
+                    }
                 };
                 current
                     .resume(resume)
@@ -177,6 +238,10 @@ fn stepped(
             }
             VmStep::Parked(parked) => {
                 parks += 1;
+                if parked.reason == lashlang::VmParkReason::AwaitingEffect {
+                    effect_parks += 1;
+                    assert!(held.is_some(), "a run parks on an effect only when asked");
+                }
                 let bytes = parked
                     .continuation
                     .to_bytes()
@@ -199,6 +264,28 @@ fn stepped(
             VmStep::GuestError(error) => break format!("guest error {:?}", error.failure.error),
         };
     };
+    assert!(
+        held.is_none(),
+        "every operation a run parked on was issued again"
+    );
+    if boundaries == Boundaries::ParkEveryEffectAndReopen {
+        let parkable = transcript
+            .iter()
+            .filter(|entry| {
+                entry.starts_with("effect ResourceOperation(")
+                    || entry.starts_with("effect Sleep")
+                    || entry.starts_with("effect WaitSignal")
+            })
+            .count();
+        assert_eq!(
+            effect_parks + declined_parks.len(),
+            parkable,
+            "the run parked on every parkable operation it issued, or declined it: {declined_parks:?}; {mode:?} transcript {transcript:?}, end {end}"
+        );
+        for reason in &declined_parks {
+            eprintln!("declined park: {reason}");
+        }
+    }
     if boundaries == Boundaries::ParkAndReopen {
         let effects = transcript
             .iter()
@@ -370,6 +457,105 @@ fn step_resume_matches_straight_through_for_every_corpus_program() {
         parked_runs > 0,
         "no corpus program reached an effect, so nothing was parked"
     );
+}
+
+#[test]
+fn effect_park_matches_straight_through_for_every_corpus_program() {
+    let corpus = corpus();
+    let mut failures = Vec::new();
+    let mut parked_programs = 0_usize;
+    for program in &corpus {
+        for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
+            let straight = straight_through(&program.program, &program.globals, mode);
+            let mut instance = VmInstance::pristine();
+            with_globals(&mut instance, &program.globals);
+            let parked = stepped(
+                &mut instance,
+                &program.program,
+                mode,
+                Boundaries::ParkEveryEffectAndReopen,
+            );
+            if mode == ExecutionMode::Foreground
+                && parked
+                    .transcript
+                    .iter()
+                    .any(|entry| entry.starts_with("effect ResourceOperation("))
+            {
+                parked_programs += 1;
+            }
+            if parked != straight {
+                failures.push(format!(
+                    "{} ({mode:?}, parked on every effect):\n  parked:   {parked:?}\n  straight: {straight:?}",
+                    program.id
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} runs of {} programs diverged from straight through:\n{}",
+        failures.len(),
+        corpus.len(),
+        failures.join("\n")
+    );
+    // The corpus's scalar resource calls: every program that issues one
+    // parked on it.
+    assert!(
+        parked_programs >= 7,
+        "too few corpus programs parked on a resource operation: {parked_programs}"
+    );
+}
+
+/// A run parked on an operation between long stretches of computation meets
+/// every cancel checkpoint where an unparked run does, in both modes: the
+/// park uncharges the operation's dispatch, and a whole-run loop resumes in
+/// the yield phase it parked in.
+#[test]
+fn effect_park_keeps_cancel_checkpoints_where_an_unparked_run_meets_them() {
+    let environment = probe_environment(&[]);
+    let program = link(
+        r#"
+let total = 0;
+for (let i = 0; i < 150000; i++) { total = total + i; }
+const first = await tools.echo({ value: total });
+for (let i = 0; i < 250000; i++) { total = total + i * 2; }
+const second = await tools.echo({ value: total + 1 });
+const third = await tools.echo({ value: second });
+for (let i = 0; i < 400000; i++) { total = total - i; }
+finish([first, second, third, total]);
+"#,
+        &environment,
+    );
+    let long = ExecutionBounds::new(
+        ExecutionBound::Bounded(NonZeroU64::new(50_000_000).expect("nonzero")),
+        ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+    );
+    for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
+        let straight = straight_through_within(&program, &State::new(), mode, long);
+        assert!(
+            straight
+                .transcript
+                .iter()
+                .filter(|entry| entry.starts_with("checkpoint"))
+                .count()
+                >= 3
+                && straight.end.starts_with("complete"),
+            "{mode:?}: the program crosses several cancel checkpoints: {:?}",
+            straight.transcript
+        );
+        let mut instance = VmInstance::pristine();
+        let parked = stepped_within(
+            &mut instance,
+            &program,
+            mode,
+            Boundaries::ParkEveryEffectAndReopen,
+            long,
+        );
+        assert_eq!(
+            parked, straight,
+            "{mode:?}: a parked run matches straight through"
+        );
+    }
 }
 
 /// The text session A plants everywhere guest state can live.

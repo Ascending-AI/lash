@@ -8,6 +8,26 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         state: &mut State,
         host: &'a H,
     ) -> Result<Self, RuntimeError> {
+        Self::from_state_with(program, state, host, None)
+    }
+
+    /// [`Self::from_state`], reusing `scratch`'s buffers: a run that ends
+    /// hands them back through [`Self::recycle_into_state_parts`].
+    pub(crate) fn from_state_recycling(
+        program: &'a CompiledProgram,
+        state: &mut State,
+        host: &'a H,
+        scratch: &mut ExecutionScratch,
+    ) -> Result<Self, RuntimeError> {
+        Self::from_state_with(program, state, host, Some(scratch))
+    }
+
+    fn from_state_with(
+        program: &'a CompiledProgram,
+        state: &mut State,
+        host: &'a H,
+        mut scratch: Option<&mut ExecutionScratch>,
+    ) -> Result<Self, RuntimeError> {
         state.validate_program(program)?;
         let projected = host.projected_bindings();
         let (mut globals, mut heap) = state.take_runtime();
@@ -16,14 +36,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         // in `from_globals` never revisits those (FIG-2865).
         crate::runtime::projected_refresh::refresh_record(&mut globals, &projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, &projected);
+        let slot_values = scratch
+            .as_deref_mut()
+            .map(|scratch| std::mem::take(&mut scratch.slot_values))
+            .unwrap_or_default();
         let slots = SlotState::from_globals(
             globals,
             &program.chunk.slot_names,
             &program.chunk.private_slots,
             &projected,
-            Vec::new(),
+            slot_values,
         );
-        let mut vm = Self::new(program, slots, host, None, host.execution_mode());
+        let mut vm = Self::new(program, slots, host, scratch, host.execution_mode());
         vm.install_heap(heap);
         if host.profile_execution() {
             vm.enable_profile();

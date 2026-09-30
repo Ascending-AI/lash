@@ -25,6 +25,7 @@ fn empty_continuation(heap: Heap) -> VmContinuation {
         instructions_executed: 0,
         heap: VmHeapContinuation::new(heap),
         resume: VmResumePoint::NextInstruction,
+        expired_functions: std::collections::BTreeSet::new(),
     }
 }
 

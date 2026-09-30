@@ -2093,6 +2093,25 @@ mod session_history {
     }
 }
 
+mod vm_broker {
+    use super::*;
+    // FIG-4159: the worker-broker laws, each turn inside a handler of the
+    // Restate double over this test's PostgreSQL stores; a lost worker fails
+    // the attempt and the double replays the invocation into the re-drive.
+    lash_conformance::vm_broker_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), _stores, _host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-vm-broker".to_string(),
+            runner,
+        )
+    });
+}
+
 mod frame_open {
     use super::*;
     // FIG-4110: every frame open (a context-pressure frame, a pressure frame

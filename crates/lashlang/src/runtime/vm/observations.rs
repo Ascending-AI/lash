@@ -46,6 +46,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Some(self.begin_lashlang_execution_site(site))
     }
 
+    /// Takes back the occurrence `active` began with: the run parked on the
+    /// operation its node issues, and issues it again when it resumes.
+    pub(super) fn rewind_lashlang_execution(&mut self, active: &ActiveLashlangExecutionNode) {
+        rewind_occurrence(
+            &mut self.lashlang_execution_occurrences,
+            &active.site.node_id,
+            active.occurrence,
+        );
+    }
+
     pub(super) fn begin_lashlang_execution_site(
         &mut self,
         site: LashlangExecutionSite,
@@ -168,6 +178,17 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             },
             selected,
         });
+    }
+}
+
+/// Takes back the occurrence a node began with, when the run parked on the
+/// operation the node issues (FIG-4159): the resumed run begins it again,
+/// under the same occurrence an unparked run gives it.
+fn rewind_occurrence(occurrences: &mut FxHashMap<String, u64>, node_id: &str, occurrence: u64) {
+    if occurrence <= 1 {
+        occurrences.remove(node_id);
+    } else {
+        occurrences.insert(node_id.to_owned(), occurrence - 1);
     }
 }
 

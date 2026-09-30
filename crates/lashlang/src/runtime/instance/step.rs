@@ -6,7 +6,12 @@
 //! - [`VmStep::Suspended`] names the request: an ability operation, a cancel
 //!   checkpoint, or (in process mode) a segment boundary. The host answers it
 //!   with [`VmResume`] through [`VmInstance::resume`](super::VmInstance::resume).
-//! - [`VmStep::Parked`] ends the run in a durable continuation.
+//! - [`VmStep::Parked`] ends the run in a durable continuation: at a segment
+//!   boundary, or on an operation the run awaits that its host parked it on
+//!   ([`VmResume::Park`] answering a [parkable](VmRequest::parkable) effect,
+//!   FIG-4159), so the worker holding it can be released while the host
+//!   settles the operation. A run started from that continuation issues the
+//!   same operation again, and the host answers it with the outcome it held.
 //! - [`VmStep::Complete`] and [`VmStep::GuestError`] end it with its outcome.
 //!
 //! Nothing that crosses this interface borrows: requests, answers and
@@ -27,7 +32,8 @@ use crate::LashlangExecutionObservation;
 use crate::runtime::{
     AbilityOp, AbilityOutcome, CompiledProgram, ContinuationError, ExecutionBounds, ExecutionHost,
     ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, ProfileReport,
-    ProjectedBindings, RuntimeError, RuntimeFailure, State, Vm, VmContinuation, VmRunOutcome,
+    ProjectedBindings, RuntimeError, RuntimeFailure, State, Vm, VmContinuation, VmParkableRun,
+    VmRunOutcome,
 };
 
 /// What a run starts from.
@@ -36,7 +42,8 @@ pub enum VmExecutionStart {
     /// The instance's session state: a foreground cell, or a process body's
     /// first segment over its argument globals.
     Session,
-    /// A parked continuation of a process body.
+    /// A parked continuation: a process body's segment, or a run of either
+    /// mode parked on an operation it awaits. Its mode must be the run's.
     Continuation(Box<VmContinuation>),
 }
 
@@ -103,9 +110,27 @@ pub enum VmRequest {
 }
 
 impl VmRequest {
+    /// Whether [`VmResume::Park`] may answer this request: an effect the run
+    /// can stand on again — a resource operation, a sleep or a signal wait —
+    /// so the host can park the run awaiting it and answer the operation when
+    /// a continuation issues it again. An aggregate, an await, a print or a
+    /// terminal is answered in place.
+    pub fn parkable(&self) -> bool {
+        matches!(
+            self,
+            Self::Effect(
+                AbilityOp::ResourceOperation(_)
+                    | AbilityOp::Sleep(_)
+                    | AbilityOp::WaitSignal { .. }
+            )
+        )
+    }
+
     fn kind(&self) -> RequestKind {
         match self {
-            Self::Effect(_) => RequestKind::Effect,
+            Self::Effect(_) => RequestKind::Effect {
+                parkable: self.parkable(),
+            },
             Self::CancelCheckpoint(_) => RequestKind::CancelCheckpoint,
             Self::Boundary => RequestKind::Boundary,
             Self::ParkDeclined(_) => RequestKind::ParkDeclined,
@@ -116,7 +141,7 @@ impl VmRequest {
 /// Which request is pending, kept to check the resume that answers it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RequestKind {
-    Effect,
+    Effect { parkable: bool },
     CancelCheckpoint,
     Boundary,
     ParkDeclined,
@@ -125,7 +150,7 @@ enum RequestKind {
 impl RequestKind {
     fn name(self) -> &'static str {
         match self {
-            Self::Effect => "effect",
+            Self::Effect { .. } => "effect",
             Self::CancelCheckpoint => "cancel checkpoint",
             Self::Boundary => "boundary",
             Self::ParkDeclined => "park declined",
@@ -142,7 +167,8 @@ pub enum VmResume {
     },
     /// Answers a boundary (run on) or a declined park (acknowledged).
     Continue,
-    /// Answers a boundary: park the run here.
+    /// Answers a boundary, or a parkable effect the run awaits: park the run
+    /// here.
     Park,
 }
 
@@ -159,7 +185,8 @@ impl VmResume {
     fn answers(&self, request: RequestKind) -> bool {
         matches!(
             (request, self),
-            (RequestKind::Effect, Self::Effect(_))
+            (RequestKind::Effect { .. }, Self::Effect(_))
+                | (RequestKind::Effect { parkable: true }, Self::Park)
                 | (RequestKind::CancelCheckpoint, Self::CancelCheckpoint { .. })
                 | (RequestKind::Boundary, Self::Continue | Self::Park)
                 | (RequestKind::ParkDeclined, Self::Continue)
@@ -181,6 +208,10 @@ pub enum VmParkReason {
     /// The host handed the pending signal wait to a successor; the
     /// continuation re-issues it.
     HandedOver,
+    /// The host parked the run on the effect it awaits (FIG-4159); the
+    /// continuation re-issues it, and the host answers it with the outcome it
+    /// held.
+    AwaitingEffect,
 }
 
 #[derive(Debug)]
@@ -227,8 +258,11 @@ pub enum VmStepError {
     },
     #[error("projected binding `{name}` is backed by a host descriptor, which cannot cross")]
     HostProjection { name: String },
-    #[error("a continuation resumes only in process mode")]
-    ContinuationOutsideProcess,
+    #[error("a continuation parked in {parked:?} mode cannot resume a {run:?} run")]
+    ContinuationModeMismatch {
+        parked: ExecutionMode,
+        run: ExecutionMode,
+    },
     #[error("the continuation does not resume this program: {0}")]
     ContinuationRefused(ContinuationError),
     #[error("the run stopped without asking its host for anything")]
@@ -262,6 +296,9 @@ struct Mailbox {
     answer: Option<VmResume>,
     /// The cancellation the host last observed at a checkpoint.
     cancelled: bool,
+    /// The host answered the pending effect with [`VmResume::Park`]: the run
+    /// is standing on it again, to park.
+    parked_on_effect: bool,
     observations: Vec<LashlangExecutionObservation>,
     runtime_failure: Option<RuntimeFailure>,
     profile: Option<ProfileReport>,
@@ -310,6 +347,12 @@ impl ExecutionHost for StepHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match self.ask(VmRequest::Effect(op)).await {
             VmResume::Effect(result) => result,
+            // `answer` admits a park only for a parkable effect, whose arm
+            // stands on the operation again when it is answered this way.
+            VmResume::Park => {
+                self.mailbox.lock_recover().parked_on_effect = true;
+                Ok(AbilityOutcome::HandedOver)
+            }
             // `answer` admits only the resume that answers the request.
             _ => Err(ExecutionHostError::new(
                 "an effect was answered by another resume",
@@ -425,10 +468,13 @@ impl VmExecution {
         if let Some(name) = config.projected.host_backed_name() {
             return Err(VmStepError::HostProjection { name });
         }
-        if matches!(start, VmExecutionStart::Continuation(_))
-            && config.mode != ExecutionMode::Process
+        if let VmExecutionStart::Continuation(continuation) = &start
+            && continuation.mode != config.mode
         {
-            return Err(VmStepError::ContinuationOutsideProcess);
+            return Err(VmStepError::ContinuationModeMismatch {
+                parked: continuation.mode,
+                run: config.mode,
+            });
         }
         let host = Arc::new(StepHost {
             config,
@@ -439,7 +485,9 @@ impl VmExecution {
             }),
         });
         let run: RunFuture = match host.config.mode {
-            ExecutionMode::Foreground => Box::pin(run_foreground(program, host.clone(), state)),
+            ExecutionMode::Foreground => {
+                Box::pin(run_foreground(program, host.clone(), start, state))
+            }
             ExecutionMode::Process => Box::pin(run_process(program, host.clone(), start, state)),
         };
         Ok(Self { host, run })
@@ -521,18 +569,83 @@ fn failure(error: RuntimeError) -> RuntimeFailure {
     RuntimeFailure { error, span: None }
 }
 
-/// A foreground cell: the session state goes in and comes back out.
+/// A foreground cell: the session state goes in and comes back out. Its host
+/// may park it on an operation it awaits (FIG-4159): the run then ends in a
+/// continuation that holds the session's runtime globals and heap, and the
+/// rest of the session state (its expired-function names) comes back to the
+/// instance until a run resumed from that continuation installs them again.
 async fn run_foreground(
     program: Arc<CompiledProgram>,
     host: Arc<StepHost>,
+    start: VmExecutionStart,
     mut state: State,
 ) -> (RunEnd, Option<State>) {
-    let result = crate::runtime::execute(&program, &mut state, host.as_ref()).await;
-    let end = match result {
-        Ok(outcome) => RunEnd::Finished(outcome),
-        Err(error) => RunEnd::Failed(failure(error)),
+    let host = host.as_ref();
+    let traced = host.config.trace_runtime_errors;
+    let mut scratch = host.take_scratch().unwrap_or_default();
+    let vm = match start {
+        VmExecutionStart::Session => {
+            Vm::from_state_recycling(&program, &mut state, host, &mut scratch)
+        }
+        VmExecutionStart::Continuation(mut continuation) => {
+            let expired = std::mem::take(&mut continuation.expired_functions);
+            match Vm::resume_from(*continuation, &program, host) {
+                Ok(vm) => {
+                    state.restore_expired_functions(expired);
+                    Ok(vm)
+                }
+                Err(error) => {
+                    host.store_scratch(scratch);
+                    return (RunEnd::Refused(error), Some(state));
+                }
+            }
+        }
     };
-    (end, Some(state))
+    let mut vm = match vm {
+        Ok(vm) => vm,
+        Err(error) => {
+            host.store_scratch(scratch);
+            return (RunEnd::Failed(failure(error)), Some(state));
+        }
+    };
+    loop {
+        match vm.run_parkable(traced).await {
+            VmParkableRun::ParkedOnOperation => match vm.suspend() {
+                Ok(mut continuation) => {
+                    vm.flush_profile(host);
+                    host.store_scratch(scratch);
+                    // The whole session travels in the continuation: the
+                    // instance keeps nothing of a parked run.
+                    continuation.expired_functions = state.take_expired_functions();
+                    return (
+                        RunEnd::Parked(Box::new(continuation), VmParkReason::AwaitingEffect),
+                        None,
+                    );
+                }
+                // The run cannot be captured where it stands: it runs on, and
+                // issues the operation again for the host to answer.
+                Err(error) => {
+                    host.ask(VmRequest::ParkDeclined(error)).await;
+                }
+            },
+            VmParkableRun::Ended(result) => {
+                if traced && let Err(failure) = &result {
+                    host.observe_runtime_failure(failure.clone());
+                }
+                vm.flush_profile(host);
+                let installed = vm
+                    .recycle_into_state_parts(&mut scratch)
+                    .and_then(|(globals, heap)| state.install_runtime(globals, heap));
+                host.store_scratch(scratch);
+                let end = match (result, installed) {
+                    (Ok(outcome), Ok(())) => RunEnd::Finished(outcome),
+                    (Err(failure), _) => RunEnd::Failed(failure),
+                    (Ok(_), Err(error)) => RunEnd::Failed(self::failure(error)),
+                };
+                return (end, Some(state));
+            }
+        }
+    }
 }
 
 /// A process body segment: it runs effect to effect, offering the host a
@@ -577,6 +690,25 @@ async fn run_process(
                         Err(error) => {
                             host.ask(VmRequest::ParkDeclined(error)).await;
                         }
+                    }
+                }
+            }
+            // The host parked the run on the effect it awaits (FIG-4159).
+            Ok(VmRunOutcome::HandedOver)
+                if std::mem::take(&mut host.mailbox.lock_recover().parked_on_effect) =>
+            {
+                match vm.suspend() {
+                    Ok(continuation) => {
+                        vm.flush_profile(host);
+                        return (
+                            RunEnd::Parked(Box::new(continuation), VmParkReason::AwaitingEffect),
+                            None,
+                        );
+                    }
+                    // The run cannot be captured where it stands: it runs on,
+                    // and issues the operation again for the host to answer.
+                    Err(error) => {
+                        host.ask(VmRequest::ParkDeclined(error)).await;
                     }
                 }
             }

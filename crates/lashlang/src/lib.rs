@@ -95,9 +95,9 @@ pub use runtime::{
     VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
     VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
-    VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest,
-    VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended,
-    VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
+    VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError,
+    VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
     is_javascript_builtin_global, is_process_handle, unwrap_type_value,
 };
 pub use runtime::{

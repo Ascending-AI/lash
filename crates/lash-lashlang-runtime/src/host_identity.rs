@@ -1,33 +1,27 @@
-//! One derivation of the identities a Lashlang host mints for the work a
-//! program asks it to start: a call's id, the id of one leaf of an aggregate,
-//! and the key namespace every journal row of the run lives under.
+//! The identities a Lashlang host mints for the work a program asks it to
+//! start: a call's id, the id of one leaf of an aggregate, and the key
+//! namespace every journal row of the run lives under.
 //!
-//! There are two Lashlang hosts — the RLM cell bridge and the process body
-//! bridge — and both mint from here, so the opener is an argument instead of
-//! a property of whichever host happened to build the string.
+//! There are two Lashlang hosts, the RLM cell bridge and the process body
+//! bridge, and both mint from here, so the opener is an argument instead of
+//! a property of whichever host happened to build the string. The call ids
+//! themselves come from [`CodeCallIdentities`], the one derivation the worker
+//! broker mints from too (ADR 0117 §2, ADR 0123).
 //!
 //! Every identity is positional (FIG-3586): a command is named by the issue
 //! ordinal it took when it left the VM, never by the call site that issued
 //! it. The call site's node id and occurrence are trace metadata only.
 
 use lash_core::{EffectOpener, ProcessId};
+use lash_vm_broker::CodeCallIdentities;
 
 use crate::replay_run::LashlangReplayNamespace;
 
-/// The identities one Lashlang host mints.
-///
-/// Two facts, and only one of them is the opener. [`EffectOpener`] is the
-/// lifecycle owner (ADR 0099 §1) — a turn, or one process — and it
-/// is the shared type, never a second spelling of it. `execution` is the part
-/// of the identity the opener is deliberately too coarse to supply: a turn runs
-/// many cells, and two cells of one turn each count their ordinals from zero,
-/// so without the cell's own key they would mint the same ids. A process body
-/// has no such subdivision — it is one run for its whole life, across every
-/// segment — so it carries none, and a segment must never appear here.
+/// The identities one Lashlang host mints: the code call identities of the
+/// run, plus the replay namespace the in-process host journals under.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangHostIdentities {
-    opener: EffectOpener,
-    execution: Option<String>,
+    code: CodeCallIdentities,
 }
 
 impl LashlangHostIdentities {
@@ -36,8 +30,7 @@ impl LashlangHostIdentities {
     /// `execution_key` is the cell's own replay key inside the turn.
     pub fn cell(opener: EffectOpener, execution_key: impl Into<String>) -> Self {
         Self {
-            opener,
-            execution: Some(execution_key.into()),
+            code: CodeCallIdentities::cell(opener, execution_key),
         }
     }
 
@@ -45,34 +38,18 @@ impl LashlangHostIdentities {
     /// process.
     pub fn process_body(process_id: ProcessId) -> Self {
         Self {
-            opener: EffectOpener::process(process_id),
-            execution: None,
+            code: CodeCallIdentities::process_body(process_id),
         }
     }
 
     /// The opener every identity below binds.
     pub fn opener(&self) -> &EffectOpener {
-        &self.opener
+        self.code.opener()
     }
 
-    /// The opener scope, canonically encoded.
-    ///
-    /// Every component is length-prefixed — the opener through
-    /// [`EffectOpener::identity_encoding`], the cell's execution key here — so
-    /// two different `(opener, execution)` pairs can never mint one scope. The
-    /// diagnostic [`EffectOpener::render`] is not usable for this: its
-    /// `:`-joined free-form components let `Turn("a:b", "c")` and
-    /// `Turn("a", "b:c")` mint the same identity.
-    fn scope(&self) -> String {
-        match &self.execution {
-            Some(execution) => format!(
-                "{}:{}:{}",
-                self.opener.identity_encoding(),
-                execution.len(),
-                execution
-            ),
-            None => self.opener.identity_encoding(),
-        }
+    /// The code call identities the broker mints the same ids from.
+    pub fn code(&self) -> &CodeCallIdentities {
+        &self.code
     }
 
     /// The key namespace every journal row of this run lives under.
@@ -80,48 +57,33 @@ impl LashlangHostIdentities {
     /// A cell's rows sit under its own replay key, beside the rest of its
     /// turn's journal; a process body's under its opener scope.
     pub fn namespace(&self) -> LashlangReplayNamespace {
-        match &self.execution {
+        match self.code.execution() {
             Some(execution) => LashlangReplayNamespace::cell(execution),
-            None => LashlangReplayNamespace::process(&self.scope()),
+            None => LashlangReplayNamespace::process(&self.code.scope()),
         }
     }
 
     /// The id of the call the program issued at `ordinal`: the tool call's
     /// id, and the reply id of an awaited handle.
     ///
-    /// It is admitted under the opener's root (ADR 0117 §2): a cell's call at
-    /// `[code opener, cell, command]`, a process body's at
-    /// `[code opener, command]`, the segment never among them. The subagent
-    /// spawn tool keys its child's start on this id (through its recorded
-    /// call), so it is what keeps a redriven spawn from starting a second
-    /// child: it moves only when the command's position in the run moves.
+    /// The subagent spawn tool keys its child's start on this id (through
+    /// its recorded call), so it is what keeps a redriven spawn from starting
+    /// a second child: it moves only when the command's position in the run
+    /// moves.
     pub fn call_id(&self, ordinal: u64) -> lash_core::ToolCallId {
-        self.derive(ordinal, None)
+        self.code.call_id(ordinal)
     }
 
-    /// The id of the leaf at `leaf_index` — its first-appearance index in the
-    /// aggregate as written, not the order it settled in — of the aggregate
+    /// The id of the leaf at `leaf_index` (its first-appearance index in the
+    /// aggregate as written, not the order it settled in) of the aggregate
     /// the program issued at `ordinal`.
     pub fn child_call_id(&self, ordinal: u64, leaf_index: usize) -> lash_core::ToolCallId {
-        self.derive(ordinal, Some(leaf_index as u64))
-    }
-
-    fn derive(&self, ordinal: u64, leaf_index: Option<u64>) -> lash_core::ToolCallId {
-        let opener = self.opener.identity_encoding();
-        let mut positions = vec![lash_core::ToolCallPosition::CodeOpener(&opener)];
-        if let Some(execution) = &self.execution {
-            positions.push(lash_core::ToolCallPosition::CodeCell(execution));
-        }
-        positions.push(lash_core::ToolCallPosition::CodeCommand(ordinal));
-        if let Some(leaf_index) = leaf_index {
-            positions.push(lash_core::ToolCallPosition::CodeAggregate(leaf_index));
-        }
-        self.opener.tool_call_admission().call_id(&positions)
+        self.code.child_call_id(ordinal, leaf_index as u64)
     }
 
     /// The replay key of the run's one durable effect-omission record.
     pub fn effect_omissions(&self) -> String {
-        format!("lashlang:{}:effect_omissions", self.scope())
+        format!("lashlang:{}:effect_omissions", self.code.scope())
     }
 }
 

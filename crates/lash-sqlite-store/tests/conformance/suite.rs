@@ -106,6 +106,26 @@ lash_conformance::frame_open_redrive_tests!({
     )
 });
 
+// FIG-4159: the worker-broker laws, each turn inside a handler of the
+// Restate double over this substrate's stores; a lost worker fails the
+// attempt and the double replays the invocation into the re-drive.
+lash_conformance::vm_broker_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4159 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the worker-broker law's handler");
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    ((backend, double), "sqlite-vm-broker".to_string(), runner)
+});
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
     let backend = TestBackend::open(SUBSTRATE).await;

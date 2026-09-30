@@ -5,10 +5,12 @@
 Accepted 2026-09-29 (FIG-4158, the first lane of FIG-3821). This lane lands
 the VM side of the decision: one owned, resettable instance, the owned
 step/resume interface, the authority split, opaque parent-side VM state and
-the parent-worker protocol types. The broker, the worker entry and pool, the
-move of both adapters into workers and the deletion of every in-parent
-parse, compile and execute path follow in their own lanes under FIG-3821,
-which stays open until the last of them lands.
+the parent-worker protocol types. FIG-4160 lands the worker entry and its
+bounded pool (`lash-vm-worker`), and FIG-4159 the parent's broker (section
+8) and the park of a run awaiting an effect. The move of both adapters into
+workers and the deletion of every in-parent parse, compile and execute path
+follow in their own lanes under FIG-3821, which stays open until the last of
+them lands.
 
 Sam's rulings of 2026-09-29 bind this decision:
 
@@ -99,14 +101,34 @@ interface borrows:
 - A resume consumes the answer to the pending request; one that answers a
   different request is refused and leaves the run suspended.
 - `VmContinuation` carries `resume: VmResumePoint`: `NextInstruction`, or
-  `ReissueOperation { operation }` when a signal wait was handed to a
-  successor and the continuation must issue it again. Resuming checks that
-  the instruction pointer stands on the operation the discriminant names.
+  `ReissueOperation { operation, loop_phase }` when the continuation must
+  issue an operation again. A signal wait handed to a successor reissues
+  its wait. A run parked while awaiting an effect (section 8) reissues the
+  resource operation or sleep it was waiting on: the VM rewinds to the
+  operation's instruction, pushes its operands back, uncharges the
+  instruction and rewinds the call site's occurrence, so the reissued
+  request is the one it replaces. A foreground park also records
+  `loop_phase` (the instruction budget left until the next yield and the
+  last announced cancel checkpoint), so a resumed run meets its cancel
+  checkpoints where a run that never parked meets them, and it carries the
+  run's expired functions. Resuming checks that the instruction pointer
+  stands on the operation the discriminant names.
+- A resume may answer a parkable effect request (a resource operation, a
+  batch, a sleep or a signal wait) with `VmResume::Park`. The run suspends
+  into `VmStep::Parked` with `VmParkReason::AwaitingEffect`, and the parent
+  resumes it later from the continuation with the effect's outcome. A run
+  that cannot suspend there asks `VmRequest::ParkDeclined` and stays
+  suspended on its request.
 
 The law `step_resume_matches_straight_through_for_every_corpus_program`
 drives every corpus program step by step, and in process mode parks it at
 every boundary and reopens each continuation from its bytes on a pristine
 instance, and compares both with the program run straight through.
+`effect_park_matches_straight_through_for_every_corpus_program` parks every
+corpus program at every parkable effect, reopens it on a pristine instance
+and compares it with the program run straight through, and
+`effect_park_keeps_cancel_checkpoints_where_an_unparked_run_meets_them`
+pins the loop phase.
 
 ### 4. Authority stays with the parent
 
@@ -153,8 +175,10 @@ succeeds, and only the worker's open refuses it.
 transport or pool:
 
 - **Messages.** Parent to worker: `Start` (the program source, explicit
-  context descriptions, and a fresh session or opaque state), `EffectResponse`,
-  `Cancel`, `Reset`, `Shutdown`. Worker to parent: `Ready`, `EffectRequest`,
+  context descriptions, and a fresh session or opaque state),
+  `EffectResponse`, `Park` (answering a process boundary or a parkable
+  effect request: serialize the run and end it `Suspended`), `Cancel`,
+  `Reset`, `Shutdown`. Worker to parent: `Ready`, `EffectRequest`,
   `Suspended`, `Complete`, `GuestError`, `Cancelled`, `ResetDone`.
 - **Headers.** Every message carries its execution lease, owner and frame
   epochs and a transport sequence. `MessageFence` admits only the next
@@ -195,6 +219,85 @@ effect executes twice. A checkpoint commits VM bytes and the parent's
 counters and ledgers together. Cancellation stays the journaled
 instruction-checkpoint observation of ADR 0039: a physical kill after a
 grace period does not decide precedence.
+
+### 8. The broker
+
+`lash-vm-broker` is the parent side of a worker run. `Broker::run` checks a
+worker out of its `WorkerSlots`, starts the program from a fresh session or
+the last committed checkpoint, answers every request the worker sends, and
+commits the run's end. It holds no transport or pool of its own: a worker
+is a `WorkerTransport` (send, cancel-safe receive, kill), and the watchdog
+belongs to the transport, which reports a silent worker as
+`WorkerRead::Unresponsive`.
+
+- **Every effect is brokered.** A request's payload is decoded, resolved
+  against the run's frozen bindings (`AdmittedContext`) and refused with
+  the typed `AuthorityRefusal` payload (`lash_vm_request_refused`) before
+  any tool runs: an unknown binding or operation, arguments the binding's
+  contract refuses, an empty aggregate, a handle this run was never
+  granted, a request kind the payload does not match, or an operation the
+  broker does not serve yet. A refused request takes no ordinal. The broker
+  serves resource operations, batches, awaits, sleeps and cancel
+  checkpoints; prints, finishes, failures, process events and signal waits
+  are refused as unsupported until the adapters move into workers.
+- **The parent owns every counter.** `ParentLedger` gives each admitted
+  request the next ordinal and derives its `ToolCallId`s through
+  `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
+  hosts also mint from. Each admission carries a fingerprint (BLAKE3 over
+  the canonical request) that the journal retains, so a re-driven run that
+  asks something different at a recorded ordinal fails with
+  `RetainedRequestDrift` instead of reusing the recorded answer.
+- **Fencing.** A message whose lease, owner epoch, frame epoch or sequence
+  is not the next one is a protocol violation, and so is a request id that
+  does not advance. The worker is discarded; nothing it sent after the
+  violation is acted on.
+- **Recovery goes through the substrate.** When a worker is lost (a crash,
+  EOF, an unresponsive transport or a violation), the broker kills it,
+  settles the operation already admitted, within `BrokerBounds` and in the
+  same invocation, and returns `BrokerFailure::WorkerLost`, which is
+  retryable. The substrate re-drives the invocation: the new attempt starts
+  from the last committed checkpoint, re-admits from the checkpoint's
+  ordinals, and gets each recorded answer back from the journal with no
+  second dispatch. The broker never restarts a run, rewinds a counter or
+  retries an effect locally. A partial frame is refused and the last
+  checkpoint kept, and a fully received `Complete` wins over a later EOF.
+- **Park on effect releases the slot.** When a parkable request's effect
+  needs a worker of its own (nested compilation, a nested run), the broker
+  answers `Park`. The worker serializes the run, which the broker commits,
+  and the slot goes back to the pool before the effect is performed. On the
+  outcome the broker checks a worker out again, resumes the continuation,
+  and hands the held outcome to the reissued request, matched by
+  fingerprint. A pool of one slot therefore completes a nested
+  compilation instead of deadlocking.
+- **Cancellation.** A stop sends `Cancel` and waits the grace period
+  before a physical kill. The run ends `Cancelled` only when the journal
+  observed the cancellation at an instruction checkpoint (ADR 0039);
+  otherwise it ends `Interrupted`. The kill itself decides nothing.
+- **Frames.** `VmSession::open_frame` advances the frame fence, opens the
+  frame in the checkpoint store and waits, bounded, until every run of an
+  earlier frame has retired. A run whose frame is retired is killed and
+  ends `FrameRetired`, and the new frame starts from a store that holds no
+  guest state of the old one, so its globals are undefined.
+- **Checkpoints.** `CheckpointStore::commit` stores the VM bytes, the
+  ledger and the frame epoch together; it refuses a commit from a retired
+  frame, and an identical re-commit is a no-op. `BrokerBounds::standard()`
+  is provisional until the pool presets land.
+
+The conformance laws `vm_broker_tests!` register on every tier (the
+in-process and replaying Restate doubles, SQLite in memory and on file,
+Postgres and live Restate):
+
+- `worker_kill_before_start_runs_no_effect`
+- `worker_kill_mid_compute_redrives_through_the_substrate`
+- `worker_kill_after_request_before_record_settles_the_admitted_operation_once`
+- `worker_kill_after_record_before_delivery_replays_with_zero_dispatch`
+- `worker_kill_mid_serialization_keeps_the_last_checkpoint`
+- `worker_kill_after_complete_before_commit_commits_once`
+- `unauthorized_worker_effect_request_is_refused_without_invoking_a_tool`
+- `stale_epoch_and_duplicate_worker_messages_are_refused`
+- `cancellation_winner_is_the_journaled_checkpoint_across_worker_kill`
+- `frame_open_retires_worker_state_and_old_globals_are_undefined`
+- `one_slot_nested_effect_does_not_deadlock`
 
 ## Consequences
 

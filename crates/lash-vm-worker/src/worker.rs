@@ -187,8 +187,10 @@ impl Server {
                     self.deliver(step)?;
                 }
                 ParentMessage::Park => {
-                    if !matches!(self.pending.take(), Some((_, EffectKind::ProcessBoundary))) {
-                        return Err(PoolError::PendingEffectParkingRequired);
+                    // A process boundary, or an effect the run can issue again
+                    // once its continuation is resumed (FIG-4159).
+                    if !self.pending.take().is_some_and(|(_, kind)| kind.parkable()) {
+                        return Err(PoolError::protocol("park answers no parkable request"));
                     }
                     self.progress(WorkerPhase::Computing)?;
                     let step = self

@@ -38,10 +38,11 @@ pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
 pub use continuation::{
     ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
-    VmSuspendedOperation,
+    VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint,
+    VmRunOutcome, VmSuspendedOperation,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
+pub(crate) use control::VmParkableRun;
 use control::{VmMode, VmStep};
 use effects::VmEffect;
 use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
@@ -264,6 +265,9 @@ pub struct Vm<'a, H> {
     /// Where a continuation captured now resumes: after the last completed
     /// effect, or on an operation that was handed over without completing.
     resume_point: VmResumePoint,
+    /// The yield phase a whole-run loop parked in, which the next loop of a
+    /// VM resumed from that park picks up (FIG-4159).
+    resume_loop_phase: Option<VmLoopPhase>,
     #[cfg(test)]
     test_suspension: TestSuspension,
     /// How many post-instruction import passes ran (FIG-3730): the law in

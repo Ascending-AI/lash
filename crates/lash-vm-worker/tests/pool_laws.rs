@@ -83,6 +83,12 @@ fn answer(request: EffectRequest) -> EffectResponse {
         outcome,
     }
 }
+fn parked(outcome: ParkOutcome) -> OpaqueVmState {
+    match outcome {
+        ParkOutcome::Parked(state) => state,
+        ParkOutcome::Declined(request) => panic!("the run declined its park: {request:?}"),
+    }
+}
 fn drive(worker: &mut Checkout, mut message: WorkerMessage) -> WorkerMessage {
     loop {
         match message {
@@ -309,7 +315,7 @@ finish(plantedClosure());
         worker
             .effect_result(answer(request))
             .expect("sentinel boundary");
-        let parked = worker.park().expect("sentinel continuation");
+        let parked = parked(worker.park().expect("sentinel continuation"));
         assert_eq!(parked.kind(), VmStateKind::Continuation);
         worker.release().expect("reset parked sentinel");
         let mut worker = checkout(&pool);
@@ -395,27 +401,64 @@ fn restart_storm_fails_queued_work_typed() {
     assert!(pool.stats().restart_storm);
 }
 
+/// A run awaiting an effect that needs a worker of its own (a nested
+/// compilation) parks and gives its slot back, so a pool of one worker runs
+/// the nested work and then resumes the run, which issues its request again
+/// and completes as it would have straight through (FIG-4159).
 #[test]
-fn single_slot_nested_compile_refuses_without_silent_deadlock() {
+fn single_slot_nested_compile_completes_by_parking_the_awaiting_run() {
+    let source = "finish(await tools.echo({ value: 7 }));";
     let pool = WorkerPool::new(config("")).expect("pool");
+    let mut straight = checkout(&pool);
+    let (_, expected) = complete(&mut straight, source);
+    straight.release().expect("release");
+
     let mut worker = checkout(&pool);
     let message = worker
-        .start(start(
-            "finish(await tools.echo({ value: 7 }));",
-            ExecutionMode::Foreground,
-        ))
+        .start(start(source, ExecutionMode::Foreground))
         .expect("start");
-    assert_eq!(worker.park(), Err(PoolError::PendingEffectParkingRequired));
-    assert!(matches!(
-        pool.checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default()),
-        Err(PoolError::CheckoutTimedOut)
-    ));
-    let WorkerMessage::EffectRequest(request) = message else {
-        panic!("request");
+    let WorkerMessage::EffectRequest(awaited) = message else {
+        panic!("the run asks for its tool call, received {message:?}");
     };
-    let message = worker.effect_result(answer(request)).expect("resume");
-    drive(&mut worker, message);
-    worker.release().expect("release");
+    assert!(awaited.kind.parkable(), "{:?} is parkable", awaited.kind);
+    assert!(
+        matches!(
+            pool.checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default()),
+            Err(PoolError::CheckoutTimedOut)
+        ),
+        "the one slot is held while the run awaits its effect"
+    );
+    let ParkOutcome::Parked(parked) = worker.park().expect("park") else {
+        panic!("the awaiting run parks");
+    };
+    worker.release().expect("the parked run's slot goes back");
+
+    let mut nested = checkout(&pool);
+    let (_, nested_value) = complete(&mut nested, "finish(6 * 7);");
+    assert!(!nested_value.is_empty(), "the nested compilation completes");
+    nested.release().expect("release");
+
+    let mut resumed = checkout(&pool);
+    let mut input = start(source, ExecutionMode::Foreground);
+    input.state = StartState::Continuation(parked);
+    let message = resumed.start(input).expect("resume");
+    let WorkerMessage::EffectRequest(again) = message else {
+        panic!("the resumed run asks again, received {message:?}");
+    };
+    assert_eq!(
+        (again.kind, &again.payload),
+        (awaited.kind, &awaited.payload),
+        "the resumed run issues the request it parked on"
+    );
+    let message = resumed.effect_result(answer(again)).expect("answer");
+    let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
+        panic!("the resumed run completes");
+    };
+    assert_eq!(
+        value.0, expected,
+        "the parked run ends as it would straight through"
+    );
+    resumed.release().expect("release");
 }
 
 #[test]
@@ -438,7 +481,7 @@ fn process_boundary_releases_and_resumes_on_one_worker() {
             ..
         })
     ));
-    let state = worker.park().expect("park");
+    let state = parked(worker.park().expect("park"));
     worker.release().expect("reset and release");
     let mut nested = checkout(&pool);
     assert_eq!(nested.pid(), pid);

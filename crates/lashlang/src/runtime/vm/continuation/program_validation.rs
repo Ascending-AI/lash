@@ -314,7 +314,7 @@ pub(super) fn validate_resume_point(
     continuation: &VmContinuation,
     program: &CompiledProgram,
 ) -> Result<(), ContinuationError> {
-    let VmResumePoint::ReissueOperation { operation } = &continuation.resume else {
+    let VmResumePoint::ReissueOperation { operation, .. } = &continuation.resume else {
         return Ok(());
     };
     let issues = match (
@@ -329,6 +329,22 @@ pub(super) fn validate_resume_point(
             .names
             .get(*index)
             .is_some_and(|candidate| candidate.text.as_ref() == name.as_str()),
+        (
+            VmSuspendedOperation::ResourceOperation { operation: name },
+            Some(
+                Instruction::ResourceCall {
+                    operation: index, ..
+                }
+                | Instruction::ResourceCallUnwrap {
+                    operation: index, ..
+                },
+            ),
+        ) => program
+            .chunk
+            .names
+            .get(*index)
+            .is_some_and(|candidate| candidate.text.as_ref() == name.as_str()),
+        (VmSuspendedOperation::Sleep, Some(Instruction::SleepFor)) => true,
         _ => false,
     };
     if issues {

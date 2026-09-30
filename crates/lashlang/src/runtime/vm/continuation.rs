@@ -11,7 +11,7 @@ use super::*;
 mod types;
 pub use types::{
     ContinuationError, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmSuspendedOperation,
 };
 
@@ -272,6 +272,12 @@ pub struct VmContinuation {
     /// Where the continuation resumes: the explicit suspended-operation and
     /// resume discriminant a worker and its parent agree on (FIG-4158).
     pub resume: VmResumePoint,
+    /// A foreground run parked on an operation it awaits carries the rest of
+    /// its session state with it (FIG-4159): the names of the globals earlier
+    /// cells dropped because their value reached a function. A process body
+    /// has none, and its bytes carry no field.
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub expired_functions: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1329,6 +1335,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
             resume_point: VmResumePoint::NextInstruction,
+            resume_loop_phase: None,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
             #[cfg(test)]
@@ -1515,6 +1522,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             instructions_executed: self.instructions_executed,
             heap: VmHeapContinuation::new(self.heap.clone()),
             resume: self.resume_point.clone(),
+            expired_functions: std::collections::BTreeSet::new(),
         };
         if validate_continuation(&continuation).is_err() {
             // The forest form could not hold this heap, so record the shared
@@ -1558,6 +1566,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         validate_continuation(&continuation)?;
         validate_program_continuation(&continuation, &program.chunk)?;
         validate_resume_point(&continuation, program)?;
+        let resume_loop_phase = match &continuation.resume {
+            VmResumePoint::ReissueOperation { loop_phase, .. } => *loop_phase,
+            VmResumePoint::NextInstruction => None,
+        };
         let active_function = continuation.active_function.map(|index| index as usize);
         let active_slot_count = match active_function {
             Some(index) => program
@@ -1762,6 +1774,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_tools: continuation.pending_tools,
             execution_nonce: continuation.execution_nonce,
             resume_point: VmResumePoint::NextInstruction,
+            resume_loop_phase,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
             #[cfg(test)]

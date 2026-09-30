@@ -17,6 +17,19 @@ impl State {
         &self.expired_functions
     }
 
+    /// Hands the dropped names to a foreground run's continuation when the
+    /// run parks on an operation it awaits (FIG-4159): they travel with the
+    /// runtime globals the continuation holds.
+    pub(crate) fn take_expired_functions(&mut self) -> BTreeSet<String> {
+        std::mem::take(&mut self.expired_functions)
+    }
+
+    /// Takes back the dropped names a parked foreground run's continuation
+    /// carried, before the resumed run's globals are installed.
+    pub(crate) fn restore_expired_functions(&mut self, names: BTreeSet<String>) {
+        self.expired_functions = names;
+    }
+
     /// Drops every root of a finished run whose value reaches a function and
     /// remembers its name; a name the run left bound is live again, whatever
     /// it held before. `host_view` omits these globals on the same rule, so

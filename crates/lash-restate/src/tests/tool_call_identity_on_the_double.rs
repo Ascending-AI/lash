@@ -13,8 +13,9 @@ use lash_core::EffectHost;
 
 /// The tiers' [`lash_conformance::ConformanceTurnRunner`]: `run_in_handler`
 /// lends the attempt the scoped controller the invocation's journal owns.
-struct DoubleTurnRunner {
-    backend: lash_restate_test::RestateTestBackend,
+/// The worker-broker laws run on it too (`vm_broker_on_the_double.rs`).
+pub(super) struct DoubleTurnRunner {
+    pub(super) backend: lash_restate_test::RestateTestBackend,
 }
 
 /// `attempt` as a `HandlerAttempt`: the law reads the attempt's answer off

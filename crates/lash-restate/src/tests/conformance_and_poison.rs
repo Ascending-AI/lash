@@ -525,6 +525,21 @@ lash_conformance::tool_call_identity_tests!(
     }
 );
 
+// FIG-4159's worker-broker laws on the live endpoint: each turn runs in a
+// probe handler, a lost worker fails the attempt retryably, and Restate
+// redelivers the invocation, replaying its journal into the re-drive.
+lash_conformance::vm_broker_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        // Restate state outlives a run: each run names its own sessions.
+        let prefix = format!("restate-vm-broker-{}", harness.run_nonce());
+        let runner = harness.turn_runner();
+        (harness, prefix, runner)
+    }
+);
+
 // FIG-3547's segment re-drive law on the live endpoint: the segments run in
 // the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
 // delivers again, and a lost substrate is the invocation killed and purged

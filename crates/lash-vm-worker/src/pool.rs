@@ -313,6 +313,17 @@ fn limit(limit: WorkerLimit) -> PoolError {
     InfrastructureOutcome::WorkerLimitExceeded { limit }.into()
 }
 
+/// How a worker answered [`Checkout::park`].
+#[derive(Debug)]
+pub enum ParkOutcome {
+    /// The run parked; the state resumes it.
+    Parked(OpaqueVmState),
+    /// The run could not be captured where it stands. The request is the
+    /// worker's [`EffectKind::ParkDeclined`]; answering it with
+    /// [`EffectOutcome::Unit`] runs on, and the run issues its request again.
+    Declined(EffectRequest),
+}
+
 /// Owns one transport lease. Dropping without release kills and reaps the
 /// worker. A failed receive fences that lease before replenishing the pool.
 pub struct Checkout {
@@ -405,23 +416,32 @@ impl Checkout {
             self.pool.config.protocol.no_response_watchdog,
         )
     }
-    /// Awaiting-effect release is an explicit broker extension point. The
-    /// current VM can park only at a ProcessBoundary. A broker must implement
-    /// a pending-effect checkpoint before nested admission can release here.
-    pub fn park(&mut self) -> Result<OpaqueVmState, PoolError> {
-        if !matches!(self.pending, Some((_, EffectKind::ProcessBoundary))) {
-            return Err(PoolError::PendingEffectParkingRequired);
+    /// Parks the run on its pending request instead of answering it: a
+    /// process boundary, or an effect the run can issue again
+    /// ([`EffectKind::parkable`]), such as one whose operation needs a worker
+    /// of its own (FIG-4159). A parked run's state resumes it with `Start`,
+    /// and a run parked on an effect issues that effect's request again. The
+    /// run may decline when it cannot be captured where it stands: the worker
+    /// then asks [`EffectKind::ParkDeclined`], and once that is answered the
+    /// run issues its request again on this checkout.
+    pub fn park(&mut self) -> Result<ParkOutcome, PoolError> {
+        if !self.pending.is_some_and(|(_, kind)| kind.parkable()) {
+            return Err(PoolError::protocol("park answers no parkable request"));
         }
         self.pending = None;
         match self.exchange(
             ParentMessage::Park,
             self.pool.config.protocol.no_response_watchdog,
         )? {
-            WorkerMessage::Suspended { state } => Ok(state),
+            WorkerMessage::Suspended { state } => Ok(ParkOutcome::Parked(state)),
+            WorkerMessage::EffectRequest(request) if request.kind == EffectKind::ParkDeclined => {
+                Ok(ParkOutcome::Declined(request))
+            }
             _ => {
-                let error = PoolError::PendingEffectParkingRequired;
                 self.discard();
-                Err(error)
+                Err(PoolError::protocol(
+                    "the worker answered a park with neither its state nor a declined park",
+                ))
             }
         }
     }

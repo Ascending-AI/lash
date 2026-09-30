@@ -40,13 +40,16 @@ Repeating a phase cannot extend it. The no-response watchdog bounds IPC waits,
 bootstrap, and reset; it is not the compute deadline. Parent-owned effect waits
 pause execution deadlines. CPU and retry totals remain in the parent budget.
 
-Process-mode `ProcessBoundary` can park through `Checkout::park`, after which
-`release` resets the process. The parent can then admit nested compilation on a
-one-worker pool and resume the continuation with Start. Parking while an effect
-is awaiting its result returns `PendingEffectParkingRequired`. FIG-4159 owns
-that pending-effect checkpoint extension. A nested checkout still has a bounded
-queue and returns `CheckoutTimedOut` when this seam is unavailable. It never
-waits silently forever.
+`Checkout::park` parks the run on its pending request: a process-mode
+`ProcessBoundary`, or an effect the run can issue again (a resource operation,
+a sleep or a signal wait, FIG-4159). The worker serializes its VM, and
+`release` resets the process, so the parent can admit nested compilation on a
+one-worker pool and then resume the continuation with `Start`; a run parked on
+an effect issues that request again. A run that cannot be captured where it
+stands declines with `ParkDeclined` and, once that is answered, issues its
+request again on the same checkout. A nested checkout still has a bounded queue
+and returns `CheckoutTimedOut` when no slot frees. It never waits silently
+forever.
 
 The standard measured FIG-4157 values are min 1/max 4, two queued items/eight
 MiB, four MiB frames, two MiB VM state, one MiB effect values, 64 KiB source,

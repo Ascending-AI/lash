@@ -137,6 +137,7 @@ mod turn_control;
 mod turn_crash_matrix;
 mod turn_park_feed;
 mod turn_runner;
+mod vm_broker;
 mod wake_delivery;
 
 pub(crate) use admission_support::*;

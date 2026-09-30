@@ -1,9 +1,9 @@
 //! The typed messages a parent and its worker exchange.
 //!
-//! Parent to worker: [`ParentMessage`] (`Start`, `EffectResponse`, `Cancel`,
-//! `Reset`, `Shutdown`). Worker to parent: [`WorkerMessage`] (`Ready`,
-//! `EffectRequest`, `Suspended`, `Complete`, `GuestError`, `Cancelled`,
-//! `ResetDone`). Every message travels under a [`MessageHeader`], and a
+//! Parent to worker: [`ParentMessage`] (`Start`, `EffectResponse`, `Park`,
+//! `Cancel`, `Reset`, `Shutdown`). Worker to parent: [`WorkerMessage`]
+//! (`Progress`, `PayloadTooLarge`, `LimitExceeded`, `Ready`, `EffectRequest`,
+//! `Suspended`, `Complete`, `GuestError`, `Cancelled`, `ResetDone`). Every message travels under a [`MessageHeader`], and a
 //! receiver admits it through a [`MessageFence`].
 //!
 //! Effect requests and results carry their values as [`EncodedPayload`]
@@ -232,7 +232,24 @@ pub enum EffectKind {
     CancelCheckpoint,
     /// Process-mode parking seam after an effect has completed.
     ProcessBoundary,
+    /// The run could not be captured where its parent asked it to park; the
+    /// parent acknowledges, and a declined park on an effect issues that
+    /// effect's request again.
     ParkDeclined,
+}
+
+impl EffectKind {
+    /// Whether the parent may answer a request of this kind with
+    /// [`ParentMessage::Park`] instead of a response (FIG-4159): a resource
+    /// operation, a sleep or a signal wait, which a continuation can issue
+    /// again, and a process boundary. It mirrors the VM's `VmRequest::parkable`
+    /// and grants nothing.
+    pub fn parkable(self) -> bool {
+        matches!(
+            self,
+            Self::ResourceOperation | Self::Sleep | Self::WaitSignal | Self::ProcessBoundary
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,7 +295,15 @@ pub enum ParentMessage {
     /// Drop the VM instance and install a pristine one. Sent only after a
     /// clean completion or release; any failure discards the worker instead.
     Reset,
-    /// Park at the owned process boundary. No effect is re-executed locally.
+    /// Park the run on its pending request instead of answering it: a process
+    /// boundary, or a parkable effect ([`EffectKind::parkable`]) whose
+    /// operation the parent settles without holding the worker, such as one
+    /// that needs a worker of its own (FIG-4159). The worker serializes its VM
+    /// and answers [`WorkerMessage::Suspended`], or asks
+    /// [`EffectKind::ParkDeclined`] when the run cannot be captured where it
+    /// stands. A run started from a state parked on an effect issues that
+    /// effect's request again, and the parent answers it with the outcome it
+    /// held. No effect is re-executed locally.
     Park,
     Shutdown,
 }
@@ -305,7 +330,8 @@ pub enum WorkerMessage {
         build: BuildIdentity,
     },
     EffectRequest(EffectRequest),
-    /// The run parked; the state resumes it.
+    /// The run parked, at a boundary or on the request its parent asked it
+    /// to park on; the state resumes it.
     Suspended {
         state: OpaqueVmState,
     },
