@@ -600,17 +600,21 @@ store-contract-soak cases='256':
     service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
   fi
   run_property_soak() {
-    local setting="$1" label="$2" selector="$3"
+    local setting="$1" label="$2" selector="$3" seed_setting="$4"
+    local replay=()
+    if [[ -n "${!seed_setting:-}" ]]; then
+      replay=("--test_env=${seed_setting}")
+    fi
     kiln test --test_timeout=1200 --test_output=all \
       "--test_env=${setting}={{cases}}" "--test_arg=${selector}" \
-      --test_arg=--nocapture "${service[@]}" "$label"
+      --test_arg=--nocapture "${replay[@]}" "${service[@]}" "$label"
   }
-  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test store_contract_state_machine
-  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test store_contract_state_machine
-  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-postgres-store:conformance__test store_contract_state_machine
-  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test session_graph_state_machine
-  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test session_graph_state_machine
-  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-postgres-store:conformance__test session_graph_state_machine
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test store_contract_state_machine LASH_STORE_CONTRACT_PROPTEST_SEED
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test store_contract_state_machine LASH_STORE_CONTRACT_PROPTEST_SEED
+  run_property_soak LASH_STORE_CONTRACT_PROPTEST_CASES //crates/lash-postgres-store:conformance__test store_contract_state_machine LASH_STORE_CONTRACT_PROPTEST_SEED
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance_memory__test session_graph_state_machine LASH_SESSION_GRAPH_PROPTEST_SEED
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test session_graph_state_machine LASH_SESSION_GRAPH_PROPTEST_SEED
+  run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-postgres-store:conformance__test session_graph_state_machine LASH_SESSION_GRAPH_PROPTEST_SEED
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
@@ -621,12 +625,16 @@ runtime-persistence-soak cases='256':
   if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
     service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
   fi
+  replay=()
+  if [[ -n "${LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED:-}" ]]; then
+    replay=(--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED)
+  fi
   run_property_soak() {
     local label="$1"
     kiln test --test_timeout=1200 --test_output=all \
       "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES={{cases}}" \
       --test_arg=runtime_persistence_state_machine --test_arg=--nocapture \
-      "${service[@]}" "$label"
+      "${replay[@]}" "${service[@]}" "$label"
   }
   run_property_soak //crates/lash-sqlite-store:conformance_memory__test
   run_property_soak //crates/lash-sqlite-store:conformance__test
@@ -637,11 +645,24 @@ runtime-persistence-soak cases='256':
 # server double, checked against the crash matrix's invariants. An empty
 # `seed` draws one from the clock; the soak prints it, and a failed epoch
 # prints the `LASH_CHAOS_SOAK_*` settings that replay it alone. release.yml's
-# `chaos-soak` job runs the same test under Cargo.
+# `chaos-soak` job runs the same test under Cargo. The 90-minute default is
+# longer than NativeLink's 3600-second action limit, so Buck compiles remotely
+# and the external runner executes this one test locally without caching it.
 chaos-soak duration='90m' seed='':
-  kiln test --test_timeout=6000 --test_output=all \
+  #!/usr/bin/env bash
+  set -euo pipefail
+  replay=()
+  for setting in LASH_CHAOS_SOAK_EPOCHS LASH_CHAOS_SOAK_STEPS; do
+    if [[ -n "${!setting:-}" ]]; then
+      replay+=("--test_env=${setting}")
+    fi
+  done
+  test_timeout="$(python3 scripts/chaos_soak_timeout.py '{{duration}}')"
+  kiln test --local-test-execution --no-test-cache \
+    --test_timeout="$test_timeout" --test_output=all \
     '--test_env=LASH_CHAOS_SOAK_DURATION={{duration}}' \
     '--test_env=LASH_CHAOS_SOAK_SEED={{seed}}' \
+    "${replay[@]}" \
     --test_arg=chaos_soak_release --test_arg=--exact --test_arg=--ignored \
     --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
 

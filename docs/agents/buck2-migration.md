@@ -280,15 +280,35 @@ build/test measurements. Later repository-rule changes do not alter those
 consumer sources or manifests. Final-current-source metadata/build/lint, test
 selection, and corrected feature-variant UI evidence remain pending.
 
+The final caller audit corrected the opt-in soak and focused-test commands.
+The 90-minute chaos soak now compiles through Buck2, executes locally because
+it exceeds NativeLink's 3600-second action limit, and always bypasses the test
+cache. Its timeout follows the runtime's hours/minutes/seconds grammar and its
+replay controls are forwarded by environment-variable name. Store-property
+replay seeds and PostgreSQL service settings retain the same name-only
+forwarding. The attachment gate uses its full libtest name with `--exact`.
+Tracked runnable commands no longer try to execute Buck2 test wrappers through
+`kiln run`; source-writing generators use their supported Cargo recipes.
+
+Focused fake-CLI contracts, duration parsing, release-fixture caller tests,
+Just parsing, shell syntax and pre-commit checks passed for these repairs. They
+did not invoke Buck2, Cargo compilation or NativeLink. The combined candidate
+now includes graph commit `e79c1a22bc46953134b4154776747e1547b648bb` and
+caller commit `fa173b178e3d57e3b5976af250b66b11acd6e64a`. No final native gate
+has completed against that combined tip yet.
+
 ## Remaining delivery gates
 
-- Workspace build/check and Clippy checks, unit/integration partition,
-  generated files, feature lanes, service runners and relevant CI/release paths.
-- Concurrent independent worktrees with separate source, outputs and daemons.
-- Kiln generation/dispatch for Lash/Buck2 and Figments's existing backend.
-- Matched coordinator benchmarks with compilation work reported separately.
-- Final stale-command audit, removal of superseded build configuration and rules,
-  source review and cross-linked unmerged Lash/Kiln PRs.
+- Run final generated-file, metadata, build, Clippy and unit/integration gates
+  against the combined candidate. A bounded two-slot native pilot was still in
+  progress when this report was updated; its result is not counted here.
+- Run the required feature, service, release and CI caller checks that are not
+  covered by the focused script contracts above.
+- Confirm Kiln generation/dispatch for the final Lash revision while existing
+  Figments worktrees continue using their current backend.
+- Link the Lash PR to Kiln PR #41. If it opens before the final gates finish,
+  keep it in draft and record the pending results. Keep both PRs unmerged until
+  the Kiln change is deployed first.
 
 The Kiln implementation at `08481af66c9ef822c760c883608bcf6c7ac2d43f` passed
 its four required batteries and independent review after correcting orphan

@@ -274,7 +274,7 @@ async fn end_oracle_root(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with `kiln run //crates/lash-sim:cross_backend_store_differential__test -- --include-ignored`)"]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
 async fn coalesced_batches_match_literal_oracles_on_every_backend() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,
@@ -425,7 +425,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with `kiln run //crates/lash-sim:cross_backend_store_differential__test -- --include-ignored`)"]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
 async fn interrupted_admission_identity_stands_over_a_later_row() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,

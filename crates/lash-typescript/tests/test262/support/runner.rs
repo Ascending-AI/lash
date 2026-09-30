@@ -966,8 +966,9 @@ pub(crate) fn compare(
 }
 
 /// Rewrites the `outcomes/**/*.tsv` shards in the source tree from a full
-/// run, when `TEST262_BLESS` is set under `kiln run` (which exports
-/// `BUILD_WORKSPACE_DIRECTORY`): one file per [`shard_of`] key, and a shard
+/// run, when `TEST262_BLESS` is set for the documented Cargo recipe, which
+/// names the source checkout with `BUILD_WORKSPACE_DIRECTORY`: one file per
+/// [`shard_of`] key, and a shard
 /// file whose tests are no longer selected is removed, like `generate.mjs`
 /// removes a table whose findings file is gone. A divergence keeps its
 /// recorded owner or becomes `UNTRIAGED`, which the data checks refuse until
@@ -985,7 +986,7 @@ pub(crate) fn bless(
         "TEST262_BLESS rewrites the record from the run; unset LASH_QUICK so the whole selection is recorded"
     );
     let workspace = std::env::var("BUILD_WORKSPACE_DIRECTORY")
-        .expect("TEST262_BLESS writes the source tree; run it through `kiln run`");
+        .expect("TEST262_BLESS writes the source tree; use the documented Cargo recipe");
     let directory = Path::new(&workspace).join("crates/lash-typescript/tests/test262");
     let outcomes = paths
         .iter()

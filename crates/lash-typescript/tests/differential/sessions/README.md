@@ -106,8 +106,10 @@ share a file (FIG-3727) — written through the oracle service `oracle.mjs` by
 one deliberate, byte-identical step:
 
 ```console
-kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
-    --ignored --exact testing::cell_conformance::node_oracle::generated::write_the_generated_corpus
+. ./env.sh
+cargo test -p lash-internal-protocol-rlm --locked --lib \
+    testing::cell_conformance::node_oracle::generated::write_the_generated_corpus \
+    -- --ignored --exact
 ```
 
 The cacheable test partition regenerates every session from its seed and
@@ -121,8 +123,11 @@ Either drift check fails naming the exact regeneration command above
 (FIG-3727). Longer runs draw fresh seeds and ask Node live:
 
 ```console
-LASH_GENERATED_SEEDS=START..END kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
-    --ignored --exact testing::cell_conformance::node_oracle::generated::generated_sessions_against_live_node
+. ./env.sh
+LASH_GENERATED_SEEDS=START..END \
+  cargo test -p lash-internal-protocol-rlm --locked --lib \
+  testing::cell_conformance::node_oracle::generated::generated_sessions_against_live_node \
+  -- --ignored --exact
 ```
 
 The manual fuzz run (`fuzz-smoke` in CI) runs it on seeds derived from its run
