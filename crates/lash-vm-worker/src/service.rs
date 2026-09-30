@@ -1,7 +1,7 @@
 use lash_core_execution::FleetFormat;
 use lash_vm_client::{
     PoolError,
-    service::{Capture, CompiledModule, Request, Response, StateAction, StateView},
+    service::{Capture, CompiledModule, Request, Response, StateAction, StateMetadata, StateView},
 };
 use lash_vm_protocol::EncodedPayload;
 use lashlang::VmInstance;
@@ -329,17 +329,23 @@ fn linked_module(
 }
 fn view(vm: &VmInstance) -> Result<StateView, PoolError> {
     Ok(StateView {
-        definition_ids: vm.state().referenced_definition_ids(),
         snapshot: vm
             .state()
             .snapshot()
             .to_canonical_bytes()
             .map_err(PoolError::protocol)?,
+        metadata: state_metadata(vm),
+    })
+}
+
+pub(crate) fn state_metadata(vm: &VmInstance) -> StateMetadata {
+    StateMetadata {
+        definition_ids: vm.state().referenced_definition_ids(),
         globals: vm.state().globals().clone(),
         names: vm.state().binding_names().map(str::to_string).collect(),
         expired: vm.state().expired_functions().clone(),
         opaque: vm.state().opaque_bindings(),
-    })
+    }
 }
 
 fn capture(

@@ -92,17 +92,32 @@ pub enum StateAction {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StateView {
+pub struct StateMetadata {
     pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
-    #[serde(with = "serde_bytes")]
-    pub snapshot: Vec<u8>,
     #[serde(with = "lashlang::effect_value::record")]
     pub globals: Record,
     pub names: BTreeSet<String>,
     pub expired: BTreeSet<String>,
     pub opaque: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateView {
+    #[serde(with = "serde_bytes")]
+    pub snapshot: Vec<u8>,
+    pub metadata: StateMetadata,
+}
+
+/// A resident cell's result and metadata, emitted with its opaque snapshot.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellCompletion {
+    pub outcome: lashlang::ExecutionOutcome,
+    /// Independently bounded, as the separate state-view response was.
+    pub state: EncodedPayload,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

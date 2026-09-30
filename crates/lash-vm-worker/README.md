@@ -111,3 +111,12 @@ its configuration as `lash::rlm::WorkerService`, `WorkerPoolConfig`, `WorkerEntr
 and `WorkerDeadlines`. Pure artifact inspection and state restoration also run in
 workers. Source and VM entry points remain in `lash-vm-worker`; the parent's pool,
 framing, queue admission and opaque state client live in `lash-vm-client`.
+
+Resident RLM cells request `capture_state_view`. Their completion carries the
+final outcome and the snapshot's guest metadata together. The parent adopts
+both without reopening and reserializing the completed snapshot in another
+worker, so state inspection cannot exhaust the cell's CPU budget after its
+final has arrived. Completion metadata is bounded and its definition IDs must
+match the opaque snapshot. A malformed completion refuses the turn with
+`ExecutionStateCaptureFailed` before any output enters history. Process runs
+request the outcome alone.

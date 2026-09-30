@@ -981,6 +981,7 @@ async fn execute_code_in_worker_scope(
         context: lash_vm_client::RunContext {
             environment: host.host_environment_description(),
             mode: lashlang::ExecutionMode::Foreground,
+            capture_state_view: true,
             projected: Vec::new(),
             observe_execution: lashlang_execution_trace.is_some(),
             ..Default::default()
@@ -994,35 +995,26 @@ async fn execute_code_in_worker_scope(
     .await;
     let (result, runtime_failure) = match run {
         Ok(lash_vm_broker::BrokeredEnd::Complete { value, checkpoint }) => {
-            if let Err(error) = workers.mark_running().await {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-            if let Err(error) = state
+            let outcome = match state
                 .vm
                 .state_mut()
-                .install_bytes(checkpoint.vm.bytes().to_vec())
+                .install_completion(&checkpoint.vm, &value)
             {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error,
-                );
-            }
-            let outcome = match rmp_serde::from_slice::<ExecutionOutcome>(&value.0) {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
+                    let mut response = exec_setup_failure(lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Host,
                         format!("invalid worker completion: {error}"),
+                    ));
+                    fail_cell_on_nested_error(
+                        &ctx,
+                        &mut response,
+                        lash_core::RuntimeEffectControllerError::new(
+                            lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
+                            format!("invalid worker completion: {error}"),
+                        ),
                     );
+                    return response;
                 }
             };
             (Ok(outcome), None)

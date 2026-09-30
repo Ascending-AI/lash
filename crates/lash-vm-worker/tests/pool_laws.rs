@@ -694,6 +694,52 @@ fn helper_entry_preserves_effect_values_losslessly() {
 }
 
 #[test]
+fn cell_completion_carries_state_metadata_and_reset_clears_the_projection() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut input = start(
+        "const planted = 7; print(planted); finish(planted);",
+        ExecutionMode::Foreground,
+    );
+    let mut context: RunContext =
+        rmp_serde::from_slice(&input.contexts[0].body.0).expect("context");
+    context.capture_state_view = true;
+    input.contexts[0].body = EncodedPayload(rmp_serde::to_vec_named(&context).expect("context"));
+    let message = worker.start(input).expect("start");
+    let WorkerMessage::Complete { state, value } = drive(&mut worker, message) else {
+        panic!("the cell completes with its state metadata");
+    };
+    let completion: service::CellCompletion =
+        rmp_serde::from_slice(&value.0).expect("cell completion");
+    let metadata: service::StateMetadata =
+        rmp_serde::from_slice(&completion.state.0).expect("state metadata");
+    assert_eq!(
+        completion.outcome,
+        lashlang::ExecutionOutcome::Finished(lashlang::Value::Number(7.0))
+    );
+    assert!(metadata.names.contains("planted"));
+    assert_eq!(
+        metadata.globals.get("planted"),
+        Some(&lashlang::Value::Number(7.0))
+    );
+    assert!(
+        metadata
+            .definition_ids
+            .iter()
+            .eq(state.definition_ids().iter())
+    );
+    worker.release().expect("reset cell");
+
+    let mut next = checkout(&pool);
+    let (_, value) = complete(&mut next, "finish(typeof planted);");
+    assert_eq!(
+        rmp_serde::from_slice::<lashlang::ExecutionOutcome>(&value).expect("plain outcome"),
+        lashlang::ExecutionOutcome::Finished(lashlang::Value::String("undefined".into()))
+    );
+    next.release().expect("reset plain run");
+}
+
+#[test]
 fn reset_failure_discards_and_reaps_before_replacement() {
     let pool = WorkerPool::new(config("reset_abort")).expect("pool");
     let mut worker = checkout(&pool);

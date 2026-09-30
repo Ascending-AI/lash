@@ -22,6 +22,7 @@ pub(crate) struct Server<'frontend> {
     pending: Option<EffectRequest>,
     reissue: Option<RecordedRequest>,
     projection_namespace: String,
+    capture_state_view: bool,
     cpu_ceiling: Option<libc::rlim_t>,
 }
 
@@ -78,6 +79,7 @@ impl<'frontend> Server<'frontend> {
             pending: None,
             reissue: None,
             projection_namespace: String::new(),
+            capture_state_view: false,
             cpu_ceiling: None,
         };
         server.send(WorkerMessage::Ready { build })?;
@@ -287,6 +289,7 @@ impl<'frontend> Server<'frontend> {
                 }
                 ParentMessage::Reset => {
                     self.cpu_ceiling = None;
+                    self.capture_state_view = false;
                     self.instance.reset();
                     self.pending = None;
                     self.reissue = None;
@@ -327,6 +330,7 @@ impl<'frontend> Server<'frontend> {
             context = rmp_serde::from_slice(&description.body.0).map_err(PoolError::protocol)?;
         }
         self.projection_namespace = context.projection_namespace;
+        self.capture_state_view = context.capture_state_view;
         let execution_start = match start.state {
             StartState::Fresh => VmExecutionStart::Session,
             StartState::Snapshot(state) => {
@@ -650,12 +654,27 @@ impl<'frontend> Server<'frontend> {
                         .with_definition_ids(parked.continuation.referenced_definition_ids()),
                 }
             }
-            VmStep::Complete(complete) => WorkerMessage::Complete {
-                state: self.snapshot()?,
-                value: EncodedPayload(
-                    rmp_serde::to_vec_named(&complete.outcome).map_err(PoolError::protocol)?,
-                ),
-            },
+            VmStep::Complete(complete) => {
+                let state = self.snapshot()?;
+                let value = if self.capture_state_view {
+                    rmp_serde::to_vec_named(&lash_vm_client::service::CellCompletion {
+                        outcome: complete.outcome,
+                        state: EncodedPayload(
+                            rmp_serde::to_vec_named(&crate::service::state_metadata(
+                                &self.instance,
+                            ))
+                            .map_err(PoolError::protocol)?,
+                        ),
+                    })
+                } else {
+                    rmp_serde::to_vec_named(&complete.outcome)
+                }
+                .map_err(PoolError::protocol)?;
+                WorkerMessage::Complete {
+                    state,
+                    value: EncodedPayload(value),
+                }
+            }
             VmStep::GuestError(error) => {
                 let limit = match error.failure.error {
                     RuntimeError::InstructionBudgetExceeded { .. }

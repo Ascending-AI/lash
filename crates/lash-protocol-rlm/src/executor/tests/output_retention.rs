@@ -15,6 +15,7 @@ use super::*;
 const SEED: u64 = 0x1643_0001;
 const SESSION: &str = "output-retention";
 const TURN: &str = "turn-1";
+type RecordedAttempt = (ExecResponse, Vec<lash_vm_client::service::WorkerReceipt>);
 
 /// The live pass's policy: a 1 KiB inline limit and a 256-byte witness,
 /// under which the cell's print and final value are both retained.
@@ -23,11 +24,15 @@ const LIVE_POLICY: lash_core::OutputRetentionPolicy = lash_core::OutputRetention
     witness_bytes: 256,
 };
 
-/// A cell whose print and final value encode to roughly 30 KB each: past the
-/// live policy's limit, well within the default's.
+const REDRIVE_POLICY: lash_core::OutputRetentionPolicy = lash_core::OutputRetentionPolicy {
+    inline_limit_bytes: 1024 * 1024,
+    witness_bytes: 4 * 1024,
+};
+
+/// The facade's 3000-row retention payload, exercised through crash and redrive.
 const CELL: &str = r#"
 const rows = [];
-for (let i = 0; i < 600; i++) {
+for (let i = 0; i < 3000; i++) {
   rows.push({ index: i, text: "a row the cell prints and finishes with" });
 }
 print(rows);
@@ -38,7 +43,7 @@ fn attempt(
     backend: lash_core::Backend,
     policy: lash_core::OutputRetentionPolicy,
     crash: bool,
-    responses: Arc<Mutex<Vec<ExecResponse>>>,
+    responses: Arc<Mutex<Vec<RecordedAttempt>>>,
 ) -> lash_restate_test::HandlerAttempt {
     let invocation = lash_core::testing::exec_code_invocation(
         SESSION,
@@ -66,7 +71,9 @@ fn attempt(
             .attachment_store(attachments)
             .build()
             .into_runtime();
-            let mut state = RlmExecutionState::new();
+            let workers = lash_vm_client::service::Service::default().with_worker_receipts();
+            let mut state =
+                RlmExecutionState::for_engine_with_workers("typescript", workers.clone());
             let response = execute_code_unbounded_with_test_render(
                 &mut state,
                 ctx,
@@ -80,7 +87,9 @@ fn attempt(
                 RlmLashlangExecutionTraceConfig::default(),
             )
             .await;
-            responses.lock_recover().push(response);
+            responses
+                .lock_recover()
+                .push((response, workers.worker_receipts()));
             assert!(
                 !crash,
                 "the attempt's deployment dies after the cell recorded its outputs"
@@ -105,7 +114,7 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
                 attempt(backend.clone(), LIVE_POLICY, true, Arc::clone(&responses)),
                 attempt(
                     backend.clone(),
-                    lash_core::OutputRetentionPolicy::DEFAULT,
+                    REDRIVE_POLICY,
                     false,
                     Arc::clone(&responses),
                 ),
@@ -113,11 +122,18 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             .await
             .expect("the live pass crashes and its redrive completes");
         let responses = responses.lock_recover().clone();
-        let [live, redriven] = responses.as_slice() else {
+        let [(live, live_workers), (redriven, replay_workers)] = responses.as_slice() else {
             panic!("one crashed pass and one redrive ran the cell: {responses:?}");
         };
         for response in [live, redriven] {
             assert!(response.error.is_none(), "{:?}", response.error);
+        }
+        for workers in [live_workers, replay_workers] {
+            assert_eq!(
+                workers.last().map(|receipt| receipt.path),
+                Some(lash_vm_client::service::WorkerPath::Cell),
+                "a completed cell must carry its state view without reopening its snapshot"
+            );
         }
 
         // The live pass retained both outputs under its policy.
@@ -154,11 +170,13 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             .terminal_finish
             .clone()
             .expect("the cell finished with its value");
+        assert_eq!(value["rows"].as_array().map(Vec::len), Some(3000));
         let stored = backend
             .attachment_store()
             .get(&finish.reference.id, 32 * 1024 * 1024)
             .await
             .expect("the retained final value is stored");
+        assert!(!REDRIVE_POLICY.retains(stored.bytes.len()));
         assert_eq!(
             stored.bytes,
             serde_json::to_vec(&value).expect("encode the final value")
@@ -168,6 +186,7 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             .get(&print.reference.id, 32 * 1024 * 1024)
             .await
             .expect("the retained print is stored");
+        assert!(!REDRIVE_POLICY.retains(printed.bytes.len()));
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&printed.bytes).expect("a JSON print"),
             value["rows"]
