@@ -264,7 +264,7 @@ fn probe_context_with<'run>(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
+        effect_controller: scoped,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),

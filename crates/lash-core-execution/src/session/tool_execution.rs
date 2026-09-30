@@ -670,7 +670,7 @@ impl RuntimeExecutionContext<'_> {
         // effect, keyed by `{call_id}:present`, so a replay serves the recorded
         // `ToolPresentation` and never re-runs a step.
         let presentation_replay_key = format!("{call_id}:present");
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         let presentation = match crate::EffectAddress::new(
             scoped.execution_scope().clone(),
             presentation_replay_key.clone(),
@@ -1050,11 +1050,7 @@ impl RuntimeExecutionContext<'_> {
         } else {
             fallback = crate::RuntimeInvocation::effect(
                 crate::EffectAddress::new(
-                    self.dispatch
-                        .effect_controller
-                        .scoped()
-                        .execution_scope()
-                        .clone(),
+                    self.dispatch.effect_controller.execution_scope().clone(),
                     format!("tool:{call_id}:await"),
                 )
                 .expect("tool await carries an admitted effect scope"),
@@ -1066,7 +1062,7 @@ impl RuntimeExecutionContext<'_> {
         let parent_effect_id = parent.effect_id().unwrap_or("tool");
         let replay_suffix = format!("{call_id}:await");
         let invocation = crate::runtime::causal::child_effect_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.dispatch.effect_controller.execution_scope(),
             parent,
             format!("{parent_effect_id}:{replay_suffix}"),
             replay_suffix,
@@ -1101,7 +1097,6 @@ impl RuntimeExecutionContext<'_> {
         let outcome = self
             .dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -1250,7 +1245,7 @@ impl RuntimeExecutionContext<'_> {
             None => self.clone(),
         };
         let command = crate::runtime::command_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.dispatch.effect_controller.execution_scope(),
             self.effect_attribution(),
             self.parent_invocation.as_ref(),
             command,

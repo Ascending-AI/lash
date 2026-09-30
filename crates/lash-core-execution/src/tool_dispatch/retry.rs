@@ -105,7 +105,7 @@ async fn build_attempt_context<'run>(
     tool_context: &ToolContext<'run>,
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
-    let scoped = tool_context.effect_controller.scoped();
+    let scoped = tool_context.effect_controller.clone();
     // The key is reserved before the body runs, and only for a declared
     // deferrer on a controller that can route await events across process
     // loss. Report which of the two is missing rather than blaming the

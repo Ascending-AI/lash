@@ -17,9 +17,8 @@ use super::TurnControlBinding;
 use super::await_event_support::await_event_scope_not_retirable;
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
 
-mod handle;
-pub use handle::RuntimeEffectControllerHandle;
-pub use handle::{BoundaryReason, SegmentProgress};
+mod progress;
+pub use progress::{BoundaryReason, SegmentProgress};
 
 mod lane;
 use lash_core_effect::retirement;

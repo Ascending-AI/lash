@@ -569,7 +569,7 @@ mod tests {
             record.id = process_id.clone();
             record.cancel_request = Some(Box::new(crate::CancelRequest::new(
                 crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(_scope.effect_controller.scoped().execution_scope())
+                serde_json::to_string(_scope.effect_controller.execution_scope())
                     .expect("serializable effect scope"),
                 1,
             )));

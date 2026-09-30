@@ -399,7 +399,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
     ) -> Result<OpenerGroupsClosed, RuntimeEffectControllerError> {
         let held = std::mem::take(&mut self.opener_groups.lock_recover().outstanding);
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         let controller = scoped.controller();
         let mut closed = OpenerGroupsClosed::default();
         let mut remaining = Vec::with_capacity(held.len());

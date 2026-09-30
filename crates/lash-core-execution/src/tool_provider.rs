@@ -195,7 +195,7 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
-            parent_scope: context.effect_controller.scoped().admitted_scope().clone(),
+            parent_scope: context.effect_controller.admitted_scope().clone(),
             session_id: context.session_id.clone(),
             execution_scope_id,
             agent_frame_id: context.agent_frame_id.clone(),
@@ -427,7 +427,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
-    pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    pub(crate) effect_controller: crate::runtime::ScopedEffectController<'run>,
     pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -546,7 +546,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
     processes: Arc<dyn crate::ProcessService>,
-    effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    effect_controller: crate::runtime::ScopedEffectController<'run>,
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -779,7 +779,7 @@ impl<'run> ToolContext<'run> {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+        effect_controller: crate::runtime::ScopedEffectController<'run>,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
     ) -> ToolContextBuilder<'run> {
@@ -1332,9 +1332,11 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
-            crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            crate::runtime::ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
@@ -1387,7 +1389,7 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
-            crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
+            controller,
             Arc::new(crate::SessionAttachmentStore::unavailable()),
             crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",

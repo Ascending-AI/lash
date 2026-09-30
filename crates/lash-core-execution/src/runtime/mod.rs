@@ -46,10 +46,6 @@ pub use causal::process_event_invocation;
 pub use causal::tool_retry_sleep_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
-#[cfg(feature = "testing")]
-pub use effect::RuntimeEffectControllerHandle;
-#[cfg(not(feature = "testing"))]
-pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::TurnCancelWait;
 pub use effect::await_event_identity;
 /// Runtime effect contracts, including local process and trigger execution capabilities.

@@ -27,7 +27,6 @@ mod turn_control_authority;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
 pub use await_event_support::await_event_scope_not_retirable;
-pub use control::RuntimeEffectControllerHandle;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,

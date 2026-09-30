@@ -411,7 +411,7 @@ fn tool_context_with_provider<'run>(
         fixtures.backend_handle.process_env_store(),
     );
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
-    let effect_controller = lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+    let effect_controller = scoped;
     let attempt_parent = attempt_invocation().into_runtime_invocation();
     // The production client, minted against the very controller the sentinel
     // wraps: an `Independent` classification therefore shows up in the ledger
@@ -1638,10 +1638,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             .runtime
             .runtime_session_services()
             .expect("attempt-atomicity session manager")
-            .direct_completion_client(
-                lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
-                Some(TurnId::from(TURN.to_string())),
-            )
+            .direct_completion_client(scoped, Some(TurnId::from(TURN.to_string())))
             .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation());
 
         lash_core::RuntimeEffectController::execute_effect(

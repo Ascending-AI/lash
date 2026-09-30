@@ -127,9 +127,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: crate::runtime::ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions,
             parent_invocation: Some(invocation("opener-parent")),
             observation_call_key: None,
@@ -383,7 +385,6 @@ mod tests {
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
             .effect_controller
-            .scoped()
             .to_static()
             .expect("the lent dispatch's controller is 'static");
         let live = LiveOpenerContext::capture(
@@ -461,7 +462,6 @@ mod tests {
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
             .effect_controller
-            .scoped()
             .to_static()
             .expect("the lent dispatch's controller is 'static");
         let live = LiveOpenerContext::capture(
@@ -634,7 +634,6 @@ mod tests {
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
             .effect_controller
-            .scoped()
             .to_static()
             .expect("the lent dispatch's controller is 'static");
         let live = LiveOpenerContext::capture(

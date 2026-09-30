@@ -277,12 +277,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         effect_id: &str,
     ) -> crate::RuntimeEffectInvocation {
-        let execution_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
+        let execution_scope = self.dispatch.effect_controller.execution_scope().clone();
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(execution_scope, effect_id)
                 .expect("runtime context carries an admitted effect scope"),
@@ -301,12 +296,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
     )]
     fn deferred_resolution_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
-        let execution_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
+        let execution_scope = self.dispatch.effect_controller.execution_scope().clone();
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(execution_scope, effect_id)
                 .expect("runtime context carries an admitted effect scope"),
@@ -330,7 +320,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.language_runtime_invocation(&effect_id);
         self.dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -360,7 +349,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.deferred_resolution_invocation(&effect_id);
         self.dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -389,7 +377,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.language_runtime_invocation(&key);
         self.dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -427,7 +414,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let expected_operation = operation.clone();
         self.dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -470,7 +456,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         parent_invocation: Option<crate::RuntimeInvocation>,
     ) -> crate::ProcessOpScope<'_> {
-        crate::ProcessOpScope::new(self.dispatch.effect_controller.scoped())
+        crate::ProcessOpScope::new(self.dispatch.effect_controller.clone())
             .with_parent_invocation(parent_invocation)
             .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
             .with_process_lineage(self.dispatch.process_lineage.clone())
@@ -585,11 +571,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub fn execution_scope_id(&self) -> String {
-        self.dispatch
-            .effect_controller
-            .scoped()
-            .scope_id()
-            .to_string()
+        self.dispatch.effect_controller.scope_id().to_string()
     }
 
     /// The admitted scope this execution's controller carries: the execution
@@ -597,11 +579,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// under. This is the checked pair — consumers that need an opener derive
     /// it from this value rather than re-pairing scope and pin themselves.
     pub fn admitted_scope(&self) -> crate::AdmittedScope {
-        self.dispatch
-            .effect_controller
-            .scoped()
-            .admitted_scope()
-            .clone()
+        self.dispatch.effect_controller.admitted_scope().clone()
     }
 
     /// The process incarnation this execution's scope was admitted under, when
@@ -613,11 +591,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// built with carries the exact pair, and this is where an execution that
     /// must name its opener (ADR 0099 §1) reads it back.
     pub fn admitted_process(&self) -> Option<crate::ProcessId> {
-        self.dispatch
-            .effect_controller
-            .scoped()
-            .admitted_process()
-            .cloned()
+        self.dispatch.effect_controller.admitted_process().cloned()
     }
 
     /// The durable process attempt admitted for this execution, when it runs
@@ -1040,7 +1014,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         let observed = control
             .observe_pending_cancel(
-                &self.dispatch.effect_controller.scoped(),
+                &self.dispatch.effect_controller,
                 crate::runtime::turn_control::TurnCancelPeekIdentity::CellCheckpoint {
                     cell,
                     checkpoint,
@@ -1083,7 +1057,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 None => self
                     .dispatch
                     .effect_controller
-                    .scoped()
                     .turn_cancel_wait(cancellation),
             }
         } else {
@@ -1137,7 +1110,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// at `{command}:{effect id}`, under the command's own key.
     pub fn under_command(&self, command: &crate::CommandReplayKey) -> Self {
         let invocation = crate::runtime::command_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.dispatch.effect_controller.execution_scope(),
             self.effect_attribution(),
             self.parent_invocation.as_ref(),
             command,
@@ -1333,7 +1306,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// lineage of the process this context runs inside. There is no registry
     /// access here by design (FIG-3607 R2).
     pub fn start_cx(&self) -> Result<crate::StartCx, crate::PluginError> {
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         crate::StartCx::materialize(scoped.admitted_scope(), self.process_lineage().as_ref())
             .map_err(|error| crate::PluginError::Session(error.to_string()))
     }
@@ -1446,9 +1419,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         // command's issue ordinal, like every other effect of the run
         // (FIG-3586).
         let invocation = crate::runtime::causal::child_effect_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.dispatch.effect_controller.execution_scope(),
             &crate::runtime::command_invocation(
-                self.dispatch.effect_controller.scoped().execution_scope(),
+                self.dispatch.effect_controller.execution_scope(),
                 self.effect_attribution(),
                 self.parent_invocation.as_ref(),
                 command,
@@ -1460,7 +1433,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -1521,7 +1493,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         let effect_id = command.effect_id();
         let invocation = crate::runtime::causal::process_effect_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.dispatch.effect_controller.execution_scope(),
             self.parent_invocation
                 .as_ref()
                 .map(|parent| parent.attribution.clone())
@@ -1530,7 +1502,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             &effect_id,
         );
         let controller = self.dispatch.effect_controller.controller();
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         #[expect(
             clippy::expect_used,
             reason = "`EffectTaskController::scoped` returns a proxy that owns the controller it was just built around"
@@ -1607,11 +1579,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> crate::RuntimeEffectInvocation {
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                self.dispatch
-                    .effect_controller
-                    .scoped()
-                    .execution_scope()
-                    .clone(),
+                self.dispatch.effect_controller.execution_scope().clone(),
                 command.sleep(),
             )
             .expect("a command sleep uses the already admitted controller scope"),
@@ -1640,7 +1608,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(invocation, command),
                 crate::RuntimeEffectLocalExecutor::sleep_under(
@@ -1710,11 +1677,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         )]
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                self.dispatch
-                    .effect_controller
-                    .scoped()
-                    .execution_scope()
-                    .clone(),
+                self.dispatch.effect_controller.execution_scope().clone(),
                 effect_id.clone(),
             )
             .expect("runtime context carries an admitted effect scope"),
@@ -1728,7 +1691,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         self.dispatch
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,

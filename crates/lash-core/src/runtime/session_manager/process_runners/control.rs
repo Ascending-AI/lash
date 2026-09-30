@@ -9,7 +9,7 @@ struct ProcessCommandRunner<'scope> {
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     effect_controller: &'scope dyn crate::RuntimeEffectController,
-    effect_controller_handle: crate::runtime::RuntimeEffectControllerHandle<'scope>,
+    scoped_effect_controller: crate::runtime::ScopedEffectController<'scope>,
     turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
@@ -28,7 +28,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
             effect_controller,
-            effect_controller_handle: scope.effect_controller.clone_scoped(),
+            scoped_effect_controller: scope.effect_controller.clone(),
             turn_cancellation: scope.turn_cancellation.clone(),
         })
     }
@@ -230,7 +230,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let effect_id = command.effect_id();
-        let scoped = self.effect_controller_handle.scoped();
+        let scoped = self.scoped_effect_controller.clone();
         scoped
             .admit_journal_write()
             .map_err(crate::PluginError::RuntimeEffectController)?;
@@ -787,7 +787,7 @@ impl ProcessCapability {
             .cancel_named(
                 process_id,
                 crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(runner.effect_controller_handle.scoped().execution_scope())
+                serde_json::to_string(runner.scoped_effect_controller.execution_scope())
                     .expect("execution scopes contain only serializable identities"),
                 None,
             )

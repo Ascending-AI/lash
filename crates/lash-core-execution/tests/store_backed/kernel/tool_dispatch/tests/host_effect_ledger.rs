@@ -464,8 +464,11 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
     // A journaling controller replays the recorded attempt outcome for the
     // same replay key — which is derived from the call id — so the second
     // dispatch is a redrive, not a re-execution.
-    context.effect_controller =
-        RuntimeEffectControllerHandle::shared(Arc::new(IntentReplayController::new(None).await));
+    context.effect_controller = ScopedEffectController::shared(
+        Arc::new(IntentReplayController::new(None).await),
+        crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+    )
+    .expect("valid test runtime scope");
 
     let args = json!({ "effect": "deploy" });
     let live = dispatch_ledger_call(&context, "call-replay", args.clone()).await;

@@ -10,7 +10,7 @@ pub async fn execute_final_tool_intents(
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
-    let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
+    let execution_scope_id = context.effect_controller.scope_id().to_string();
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
         return Ok(Vec::new());
     }
@@ -325,7 +325,7 @@ pub(crate) fn declaring_identity(
 ) -> crate::ToolIntentIdentity {
     crate::derive_tool_intent_identity_under(
         &context.session_id,
-        context.effect_controller.scoped().scope_id(),
+        context.effect_controller.scope_id(),
         tool_call_id,
         0,
         Some(minting_emission),
@@ -441,7 +441,7 @@ async fn execute_one(
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
-                context.effect_controller.scoped().execution_scope().clone(),
+                context.effect_controller.execution_scope().clone(),
                 identity.replay_key.clone(),
             )
             .expect("tool-intent execution carries an admitted effect scope"),
@@ -452,7 +452,7 @@ async fn execute_one(
     let parent = parent.with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
-    let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
+    let scope = crate::ProcessOpScope::new(context.effect_controller.clone())
         .with_parent_invocation(Some(parent))
         .with_agent_frame_id(Some(context.agent_frame_id.clone()))
         .with_process_lineage(context.process_lineage.clone());
@@ -538,8 +538,7 @@ async fn execute_one(
             let mut request = intent.request.clone();
             request.idempotency_key = identity.replay_key.clone();
             let report =
-                Box::pin(router.emit_recorded(request, &context.effect_controller.scoped()))
-                    .await?;
+                Box::pin(router.emit_recorded(request, &context.effect_controller)).await?;
             Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::RegisterProcessDefinition(intent) => {
@@ -596,7 +595,7 @@ async fn publish_declared_module(
             intent.engine_kind
         ))
     })?;
-    let scoped = context.effect_controller.scoped();
+    let scoped = context.effect_controller.clone();
     ports
         .modules()
         .publish_module_artifact(
@@ -718,7 +717,7 @@ async fn realize_register_process_definition(
     // `register_recorded_trigger` (FIG-3470): the journaled admission — not
     // this call — owns the durable write, so a redrive replays the recorded
     // registration and a group child admits it under its own binding.
-    let scoped = context.effect_controller.scoped();
+    let scoped = context.effect_controller.clone();
     // The CAS holds the revision it writes before it writes, under the
     // intent's journal (ADR 0113 §3.6).
     let creator = scoped
@@ -782,7 +781,7 @@ async fn register_recorded_trigger(
     identity: &crate::ToolIntentIdentity,
     intent: &crate::RegisterTriggerIntent,
 ) -> Result<serde_json::Value, crate::PluginError> {
-    let scoped = context.effect_controller.scoped();
+    let scoped = context.effect_controller.clone();
     let mut draft = intent.draft.clone();
     if let Some(env_spec) = intent.env_spec.as_ref() {
         // Publication moved out of the attempt and into realization: the

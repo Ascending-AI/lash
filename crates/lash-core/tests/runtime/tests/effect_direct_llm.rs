@@ -47,13 +47,11 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         .await
         .expect("open the operation's handler");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::borrowed(
-            lash_core::testing::LayeredEffectHost::layer_scoped(
-                handler.scoped(),
-                Arc::new(recorder.clone()),
-            )
-            .expect("layer the operation's scoped controller"),
-        ),
+        lash_core::testing::LayeredEffectHost::layer_scoped(
+            handler.scoped(),
+            Arc::new(recorder.clone()),
+        )
+        .expect("layer the operation's scoped controller"),
         None,
     );
     let request = LlmRequest {

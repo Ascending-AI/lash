@@ -23,7 +23,7 @@ impl RuntimeExecutionContext<'_> {
         if let Some(parent) = self.parent_invocation.as_ref() {
             let parent_effect_id = parent.effect_id().unwrap_or("effect");
             return crate::runtime::causal::child_effect_invocation(
-                self.dispatch.effect_controller.scoped().execution_scope(),
+                self.dispatch.effect_controller.execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 suffix,
@@ -32,11 +32,7 @@ impl RuntimeExecutionContext<'_> {
         let replay_key = format!("{}:{suffix}", self.execution_scope_id());
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                self.dispatch
-                    .effect_controller
-                    .scoped()
-                    .execution_scope()
-                    .clone(),
+                self.dispatch.effect_controller.execution_scope().clone(),
                 replay_key,
             )
             .expect("tool batch carries an admitted effect scope"),

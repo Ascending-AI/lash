@@ -153,7 +153,7 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
     let retry_policy =
         super::retry::resolve_retry_policy(context, &prepared.tool_id, execution_grant.as_deref());
     let turn_cancel_wait = Box::new(
-        context.effect_controller.scoped().turn_cancel_wait(
+        context.effect_controller.turn_cancel_wait(
             tool_context
                 .cancellation_token()
                 .cloned()

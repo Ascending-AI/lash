@@ -620,9 +620,11 @@ impl ToolCallFixture<'static> {
                 session_lifecycle,
                 session_graph,
                 Arc::new(crate::UnavailableProcessService),
-                crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                    UnavailableEffectController,
-                )),
+                crate::runtime::ScopedEffectController::shared(
+                    Arc::new(UnavailableEffectController),
+                    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+                )
+                .expect("valid test runtime scope"),
                 Arc::new(crate::SessionAttachmentStore::unavailable()),
                 direct_completions,
             )
@@ -724,8 +726,7 @@ impl<'run> ToolCallFixture<'run> {
     /// scope. A fixture that exercises an owner-derived answer (a declared
     /// child's parent scope) binds the real scope here.
     pub fn scoped_effect_controller(mut self, scoped: crate::ScopedEffectController<'run>) -> Self {
-        self.context.effect_controller =
-            crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+        self.context.effect_controller = scoped;
         self
     }
 
@@ -1375,7 +1376,7 @@ pub async fn coordinate_tool_provider_with_services(
     let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch), &call)
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .build();
-    let turn_cancel_wait = dispatch.effect_controller.scoped().turn_cancel_wait(
+    let turn_cancel_wait = dispatch.effect_controller.turn_cancel_wait(
         tool_context
             .cancellation_token()
             .cloned()
@@ -1674,7 +1675,7 @@ impl EffectBackedProcessService {
         // the ToolContext carries (`process_effect_invocation`), so a nested
         // command inherits the attempt's replay-key lineage. Use the same
         // helper, not a lookalike.
-        let scoped = scope.effect_controller.scoped();
+        let scoped = scope.effect_controller.clone();
         let attribution = scope
             .parent_invocation
             .as_ref()
@@ -1689,7 +1690,7 @@ impl EffectBackedProcessService {
         let controller = scope.controller();
         let (proxy, requests) = crate::runtime::effect::EffectTaskController::scoped(
             controller,
-            scope.effect_controller.scoped().admitted_scope().clone(),
+            scope.effect_controller.admitted_scope().clone(),
         )
         .map_err(crate::RuntimeEffectControllerError::from)?;
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(
@@ -1871,7 +1872,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             .cancel_command(
                 process_id,
                 crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(scope.effect_controller.scoped().execution_scope())
+                serde_json::to_string(scope.effect_controller.execution_scope())
                     .expect("serializable effect scope"),
                 None,
             )
@@ -2460,7 +2461,7 @@ impl crate::ProcessService for MockSessionManager {
             .request_process_cancel(
                 &process_id,
                 crate::CancelOrigin::OperatorRequested,
-                serde_json::to_string(_scope.effect_controller.scoped().execution_scope())
+                serde_json::to_string(_scope.effect_controller.execution_scope())
                     .expect("serializable effect scope"),
                 None,
             )

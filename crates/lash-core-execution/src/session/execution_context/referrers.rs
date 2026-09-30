@@ -15,7 +15,7 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// A scope with no journal identity.
     pub fn execution_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
-        execution_referrer_of(self.dispatch.effect_controller.scoped().execution_scope())
+        execution_referrer_of(self.dispatch.effect_controller.execution_scope())
     }
 
     /// The claim of [`Self::execution_referrer`], armed with its journal
@@ -25,7 +25,7 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// A scope with no journal identity.
     pub fn execution_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
-        execution_claim_of(self.dispatch.effect_controller.scoped().execution_scope())
+        execution_claim_of(self.dispatch.effect_controller.execution_scope())
     }
 
     /// The frame-environment referrer of the frame this execution's turn was
@@ -60,7 +60,6 @@ impl RuntimeExecutionContext<'_> {
         let creator = self
             .dispatch
             .effect_controller
-            .scoped()
             .execution_scope()
             .journal_identity()?;
         Ok(Arc::new(

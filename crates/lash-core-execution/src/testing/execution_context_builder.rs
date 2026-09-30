@@ -535,23 +535,20 @@ impl<'run> TestExecutionContextBuilder<'run> {
         // under, and `HostBridge` refuses a claim/opener disagreement rather
         // than re-pairing the two halves itself.
         let effect_controller = match self.effect_controller {
-            None => crate::runtime::RuntimeEffectControllerHandle::borrowed(
-                effect_host
-                    .as_ref()
-                    .expect("a builder with no host is built over a controller")
-                    .scoped_static(default_admitted())
-                    .expect("the supplied host binds the fixture's admitted scope")
-                    .expect("the supplied host lends a static controller"),
-            ),
+            None => effect_host
+                .as_ref()
+                .expect("a builder with no host is built over a controller")
+                .scoped_static(default_admitted())
+                .expect("the supplied host binds the fixture's admitted scope")
+                .expect("the supplied host lends a static controller"),
             Some(TestEffectController::Shared(effect_controller)) => {
-                crate::runtime::RuntimeEffectControllerHandle::Shared {
-                    controller: effect_controller,
-                    admitted: default_admitted(),
-                }
+                crate::runtime::ScopedEffectController::shared(
+                    effect_controller,
+                    default_admitted(),
+                )
+                .expect("valid fixture scope")
             }
-            Some(TestEffectController::Borrowed(effect_controller)) => {
-                crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
-            }
+            Some(TestEffectController::Borrowed(effect_controller)) => effect_controller,
             Some(TestEffectController::Lent(effect_controller)) => {
                 let claimed = default_admitted();
                 assert_eq!(
@@ -560,14 +557,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     "the lent controller admits a scope the context does not claim: open the \
                      execution for the context's scope"
                 );
-                crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
+                effect_controller
             }
         };
         // A process body runs inside its process: a fixture that names no
         // lineage runs a root process's body.
         let process_lineage =
             self.process_lineage
-                .or_else(|| match effect_controller.scoped().execution_scope() {
+                .or_else(|| match effect_controller.execution_scope() {
                     crate::ExecutionScope::Process { process_id } => {
                         Some(crate::ProcessLineage::of_process(
                             process_id,
@@ -715,7 +712,7 @@ pub fn wire_test_tool_children(
         )
         .with_clock(Arc::clone(&dispatch.clock)),
     )?;
-    let admitted = dispatch.effect_controller.scoped().admitted_scope().clone();
+    let admitted = dispatch.effect_controller.admitted_scope().clone();
     let opener = crate::runtime::effect::opener_for_execution_scope(&admitted)?;
     let lent = host.scoped_static(admitted).ok()??;
     let (guard, _ended) = tool_children.openers().register(

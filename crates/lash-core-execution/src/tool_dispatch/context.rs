@@ -74,7 +74,7 @@ pub struct ToolDispatchContext<'run> {
     pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     /// The engines a definition registration resolves against.
     pub process_engines: crate::ProcessEngineRegistry,
-    pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    pub effect_controller: crate::runtime::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
     /// The resolved key one call's observation lanes are emitted under
@@ -145,7 +145,7 @@ impl ToolDispatchContext<'_> {
         {
             return key.to_owned();
         }
-        let scoped = self.effect_controller.scoped();
+        let scoped = self.effect_controller.clone();
         let scope = scoped.execution_scope();
         debug_assert!(
             scope.journal_identity().is_ok(),
@@ -201,7 +201,6 @@ impl ToolDispatchContext<'_> {
     /// for those sessionless scopes.
     pub(crate) fn parentless_attribution(&self) -> crate::RuntimeAttribution {
         self.effect_controller
-            .scoped()
             .execution_scope()
             .session_id()
             .map(crate::RuntimeAttribution::for_session)
@@ -400,7 +399,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
 
 impl<'run> ToolDispatchContext<'run> {
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
-        crate::ProcessOpScope::new(self.effect_controller.scoped())
+        crate::ProcessOpScope::new(self.effect_controller.clone())
             .with_parent_invocation(self.parent_invocation.clone())
             .with_agent_frame_id(Some(self.agent_frame_id.clone()))
             .with_process_lineage(self.process_lineage.clone())
@@ -469,12 +468,8 @@ impl<'run> ToolDispatchContext<'run> {
             trigger_router: self.trigger_router.clone(),
             process_definitions: self.process_definitions.clone(),
             process_engines: self.process_engines.clone(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
-                controller.clone(),
-            ),
-            direct_completions: self.direct_completions.lend_static(
-                crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
-            ),
+            effect_controller: controller.clone(),
+            direct_completions: self.direct_completions.lend_static(controller),
             parent_invocation: self.parent_invocation.clone(),
             observation_call_key: self.observation_call_key.clone(),
             execution_env_spec: self.execution_env_spec.clone(),

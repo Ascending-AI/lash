@@ -237,7 +237,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         group_key: &str,
     ) -> Result<Vec<crate::runtime::effect::IncorporatedGroupRank>, RuntimeEffectControllerError>
     {
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         let controller = scoped.controller();
         let mut through_rank = 0u64;
         while controller
@@ -299,7 +299,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             already + 1
         );
         let invocation = self.language_runtime_invocation(&effect_id);
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         let controller = scoped.controller();
         // Read the prefix's settlements before the record, on the live run
         // and on every replay alike. A settled rank is immutable, so these

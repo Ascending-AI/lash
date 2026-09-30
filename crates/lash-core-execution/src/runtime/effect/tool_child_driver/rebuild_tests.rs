@@ -28,7 +28,6 @@ fn serving_context(path: Path, dispatch: &ToolDispatchContext<'static>) -> LiveO
         Path::Live => {
             let lent_controller = dispatch
                 .effect_controller
-                .scoped()
                 .to_static()
                 .expect("the lent dispatch's controller is 'static");
             LiveOpenerContext::capture(

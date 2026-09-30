@@ -218,7 +218,7 @@ impl RuntimeExecutionContext<'_> {
         wake: GroupWakePolicy,
         reopen: crate::GroupReopen,
     ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        let scoped = self.dispatch.effect_controller.scoped();
+        let scoped = self.dispatch.effect_controller.clone();
         // Opening a group writes the journal; a replayed language command's
         // guard admits it or refuses it before any row exists (FIG-3586).
         scoped.admit_journal_write()?;
@@ -798,12 +798,7 @@ impl RuntimeExecutionContext<'_> {
         abandoned: &[usize],
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let controller = self.dispatch.effect_controller.controller();
-        let execution_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
+        let execution_scope = self.dispatch.effect_controller.execution_scope().clone();
         for &position in abandoned {
             let Some(PreparedGroupChild::Tool(leaf)) = children.get(position) else {
                 continue;

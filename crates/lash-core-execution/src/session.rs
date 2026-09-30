@@ -822,7 +822,7 @@ impl Session {
         session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
         session_graph: Arc<dyn crate::plugin::SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+        effect_controller: crate::runtime::ScopedEffectController<'run>,
         direct_completions: crate::DirectCompletionClient<'run>,
         trigger_router: Option<crate::TriggerRouter>,
         process_definitions: Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>>,

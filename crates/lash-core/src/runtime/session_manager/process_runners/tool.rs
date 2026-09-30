@@ -143,7 +143,7 @@ impl RuntimeSessionServices {
                 )]
                 let invocation = match await_parent_invocation.as_ref() {
                     Some(parent) => crate::runtime::causal::child_effect_invocation(
-                        dispatch.effect_controller.scoped().execution_scope(),
+                        dispatch.effect_controller.execution_scope(),
                         parent,
                         format!("{}:{suffix}", parent.effect_id().unwrap_or("tool")),
                         &suffix,
@@ -152,11 +152,7 @@ impl RuntimeSessionServices {
                         let effect_id = format!("tool:{suffix}");
                         crate::RuntimeEffectInvocation::new(
                             crate::EffectAddress::new(
-                                dispatch
-                                    .effect_controller
-                                    .scoped()
-                                    .execution_scope()
-                                    .clone(),
+                                dispatch.effect_controller.execution_scope().clone(),
                                 effect_id.clone(),
                             )
                             .expect("process tool dispatch carries an admitted effect scope"),

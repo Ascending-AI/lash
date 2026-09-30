@@ -89,9 +89,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: crate::runtime::ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -143,8 +145,7 @@ mod tests {
         ) -> Result<DeploymentToolChildContext, crate::PluginError> {
             self.builds.fetch_add(1, Ordering::SeqCst);
             let mut dispatch = context(Arc::clone(&self.tools));
-            dispatch.effect_controller =
-                crate::runtime::RuntimeEffectControllerHandle::borrowed(lent_controller);
+            dispatch.effect_controller = lent_controller;
             Ok(DeploymentToolChildContext::new(dispatch, Arc::new(())))
         }
     }

@@ -140,9 +140,11 @@ fn lent_with_direct_completions(
         trigger_router: None,
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::testing::UnavailableEffectController,
-        )),
+        effect_controller: crate::runtime::ScopedEffectController::shared(
+            Arc::new(crate::testing::UnavailableEffectController),
+            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         direct_completions,
         parent_invocation: Some(invocation("opener-parent")),
         observation_call_key: None,
@@ -313,15 +315,12 @@ fn the_child_runs_under_its_recorded_execution_environment() {
 #[test]
 fn the_child_runs_on_its_own_admitted_controller() {
     assert_ne!(
-        lent().effect_controller.scoped().execution_scope(),
+        lent().effect_controller.execution_scope(),
         &ExecutionScope::turn("child-session", "turn"),
         "the lent controller must be admitted under a scope that is not the child's"
     );
     assert_eq!(
-        rebound(&request())
-            .effect_controller
-            .scoped()
-            .execution_scope(),
+        rebound(&request()).effect_controller.execution_scope(),
         &ExecutionScope::turn("child-session", "turn")
     );
 }
@@ -648,9 +647,11 @@ fn probed_lent(
             bindable,
             call,
         }),
-        crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::testing::UnavailableEffectController,
-        )),
+        crate::runtime::ScopedEffectController::shared(
+            Arc::new(crate::testing::UnavailableEffectController),
+            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         Some(crate::TurnId::from("opener-turn")),
     ))
 }

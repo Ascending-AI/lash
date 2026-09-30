@@ -162,7 +162,11 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
         }),
     )
     .await;
-    context.effect_controller = RuntimeEffectControllerHandle::shared(recorder.clone());
+    context.effect_controller = ScopedEffectController::shared(
+        recorder.clone(),
+        crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+    )
+    .expect("valid test runtime scope");
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .call_id(crate::ToolCallId::fixture("call-1"));
 
@@ -206,8 +210,11 @@ async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
         }),
     )
     .await;
-    context.effect_controller =
-        RuntimeEffectControllerHandle::shared(Arc::new(FailingSleepEffectController));
+    context.effect_controller = ScopedEffectController::shared(
+        Arc::new(FailingSleepEffectController),
+        crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+    )
+    .expect("valid test runtime scope");
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .call_id(crate::ToolCallId::fixture("call-1"));
 

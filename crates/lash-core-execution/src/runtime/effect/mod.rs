@@ -93,7 +93,7 @@ pub use executor::{
     EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
     effect_groups_unsupported,
 };
-pub use executor::{RUN_SEAL_OPERATION, RuntimeEffectControllerHandle, TurnCancelWait};
+pub use executor::{RUN_SEAL_OPERATION, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,
     emit_llm_trace_started, emit_provider_replay_drops, llm_call_error_from_transport,

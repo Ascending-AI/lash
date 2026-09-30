@@ -12,10 +12,6 @@ impl<'run> RuntimeTurnDriver<'run> {
         crate::ExecutionScope::turn(self.session_id.clone(), self.turn_id.clone())
     }
 
-    pub(super) fn effect_controller_handle(&self) -> RuntimeEffectControllerHandle<'run> {
-        RuntimeEffectControllerHandle::borrowed(self.scoped_effect_controller.clone())
-    }
-
     pub(super) fn execution_context(
         &self,
         event_tx: &TurnObserver,
@@ -37,9 +33,9 @@ impl<'run> RuntimeTurnDriver<'run> {
         chronological_projection: Arc<crate::ChronologicalProjection>,
     ) -> Result<crate::RuntimeExecutionContext<'run>, PluginError> {
         let manager = self.session_services.clone();
-        let effect_controller = self.effect_controller_handle();
-        let direct_completions = manager
-            .direct_completion_client(effect_controller.clone_scoped(), Some(self.turn_id.clone()));
+        let effect_controller = self.scoped_effect_controller.clone();
+        let direct_completions =
+            manager.direct_completion_client(effect_controller.clone(), Some(self.turn_id.clone()));
         let execution_env_spec = self
             .turn_pipeline
             .state()

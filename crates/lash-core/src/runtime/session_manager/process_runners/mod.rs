@@ -151,10 +151,9 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let opener = crate::facade_support::opener_for_execution_scope(
             scoped_effect_controller.admitted_scope(),
         );
-        let effect_controller =
-            crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped_effect_controller);
+        let effect_controller = scoped_effect_controller;
         let direct_completions = services.direct_completion_client(
-            effect_controller.clone_scoped(),
+            effect_controller.clone(),
             self.causal_invocation
                 .as_ref()
                 .and_then(|invocation| invocation.attribution.turn_id.clone()),
@@ -227,7 +226,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                     .core
                     .control
                     .effect_host
-                    .scoped_static(dispatch.effect_controller.scoped().admitted_scope().clone())
+                    .scoped_static(dispatch.effect_controller.admitted_scope().clone())
                     .ok()??;
                 let context = crate::facade_support::LiveOpenerContext::capture(
                     dispatch.as_ref(),

@@ -283,7 +283,7 @@ fn launch_parent(
     identity: &crate::ToolIntentIdentity,
 ) -> crate::RuntimeInvocation {
     site.scope.parent_invocation.clone().unwrap_or_else(|| {
-        let scoped = site.scope.effect_controller.scoped();
+        let scoped = site.scope.effect_controller.clone();
         let execution_scope = scoped.execution_scope();
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(execution_scope.clone(), identity.replay_key.clone())
@@ -484,7 +484,7 @@ async fn cancel_owned_process(
     site: &ParkSite<'_, '_>,
     process_id: &crate::ProcessId,
 ) -> Result<CancelDischarge, crate::RuntimeEffectControllerError> {
-    let scoped = site.scope.effect_controller.scoped();
+    let scoped = site.scope.effect_controller.clone();
     let suffix = crate::runtime::effect::tool_cancel_work_replay_suffix(site.call_id);
     let parent = site.scope.parent_invocation.as_ref().map(|parent| {
         let parent_effect_id = parent.effect_id().unwrap_or("tool");

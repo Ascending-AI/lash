@@ -2,7 +2,7 @@ mod tests {
     use crate::ProcessId;
     use crate::RuntimeExecutionContext;
     use crate::SessionId;
-    use crate::runtime::RuntimeEffectControllerHandle;
+    use crate::runtime::ScopedEffectController;
     use crate::session::ToolInvocationReply;
     use crate::support::prelude::*;
     use crate::tool_dispatch::ToolDispatchContext;
@@ -143,9 +143,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -346,9 +348,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -456,9 +460,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -617,9 +623,11 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            effect_controller: ScopedEffectController::shared(
+                Arc::new(crate::testing::UnavailableEffectController),
+                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+            )
+            .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -984,7 +992,7 @@ mod tests {
             process_engines: crate::ProcessEngineRegistry::default(),
             // The completion presents through the journaled boundary, so the
             // context runs on the open handler's lent controller.
-            effect_controller: RuntimeEffectControllerHandle::borrowed(handler.scoped()),
+            effect_controller: handler.scoped(),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),

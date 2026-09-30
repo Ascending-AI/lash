@@ -192,7 +192,7 @@ impl LashRuntime {
             traces: manager.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             direct_completions: manager.direct_completion_client(
-                RuntimeEffectControllerHandle::borrowed(scoped_effect_controller.clone()),
+                scoped_effect_controller.clone(),
                 Some(turn_phase_id(trace_turn_id, "context-pressure")),
             ),
             system_prompt: Some(system_prompt),

@@ -908,8 +908,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // the child's recorded identity (§4), so a nested admission minted after
     // the child's cancel decision commits refuses at the substrate. This is
     // the authority boundary; everything else on this list is attribution.
-    child.effect_controller =
-        crate::runtime::RuntimeEffectControllerHandle::borrowed(controller.clone());
+    child.effect_controller = controller.clone();
     // Child-local buffers. Their contents ride the child's outcome (§6, §13),
     // so a child that wrote into the opener's buffers would put its facts
     // somewhere its settlement cannot carry them from.
@@ -924,7 +923,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
     child.direct_completions = lent.direct_completions.bind_tool_child(
         &request.scope.session_id,
         &execution_env_spec,
-        crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
+        controller,
         request
             .lineage
             .parent_invocation()
@@ -1405,7 +1404,7 @@ fn child_turn_cancel_scope(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
 ) -> crate::ExecutionScope {
-    let scoped = dispatch.effect_controller.scoped();
+    let scoped = dispatch.effect_controller.clone();
     let admitted = scoped.execution_scope();
     let physical_turn = request
         .lineage
@@ -1497,7 +1496,6 @@ async fn await_journaled_tool_completion(
     let settle_started = dispatch.clock.now();
     let outcome = dispatch
         .effect_controller
-        .scoped()
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 invocation,
@@ -1577,7 +1575,7 @@ fn journaled_await_invocation(
     let suffix = format!("{call_id}:await");
     let parent_effect_id = parent.effect_id().unwrap_or("tool").to_string();
     crate::runtime::causal::child_effect_invocation(
-        dispatch.effect_controller.scoped().execution_scope(),
+        dispatch.effect_controller.execution_scope(),
         parent,
         format!("{parent_effect_id}:{suffix}"),
         suffix,
@@ -1661,7 +1659,7 @@ async fn resolve_model_return(
     // the settlement's recorded `model_return` — replay serves the record and
     // never re-runs a step (ADR 0099 §6, FIG-3420).
     let replay_key = format!("{}:present", request.call.call_id);
-    let scoped = dispatch.effect_controller.scoped();
+    let scoped = dispatch.effect_controller.clone();
     let presented =
         match crate::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone()) {
             Ok(address) => scoped

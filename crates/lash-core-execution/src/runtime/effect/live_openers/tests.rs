@@ -36,9 +36,11 @@ fn live_context() -> LiveOpenerContext {
         trigger_router: None,
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::testing::UnavailableEffectController,
-        )),
+        effect_controller: crate::runtime::ScopedEffectController::shared(
+            Arc::new(crate::testing::UnavailableEffectController),
+            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -62,7 +64,6 @@ fn live_context() -> LiveOpenerContext {
     };
     let lent_controller = dispatch
         .effect_controller
-        .scoped()
         .to_static()
         .expect("the test controller lends itself 'static");
     LiveOpenerContext::capture(

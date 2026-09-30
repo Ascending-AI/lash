@@ -349,7 +349,7 @@ impl RuntimeSessionServices {
 
     pub fn direct_completion_client<'run>(
         self: &Arc<Self>,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+        effect_controller: crate::runtime::ScopedEffectController<'run>,
         turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
         DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)

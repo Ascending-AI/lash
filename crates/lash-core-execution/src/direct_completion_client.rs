@@ -72,7 +72,7 @@ pub trait DirectCompletionService: Send + Sync {
 #[derive(Clone)]
 struct RuntimeDirectSource<'run> {
     service: Arc<dyn DirectCompletionService>,
-    effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    effect_controller: crate::runtime::ScopedEffectController<'run>,
     turn_id: Option<crate::TurnId>,
 }
 
@@ -140,7 +140,7 @@ pub struct DirectCompletionClient<'run> {
 impl<'run> DirectCompletionClient<'run> {
     pub fn runtime(
         service: Arc<dyn DirectCompletionService>,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+        effect_controller: crate::runtime::ScopedEffectController<'run>,
         turn_id: Option<crate::TurnId>,
     ) -> Self {
         Self {
@@ -239,7 +239,7 @@ impl<'run> DirectCompletionClient<'run> {
         &self,
         session_id: &crate::SessionId,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'child>,
+        effect_controller: crate::runtime::ScopedEffectController<'child>,
         turn_id: Option<crate::TurnId>,
         parent_invocation: Option<crate::RuntimeInvocation>,
         usage_ledger: crate::runtime::ToolUsageLedger,
@@ -333,7 +333,7 @@ impl<'run> DirectCompletionClient<'run> {
     /// child's own recorded authority before any call can ride it.
     pub(crate) fn lend_static(
         &self,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'static>,
+        effect_controller: crate::runtime::ScopedEffectController<'static>,
     ) -> DirectCompletionClient<'static> {
         let source = match &self.source {
             DirectCompletionSource::Runtime(source) => {
@@ -428,7 +428,7 @@ impl<'run> DirectCompletionClient<'run> {
                     .complete(
                         request,
                         usage_source,
-                        source.effect_controller.scoped(),
+                        source.effect_controller.clone(),
                         source.turn_id.as_ref(),
                         position,
                         self.usage_ledger.as_ref(),
@@ -492,7 +492,7 @@ impl<'run> DirectCompletionClient<'run> {
                     .complete_llm(
                         request,
                         usage_source,
-                        source.effect_controller.scoped(),
+                        source.effect_controller.clone(),
                         source.turn_id.as_ref(),
                         self.position(None),
                         caused_by,

@@ -5,7 +5,7 @@
 
 use crate::SessionId;
 use crate::plugin::{PluginSession, StaticPluginFactory};
-use crate::runtime::RuntimeEffectControllerHandle;
+use crate::runtime::ScopedEffectController;
 use crate::support::prelude::*;
 use crate::tool_dispatch::*;
 use crate::{

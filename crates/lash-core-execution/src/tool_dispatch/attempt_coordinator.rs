@@ -66,7 +66,7 @@ impl ToolAttemptLineage {
         context: &ToolDispatchContext<'_>,
         suffix: String,
     ) -> RuntimeEffectInvocation {
-        let scoped = context.effect_controller.scoped();
+        let scoped = context.effect_controller.clone();
         let scope = scoped.execution_scope();
         if let Some(parent) = &self.parent {
             let parent_effect_id = parent.effect_id().unwrap_or("tool");
@@ -192,7 +192,7 @@ pub async fn coordinate_tool_invocation<'run>(
             .effect_controller
             .controller()
             .prepare_completion_key(
-                context.effect_controller.scoped().execution_scope(),
+                context.effect_controller.execution_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
                 may_defer,
             )
@@ -236,7 +236,6 @@ pub async fn coordinate_tool_invocation<'run>(
         let invocation = lineage.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
-            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation.clone(),
@@ -1000,7 +999,6 @@ async fn sleep_before_retry(
 ) -> Result<(), crate::RuntimeEffectControllerError> {
     let outcome = context
         .effect_controller
-        .scoped()
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,

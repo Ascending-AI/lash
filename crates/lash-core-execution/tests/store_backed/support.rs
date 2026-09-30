@@ -88,7 +88,7 @@ pub fn scoped_controller(
 }
 
 /// A fresh memory backend's own controller for the runtime-operation
-/// scope `RuntimeEffectControllerHandle::shared` admits: what the dispatch
+/// scope the dispatch fixtures admit: what the dispatch
 /// fixtures run their tool attempts through.
 pub async fn runtime_operation_controller() -> std::sync::Arc<dyn crate::RuntimeEffectController> {
     let backend = memory_backend().await;
@@ -115,12 +115,12 @@ pub fn plugin_host(
 /// takes `effect_controller: ports.controller`, so it cannot outlive a
 /// handler that lent the controller.
 pub struct DispatchPorts<'h> {
-    pub controller: crate::runtime::RuntimeEffectControllerHandle<'h>,
+    pub controller: crate::runtime::ScopedEffectController<'h>,
     pub attachment_store: std::sync::Arc<crate::SessionAttachmentStore>,
 }
 
 /// The runtime-operation scope a hand-built dispatch context's attempts run
-/// under, the one `RuntimeEffectControllerHandle::shared` admits. Open the
+/// under. Open the
 /// handler [`double_dispatch_ports`] lends for it.
 pub fn dispatch_scope() -> crate::AdmittedScope {
     crate::AdmittedScope::runtime_operation("test-runtime-effect-controller")
@@ -176,7 +176,7 @@ pub fn double_dispatch_ports<'h>(
     handler: &'h lash_restate_test::OpenHandler,
 ) -> DispatchPorts<'h> {
     DispatchPorts {
-        controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(handler.scoped()),
+        controller: handler.scoped(),
         attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
             double.lash_backend().attachment_store(),
         )),
@@ -191,7 +191,11 @@ pub async fn controller_dispatch_ports(
     controller: std::sync::Arc<dyn crate::RuntimeEffectController>,
 ) -> DispatchPorts<'static> {
     DispatchPorts {
-        controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
+        controller: crate::runtime::ScopedEffectController::shared(
+            controller,
+            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
             memory_store_backend().await.attachment_store(),
         )),

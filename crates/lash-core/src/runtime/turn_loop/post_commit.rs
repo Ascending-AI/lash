@@ -35,10 +35,8 @@ impl LashRuntime {
             })?;
         let phase_turn_id = turn_phase_id(trace_turn_id, "turn-persisted");
         let phase_controller = scoped_effect_controller.clone();
-        let direct_completions = manager.direct_completion_client(
-            RuntimeEffectControllerHandle::borrowed(phase_controller),
-            Some(phase_turn_id),
-        );
+        let direct_completions =
+            manager.direct_completion_client(phase_controller, Some(phase_turn_id));
 
         let result = session
             .plugins()

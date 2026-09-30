@@ -198,7 +198,7 @@ impl RuntimeExecutionContext<'_> {
             None
         } else {
             let group_invocation = crate::runtime::command_invocation(
-                self.dispatch.effect_controller.scoped().execution_scope(),
+                self.dispatch.effect_controller.execution_scope(),
                 self.effect_attribution(),
                 self.parent_invocation.as_ref(),
                 &command,

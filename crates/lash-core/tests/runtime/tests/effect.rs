@@ -980,10 +980,11 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
 
     let manager = runtime.runtime_session_services().expect("session manager");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         None,
     );
     let mut request = lash_core::facade_support::DirectRequest::text("mock-model", "summarize");
@@ -1065,10 +1066,11 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     .await;
     let manager = runtime.runtime_session_services().expect("session manager");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         Some(TurnId::from("turn-direct".to_string())),
     );
     let completion = direct
@@ -1127,17 +1129,19 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
     .await;
     let manager = runtime.runtime_session_services().expect("session manager");
     let first = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         Some(TurnId::from("turn-direct".to_string())),
     );
     let second = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         Some(TurnId::from("turn-direct".to_string())),
     );
 
@@ -1190,10 +1194,11 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     .await;
     let manager = runtime.runtime_session_services().expect("session manager");
     let client = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder)),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         Some(TurnId::from("turn-direct".to_string())),
     );
 
@@ -1291,10 +1296,7 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
         ))
         .await
         .expect("open the scope's handler");
-    let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::borrowed(handler.scoped()),
-        None,
-    );
+    let direct = manager.direct_completion_client(handler.scoped(), None);
     let completion = direct
         .direct_completion(
             lash_core::facade_support::DirectRequest::text("mock-model", "summarize"),
@@ -1358,10 +1360,11 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
 
     let manager = runtime.runtime_session_services().expect("session manager");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(layered_operation_controller(
-            &backend,
-            Arc::new(recorder.clone()),
-        )),
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+        )
+        .expect("valid test runtime scope"),
         None,
     );
     let completion = direct

@@ -1287,10 +1287,7 @@ async fn cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress()
     .await;
     predecessor_context.trigger_router = Some(router.clone());
     router
-        .emit(
-            request.clone(),
-            &predecessor_context.effect_controller.scoped(),
-        )
+        .emit(request.clone(), &predecessor_context.effect_controller)
         .await
         .expect("seed the predecessor caller-key occurrence");
     let first = run_fixed_intent_attempt(&predecessor_context).await;

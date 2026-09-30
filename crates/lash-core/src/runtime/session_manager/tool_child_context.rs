@@ -23,10 +23,8 @@ impl RuntimeSessionServices {
             .current
             .plugins
             .pin_resolved_tool_surface(&self.current.session_id)?;
-        let effect_controller =
-            crate::runtime::RuntimeEffectControllerHandle::borrowed(lent_controller);
-        let direct_completions =
-            self.direct_completion_client(effect_controller.clone_scoped(), None);
+        let effect_controller = lent_controller;
+        let direct_completions = self.direct_completion_client(effect_controller.clone(), None);
         let state = self.current.snapshot.to_runtime_state();
         let execution_env_spec = state.process_execution_env_spec(&self.current.policy);
         // Never read: the driver points the observer at its recorder.

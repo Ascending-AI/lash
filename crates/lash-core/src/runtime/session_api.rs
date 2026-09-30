@@ -820,12 +820,8 @@ impl LashRuntime {
             system_prompt,
             traces: services.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
-            direct_completions: services.direct_completion_client(
-                crate::runtime::RuntimeEffectControllerHandle::Borrowed(
-                    scoped_effect_controller.clone(),
-                ),
-                None,
-            ),
+            direct_completions: services
+                .direct_completion_client(scoped_effect_controller.clone(), None),
         };
         let outcome = async {
             let Some(compaction) = plugin_session.compact_context(&ctx).await.map_err(|err| {
