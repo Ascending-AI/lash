@@ -44,6 +44,77 @@ const CLOSING_DELETE_WAIT: Duration = Duration::from_secs(120);
 
 type Controller<'ctx> = RestateRuntimeEffectController<'ctx, WorkflowContext<'ctx>>;
 
+#[async_trait::async_trait]
+trait WorkloadProcessCleanup: Sync {
+    async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>>;
+    async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()>;
+    async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()>;
+}
+
+async fn cleanup_model_children(
+    admin: &impl WorkloadProcessCleanup,
+    session: &str,
+) -> Result<usize> {
+    let cleanup = async {
+        let mut cleaned = std::collections::BTreeSet::new();
+        loop {
+            let children = admin.owned(session).await?;
+            if children.is_empty() {
+                return Ok::<_, anyhow::Error>(cleaned.len());
+            }
+            for child in &children {
+                admin.cancel(child).await?;
+            }
+            for child in children {
+                admin.await_terminal(&child).await?;
+                cleaned.insert(child);
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(20), cleanup)
+        .await
+        .context("workload model-child cleanup did not reach terminal state")?
+}
+
+struct SessionProcessCleanup<'a, 'ctx> {
+    processes: lash::process::Processes,
+    controller: &'a Controller<'ctx>,
+}
+
+#[async_trait::async_trait]
+impl WorkloadProcessCleanup for SessionProcessCleanup<'_, '_> {
+    async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>> {
+        Ok(self
+            .processes
+            .list_originated_by(
+                &lash_core::SessionScope::new(SessionId::from(session)),
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::any_of([
+                        lash_core::ProcessStatus::Running,
+                        lash_core::ProcessStatus::Waiting,
+                    ]),
+                    ..Default::default()
+                },
+            )
+            .await?
+            .into_iter()
+            .map(|row| row.process_id)
+            .collect())
+    }
+
+    async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()> {
+        let scope = scoped(self.controller, process.as_ref(), "model-child-cleanup")
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        self.processes.cancel(process, scope).await?;
+        Ok(())
+    }
+
+    async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()> {
+        self.processes.await_output(process).await?;
+        Ok(())
+    }
+}
+
 fn terminal(error: impl std::fmt::Display) -> HandlerError {
     TerminalError::new(error.to_string()).into()
 }
@@ -516,6 +587,16 @@ impl LoadWorker {
             })
             .await;
         let execution = administration.for_invocation(ctx);
+        let cleaned = cleanup_model_children(
+            &SessionProcessCleanup {
+                processes: self.core.processes(),
+                controller: execution.controller(),
+            },
+            &session_id,
+        )
+        .await
+        .map_err(terminal_chain)?;
+        println!("load cleanup session={session_id} model_children_cancelled={cleaned}");
         execution
             .controller()
             .revoke_await_events_for_session(&SessionId::from(session_id.clone()))
@@ -618,4 +699,71 @@ async fn wait_for_provider_receipt(witness: &PgPool, operation: &str) -> Result<
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     anyhow::bail!("the provider was never asked for `{operation}`")
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    struct ParkedChildren {
+        rows: Mutex<BTreeMap<lash_core::ProcessId, (&'static str, lash_core::ProcessStatus, bool)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl WorkloadProcessCleanup for ParkedChildren {
+        async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, (owner, status, _))| *owner == session && status.is_live())
+                .map(|(id, _)| id.clone())
+                .collect())
+        }
+
+        async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()> {
+            self.rows.lock().unwrap().get_mut(process).unwrap().2 = true;
+            Ok(())
+        }
+
+        async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()> {
+            let mut rows = self.rows.lock().unwrap();
+            let (_, status, requested) = rows.get_mut(process).unwrap();
+            anyhow::ensure!(
+                *requested,
+                "a parked child needs cancellation before its terminal"
+            );
+            *status = lash_core::ProcessStatus::Cancelled;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sessions()
+    -> Result<()> {
+        // Cancelling the turn drops its wait, while its registered child stays parked.
+        let child = lash_core::ProcessId::fixture("opaque-model-child");
+        let sibling = lash_core::ProcessId::fixture("another-session-child");
+        let admin = ParkedChildren {
+            rows: Mutex::new(BTreeMap::from([
+                (
+                    child.clone(),
+                    ("retired-session", lash_core::ProcessStatus::Waiting, false),
+                ),
+                (
+                    sibling.clone(),
+                    ("other-session", lash_core::ProcessStatus::Waiting, false),
+                ),
+            ])),
+        };
+        cleanup_model_children(&admin, "retired-session").await?;
+        let rows = admin.rows.lock().unwrap();
+        assert_eq!(rows[&child].1, lash_core::ProcessStatus::Cancelled);
+        assert_eq!(rows[&sibling].1, lash_core::ProcessStatus::Waiting);
+        assert!(!rows[&sibling].2);
+        Ok(())
+    }
 }

@@ -27,6 +27,7 @@ spec:
           image: {{ $config.image }}
           resources: {{ toJson $config.resources }}
           {{- if eq $component "postgres" }}
+          args: [postgres, -c, shared_preload_libraries=pg_stat_statements, -c, track_io_timing=on]
           env:
             - {name: POSTGRES_USER, value: lash}
             - {name: POSTGRES_DB, value: lash}

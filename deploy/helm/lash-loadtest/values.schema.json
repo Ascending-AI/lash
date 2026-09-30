@@ -448,6 +448,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "journalRetention": {
+          "type": "string",
+          "const": "5m"
+        },
         "resources": {
           "type": "object",
           "properties": {
@@ -487,6 +491,7 @@
         "faultCampaign",
         "run",
         "activeDeadlineSeconds",
+        "journalRetention",
         "resources"
       ],
       "additionalProperties": false

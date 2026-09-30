@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Reconcile FIG-3790 smoke measurements. This command establishes no budgets."""
+import argparse
+from collections import Counter, defaultdict
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+
+TERMINAL = {'answered', 'failed', 'cancelled', 'completed'}
+WITNESS_CLASSES = ('turns', 'cells', 'provider-retries', 'tools', 'child-processes', 'host-processes',
+                   'host-signals', 'host-cancels', 'queued-inputs', 'queued-cancels', 'turn-cancels',
+                   'deletes', 'attachment-puts', 'attachment-reads', 'shared-attachments', 'peer-reads',
+                   'cron-setup', 'cron-ticks', 'cron-closed-after-delete')
+FAULT_CLASSES = ('fault-campaign', 'worker-kill', 'restate-restart', 'rolling-deploy')
+OUTCOMES = TERMINAL | {'parked', 'stalled', 'unrecognized', 'timeout', 'client_error'}
+LEDGERS = {'witness_load_events', 'witness_provider_receipts', 'witness_effect_attempts',
+           'witness_effect_commits', 'witness_effect_replies', 'witness_load_faults'}
+RECORDS = {'run', 'operation', 'sample', 'witness', 'witness_evidence', 'sample_error', 'query_retry'}
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def version(row):
+    require(row.get('schema_version') == 1, 'unsupported measurement schema')
+
+
+def distribution(values):
+    values = sorted(values)
+    return {'count': len(values), **{key: values[max(0, math.ceil(len(values) * fraction) - 1)] if values else None
+                                  for key, fraction in [('p50', .5), ('p95', .95), ('p99', .99)]}}
+
+
+def populations(rows):
+    seen = set()
+    outcomes = Counter()
+    accepted = 0
+    for row in rows:
+        version(row)
+        require(row['id'] not in seen, f"duplicate operation {row['id']}")
+        seen.add(row['id'])
+        try:
+            times = [row['scheduled_ns'], row['sent_ns']]
+            if row['accepted_ns'] is not None:
+                accepted += 1
+                times.append(row['accepted_ns'])
+            times.append(row['observed_ns'])
+        except KeyError as error:
+            raise ValueError(f'missing operation timestamp {error}') from error
+        require(all(isinstance(value, int) and value >= 0 for value in times), 'invalid monotonic timestamp')
+        require(times == sorted(times), f"clock order violated for {row['id']}")
+        require(row['outcome'] in OUTCOMES, 'unrecognized measurement outcome')
+        outcomes[row['outcome']] += 1
+        require(row['outcome'] not in TERMINAL or row['accepted_ns'] is not None, 'terminal without acceptance')
+    return {'offered': len(rows), 'accepted': accepted,
+            'durable_terminal': sum(outcomes[key] for key in TERMINAL),
+            'outcomes': dict(outcomes), 'unresolved': len(rows) - sum(outcomes[key] for key in TERMINAL)}
+
+
+class CounterDeltas:
+    """Every identity has an explicit epoch; a new epoch marks an unobserved gap."""
+    def __init__(self):
+        self.values = {}
+        self.epochs = {}
+        self.total = 0
+        self.gaps = 0
+
+    def add(self, identity, epoch, value):
+        require(math.isfinite(value) and value >= 0, 'invalid counter value')
+        previous_epoch = self.epochs.get(identity)
+        if previous_epoch is not None and previous_epoch != epoch:
+            self.gaps += 1
+        self.epochs[identity] = epoch
+        key = (identity, epoch)
+        previous = self.values.get(key, value)
+        require(value >= previous, f'counter reset without epoch: {identity}')
+        delta = value - previous
+        self.values[key] = value
+        self.total += delta
+        return delta
+
+
+def validate_resources(resources):
+    processes = resources['processes']
+    require(len({row['pid'] for row in processes}) == len(processes), 'duplicate child PID')
+    for name, total in [('rss_bytes', 'rss_sum_bytes'), ('cpu_ticks', 'cpu_ticks_sum')]:
+        require(sum(row[name] for row in processes) == resources[total], f'parent/child {name} total mismatch')
+
+
+def deployment_memory(resources):
+    return sum(row['cgroup_memory_bytes'] for row in resources)
+
+
+def journal_summary(rows, completed):
+    maxima = {}
+    growth = []
+    for row in rows:
+        value = row['journal']
+        previous = maxima.setdefault(row['id'], {'entries': 0, 'bytes': 0})
+        require(value['entries'] >= 0 and value['bytes'] >= 0, 'negative journal size')
+        growth.append({'id': row['id'], 'bytes': max(0, value['bytes'] - previous['bytes'])})
+        for name in ('entries', 'bytes'):
+            previous[name] = max(previous[name], value[name])
+    total = sum(row['bytes'] for row in maxima.values())
+    return {'invocations': len(maxima), 'maxima': maxima, 'growth': growth,
+            'logical_bytes': total, 'bytes_per_terminal': total / completed if completed else None}
+
+
+def prometheus(text):
+    rows = []
+    for line in text.splitlines():
+        if not line or line.startswith('#'):
+            continue
+        match = re.fullmatch(r'([a-zA-Z_:][\w:]*)(\{.*\})?\s+(\S+)(?:\s+\S+)?', line)
+        require(match is not None, f'invalid Prometheus sample: {line[:100]}')
+        name, labels, value = match.groups()
+        labels = {key: json.loads('"' + val + '"') for key, val in
+                  re.findall(r'(\w+)="((?:[^"\\]|\\.)*)"', labels or '')}
+        value = float(value)
+        # Empty quantiles may be NaN. Counters required below must be finite.
+        if name.endswith(('_total', '_bytes')) or not labels:
+            require(math.isfinite(value), f'nonfinite metric {name}')
+        rows.append((name, labels, value))
+    return rows
+
+
+def recoveries(faults, operations):
+    operations = {row['id']: row for row in operations}
+    result = []
+    for fault in faults:
+        version(fault)
+        expected = {key for key, row in operations.items() if row['accepted_ns'] is not None and row['accepted_ns'] <= fault['actual_ns']}
+        require(set(fault['accepted_ids']) == expected and len(fault['accepted_ids']) == len(expected), 'pre-fault accepted population mismatch')
+        require(fault['witness_verdict'] == 'passed', 'fault durability witnesses failed')
+        times = [fault['actual_ns'], fault['service_progress_ns'], fault['backlog_recovered_ns']]
+        require(times == sorted(times), 'fault recovery clock order')
+        for key in fault['accepted_ids']:
+            row = operations.get(key)
+            require(row is not None and row['outcome'] in TERMINAL, 'lost pre-fault accepted input')
+            require(row['observed_ns'] <= times[-1], 'backlog recovered before the terminal was observed')
+        result.append({'id': fault['id'], 'service_progress_ns': times[1] - times[0],
+                       'backlog_recovery_ns': times[2] - times[0]})
+    return result
+
+
+def reconcile_witness(run, operations, witness, evidence):
+    require(len(evidence) == len(LEDGERS) and {row['ledger'] for row in evidence} == LEDGERS,
+            'missing or duplicate independent witness ledger')
+    for row in evidence:
+        version(row)
+        require(row['run'] == run['run'], 'mixed witness run identities')
+    ledgers = {row['ledger']: row['rows'] for row in evidence}
+    for ledger, count in [('witness_provider_receipts', 'provider_calls'),
+                          ('witness_effect_attempts', 'effect_attempts'), ('witness_effect_commits', 'effect_commits')]:
+        require(len(ledgers[ledger]) == witness[count], f'{ledger} counter mismatch')
+    require(len(ledgers['witness_load_faults']) == witness.get('fault_rows', 0), 'fault witness counter mismatch')
+    expected = {(row['subject_id'], row['scenario']): row for row in operations}
+    require(len(expected) == len(operations), 'duplicate witnessed operation subject')
+    for phase in ['sent', 'terminal']:
+        events = [row for row in ledgers['witness_load_events'] if row['observer'] == 'driver' and row['phase'] == phase]
+        require(Counter((row['subject'], row['operation']) for row in events) == Counter(expected.keys()),
+                f'{phase} witness identities differ from client operations')
+        for event in events:
+            operation = expected[(event['subject'], event['operation'])]
+            detail = json.loads(event['detail_json'])
+            if phase == 'sent':
+                require(detail['request'] == operation['request'], 'witness request differs from operation')
+                require(int(detail['scheduled_ns']) == operation['scheduled_ns'] and int(detail['sent_ns']) == operation['sent_ns'],
+                        'witness send timestamps differ from operation')
+            else:
+                require(int(detail['terminal_ns']) == operation['observed_ns'], 'witness terminal timestamp differs from operation')
+                require(detail.get('response') == operation['response'] and detail.get('error') == operation['error'],
+                        'witness terminal differs from client response')
+
+
+def cancellation_census(samples, owned, disappeared):
+    available = all('cancellation_commands' in sample for sample in samples)
+    commands = {}
+    targets = {}
+    for sample in samples:
+        for row in sample.get('cancellation_commands', []):
+            require(row['id'] in owned, 'unowned cancellation sender')
+            identity = (row['id'], row['index'])
+            require(identity not in commands or commands[identity] == row, 'journal cancellation command changed')
+            commands[identity] = row
+            if row['version'] != 2:
+                available = False  # v1 lacks the decoded entry_json projection.
+                continue
+            require(row['entry_type'] == 'Command: SendSignal', 'unsupported cancellation command')
+            try:
+                command = json.loads(row['entry_json'])['Command']['SendSignal']
+                require(isinstance(command, dict) and {'signal_id', 'result', 'target_invocation_id'} <= command.keys(),
+                        'incomplete cancellation journal projection')
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError('invalid cancellation journal projection') from error
+            if command['signal_id'] == {'Index': 1}:
+                require(command['result'] == 'Void', 'invalid built-in cancellation payload')
+                require(isinstance(command['target_invocation_id'], str), 'missing cancellation target invocation ID')
+                targets.setdefault(command['target_invocation_id'], []).append(identity)
+    explained = [row['id'] for row in disappeared if row['status'] == 'inboxed'
+                 and row.get('target_service_name') == 'EffectGroupIndex' and row['id'] in targets]
+    return {'available': available, 'commands': len(commands), 'target_invocation_ids': sorted(targets),
+            'explained_inbox_ids': sorted(explained),
+            'unexplained_disappearance_ids': sorted(row['id'] for row in disappeared if row['id'] not in explained)}
+
+
+def summarize(run, operations, samples, witness, faults=(), sample_errors=(), witness_evidence=None):
+    require(not sample_errors, 'required collection intervals are missing')
+    for row in [run, witness, *samples]:
+        version(row)
+        require(row['run'] == run['run'], 'mixed run identities')
+    require(all(row['run'] == run['run'] for row in operations), 'mixed operation run identities')
+    if witness_evidence is not None:
+        reconcile_witness(run, operations, witness, witness_evidence)
+    count = populations(operations)
+    require(count['offered'] == witness['sent'] == witness['terminal'], 'witness population mismatch')
+    classes = witness['verdict']['classes']
+    campaign = run.get('fault_campaign', False)
+    require(set(classes) == set(WITNESS_CLASSES) | (set(FAULT_CLASSES) if campaign else set()), 'missing or unknown durable evidence classes')
+    require(classes and all(row['witnessed'] > 0 and not row['violations'] for row in classes.values()), 'durability witness failed')
+    primary = [row for row in operations if row['scenario'] == 'turn']
+    planned = run['sessions'] * run['turns_per_session']
+    require(len(primary) >= planned if campaign else len(primary) == planned, 'primary offered population mismatch')
+    if campaign:
+        actors = defaultdict(list)
+        for row in primary:
+            actors[row['actor_id']].append(row['request']['ordinal'])
+        require(set(actors) == set(range(run['sessions'])), 'campaign actor population mismatch')
+        require(all(len(ordinals) >= run['turns_per_session'] and sorted(ordinals) == list(range(len(ordinals)))
+                    for ordinals in actors.values()), 'campaign primary ordinals are incomplete')
+    require(len(samples) >= 2, 'missing initial/final metric sample')
+    samples = sorted(samples, key=lambda row: row['monotonic_ns'])
+    require(samples[0]['monotonic_ns'] <= min(row['sent_ns'] for row in operations), 'metrics began after load')
+    require(samples[-1]['monotonic_ns'] >= max(row['observed_ns'] for row in operations), 'metrics ended before drain')
+    groups = defaultdict(list)
+    for row in operations:
+        groups[(row['scenario'], row['phase'])].append(row)
+    histograms = []
+    for (scenario, phase), rows in sorted(groups.items()):
+        end = max(row['observed_ns'] for row in rows)
+        start = min(row['scheduled_ns'] for row in rows)
+        duration = (end - start) / 1e9
+        population = populations(rows)
+        timelines = sorted([(row['scheduled_ns'], 1) for row in rows] +
+                           [(row['observed_ns'], -1) for row in rows if row['outcome'] in TERMINAL])
+        backlog = peak = 0
+        for _, delta in timelines:
+            backlog += delta
+            peak = max(peak, backlog)
+        histograms.append({'schema_version': 1, 'scenario': scenario, 'phase': phase, 'population': population,
+                           'scheduled_to_terminal_ns': distribution([row['observed_ns'] - row['scheduled_ns'] for row in rows if row['outcome'] in TERMINAL]),
+                           'send_to_terminal_ns': distribution([row['observed_ns'] - row['sent_ns'] for row in rows if row['outcome'] in TERMINAL]),
+                           'queue_delay_ns': distribution([row['sent_ns'] - row['scheduled_ns'] for row in rows]),
+                           'duration_s': duration, 'offered_per_s': len(rows) / duration if duration else None,
+                           'completed_per_s': population['durable_terminal'] / duration if duration else None,
+                           'backlog_peak': peak, 'backlog_at_end': backlog,
+                           'latency_by_outcome_ns': {outcome: distribution([row['observed_ns'] - row['scheduled_ns'] for row in rows if row['outcome'] == outcome]) for outcome in population['outcomes']}})
+    counters = defaultdict(CounterDeltas)
+    worker_peaks = {}
+    memory_peaks = []
+    journal_rows = []
+    owned_invocations = {}
+    invocation_states = {}
+    parked_transitions = 0
+    parked_ns = 0
+    last_time = samples[0]['monotonic_ns']
+    epoch_rows = []
+    physical_peaks = {}
+    snapshot_peak = 0
+    initial_invocations = {row['id'] for row in samples[0]['invocations']}
+    baseline_nodes = {row['address'].rstrip('/'): row['gen_node_id'] for row in samples[0]['node_epochs']}
+    for sample_index, sample in enumerate(samples):
+        require(sample['collection_finished_ns'] >= sample['monotonic_ns'], 'collector clock order')
+        worker_resources = []
+        require(len(sample['workers']) == len(run['workers']), 'missing worker resource sample')
+        require({row['node'] for row in sample['workers']} == set(run['workers']), 'missing or duplicate worker sample')
+        for worker in sample['workers']:
+            node, resources = worker['node'], worker['resources']
+            validate_resources(resources)
+            worker_resources.append(resources)
+            worker_peaks[node] = max(worker_peaks.get(node, 0), resources['cgroup_peak_bytes'])
+            epoch = next(row['epoch'] for row in resources['processes'] if row['parent_pid'] not in {proc['pid'] for proc in resources['processes']})
+            for name in ('usage_usec', 'throttled_usec', 'nr_throttled'):
+                counters['worker_' + name].add(node, epoch, resources['cgroup_cpu'][name])
+            counters['worker_ooms'].add(node, epoch, resources['cgroup_events']['oom_kill'])
+        memory_peaks.append(deployment_memory(worker_resources))
+        database = sample['postgres']
+        for name in ('transactions', 'blocks_read', 'blocks_hit', 'read_ms', 'write_ms', 'wal_bytes', 'query_calls', 'query_ms'):
+            reset = database['wal_reset'] if name == 'wal_bytes' else database['query_reset'] if name.startswith('query_') else database['stats_reset']
+            counters['postgres_' + name].add('postgres', (database['epoch'], reset), database[name])
+        for invocation in sample['invocations']:
+            key = invocation.get('target_service_key') or ''
+            if invocation["id"] not in initial_invocations or f"load-{run['run']}-" in key or invocation.get('invoked_by_id') in owned_invocations:
+                owned_invocations[invocation['id']] = invocation
+        # Repeat to include descendants regardless of SQL scan ordering.
+        while True:
+            before = len(owned_invocations)
+            for invocation in sample['invocations']:
+                if invocation.get('invoked_by_id') in owned_invocations:
+                    owned_invocations[invocation['id']] = invocation
+            if len(owned_invocations) == before:
+                break
+        parked_ns += sum(status == 'suspended' for status in invocation_states.values()) * (sample['monotonic_ns'] - last_time)
+        for invocation in sample['invocations']:
+            if invocation['id'] in owned_invocations:
+                status = invocation['status']
+                parked_transitions += status == 'suspended' and invocation_states.get(invocation['id']) != 'suspended'
+                invocation_states[invocation['id']] = status
+        last_time = sample['monotonic_ns']
+        journal_rows.extend(row for row in sample['journals'] if row['id'] in owned_invocations)
+        require(len(sample['restate']) == 3, 'missing Restate node sample')
+        for node in sample['restate']:
+            metadata = next((row for row in sample['node_epochs'] if row['address'].rstrip('/') == node['node'].rstrip('/')), None)
+            require(metadata is not None, 'Restate metrics have no node epoch')
+            node_epoch = metadata['gen_node_id']
+            metrics = prometheus(node['prometheus'])
+            require(any(name in {'restate_invoker_invocation_tasks_total', 'restate_num_active_partitions'} for name, _, _ in metrics), 'missing Restate invoker exporter')
+            for name, labels, value in metrics:
+                if name == 'restate_invoker_invocation_tasks_total':
+                    partition = labels['partition_id']
+                    leader = next((row for row in sample['leader_epochs'] if str(row['partition_id']) == partition), None)
+                    require(leader is not None and leader['leader_epoch'] is not None, 'retry counter has no leader epoch')
+                    epoch_rows.append({'node': node['node'], 'node_epoch': node_epoch, 'partition': partition,
+                                       'leader': leader['leader_gen_node_id'], 'leader_epoch': leader['leader_epoch']})
+                    # Node counters survive leadership changes. Include leader epochs
+                    # in evidence, but do not discard cumulative node deltas at handoff.
+                    identity = (node['node'], tuple(sorted(labels.items())))
+                    counter_name = 'restate_task_' + labels['status']
+                    if labels['status'] == 'failed':
+                        counter_name += '_retryable' if labels.get('transient') == 'true' else '_terminal'
+                    counter = counters[counter_name]
+                    if (sample_index > 0 and identity not in counter.epochs
+                            and baseline_nodes[node['node'].rstrip('/')] == node_epoch):
+                        # A counter series absent from the initial scrape was
+                        # zero. Preserve its first event instead of rebasing it.
+                        counter.add(identity, node_epoch, 0)
+                    counter.add(identity, node_epoch, value)
+            snapshot = node['physical']['snapshot']
+            require(snapshot is not None, 'missing remote snapshot bytes')
+            snapshot_peak = max(snapshot_peak, snapshot['bytes'])
+            physical_peaks[node['node']] = max(physical_peaks.get(node['node'], 0), node['physical']['allocated_bytes'])
+    journal_rows.extend({'id': row['invocation_id'], 'journal': row['journal']} for row in operations if row['journal'] is not None)
+    for row in operations:
+        require(row['accepted_ns'] is None or row['invocation_id'] in owned_invocations, 'accepted invocation missing from final journal census')
+    final_invocations = {row['id'] for row in samples[-1]['invocations']}
+    disappeared = [row for key, row in owned_invocations.items() if key not in final_invocations]
+    cancellations = cancellation_census(samples, owned_invocations, disappeared)
+    unexplained = [row for row in disappeared if row['id'] in cancellations['unexplained_disappearance_ids']]
+    unfinished = [row for key, row in owned_invocations.items() if key in final_invocations and invocation_states.get(key) != 'completed']
+    require(counters['restate_task_started'].total >= count['accepted'], 'Restate task counters omit accepted operations')
+    for name in ['restate_task_failed_retryable', 'restate_task_failed_terminal', 'restate_task_suspended']:
+        counters[name]  # A supported series absent throughout the run is zero.
+    delta_summary = {name: {'observed_delta': value.total, 'epoch_gaps': value.gaps,
+                            'complete': value.gaps == 0} for name, value in sorted(counters.items())}
+    require(all(row['complete'] for row in delta_summary.values()), 'counter epoch gap: incomplete measurement')
+    require(witness['effect_attempts'] - witness['effect_commits'] == witness['verdict']['absorbed_effect_attempts'], 'absorbed effect attempt mismatch')
+    require(0 <= witness['provider_retryable_failures'] <= witness['provider_calls'], 'provider receipt population mismatch')
+    require(witness['effect_attempts'] >= witness['effect_commits'], 'effect attempts smaller than commits')
+    require(count['unresolved'] == 0, 'unresolved durable operation population')
+    completed = count['durable_terminal']
+    journal = journal_summary(journal_rows, completed)
+    missing_journals = [key for key in owned_invocations if key not in cancellations['explained_inbox_ids']
+                        and (key not in journal['maxima'] or journal['maxima'][key]['entries'] == 0)]
+    reasons = []
+    if campaign and not faults:
+        reasons.append('L4 witness-clock faults require driver-clock recovery normalization')
+    if unfinished:
+        reasons.append('run-owned internal invocations remain unfinished')
+    if unexplained:
+        reasons.append('run-owned invocations disappeared without a recorded inbox cancellation')
+    if missing_journals:
+        reasons.append('run-owned invocation has an empty, missing or pruned journal')
+    status = 'FAILED' if unexplained and cancellations['available'] else 'INCOMPLETE' if reasons else 'PASSED'
+    qualification = {'status': status, 'reasons': reasons,
+                     'unfinished_internal': unfinished, 'disappeared_invocations': unexplained,
+                     'missing_journal_ids': missing_journals}
+    normalized = {name: row['observed_delta'] / completed if completed else None
+                  for name, row in delta_summary.items() if name.startswith('postgres_')}
+    return {'schema_version': 1, 'run': run['run'], 'mode': run.get('mode', 'smoke'), 'population': count,
+            'qualification': qualification,
+            'cancellations': cancellations,
+            'histograms': histograms, 'counters': delta_summary, 'retry_epochs': epoch_rows,
+            'client_retries': sum(row['client_attempts'] - 1 for row in operations),
+            'client_reattaches': sum(row.get('client_reattaches', 0) for row in operations),
+            'provider_calls': witness['provider_calls'],
+            'provider_retryable_failures': witness['provider_retryable_failures'], 'effect_attempts': witness['effect_attempts'],
+            'effect_commits': witness['effect_commits'],
+            'absorbed_effect_attempts': witness['effect_attempts'] - witness['effect_commits'],
+            'journals': journal, 'postgres_per_terminal': normalized,
+            'postgres_peaks': {key: max(row['postgres'][key] for row in samples) for key in ('connections', 'waiters', 'lock_waiters')},
+            'deployment_memory_peak_bytes': max(memory_peaks), 'worker_peak_bytes': worker_peaks,
+            'physical_peak_bytes_by_node': physical_peaks, 'shared_snapshot_peak_bytes': snapshot_peak,
+            'parks': {'sampled_transitions': parked_transitions, 'sampled_occupancy_ns': parked_ns,
+                      'resolution': 'collector intervals; sub-interval parks are not observable'},
+            'pool': {'status': 'PENDING', 'dependencies': ['FIG-4161', 'FIG-4162']},
+            'unavailable': {'postgres_lock_wait_duration': 'PostgreSQL provides current waiters, not cumulative per-lock time',
+                            'remote_clock_offsets': 'no synchronized remote clock authority'},
+            'recoveries': recoveries(faults, operations), 'faults_exercised': len(faults),
+            'fault_clock': 'L4 raw fault rows use the independent PostgreSQL witness clock; normalized recovery inputs use the driver monotonic clock',
+            'saturation': 'NOT_RUN', 'baseline': None, 'budgets': None,
+            'invariants': {'witness_populations': 'passed', 'resource_totals': 'passed',
+                           'retry_epochs': 'passed', 'completed_journals': 'passed' if not reasons else 'INCOMPLETE'}}
+
+
+def metric_rows(samples):
+    """Explicit units and identities; raw collector records remain in samples.jsonl."""
+    for sample in samples:
+        def metric(node, deployment, generation, name, unit, value, **labels):
+            return dict(schema_version=1, run=sample['run'], monotonic_ns=sample['monotonic_ns'],
+                        collection_finished_ns=sample['collection_finished_ns'],
+                        node=node, deployment=deployment, generation=generation,
+                        metric=name, unit=unit, value=value, labels=labels,
+                        clock_uncertainty_ns=sample['collection_finished_ns'] - sample['monotonic_ns'])
+        for worker in sample['workers']:
+            node, data = worker['node'], worker['resources']
+            generation = data.get('generation')
+            for name in ['cgroup_memory_bytes', 'cgroup_peak_bytes', 'rss_sum_bytes']:
+                yield metric(node, node, generation, name, 'bytes', data[name])
+            for proc in data['processes']:
+                yield metric(node, node, generation, 'process_rss', 'bytes', proc['rss_bytes'], pid=proc['pid'], epoch=proc['epoch'])
+                yield metric(node, node, generation, 'process_cpu', 'seconds', proc['cpu_ticks'] / data['clock_ticks_per_second'], pid=proc['pid'], epoch=proc['epoch'])
+            for name, value in data['cgroup_cpu'].items():
+                yield metric(node, node, generation, 'cgroup_cpu_' + name, 'microseconds' if name.endswith('_usec') else 'count', value)
+            for name, value in data['cgroup_events'].items():
+                yield metric(node, node, generation, 'cgroup_memory_' + name, 'count', value)
+        database = sample['postgres']
+        for name, value in database.items():
+            if isinstance(value, (int, float)):
+                unit = 'bytes' if name == 'wal_bytes' else 'milliseconds' if name.endswith('_ms') else 'count'
+                yield metric('postgres', 'postgres', database['epoch'], name, unit, value, scope='Lash database' if name != 'wal_bytes' else 'server including witness database')
+        for row in sample['journals']:
+            for name, unit in [('entries', 'count'), ('bytes', 'bytes')]:
+                yield metric('restate', row['id'], None, 'journal_' + name, unit, row['journal'][name])
+        for node in sample['restate']:
+            epoch = next(row['gen_node_id'] for row in sample['node_epochs'] if row['address'].rstrip('/') == node['node'].rstrip('/'))
+            yield metric(node['node'], node['node'], epoch, 'physical_allocated', 'bytes', node['physical']['allocated_bytes'])
+            for directory, value in node['physical']['directories'].items():
+                yield metric(node['node'], node['node'], epoch, 'physical_directory', 'bytes', value, directory=directory)
+            for name, labels, value in prometheus(node['prometheus']):
+                if name == 'restate_invoker_invocation_tasks_total':
+                    yield metric(node['node'], node['node'], epoch, name, 'count', value, **labels)
+        # The snapshot prefix is shared by every Restate node.
+        yield metric('s3', 'snapshot-prefix', None, 'snapshot_objects_bytes', 'bytes', max(node['physical']['snapshot']['bytes'] for node in sample['restate']))
+
+
+def read_records(path):
+    records = []
+    for line in path.read_text().splitlines():
+        if line.startswith('load measurement '):
+            row = json.loads(line[len('load measurement '):])
+            version(row)
+            require(row['record'] in RECORDS, 'unsupported measurement record')
+            records.append(row)
+    return records
+
+
+def archive(log, output, fault_path=None):
+    records = read_records(log)
+    runs = [row for row in records if row['record'] == 'run']
+    witnesses = [row for row in records if row['record'] == 'witness']
+    require(len(runs) == len(witnesses) == 1, 'missing or duplicate run/witness record')
+    require(all(row['run'] == runs[0]['run'] for row in records), 'mixed archive run identities')
+    operations = [row for row in records if row['record'] == 'operation']
+    samples = [row for row in records if row['record'] == 'sample']
+    faults = [json.loads(line) for line in fault_path.read_text().splitlines()] if fault_path else []
+    sample_errors = [row for row in records if row['record'] == 'sample_error']
+    query_retries = [row for row in records if row['record'] == 'query_retry']
+    witness_evidence = [row for row in records if row['record'] == 'witness_evidence']
+    output = output / 'fig-3790' / runs[0]['run']
+    output.mkdir(parents=True, exist_ok=True)
+    for name, rows in [('operations', operations), ('samples', samples), ('sample_errors', sample_errors),
+                       ('query_retries', query_retries), ('witness_evidence', witness_evidence), ('faults', faults)]:
+        (output / (name + '.jsonl')).write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
+    (output / 'witness.json').write_text(json.dumps(witnesses[0], indent=2) + '\n')
+    (output / 'collection.json').write_text(json.dumps({**runs[0], 'source_log_sha256': hashlib.sha256(log.read_bytes()).hexdigest(),
+                                                     'scope': 'pipeline smoke; no baseline or budgets'}, indent=2) + '\n')
+    try:
+        summary = summarize(runs[0], operations, samples, witnesses[0], faults, sample_errors, witness_evidence)
+    except ValueError as error:
+        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed', 'error': str(error)}) + '\n')
+        raise
+    (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))
+    (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'histograms': summary.pop('histograms')}, indent=2) + '\n')
+    (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+    qualification = summary['qualification']['status']
+    print(f"load measurements qualification={qualification} operations={len(operations)} samples={len(samples)} journals={summary['journals']['invocations']} counter_series={len(summary['counters'])} pool=PENDING results={output}")
+    require(qualification == 'PASSED', f'load qualification is {qualification}: ' + '; '.join(summary['qualification']['reasons']))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('log', type=Path)
+    parser.add_argument('output', type=Path)
+    parser.add_argument('--faults', type=Path)
+    args = parser.parse_args()
+    archive(args.log, args.output, args.faults)

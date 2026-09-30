@@ -78,6 +78,8 @@ load:
   # The run ID the driver and the fault controller share; empty picks one.
   run: ""
   activeDeadlineSeconds: 900
+  # Preserve completed journals for L5 evidence; differs from deployment defaults.
+  journalRetention: 5m
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {cpu: "2", memory: 1Gi}

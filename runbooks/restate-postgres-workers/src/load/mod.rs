@@ -17,6 +17,7 @@
 
 pub mod control;
 mod fault_verify;
+pub mod measurements;
 pub mod tools;
 pub mod verify;
 pub mod worker;

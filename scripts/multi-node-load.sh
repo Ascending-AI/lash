@@ -52,6 +52,7 @@ path = pathlib.Path(directory)
     'generation': values['workers']['generation'],
     'loadDeadline': values['load']['activeDeadlineSeconds'],
     'workload': values['load']['workload'],
+    'restateImage': values['restate']['image'],
 }))
 PYVALUES
 values=(-f "$run/run-values.yaml")
@@ -137,9 +138,10 @@ image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["repos
 runtime_base="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["runtime"])' "$run/build-settings.json")"
 node_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["nodeImage"])' "$run/build-settings.json")"
 next_image="$image-next"
-docker build --build-arg "RUNTIME_BASE=$runtime_base" -t "$image" -f deploy/helm/lash-loadtest/Dockerfile . > "$run/image-build.log" 2>&1
+restate_image="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["restateImage"])' "$run/build-settings.json")"
+docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg "RESTATE_IMAGE=$restate_image" -t "$image" -f deploy/helm/lash-loadtest/Dockerfile . > "$run/image-build.log" 2>&1
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
-docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg BIN_DIR=target/loadtest-image/bin-next \
+docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg "RESTATE_IMAGE=$restate_image" --build-arg BIN_DIR=target/loadtest-image/bin-next \
   -t "$next_image" -f deploy/helm/lash-loadtest/Dockerfile . >> "$run/image-build.log" 2>&1
 next_image_id="$(docker image inspect "$next_image" --format '{{.Id}}')"
 created=1
@@ -176,7 +178,7 @@ helm template topology "$chart" --namespace "$namespace" "${values[@]}" > "$run/
 helm install topology "$chart" --namespace "$namespace" "${values[@]}" > "$run/helm-install.log"
 "${k[@]}" wait --for=condition=complete "job/${resource}-schema" --timeout=180s
 "${k[@]}" rollout status "statefulset/${resource}-restate" --timeout=180s
-ctl() { "${k[@]}" exec "${resource}-restate-0" -- restatectl "$@"; }
+ctl() { "${k[@]}" exec "${resource}-restate-0" -c restate -- restatectl "$@"; }
 ctl provision --replication 2 --num-partitions 24 --yes > "$run/provision.log"
 # Stable node names preserve IDs across pod restarts; node IDs come from
 # committed metadata, never from assumptions about pod startup ordering.
@@ -251,28 +253,46 @@ printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 
 # busy worker, restarts a Restate leader and rolls the workers to the
 # synthetic N+1 with a generation drain. The driver reconciles the witness
 # ledgers, fault classes included, once the campaign ends.
-load_run="$workload-fault-$(date -u +%Y%m%d%H%M%S)"
-printf 'load:\n  enabled: true\n  faultCampaign: true\n  run: %s\n' "$load_run" > "$run/load-values.yaml"
+fault_campaign="${LASH_LOADTEST_FAULT_CAMPAIGN:-true}"
+[[ "$fault_campaign" == true || "$fault_campaign" == false ]] || { echo "LASH_LOADTEST_FAULT_CAMPAIGN must be true or false" >&2; exit 1; }
+load_run="$workload-$(date -u +%Y%m%d%H%M%S)"
+printf 'load:\n  enabled: true\n  faultCampaign: %s\n  run: %s\n' "$fault_campaign" "$load_run" > "$run/load-values.yaml"
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/load-values.yaml" \
   --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job load | "${k[@]}" apply -f -
 "${k[@]}" rollout status "deployment/${resource}-fault-probe" --timeout=120s
 campaign_status=0
+if [[ "$fault_campaign" == true ]]; then
 python3 scripts/loadtest_faults.py --kubeconfig "$KUBECONFIG" --namespace "$namespace" --name "$resource" \
   --run "$load_run" --workload "crates/lash-perf/workloads/$workload.json" --workload-name "$workload" \
   --run-dir "$run" --chart "$chart" --values "$run/run-values.yaml" \
   --initial-tag "$name" --next-tag "$name-next" 2>&1 | tee "$run/faults.log" || campaign_status=$?
+fi
 load_state=""
+load_collected=0
 for attempt in $(seq 1 "$load_deadline"); do
   load_state="$("${k[@]}" get "job/${resource}-load" -o jsonpath='{.status.succeeded}/{.status.failed}')"
-  if [[ "$load_state" == 1/* || "$load_state" == */1 ]]; then break; fi
+  if "${k[@]}" exec "job/${resource}-load" -c load -- test -f /tmp/load-measurements.complete >/dev/null 2>&1; then
+    "${k[@]}" exec "job/${resource}-load" -c load -- cat /tmp/load-measurements.jsonl > "$run/measurements.log"
+    "${k[@]}" exec "job/${resource}-load" -c load -- touch /tmp/load-measurements.collected
+    load_collected=1
+    for finish in $(seq 1 60); do
+      load_state="$("${k[@]}" get "job/${resource}-load" -o jsonpath='{.status.succeeded}/{.status.failed}')"
+      if [[ "$load_state" == 1/* || "$load_state" == */1 ]]; then break; fi
+      sleep 1
+    done
+    break
+  fi
+  if [[ "$load_state" == */1 ]]; then break; fi
   sleep 1
 done
 "${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
+((load_collected == 1))
+python3 scripts/loadtest_measurements.py "$run/measurements.log" "$run/results"
 grep '^load \|^load witness' "$run/load.log" > "$run/load-witness.txt" || true
 ((campaign_status == 0))
 grep -F 'load witness verdict=passed' "$run/load.log"
 [[ "$load_state" == 1/* ]]
-printf 'durable workload and fault campaign passed: %s\n' "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
+printf 'durable workload passed: fault_campaign=%s %s\n' "$fault_campaign" "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
 }
 
 main "$@"; exit "$?"

@@ -824,6 +824,27 @@ async fn direct_health(State(state): State<AppState>) -> AxumJson<HealthResponse
     })
 }
 
+async fn load_resources() -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
+    let output = tokio::process::Command::new("python3")
+        .args([
+            "/opt/lash/loadtest_resources.py",
+            "--root",
+            &std::process::id().to_string(),
+        ])
+        .output()
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    if !output.status.success() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map(AxumJson)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
 async fn topology_attachment(
     State(state): State<AppState>,
     axum::extract::Path((session_id, attachment_id)): axum::extract::Path<(String, String)>,
@@ -1281,6 +1302,7 @@ async fn async_main() -> Result<()> {
     let active = ActiveOperations::default();
     let control_router = Router::new()
         .route("/health", get(direct_health))
+        .route("/load/resources", get(load_resources))
         .route(
             "/topology/attachments/{session_id}/{attachment_id}",
             get(topology_attachment),

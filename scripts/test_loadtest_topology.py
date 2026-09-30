@@ -141,6 +141,23 @@ class ChartTests(unittest.TestCase):
             self.assertIn('NET_ADMIN', init['securityContext']['capabilities']['add'])
             self.assertEqual(init['command'].count('netem'), 1)
 
+    def test_measurement_collectors_and_explicit_journal_retention(self):
+        documents = self.documents('load-enabled.yaml')
+        load = next(row for row in documents if row['kind'] == 'Job' and row['metadata']['name'].endswith('-load'))
+        env = {row['name']: row.get('value') for row in load['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual(env['LASH_LOAD_JOURNAL_RETENTION'], '5m')
+        self.assertEqual(env['LASH_LOAD_MEASUREMENTS_PATH'], '/tmp/load-measurements.jsonl')
+        self.assertEqual(len(env['RESTATE_METRICS_URLS'].split(',')), 3)
+        self.assertEqual(env['WORKER_CONTROL_URLS'],
+                         'http://lash-loadtest-worker-0-control:18101,http://lash-loadtest-worker-1-control:18101')
+        restate = next(row for row in documents if row['kind'] == 'StatefulSet' and row['metadata']['name'].endswith('-restate'))
+        spec = restate['spec']['template']['spec']
+        self.assertTrue(spec['shareProcessNamespace'])
+        self.assertIn({'name': 'fault', 'emptyDir': {}}, spec['volumes'])
+        collector = next(row for row in restate['spec']['template']['spec']['containers'] if row['name'] == 'physical-collector')
+        self.assertTrue(collector['volumeMounts'][0]['readOnly'])
+        self.assertEqual(collector['readinessProbe']['httpGet']['path'], '/health')
+
     def test_scaleway_storage_and_placement(self):
         documents = self.documents('values-scaleway.yaml.rendered.yaml')
         restate = next(item for item in documents if item['kind'] == 'StatefulSet' and item['metadata']['name'].endswith('-restate'))
@@ -187,6 +204,10 @@ class ChartTests(unittest.TestCase):
                for entry in worker['spec']['template']['spec']['containers'][0]['env']
                if entry['name'] == 'WORKER_INSTANCE_ID'}
         self.assertEqual(ids, {'worker-0-initial', 'worker-1-initial', 'worker-0-next', 'worker-1-next'})
+        generations = {entry['value'] for worker in workers
+                       for entry in worker['spec']['template']['spec']['containers'][0]['env']
+                       if entry['name'] == 'WORKER_GENERATION'}
+        self.assertEqual(generations, {'initial', 'next'})
 
     def test_fault_targets_restart_in_place_after_a_hold(self):
         documents = self.documents('values-local.yaml.rendered.yaml')
@@ -224,6 +245,7 @@ class ChartTests(unittest.TestCase):
             ['--set', 'nameOverride=' + 'a' * 40, '--set', 'workers.generation=' + 'b' * 32],
             ['--set', 'load.workload=figments-v2'],
             ['--set', 'load.turnsPerSession=0'],
+            ['--set', 'load.journalRetention=0s'],
         ]:
             with self.subTest(overrides=overrides):
                 result = subprocess.run([

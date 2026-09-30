@@ -54,6 +54,7 @@ struct Driver {
     ingress: String,
     workers: Vec<String>,
     started: Instant,
+    collector: Arc<lash_restate_postgres_workers_e2e::load::measurements::Collector>,
     /// `true` once the fault controller ended its campaign; `None` when the
     /// run has no campaign and each session stops after its planned turns.
     campaign: Option<tokio::sync::watch::Receiver<bool>>,
@@ -63,6 +64,13 @@ struct Driver {
 #[derive(Default)]
 struct Delivery {
     attempts: u32,
+    submit_attempts: u32,
+    attach_attempts: u32,
+    accepted_ns: Option<u128>,
+    invocation_id: Option<String>,
+    response_bytes: usize,
+    timed_out: bool,
+    terminal_failure: bool,
     reattached: bool,
     retried: Vec<String>,
 }
@@ -113,9 +121,15 @@ impl Driver {
         }
     }
 
-    async fn exchange(&self, request: &LoadRequest, attach: bool) -> Exchange {
+    async fn exchange(
+        &self,
+        request: &LoadRequest,
+        attach: bool,
+        delivery: &mut Delivery,
+    ) -> Exchange {
         let key = request.workflow_key();
         let sent = if attach {
+            delivery.attach_attempts += 1;
             self.client
                 .get(format!(
                     "{}/restate/workflow/{LOAD_WORKFLOW}/{key}/attach",
@@ -124,8 +138,9 @@ impl Driver {
                 .send()
                 .await
         } else {
+            delivery.submit_attempts += 1;
             self.client
-                .post(format!("{}/{LOAD_WORKFLOW}/{key}/run", self.ingress))
+                .post(format!("{}/{LOAD_WORKFLOW}/{key}/run/send", self.ingress))
                 .json(request)
                 .send()
                 .await
@@ -140,6 +155,35 @@ impl Driver {
             Err(error) => return Exchange::Transient(format!("read the answer: {error:#}")),
         };
         let text = || format!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+        if status.is_success() && !attach {
+            let acknowledgement: Value = match serde_json::from_slice(&body) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Exchange::Failed(format!("undecodable send acknowledgement: {error}"));
+                }
+            };
+            let Some(id) = acknowledgement["invocationId"].as_str() else {
+                return Exchange::Failed("send acknowledgement has no invocation ID".to_owned());
+            };
+            if delivery
+                .invocation_id
+                .as_deref()
+                .is_some_and(|previous| previous != id)
+            {
+                return Exchange::Failed(
+                    "resubmission changed the accepted invocation ID".to_owned(),
+                );
+            }
+            delivery
+                .accepted_ns
+                .get_or_insert_with(|| self.elapsed_ns());
+            delivery.invocation_id = Some(id.to_owned());
+            delivery.reattached |= acknowledgement["status"] == "PreviouslyAccepted";
+            return Exchange::Accepted;
+        }
+        if attach {
+            delivery.response_bytes = body.len();
+        }
         if status.is_success() {
             return match serde_json::from_slice::<LoadResponse>(&body) {
                 Ok(response) => Exchange::Answer(response),
@@ -147,12 +191,13 @@ impl Driver {
             };
         }
         match status {
-            reqwest::StatusCode::CONFLICT if !attach => Exchange::Accepted,
             reqwest::StatusCode::NOT_FOUND if attach => Exchange::Unknown,
             // The handler's terminal failure, which the workflow keeps: it
             // counts only once an attach reads it back from the invocation.
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR if attach => Exchange::Failed(text()),
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR => Exchange::Accepted,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR if attach => {
+                delivery.terminal_failure = true;
+                Exchange::Failed(text())
+            }
             _ => Exchange::Transient(text()),
         }
     }
@@ -166,7 +211,7 @@ impl Driver {
         loop {
             delivery.attempts += 1;
             delivery.reattached |= attach;
-            let retry = match self.exchange(request, attach).await {
+            let retry = match self.exchange(request, attach, &mut delivery).await {
                 Exchange::Answer(response) => return (Ok(response), delivery),
                 Exchange::Failed(error) => return (Err(error), delivery),
                 Exchange::Accepted => {
@@ -180,6 +225,7 @@ impl Driver {
                 Exchange::Transient(error) => error,
             };
             if Instant::now() >= deadline {
+                delivery.timed_out = true;
                 return (
                     Err(format!(
                         "no answer within {:?}; last: {retry}",
@@ -241,17 +287,71 @@ impl Driver {
         )
         .await?;
         let (answer, delivery) = self.settle(&request).await;
+        let accepted_ns = delivery.accepted_ns;
+        let invocation_id = &delivery.invocation_id;
         let terminal_ns = self.elapsed_ns();
-        let mut detail = json!({
-            "attempts": delivery.attempts,
-            "reattached": delivery.reattached,
-            "retried": delivery.retried,
-            "terminal_ns": terminal_ns.to_string(),
-        });
-        match &answer {
-            Ok(response) => detail["response"] = json!(response),
-            Err(error) => detail["error"] = json!(error),
-        }
+        let response = answer.as_ref().ok().map(serde_json::to_value).transpose()?;
+        let outcome = match &answer {
+            Ok(_) => response
+                .as_ref()
+                .and_then(|value| value["outcome"]["status"].as_str())
+                .unwrap_or("completed")
+                .to_owned(),
+            Err(_) if delivery.timed_out => "timeout".into(),
+            Err(_) if delivery.terminal_failure => "failed".into(),
+            Err(_) => "client_error".into(),
+        };
+        // Read each completed outer invocation before retention can prune it.
+        let (journal, journal_error) = if let Some(id) = invocation_id {
+            match self.collector.journal(id).await {
+                Ok(journal) => (Some(journal), None),
+                Err(error) => (None, Some(format!("{error:#}"))),
+            }
+        } else {
+            (None, None)
+        };
+        let actor = match &request {
+            LoadRequest::Turn { actor, .. } => Some(*actor),
+            _ => None,
+        };
+        let session_id = match &request {
+            LoadRequest::Turn { session_id, .. }
+            | LoadRequest::CronSetup { session_id, .. }
+            | LoadRequest::DeleteSession { session_id, .. } => session_id.clone(),
+            LoadRequest::CronTick { run, .. } => cron_session_id(run),
+        };
+        lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+            "schema_version": 1, "record": "operation", "run": self.run,
+            "id": request.workflow_key(), "invocation_id": invocation_id,
+            "subject_id": subject,
+            "input_id": lash_restate_postgres_workers_e2e::load::turn_id_for(&subject),
+            "actor_id": actor, "session_id": session_id,
+            "request": request, "scenario": operation.as_str(),
+            "phase": if self.campaign.is_some() { "fault_campaign" } else { "smoke" },
+            "scheduled_ns": scheduled_ns, "sent_ns": sent_ns, "accepted_ns": accepted_ns,
+            "first_visible_ns": null, "settled_ns": null, "observed_ns": terminal_ns,
+            "unavailable": {"first_visible_ns": "workflow attach exposes the terminal only",
+                "settled_ns": "remote settlement clock is not synchronized with the client"},
+            "outcome": outcome, "error": answer.as_ref().err().map(|error| format!("{error:#}")),
+            "root_id": response.as_ref().and_then(|value| value["outcome"]["root"].as_str()),
+            "client_attempts": delivery.submit_attempts, "client_reattaches": delivery.attach_attempts.saturating_sub(1),
+            "request_bytes": serde_json::to_vec(&request)?.len(), "response_bytes": delivery.response_bytes,
+            "response": response, "journal": journal, "journal_error": journal_error, "fault_ids": [],
+        }))?;
+        let detail = match &answer {
+            Ok(response) => json!({
+                "response": response,
+                "attempts": delivery.attempts, "retried": delivery.retried,
+                "reattached": delivery.reattached,
+                "terminal_ns": terminal_ns.to_string(),
+            }),
+            Err(error) => json!({
+                "error": format!("{error:#}"),
+                "attempts": delivery.attempts, "retried": delivery.retried,
+                "reattached": delivery.reattached,
+                "terminal_ns": terminal_ns.to_string(),
+            }),
+        };
         record_load_event(
             &self.witness,
             LoadEvent {
@@ -350,6 +450,7 @@ async fn run_actor(driver: Arc<Driver>, actor: u64, turns: u64) -> Result<()> {
     let mut generation = 0;
     let mut in_flight = JoinSet::new();
     let mut deletes = JoinSet::new();
+    let mut active_session = None;
     for ordinal in 0.. {
         let past_plan = ordinal >= turns;
         if past_plan && !driver.campaign_running() {
@@ -369,6 +470,7 @@ async fn run_actor(driver: Arc<Driver>, actor: u64, turns: u64) -> Result<()> {
             arrival.await;
         }
         let session_id = actor_session_id(&driver.run, actor, generation);
+        active_session = Some(session_id.clone());
         let request = LoadRequest::Turn {
             workload_sha256: driver.load.sha256().to_owned(),
             run: driver.run.clone(),
@@ -393,6 +495,7 @@ async fn run_actor(driver: Arc<Driver>, actor: u64, turns: u64) -> Result<()> {
             Ok::<_, anyhow::Error>(())
         });
         if plan.delete || plan.rotate {
+            active_session = None;
             let retired = std::mem::take(&mut in_flight);
             let task_driver = Arc::clone(&driver);
             deletes.spawn(async move {
@@ -421,6 +524,18 @@ async fn run_actor(driver: Arc<Driver>, actor: u64, turns: u64) -> Result<()> {
         .await
         .into_iter()
         .collect::<Result<()>>()?;
+    if let Some(session_id) = active_session {
+        driver
+            .submit(
+                LoadRequest::DeleteSession {
+                    run: driver.run.clone(),
+                    session_id,
+                },
+                driver.elapsed_ns(),
+                false,
+            )
+            .await?;
+    }
     deletes
         .join_all()
         .await
@@ -576,6 +691,12 @@ async fn diagnose(witness: &PgPool, verdict: &verify::Verdict) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let measurement_path = std::path::PathBuf::from(required_env("LASH_LOAD_MEASUREMENTS_PATH")?);
+    std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&measurement_path)
+        .context("create the fresh run's measurement file")?;
     let workload_name = required_env(lash_restate_postgres_workers_e2e::load::LOAD_WORKLOAD_ENV)?;
     let load = LoadContext::named(&workload_name)?;
     let run = env(
@@ -617,6 +738,60 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+    let started = Instant::now();
+    let collector = Arc::new(
+        lash_restate_postgres_workers_e2e::load::measurements::Collector {
+            run: run.clone(),
+            workers: workers.clone(),
+            nodes: required_env("RESTATE_METRICS_URLS")?
+                .split(',')
+                .map(str::to_owned)
+                .collect(),
+            admin: required_env("RESTATE_ADMIN_URL")?,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()?,
+            database: sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&required_env("DATABASE_URL")?)
+                .await?,
+            started,
+            initial_invocations: tokio::sync::Mutex::new(None),
+        },
+    );
+    let journal_settings = collector
+        .retain_journals(&required_env("LASH_LOAD_JOURNAL_RETENTION")?)
+        .await?;
+    lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+        "schema_version": 1, "record": "run", "run": run, "mode": if campaign.is_some() { "fault_campaign" } else { "smoke" },
+        "workload": workload_name, "workload_sha256": load.sha256(),
+        "seed": load.workload.spec().seed, "sessions": sessions, "turns_per_session": turns,
+        "workers": workers, "fault_campaign": campaign.is_some(), "pool": "PENDING", "pool_dependencies": ["FIG-4161", "FIG-4162"],
+        "invocation_scope": "isolated topology, one driver; census before admission",
+        "journal_settings": journal_settings,
+    }))?;
+    lash_restate_postgres_workers_e2e::load::measurements::emit(&collector.sample().await?)?;
+    let collection_stop = Arc::new(tokio::sync::Notify::new());
+    let task_stop = Arc::clone(&collection_stop);
+    let task_collector = Arc::clone(&collector);
+    let scrape_s = load.workload.spec().collection.scrape_s;
+    let collection = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = task_stop.notified() => break,
+                _ = tokio::time::sleep(Duration::from_secs(u64::from(scrape_s))) => {
+                    let sample = match task_collector.sample().await {
+                        Ok(sample) => sample,
+                        Err(error) => json!({"schema_version": 1, "record": "sample_error",
+                            "run": task_collector.run, "monotonic_ns": task_collector.started.elapsed().as_nanos(),
+                            "error": format!("{error:#}")}),
+                    };
+                    lash_restate_postgres_workers_e2e::load::measurements::emit(&sample)?;
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    });
     let driver = Arc::new(Driver {
         run: run.clone(),
         witness,
@@ -625,9 +800,10 @@ async fn main() -> Result<()> {
             .build()?,
         ingress: required_env("RESTATE_INGRESS_URL")?,
         workers,
-        started: Instant::now(),
+        started,
         campaign,
         load,
+        collector,
     });
     println!(
         "load run={run} workload={workload_name} sha256={} sessions={sessions} turns_per_session={turns} fault_campaign={}",
@@ -685,18 +861,70 @@ async fn main() -> Result<()> {
             )
             .await?;
     }
-    println!(
-        "load drained run={run} elapsed_s={:.1}",
-        driver.started.elapsed().as_secs_f64()
-    );
-
+    collection_stop.notify_one();
+    collection.await??;
+    // Public terminals can precede their asynchronous cleanup. Retain the
+    // final census after that work settles, bounded to keep this a short smoke.
+    let drain_deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let sample = driver.collector.sample().await?;
+        let owned: std::collections::BTreeSet<_> = sample["journals"]
+            .as_array()
+            .context("sample has no journals")?
+            .iter()
+            .filter_map(|row| row["id"].as_str())
+            .collect();
+        let unfinished = sample["invocations"]
+            .as_array()
+            .context("sample has no invocations")?
+            .iter()
+            .filter(|row| {
+                owned.contains(row["id"].as_str().unwrap_or_default())
+                    && row["status"] != "completed"
+            })
+            .count();
+        lash_restate_postgres_workers_e2e::load::measurements::emit(&sample)?;
+        if unfinished == 0 || Instant::now() >= drain_deadline {
+            println!(
+                "load drained run={run} elapsed_s={:.1} unfinished_internal={unfinished}",
+                driver.started.elapsed().as_secs_f64()
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
     let snapshot = verify::load_snapshot(&driver.witness, &run).await?;
     let verdict = verify::verify(&driver.load, &run, &snapshot)?;
     for line in verdict.lines() {
         println!("{line}");
     }
     diagnose(&driver.witness, &verdict).await?;
+    lash_restate_postgres_workers_e2e::load::measurements::retain_witness(&driver.witness, &run)
+        .await?;
+    lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
+        "schema_version": 1, "record": "witness", "run": run, "verdict": verdict,
+        "fault_rows": snapshot.faults.len(),
+        "sent": snapshot.events.iter().filter(|event| event.phase == "sent").count(),
+        "terminal": snapshot.events.iter().filter(|event| event.phase == "terminal").count(),
+        "provider_calls": snapshot.receipts.len(), "effect_attempts": snapshot.attempts.len(),
+        "provider_retryable_failures": snapshot.receipts.iter().filter(|(_, scenario)| scenario == "load_retryable").count(),
+        "effect_commits": snapshot.commits.len(),
+    }))?;
     println!("load witness summary {}", serde_json::to_string(&verdict)?);
+    // The controller copies this file while the container is still alive.
+    // Kubernetes only exposes the current rotated log, so stdout cannot be
+    // the raw result archive. The acknowledgement ends this foreground Job.
+    std::fs::write(measurement_path.with_extension("complete"), b"complete\n")?;
+    let collected = measurement_path.with_extension("collected");
+    let deadline = Instant::now()
+        + Duration::from_secs(u64::from(driver.load.workload.spec().drain_timeout_s));
+    while !collected.exists() {
+        ensure!(
+            Instant::now() < deadline,
+            "controller did not collect the measurement file"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     ensure!(
         verdict.passed(),
         "load witness failed with {} violations",

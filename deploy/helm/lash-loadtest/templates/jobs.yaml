@@ -23,6 +23,7 @@ spec:
             - |
               until psql "$DATABASE_URL" -Atqc 'SELECT 1' >/dev/null 2>&1; do sleep 1; done
               psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /opt/lash/schema.sql
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements'
               psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v witness_password="$WITNESS_PASSWORD" <<'SQL'
               CREATE ROLE lash_witness LOGIN PASSWORD :'witness_password';
               CREATE DATABASE lash_witness OWNER lash;
@@ -153,5 +154,8 @@ spec:
             - {name: LASH_LOAD_RUN, value: {{ .Values.load.run | quote }}}
             {{- end }}
             - {name: WORKER_CONTROL_URLS, value: "{{ range $index := until (int .Values.workers.count) }}{{ if $index }},{{ end }}http://{{ $name }}-worker-{{ $index }}-control:18101{{ end }}"}
+            - {name: LASH_LOAD_MEASUREMENTS_PATH, value: /tmp/load-measurements.jsonl}
+            - {name: LASH_LOAD_JOURNAL_RETENTION, value: {{ .Values.load.journalRetention | quote }}}
+            - {name: RESTATE_METRICS_URLS, value: "{{ range $index := until (int .Values.restate.replicas) }}{{ if $index }},{{ end }}http://{{ $name }}-restate-{{ $index }}.{{ $name }}-peers:5122{{ end }}"}
           resources: {{ toJson .Values.load.resources }}
 {{- end }}

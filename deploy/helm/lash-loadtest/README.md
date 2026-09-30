@@ -11,7 +11,7 @@ Run the local proof in a build-enabled Kiln fork:
 
 ```sh
 . ./env.sh
-kiln gate lash fig-4167 -- just multi-node-load
+LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4167 -- just multi-node-load
 ```
 
 The foreground recipe builds the harness binaries on the shared pool, plus the
@@ -107,8 +107,9 @@ sent and terminal rows, the provider's receipts, the synthetic tools' effect
 attempts and commits, and the exact blob bytes put and read (digested by the
 witness). The driver then reconciles 19 evidence classes against the plan the
 workload regenerates and prints one `load witness class=...` line per class.
-Any violation, and any class with no evidence, fails the run. The final result
-archive and measurements belong to later lanes.
+Any violation, and any class with no evidence, fails the run. The measurements
+collector archives the independent ledgers and reconciles them against the
+client operation records before qualifying the result.
 
 # Fault campaign
 
@@ -230,3 +231,128 @@ The Scaleway profile uses the documented `sbs-5k` class from
 [Scaleway CSI storage guidance](https://www.scaleway.com/en/docs/kubernetes/api-cli/managing-storage/).
 Confirm that class and the operator-created pool labels on the actual cluster
 before provisioning the pending release baseline.
+
+# Measurements
+
+The load driver collects measurements before its first admission, periodically
+through the load, and after the drain. `just multi-node-load` reconciles its
+records and writes `results/fig-3790/<run-id>/` inside the run's evidence directory. It produces
+version 1 `operations.jsonl`, `metrics.jsonl`, `samples.jsonl`, `faults.jsonl`,
+`histograms.json`, `sample_errors.jsonl`, `query_retries.jsonl`,
+`witness_evidence.jsonl`, `witness.json`, `collection.json` and `summary.json`. L6 packaging can archive
+these files together with topology, build and placement evidence. A smoke
+result has no baseline, saturation estimate or budgets.
+
+Each operation preserves the driver's monotonic scheduled, send, acceptance
+and terminal-observation times, its actor, session, subject, input and invocation IDs, request/response
+sizes, typed outcome, response and terminal journal read. Restate's `/send`
+acknowledgement establishes acceptance; attaching to the durable workflow
+establishes the observed terminal. Acceptance does not count as completion.
+Timeouts, cancellations, failures and unresolved work remain separate
+populations. First visible output and the remote settlement instant are
+explicitly unavailable through this workflow endpoint. No remote timestamp is
+subtracted from the client clock. Samples retain the collector's start/end
+interval as clock uncertainty.
+
+Histograms retain p50/p95/p99, queue delay, offered/completed rates and backlog
+for each scenario and phase. Each outcome also has its own latency population.
+The driver writes every raw record to `LASH_LOAD_MEASUREMENTS_PATH`. After
+collection, it creates a `.complete` marker and stays alive while the controller
+copies the file to `measurements.log`. The controller creates a `.collected`
+marker, then waits for the Job to exit. Container logs contain progress only;
+Kubernetes log rotation cannot discard the result archive. The acknowledgement
+has the workload's drain timeout.
+
+The report must match the driver's population and independent witness counts,
+including the planned primary-turn population. Any duplicate, missing terminal,
+invalid clock order, unresolved operation or failed witness fails the command.
+The archive retains the exact independent event, provider receipt and effect
+ledger rows before deleting the topology. The reconciler checks their identities,
+requests, responses and timestamps against client records. Failed analyses retain
+the raw rows, collection settings and witness verdict.
+
+The invocation census starts before admission in this isolated topology, which
+has one load driver and no concurrent traffic after the L2 smoke drains. All
+new invocations belong to the run, including HTTP-started bodies without a
+Restate parent ID. Journal aggregates read `raw_length`, retain per-invocation
+maxima and growth, and include every retained completed invocation. Every outer
+terminal also triggers a journal read before retention. Physical collectors
+mount each Restate data volume read-only and record allocated bytes by
+directory. They list the separate S3 snapshot prefix, including pagination.
+The report counts that shared prefix once.
+
+For this isolated evidence topology, `load.journalRetention` is fixed at `5m`
+and applied to every registered service before load admission. This deliberately
+differs from default deployment settings. `collection.json` records the before/after
+service settings. L6 must preserve this flag. The eventual FIG-4172 baseline
+campaign must decide its retention settings explicitly before comparing costs.
+The driver allows up to 20 seconds for asynchronous internal cleanup after the
+public operations finish; unfinished internal invocations fail reconciliation.
+The driver deletes each actor's final session after its last turn completes,
+as well as sessions retired by rotation or scripted deletion.
+Session deletion first enumerates model-created processes through the public
+provenance filter, cancels all live children and awaits their terminals. A turn
+cancel drops its wait and does not cancel its parked child, so the workload must
+do this cleanup explicitly. An incomplete census retains its metric/histogram
+outputs with `qualification.status=INCOMPLETE` and exits unsuccessfully. Missing
+or vanished internal completions are never excused as inferred cancellations.
+The collector retains run-owned `sys_journal` signal commands with their exact
+target invocation IDs. A disappeared inboxed `EffectGroupIndex` call is explained
+only by a recorded built-in cancel signal targeting that ID, matching Restate
+1.7.12's cancel-before-start contract. Such calls need no completed journal.
+Unexplained disappearances fail qualification when the cancellation census is
+available; older evidence without it remains `INCOMPLETE`.
+
+`/load/resources` reads the worker and all descendant processes, preserving PID
+start epochs, CPU, RSS and peak RSS. The report validates the parent/child sums.
+Deployment memory is the sum of distinct worker cgroup memory values; process
+RSS is a separate diagnostic. Cgroup CPU, throttling and OOM counters retain
+their process epoch. Model-code pool queue, IPC, reset/crash counters and proof
+that cells and bodies run in the pool remain **PENDING** on FIG-4161 and
+FIG-4162. Descendant sampling is ready for that qualification.
+
+PostgreSQL enables `pg_stat_statements` and I/O timing for the load topology.
+The collector records transactions, WAL, connections, I/O time/block counts,
+current waits/lock waits and query calls/time. It normalizes deltas by durable
+terminal operations. WAL has server scope, including the separate witness
+database; query/transaction/I/O statistics have Lash database scope and include
+collection overhead. PostgreSQL does not expose cumulative per-lock wait time;
+that metric is explicitly unavailable rather than zero.
+
+Restate retryable failures and suspensions use cumulative task counters and
+node-generation epochs. Samples retain the partition's leader identity and
+epoch alongside each counter. Leadership changes do not reset the node's
+cumulative counters. The collector reads `sys_invocation_status` directly because the combined
+`sys_invocation` view joins ephemeral leader state, which can disappear during
+rebalancing. SQL `retry_count` resets at leadership changes and suspension, so
+it is never used as a cumulative count. New counter series begin at zero when absent from the
+initial scrape. An unexplained reset or an unobserved node-generation gap fails
+measurement completeness. Failed scrape intervals are retained and the collector
+continues, so a fault does not stop later evidence collection. Transient partition
+transfer failures and interrupted read-only query connections get bounded retries
+within the sample; every attempt is
+retained in `query_retries.jsonl`, and the collection interval exposes the delay.
+Provider retryable receipts, client attempts and
+effect attempts/commits have independent counts.
+
+An L4 fault ledger can be supplied to the reconciler with `--faults PATH`.
+Each row has `schema_version: 1`, `id`, `actual_ns`, `service_progress_ns`,
+`backlog_recovered_ns`, `accepted_ids` and `witness_verdict`. Times use the same
+client monotonic origin as the operation records. The recovery report requires
+all named accepted inputs to have durable terminals by backlog recovery and a
+passed durability witness verdict. It reports service-progress and full-backlog
+recovery separately. The L5 smoke setting injects no L4 faults; recovery-law
+fixtures exercise the measurement calculations.
+
+Run the focused measurement-law tests through Kiln:
+
+```sh
+kiln gate lash fig-4170 -- python3 scripts/test_loadtest_measurements.py
+```
+
+The pinned counter and journal meanings follow the
+[Restate 1.7.12 invoker counters](https://github.com/restatedev/restate/blob/v1.7.12/crates/invoker-impl/src/metric_definitions.rs),
+[journal schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/journal/schema.rs)
+and [retry snapshot schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/invocation_state/schema.rs).
+
+For the small L5 collection smoke, run `LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4170 -- just multi-node-load`. The default recipe preserves the L4 fault campaign. Campaigns retain the extra four fault witness classes, all six independent ledgers, and primary turns beyond the planned minimum. Raw L4 fault records use the PostgreSQL witness clock. They remain separate from driver-monotonic recovery inputs; a campaign without normalized recovery inputs is explicitly INCOMPLETE. No clock offset is guessed.

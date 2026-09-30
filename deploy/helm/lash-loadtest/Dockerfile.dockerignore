@@ -9,3 +9,6 @@
 !crates/
 !crates/lash-postgres-store/
 !crates/lash-postgres-store/schema.sql
+!scripts/
+!scripts/loadtest_resources.py
+!scripts/loadtest_storage.py

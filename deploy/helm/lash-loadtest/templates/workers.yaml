@@ -48,6 +48,7 @@ spec:
           {{- include "loadtest.env" $ | nindent 10 }}
             - {name: POSTGRES_CONNECTIONS_PER_WORKER, value: {{ $.Values.workers.pgConnections | quote }}}
             - {name: WORKER_INSTANCE_ID, value: "worker-{{ $index }}-{{ $generation }}"}
+            - {name: WORKER_GENERATION, value: {{ $generation | quote }}}
           readinessProbe: {httpGet: {path: /health, port: 18101}, periodSeconds: 2}
           volumeMounts: [{name: fault, mountPath: /fault}]
       volumes: [{name: fault, emptyDir: {}}]
