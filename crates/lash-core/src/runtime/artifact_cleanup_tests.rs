@@ -120,14 +120,6 @@ impl ArtifactCleanupLedger for Ledger {
         Ok(false)
     }
 
-    async fn nudge_awaiting_journal(
-        &self,
-        _journal: &lash_sansio::EffectJournalIdentity,
-        _now_ms: u64,
-    ) -> Result<u64, StoreError> {
-        Ok(0)
-    }
-
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
         Ok(self
             .rows

@@ -26,7 +26,6 @@ table lash_abandoned_consumer_holds
   column owner_scope_kind text not-null
   primary-key (hold_key)
 table lash_artifact_cleanup_obligations
-  column awaited_journal_key text nullable
   column cleanup_json text not-null
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable

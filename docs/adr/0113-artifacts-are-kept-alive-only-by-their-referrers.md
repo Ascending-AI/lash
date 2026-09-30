@@ -152,13 +152,6 @@ referrer, with ADR 0109's due, claimed and stalled states. A row exists only
 while cleanup is owed. PostgreSQL has one ledger table. SQLite has a core
 table and a registry table, so prune can record an end in its own database;
 ids have `core:` or `registry:` prefixes and settlement routes by prefix.
-Each row also keeps `awaited_journal_key`, the key of the journal its
-delivery waits on (`ArtifactCleanup::awaited_journal`): the gate, else the
-journal its guard awaits (an execution referrer's own journal, a prepared
-frame's creator, an absent start's starter, a revision's creator), else null
-(`crates/lash-sqlite-store/src/schema.rs:689-716,1376-1403`,
-`crates/lash-sqlite-store/src/obligation_ledger.rs:538-631`,
-`crates/lash-postgres-store/schema.sql:1091-1113`).
 
 An end hook writes `Ended` beside the durable fact that ends the referrer.
 An `Ended` plan replaces a guard; a guard cannot replace an existing plan.
@@ -198,17 +191,10 @@ The resolution and delivery are in
 settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs:125-149`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
-A journal's settlement ends that wait: once a Restate drive's call of a
-root's `run` returns, no attempt of the run is open, and the drive asks
-`SessionDriver::root_run_ended`, which nudges every due row whose awaited
-journal is the root's turn journal
-(`ArtifactCleanupLedger::nudge_awaiting_journal`). The frames the root's
-commits ended and its execution referrer are then delivered on the next
-pass, even when a pass met them while the run was still open. The nudge is
-not journaled: a drive replay repeats it, which only shortens a wait, and a
-missed one leaves the row to its deferral
-(`crates/lash-restate/src/session_driver.rs`,
-`crates/lash/src/core/session_driver.rs`).
+Every journal kind uses this deferral: awaited and driveless roots,
+processes, and queue drains. Settlement permits cleanup when the next due
+pass reaches the row; it does not shorten the recorded delay. Retaining
+artifacts for the full deferral avoids a separate settlement fast path.
 `NotBefore` defers at the earlier of its known due instant and that backoff.
 A missing carry stalls as refused, an undecodable row stalls as undecodable,
 and store faults retry the delivery. A retry repeats every store
@@ -628,11 +614,15 @@ Prune and a late start rescue respect fences
 #### 7.11 Journal gates
 
 A replaying journal keeps its gate's artifacts
-(`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). A settled
-journal's nudge makes due only the rows awaiting it, on every backend
-(`lash_conformance::a_settled_journal_nudges_only_the_cleanups_awaiting_it`).
-A carry turn held open across a recovery pass after a crash still reclaims
-its predecessor frame within the matrix bound on both engines
+(`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). For awaited
+and driveless roots, processes, and queue drains, a deferred
+cleanup retains its artifacts while the journal can replay and releases
+after settlement once the deferral expires, on SQLite memory/file and
+PostgreSQL over both the double and live Restate
+(`crates/lash-restate-test/tests/crash_windows/journal_settlement_cleanup.rs`).
+A carry turn held open across a recovery pass after a crash reclaims its
+predecessor frame after the cleanup clock passes the guarded deferral,
+while claim recovery keeps the matrix's lapsed-claim bound on both engines
 (`crates/lash-sim/src/crash_matrix/cases/definition_carry.rs`).
 
 #### 7.12 Definition closure
@@ -686,8 +676,9 @@ source edges until the relevant authorities settle them (§2.5, §3).
 
 Every ended referrer has a permanent fence. Host pins need explicit release;
 overwritten globals retain their frame edges until frame end. Waiting
-guards poll at the maximum backoff unless a nudge shortens it; a root's
-ended run nudges every row awaiting its journal. Store faults
+guards poll at the maximum backoff; journal settlement leaves them to
+the relay's next due pass. End facts still arm or nudge their own referrers.
+Store faults
 retry, and refused or undecodable obligations remain visible as stalled
 work (§2.3-2.5, §3.1, §3.5) under
 [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md).

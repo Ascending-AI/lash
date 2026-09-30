@@ -199,21 +199,6 @@ pub trait SessionDriver: Send + Sync {
         session: &SessionId,
         root: &crate::TurnId,
     ) -> Result<(), crate::engine::DriveAbort>;
-
-    /// The engine's run of `root` of `session` has ended and no attempt of it
-    /// is open: once the root's terminal is durable its journal cannot
-    /// replay, so every artifact cleanup awaiting that journal — the frames
-    /// its commits ended, its execution referrer, a guard it created — is
-    /// made due now (ADR 0113 §2.5). A relay pass that met the gate while the run was
-    /// still open deferred those cleanups at its maximum backoff; this is
-    /// what ends that wait. The engine calls it each time it observes the
-    /// run end, replays included, so it only ever shortens a wait; a call
-    /// that never comes leaves each cleanup to its deferral.
-    async fn root_run_ended(
-        &self,
-        session: &SessionId,
-        root: &crate::TurnId,
-    ) -> Result<(), crate::StoreError>;
 }
 
 /// Deployment port for durable process work.
@@ -506,14 +491,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionDriver for Probe {
-        async fn root_run_ended(
-            &self,
-            _session: &SessionId,
-            _root: &crate::TurnId,
-        ) -> Result<(), crate::StoreError> {
-            unreachable!("the probe never runs a root")
-        }
-
         async fn admit(
             &self,
             _controller: crate::ScopedEffectController<'_>,
