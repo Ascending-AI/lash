@@ -2446,7 +2446,7 @@ class FeatureLaneGraph:
             if (
                 kind == "bin"
                 and target.get("test", False)
-                and command.unit_tests
+                and (command.unit_tests or (command.subcommand == "test" and command.selector == "--bins"))
                 and command.selector != "--lib"
             ):
                 unit_label = self.emit_target(

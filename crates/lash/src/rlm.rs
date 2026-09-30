@@ -231,6 +231,25 @@ fn rlm_termination_options(
 }
 
 /// One shared pool for RLM cells, process bodies, and pure language work.
+///
+/// SDK releases attach `lash-sdk-worker-VERSION-TARGET.tar.gz` and its SHA256.
+/// The archive includes `bin/lash-vm-worker`, `manifest.json` with its compiled
+/// build identity, and the exact SDK source tree under `sdk/`. Build the host
+/// against that tree with the pinned compiler, release profile and target,
+/// without the `testing` feature. Copy the helper beside the host executable,
+/// or select its absolute path with [`WorkerEntry::helper`]. A mismatched helper
+/// fails its handshake; there is no fallback. Standalone registry consumption
+/// of the build identity is tracked by FIG-4408.
+///
+/// A single-binary host calls [`worker_entry_with_frontend`] as its first action,
+/// before runtime creation, credentials, stores or providers, and returns from
+/// main when that call returns `true`. It then selects [`WorkerEntry::reexec`]
+/// using the same immutable compiled identity. `examples/worker_host.rs` proves
+/// this bootstrap with the facade's TypeScript frontend. Host-owned frontends
+/// should include their own compiled source identity in the identity they pass.
+/// The child starts with an empty environment and closes inherited descriptors.
+/// The language bounds guest authority; the process contains native crashes.
+/// A native escape still has the worker user's OS access.
 pub use lash_vm_client::service::Service as WorkerService;
 /// Host-selected worker entry, pool bounds, and execution deadlines.
 pub use lash_vm_client::{

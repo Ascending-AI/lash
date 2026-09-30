@@ -142,3 +142,9 @@ name = "lash-seam-proof-worker"
 path = "tests/seam_proof_dialect/worker.rs"
 required-features = ["rlm", "testing"]
 test = false
+
+[[example]]
+name = "worker_host"
+path = "examples/worker_host.rs"
+required-features = ["rlm", "typescript"]
+test = false

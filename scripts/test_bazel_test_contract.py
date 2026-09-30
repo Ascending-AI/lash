@@ -1267,7 +1267,7 @@ class FocusedClippyVerdicts(unittest.TestCase):
             self.assertFalse(any(arg.startswith("--build_event_json_file=") for arg in arguments))
 
 class CargoTargetSelectionTests(unittest.TestCase):
-    def emit(self, arguments, required_features=()):
+    def emit(self, arguments, required_features=(), subcommand="test"):
         from unittest.mock import Mock, patch
 
         sys.path.insert(0, str(ROOT / "tools/bazel"))
@@ -1286,12 +1286,26 @@ class CargoTargetSelectionTests(unittest.TestCase):
                                  f"{target['name']}:{kind}")
         graph.units = []
         command = generator.feature_variants.parse_command(
-            ["cargo", "test", "-p", "example", "--no-default-features", *arguments]
+            ["cargo", subcommand, "-p", "example", "--no-default-features", *arguments]
         )
         tests = []
         with patch.object(generator, "cargo_test_policy", return_value=(False, "")):
             compiled = graph.emit_root_targets(command, {"example": []}, tests)
         return command, compiled, tests, graph.emit_target.call_args_list
+
+    def test_release_binaries_do_not_compile_dev_or_test_harnesses(self):
+        command, compiled, tests, calls = self.emit(["--bins", "--locked"], subcommand="check")
+        self.assertEqual(["app:bin"], compiled)
+        self.assertEqual([], tests)
+        self.assertFalse(command.with_dev)
+        self.assertFalse(command.unit_tests)
+        self.assertEqual(1, len(calls))
+        self.assertFalse(calls[0].args[4])
+        command, compiled, tests, _ = self.emit(["--bins", "--locked"])
+        self.assertEqual(["app:bin", "app:bin-unit-test"], compiled)
+        self.assertEqual(["app:bin-unit-test"], tests)
+        self.assertFalse(command.unit_tests)
+        self.assertTrue(command.with_dev)
 
     def test_named_integrations_compile_binaries_without_unit_harnesses(self):
         command, compiled, tests, calls = self.emit([

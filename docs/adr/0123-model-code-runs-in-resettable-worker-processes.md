@@ -299,6 +299,50 @@ Sources: `crates/lash-vm-client/src/ipc.rs:26`,
 `crates/lash-vm-worker/src/entry.rs:26`, and
 `crates/lash-vm-client/src/pool.rs`.
 
+### Presets and host packaging
+
+FIG-4162 retains the standard pool bounds: one prewarmed process, at most four
+processes, two queued inputs and eight MiB queued bytes. Protocol bounds remain
+four MiB frames, two MiB state, one MiB effect payloads, 64 KiB source, 100,000
+decoded nodes and 64 MiB charged decode allocation. VM admission allows fifty
+million instructions, 64 MiB guest memory and 1,024 frames. Checkout and IPC
+silence are five seconds, compute thirty seconds, serialization five seconds,
+cancellation grace 100 ms, cumulative CPU ten seconds, and attempts three.
+The restart window admits eight failed replacements per minute.
+
+These bounds limit resource admission; the synthetic service-time matrix does
+not prove an arbitrary-guest deadline or optimal host concurrency. Existing RLM
+and process fixtures need the service's explicit larger profile: 64 MiB state,
+128 MiB frames and queued input, and 256 MiB charged decode allocation. Small
+echo workloads do not justify reducing that valid-state envelope. Hosts select
+their own configuration when their workload needs different bounds.
+
+Releases bundle the optimized helper with its exact SDK source tree, compiler
+pin, lockfile and per-file checksums. The host must build against that source
+tree, on the matching target and profile without the testing feature. The
+helper reports its immutable compiled identity with `--build-identity`; pool
+admission compares it before guest work. A single executable instead registers
+the facade's early re-exec entry and frontend before constructing its runtime,
+credentials or stores, as `crates/lash/examples/worker_host.rs` demonstrates.
+Standalone registry consumption of the fingerprint closure remains FIG-4408.
+
+The optimized same-machine matrix records 10,000 paired fresh-state observations
+per workload and 200 cold helper starts. Warm zero-resource-effect overhead is
+0.155 ms p50 and 0.475 ms p99, within the 1/5 ms diagnostic budget. Scalar
+one-effect exchange is 105/1,281 microseconds, over the 100/500 microsecond
+budget; nine of ten exchange populations exceed at least one threshold.
+The whole-batch and large-value measurements include guest work and
+serialization. The matrix uses the canonical optimized workspace feature
+graph, including testing features, without invoking test controls. Shared-host
+load, sample counts, complete tails and memory counters are recorded in
+`crates/lash-perf/src/vm_worker_matrix/measurements-20260930.json` and its
+Markdown companion. These measurements support bounded admission and keep
+latency failures visible; they do not set a portable CI latency gate.
+
+Sources: `crates/lash-vm-client/src/config.rs:52`,
+`crates/lash-vm-client/src/service.rs:442`, `scripts/package_vm_worker.py:18`,
+and `.github/workflows/release.yml:689`.
+
 ## Consequences
 
 Opaque records let the broker store and fence state without restoring guest

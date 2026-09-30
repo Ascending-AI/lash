@@ -200,6 +200,7 @@ def resolve_request(
 # Cargo target kinds the command compiles. `cargo test` and `cargo check
 # --tests` differ in what they RUN, never in what they compile.
 SELECTOR_KINDS = {
+    "--bins": ("lib", "bin"),
     "--lib": ("lib",),
     "--tests": ("lib", "test", "bin"),
     "--all-targets": ("lib", "test", "bin", "example", "bench"),
@@ -221,7 +222,7 @@ class Command:
     @property
     def unit_tests(self) -> bool:
         return self.selector in DEV_SELECTORS or (
-            self.subcommand == "test" and (self.selector == "--lib" or not self.tests)
+            self.subcommand == "test" and (self.selector == "--lib" or (self.selector is None and not self.tests))
         )
 
     def selects_test(self, name: str) -> bool:

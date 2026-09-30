@@ -159,6 +159,51 @@ lash_rust_binary(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "worker_host__example",
+    crate_features = [
+        "default",
+        "restate",
+        "rlm",
+        "sqlite",
+        "testing",
+        "typescript",
+    ],
+    crate_name = "worker_host",
+    crate_root = "examples/worker_host.rs",
+    declared_features = [
+        "anthropic",
+        "default",
+        "google",
+        "http-transport",
+        "mcp",
+        "openai",
+        "otel-trace",
+        "postgres",
+        "restate",
+        "rlm",
+        "s3",
+        "sqlite",
+        "subagents",
+        "synthetic-next",
+        "testing",
+        "typescript",
+    ],
+    data_exclude = [
+        "tests/ui/*",
+    ],
+    exec_properties = sized_exec_properties("lash-runtime", "worker_host"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash",
+    library_crate_name = "lash",
+    manifest_dir = "crates/lash",
+    package_name = "lash-runtime",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "artifact_referrers_evidence__test",
     crate_features = [

@@ -193,6 +193,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--bins", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
 ]
 

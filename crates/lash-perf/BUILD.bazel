@@ -69,9 +69,12 @@ lash_rust_unit_test(
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
-    test_env = {"RUST_TEST_THREADS": "1"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -176,6 +179,35 @@ lash_rust_unit_test(
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_binary(
+    name = "vm-worker-matrix__bin",
+    crate_features = [
+        "default",
+    ],
+    crate_name = "vm_worker_matrix",
+    crate_root = "src/bin/vm_worker_matrix.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "vm_worker_matrix"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-perf",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -488,9 +520,12 @@ lash_rust_feature_test(
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
-    test_env = {"RUST_TEST_THREADS": "1"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
         "manual",
@@ -519,9 +554,12 @@ lash_rust_feature_test(
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
-    test_env = {"RUST_TEST_THREADS": "1"},
+    test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
         "manual",
@@ -642,6 +680,71 @@ lash_rust_feature_test(
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"@crates//:dhat-0.3.3": "dhat"},
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_3daa10dd", "//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_fe6f808f", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_3a442a97", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_7c47c1e8", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_d4e50eac", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_fc51d540", "//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_c8044a46"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "vm-worker-matrix__bin__fv_1555065c",
+    crate_features = [],
+    crate_name = "vm_worker_matrix",
+    crate_root = "src/bin/vm_worker_matrix.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "vm_worker_matrix"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-perf:lash-perf__fv_1555065c",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_3daa10dd", "//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_fe6f808f", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_3a442a97", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_7c47c1e8", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_d4e50eac", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_fc51d540", "//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_c8044a46"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "vm-worker-matrix__bin__fv_2decc7a3",
+    crate_features = [
+        "dhat-heap",
+    ],
+    crate_name = "vm_worker_matrix",
+    crate_root = "src/bin/vm_worker_matrix.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "vm_worker_matrix"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-perf:lash-perf__fv_2decc7a3",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
     tags = [
         "feature-lane",
         "manual",

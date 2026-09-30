@@ -16,7 +16,11 @@ LIBRARIES = {"lashlang", "lash-typescript", "lash-vm-worker"}
 # The conformance crate is a test harness: these constructors create fixed AST
 # storage fixtures, and none is reachable from a model execution entry point.
 TEST_HARNESSES = {"lash-conformance"}
-REFERENCE_TOOLS = {"crates/lash-perf/src/string_scaling.rs"}
+REFERENCE_TOOLS = {
+    "crates/lash-perf/src/string_scaling.rs",
+    # Developer-only same-machine reference. Never reachable from the SDK.
+    "crates/lash-perf/src/vm_worker_matrix/baseline.rs",
+}
 ENTRY = re.compile(r"(?:\b(?:lash_typescript|typescript|lashlang)::(?:parse(?:_[A-Za-z0-9_]+)?|link(?:_[A-Za-z0-9_]+)?|compile(?:_[A-Za-z0-9_]+)?)|\b(?:LinkedModule|ModuleArtifact)::(?:link|from_program|from_store_bytes)|\bVmInstance::(?:new|pristine)|\.(?:execute_program|execute_compiled|run_program|compile_program))\s*\(")
 IMPORT = re.compile(r"\buse\s+(?:lash_typescript|lashlang)::[^;]*\b(?:parse(?:_[A-Za-z0-9_]+)?|link(?:_[A-Za-z0-9_]+)?|compile(?:_[A-Za-z0-9_]+)?|VmInstance)\b[^;]*;")
 TEST_CFG = re.compile(r'#\s*\[\s*cfg\s*\((?:test|feature\s*=\s*"testing"|any\(\s*test\s*,\s*feature\s*=\s*"testing"\s*\))\)\s*\]')

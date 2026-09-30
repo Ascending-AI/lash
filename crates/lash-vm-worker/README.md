@@ -53,16 +53,22 @@ request again on the same checkout. A nested checkout still has a bounded queue
 and returns `CheckoutTimedOut` when no slot frees. It never waits silently
 forever.
 
-The standard measured FIG-4157 values are min 1/max 4, two queued items/eight
+The standard presets retained after FIG-4162 are min 1/max 4, two queued items/eight
 MiB, four MiB frames, two MiB VM state, one MiB effect values, 64 KiB source,
 100,000 decoded nodes, 64 MiB charged decode allocation and five seconds IPC
-silence. CPU, compute, serialization, retry and restart presets are provisional
-until FIG-4162 measures the integrated path.
+silence. Checkout is five seconds, compute thirty seconds, serialization five
+seconds, cancellation grace 100 ms and cumulative CPU ten seconds. An invocation
+allows three attempts; the pool permits eight failed replacements per minute.
+These are host bounds, not latency targets or guarantees for arbitrary guests.
+The optimized matrix and its sampling contract live in
+`crates/lash-perf/src/vm_worker_matrix/`; ADR 0123 records the measured result.
 
 The shipped RLM/process service currently allows 64 MiB VM state, 128 MiB
 frames, 256 MiB charged decode allocation and 128 MiB queued input. The existing
 process and conformance fixtures exceed the pool's smaller baseline presets.
-These integrated values remain provisional for FIG-4162's measurements.
+This larger compatibility profile stays explicit: the small synthetic matrix
+does not justify rejecting existing valid process state. Hosts can supply a
+smaller `PoolConfig` for their own admitted workload.
 
 Effect values use explicit variants and IEEE number bits, preserving undefined,
 non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
@@ -80,6 +86,21 @@ watches the closure files and source directories, including source additions
 and removals. Bazel declares the closure as build-script inputs. The inventory
 generator declares inputs without hashing their contents. Re-exec hosts supply
 their own immutable compiled identity.
+
+SDK releases attach `lash-sdk-worker-VERSION-OS-ARCH.tar.gz` plus its SHA256.
+It contains `bin/lash-vm-worker`, the complete exact `sdk/` source tree and a
+manifest with the compiled identity and every source file's checksum. Build the
+host against those sources using the pinned compiler, matching target, release
+profile and disabled testing feature. Place the helper beside the host or select
+its path explicitly. `lash-vm-worker --build-identity` exposes the compiled
+identity for inspection; the handshake refuses a different build. Registry-only
+consumption of this source closure is unresolved in FIG-4408.
+
+For a single executable, the facade's `crates/lash/examples/worker_host.rs`
+registers its frontend and early re-exec entry before any host runtime,
+credentials or stores. The worker and parent use the same compiled identity.
+The source tree and helper are a matching pair; substituting a worker from a
+different checkout, compiler, profile, feature selection or target is refused.
 
 The native bootstrap lives in `entry.rs`. The core boundary gate allows only
 its argv read and empty-environment probe; every other ambient read in the

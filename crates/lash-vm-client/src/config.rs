@@ -46,8 +46,9 @@ pub struct Deadlines {
 }
 
 impl Deadlines {
-    /// CPU and execution deadlines are provisional until the integrated
-    /// FIG-4162 benchmark. IPC silence uses the measured FIG-4157 preset.
+    /// Bounded host defaults, retained after the FIG-4162 integrated matrix.
+    /// Synthetic service times do not bound arbitrary guest computation;
+    /// hosts should select deadlines for their admitted workload.
     pub const fn standard() -> Self {
         Self {
             checkout: Duration::from_secs(5),
@@ -75,6 +76,9 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
+    /// Prewarm one process, admit at most four, and bound waiting input to
+    /// two items and eight MiB. See ADR 0123 for the measurement contract and
+    /// the larger state profile used by the RLM/process service.
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
             entry,
