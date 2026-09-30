@@ -1074,6 +1074,16 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("--test_timeout=1200", just_cross_backend)
 
     def test_active_test_callers_use_the_test_interface(self) -> None:
+        def obsolete_test_run(source: str) -> re.Match[str] | None:
+            shell_continuations_collapsed = source.replace("\\\n", " ")
+            return re.search(
+                r"\bkiln run\s+[^\n]*:[^\s]*__test\b",
+                shell_continuations_collapsed,
+            )
+
+        self.assertIsNotNone(
+            obsolete_test_run("kiln " + "run \\\n  //pkg:target__test")
+        )
         tracked = subprocess.check_output(
             ["git", "ls-files", "-z"], cwd=ROOT
         ).decode().split("\0")
@@ -1094,7 +1104,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for path, source in sources.items():
             with self.subTest(path=path):
                 self.assertIsNone(
-                    re.search(r"\bkiln run\s+[^\n]*:[^\s]*__test\b", source),
+                    obsolete_test_run(source),
                     f"{path} tries to run a Buck2 test wrapper as a binary",
                 )
         justfile = sources["justfile"]
