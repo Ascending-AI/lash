@@ -474,24 +474,13 @@ impl LoadWorker {
                 .map_err(turn_handler_error)?;
         } else if process.waits_for_signal() {
             tokio::time::sleep(Duration::from_millis(u64::from(process.wake_delay_ms))).await;
-            let event_type =
-                lash_core::facade_support::process_signal_event_type("resume").map_err(terminal)?;
-            let append =
-                lash_core::ProcessEventAppendRequest::new(
-                    event_type,
-                    json!({ "key": key, "signal": "resume" }),
-                )
-                .with_replay_key(
-                    lash_core::facade_support::process_signal_wait_key(&process_id, "resume", key),
-                );
+            let signal = lash_core::ProcessSignal::new(
+                lash_core::ProcessSignalIdentity::new(process_id.clone(), "resume", key.clone())
+                    .map_err(terminal)?,
+                json!({ "key": key, "signal": "resume" }),
+            );
             processes
-                .signal(
-                    &process_id,
-                    "resume",
-                    key.clone(),
-                    append,
-                    scoped(controller, key, "signal")?,
-                )
+                .signal(signal, scoped(controller, key, "signal")?)
                 .await
                 .map_err(turn_handler_error)?;
             signalled = true;

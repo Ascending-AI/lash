@@ -134,34 +134,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn signal(
         &self,
-        process_id: crate::ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
+        signal: crate::ProcessSignal,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                request,
-            })
-            .await?
-        {
+        match self.run(crate::ProcessCommand::Signal { signal }).await? {
             crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
             _ => Err(wrong_process_outcome("signal")),
         }
-    }
-
-    async fn signal_recorded(
-        &self,
-        process_id: crate::ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal(process_id, signal_name, signal_id, request)
-            .await
     }
 
     async fn emit_event(
@@ -927,12 +905,11 @@ impl ProcessCapability {
                 status: record.status,
             });
         }
-        let event_type = crate::process_signal_event_type(&signal_name)?;
-        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-            crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-        );
         runner
-            .signal(record.id.clone(), signal_name, signal_id, request)
+            .signal(crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(record.id.clone(), signal_name, signal_id)?,
+                payload,
+            ))
             .await
     }
 
@@ -946,14 +923,13 @@ impl ProcessCapability {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let event_type = crate::process_signal_event_type(&signal_name)?;
-        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-            crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-        );
         let runner = self.command_runner(current, &scope)?;
         let process_id = runner.registry().require_process_id(process_id).await?;
         runner
-            .signal_recorded(process_id, signal_name, signal_id, request)
+            .signal(crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(process_id, signal_name, signal_id)?,
+                payload,
+            ))
             .await
     }
 

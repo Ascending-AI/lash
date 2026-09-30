@@ -113,16 +113,13 @@ async fn signal(engine: &Engine, core: &lash::LashCore, id: &ProcessId) {
             let core = core.clone();
             let id = id.clone();
             Box::pin(async move {
-                let event = lash_core::ProcessEventAppendRequest::new(
-                    lash_core::facade_support::process_signal_event_type(SIGNAL)
-                        .expect("signal type"),
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(id, SIGNAL, "signal-1")
+                        .expect("signal identity"),
                     json!({"go": 1}),
-                )
-                .with_replay_key(
-                    lash_core::facade_support::process_signal_wait_key(&id, SIGNAL, "signal-1"),
                 );
                 core.processes()
-                    .signal(&id, SIGNAL, "signal-1", event, scoped)
+                    .signal(signal, scoped)
                     .await
                     .expect("deliver signal");
             })

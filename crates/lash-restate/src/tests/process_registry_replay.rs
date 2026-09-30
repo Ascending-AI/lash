@@ -353,14 +353,15 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-signal"),
                 RuntimeEffectCommand::process(ProcessCommand::Signal {
-                    process_id: signal_record.id.clone(),
-                    signal_name: "notify".to_string(),
-                    signal_id: "notify".to_string(),
-                    request: lash_core::ProcessEventAppendRequest::new(
-                        "signal.notify",
+                    signal: lash_core::ProcessSignal::new(
+                        lash_core::ProcessSignalIdentity::new(
+                            signal_record.id.clone(),
+                            "notify".to_string(),
+                            "notify".to_string(),
+                        )
+                        .expect("signal identity"),
                         serde_json::json!({ "signal": "notify" }),
-                    )
-                    .with_replay_key("signal:notify"),
+                    ),
                 }),
             ),
             registry_local_executor(registry.clone()),
@@ -399,14 +400,15 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-signal-2"),
                 RuntimeEffectCommand::process(ProcessCommand::Signal {
-                    process_id: signal_record.id.clone(),
-                    signal_name: "notify".to_string(),
-                    signal_id: "notify-2".to_string(),
-                    request: lash_core::ProcessEventAppendRequest::new(
-                        "signal.notify",
+                    signal: lash_core::ProcessSignal::new(
+                        lash_core::ProcessSignalIdentity::new(
+                            signal_record.id.clone(),
+                            "notify".to_string(),
+                            "notify-2".to_string(),
+                        )
+                        .expect("signal identity"),
                         serde_json::json!({ "signal": "notify-2" }),
-                    )
-                    .with_replay_key("signal:notify-2"),
+                    ),
                 }),
             ),
             registry_local_executor(registry.clone()),
@@ -488,14 +490,15 @@ pub(super) async fn restate_signal_uses_declared_wait_ordinal_when_event_count_d
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "signal-divergent-ordinal"),
             RuntimeEffectCommand::process(ProcessCommand::Signal {
-                process_id: process_id.clone(),
-                signal_name: signal_name.to_string(),
-                signal_id: "signal-1".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    event_type.clone(),
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        process_id.clone(),
+                        signal_name.to_string(),
+                        "signal-1".to_string(),
+                    )
+                    .expect("signal identity"),
                     payload.clone(),
-                )
-                .with_replay_key("signal-divergent-ordinal:1"),
+                ),
             }),
         ),
         registry_local_executor(registry.clone()),

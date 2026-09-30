@@ -1500,14 +1500,10 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .and_then(|exec| exec.event_context.as_ref())
             .ok_or_else(missing_process_execution_error)?;
-        let event_type = crate::process_signal_event_type(signal_name)?;
-        let replay_key = crate::process_signal_wait_key(process_id, signal_name, &signal_id);
+        let identity =
+            crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?;
         let command = crate::ProcessCommand::Signal {
-            process_id: process_id.clone(),
-            signal_name: signal_name.to_string(),
-            signal_id,
-            request: crate::ProcessEventAppendRequest::new(event_type.clone(), payload)
-                .with_replay_key(replay_key),
+            signal: crate::ProcessSignal::new(identity, payload),
         };
         let effect_id = command.effect_id();
         let invocation = crate::runtime::causal::process_effect_invocation(

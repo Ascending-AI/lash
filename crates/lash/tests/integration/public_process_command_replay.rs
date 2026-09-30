@@ -40,11 +40,11 @@ impl Method {
             Self::Signal => core
                 .processes()
                 .signal(
-                    id,
-                    "ready",
-                    "receipt-law",
-                    lash_core::ProcessEventAppendRequest::new("signal.ready", json!({"ready": 7}))
-                        .with_replay_key("receipt-law"),
+                    lash_core::ProcessSignal::new(
+                        lash_core::ProcessSignalIdentity::new(id.clone(), "ready", "receipt-law")
+                            .expect("valid signal identity"),
+                        json!({"ready": 7}),
+                    ),
                     scoped,
                 )
                 .await

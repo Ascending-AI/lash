@@ -891,6 +891,17 @@
     },
     "RemoteProcessEventSemantics": {
       "properties": {
+        "signal_wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProcessSignalWaitBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The wait a signal event resolves, selected by the append that admitted the signal."
+        },
         "terminal": {
           "anyOf": [
             {
@@ -944,6 +955,21 @@
           "type": "object"
         }
       ]
+    },
+    "RemoteProcessSignalWaitBinding": {
+      "additionalProperties": false,
+      "description": "Wire mirror of the wait one signal event resolves: the ordinal of the process's wait for the signal's name (FIG-4298).",
+      "properties": {
+        "ordinal": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal"
+      ],
+      "type": "object"
     },
     "RemoteProcessStatus": {
       "oneOf": [

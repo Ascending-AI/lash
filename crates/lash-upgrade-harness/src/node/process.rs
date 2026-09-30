@@ -144,18 +144,15 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
                 payload,
             } => {
                 let process_id = lash_core::ProcessId::parse(&process_id).map_err(terminal)?;
-                let event_type = lash_core::facade_support::process_signal_event_type(SIGNAL)
-                    .map_err(terminal)?;
-                let request = lash_core::ProcessEventAppendRequest::new(event_type, payload)
-                    .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                        &process_id,
-                        SIGNAL,
-                        &signal_id,
-                    ));
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(process_id, SIGNAL, signal_id)
+                        .map_err(terminal)?,
+                    payload,
+                );
                 let event = self
                     .core
                     .processes()
-                    .signal(&process_id, SIGNAL, signal_id, request, scoped)
+                    .signal(signal, scoped)
                     .await
                     .map_err(terminal)?;
                 Ok(Json(HarnessReply::Signalled {

@@ -144,11 +144,11 @@ fn signal_request(
     signal_name: &str,
     signal_id: &str,
     payload: serde_json::Value,
-) -> lash_core::ProcessEventAppendRequest {
-    let event_type = lash_core::facade_support::process_signal_event_type(signal_name)
-        .expect("signal event type");
-    lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-        lash_core::facade_support::process_signal_wait_key(process_id, signal_name, signal_id),
+) -> lash_core::ProcessSignal {
+    lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)
+            .expect("valid signal identity"),
+        payload,
     )
 }
 
@@ -828,9 +828,6 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let event = core
         .processes()
         .signal(
-            triggered_process_id,
-            "ready",
-            "host-signal-1",
             signal_request(
                 triggered_process_id,
                 "ready",
@@ -920,9 +917,6 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     wait_for_waiting_signal(&core, process_id, "ready").await;
     core.processes()
         .signal(
-            process_id,
-            "ready",
-            "session-trigger-visibility-signal",
             signal_request(
                 process_id,
                 "ready",
@@ -998,9 +992,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let undeclared = core
         .processes()
         .signal(
-            &process_id,
-            "nope",
-            "undeclared-1",
             signal_request(&process_id, "nope", "undeclared-1", serde_json::json!("x")),
             runtime_operation_scope(&core, "signal-validation-undeclared").await,
         )
@@ -1014,9 +1005,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let mistyped = core
         .processes()
         .signal(
-            &process_id,
-            "ready",
-            "mistyped-1",
             signal_request(
                 &process_id,
                 "ready",
@@ -1043,9 +1031,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "valid-1",
             signal_request(&process_id, "ready", "valid-1", serde_json::json!("done")),
             runtime_operation_scope(&core, "signal-validation-valid").await,
         )
@@ -1107,9 +1092,6 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "order-1",
             signal_request(&process_id, "ready", "order-1", serde_json::json!(1)),
             runtime_operation_scope(&core, "repeated-waits-signal-1").await,
         )
@@ -1131,9 +1113,6 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "order-2",
             signal_request(&process_id, "ready", "order-2", serde_json::json!(2)),
             runtime_operation_scope(&core, "repeated-waits-signal-2").await,
         )
@@ -1407,9 +1386,6 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "outliving-host-signal",
             signal_request(
                 &process_id,
                 "ready",

@@ -678,11 +678,12 @@ pub enum ProcessCommand {
         requester: String,
         refusal: crate::PluginError,
     },
+    /// Deliver one signal. The command carries the signal as it is
+    /// admitted, never an append request: the append key is derived from the
+    /// signal's identity at admission, so no caller can select another
+    /// (FIG-4299).
     Signal {
-        process_id: ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
+        signal: crate::ProcessSignal,
     },
     EmitEvent {
         process_id: ProcessId,
@@ -756,10 +757,7 @@ enum ProcessCommandDecode {
         refusal: crate::PluginError,
     },
     Signal {
-        process_id: ProcessId,
-        signal_name: String,
-        signal_id: String,
-        request: crate::ProcessEventAppendRequest,
+        signal: crate::ProcessSignal,
     },
     EmitEvent {
         process_id: ProcessId,
@@ -851,17 +849,7 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 requester,
                 refusal,
             },
-            ProcessCommandDecode::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                request,
-            } => Self::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                request,
-            },
+            ProcessCommandDecode::Signal { signal } => Self::Signal { signal },
             ProcessCommandDecode::EmitEvent {
                 process_id,
                 request,
@@ -982,12 +970,12 @@ impl ProcessCommand {
             Self::CancelRefused { process_id, .. } => {
                 format!("process:cancel:{process_id}")
             }
-            Self::Signal {
-                process_id,
-                signal_name,
-                signal_id,
-                ..
-            } => format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}"),
+            Self::Signal { signal } => format!(
+                "process:signal:{}:signal.{}:{}",
+                signal.identity.process_id(),
+                signal.identity.signal_name(),
+                signal.identity.signal_id()
+            ),
             Self::EmitEvent {
                 process_id,
                 request,

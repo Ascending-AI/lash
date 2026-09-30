@@ -1003,19 +1003,38 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ok": true }),
-        replay_key: Some("signal-replay".to_string()),
     };
-    let append =
-        lash_core::ProcessEventAppendRequest::try_from(signal.clone()).expect("append request");
+    // The conversion keeps the whole identity and derives the append key
+    // from it: no caller-selected key survives the crossing (FIG-4299).
+    let admitted = lash_core::ProcessSignal::try_from(signal.clone()).expect("signal");
+    assert_eq!(
+        admitted.identity.process_id(),
+        &lash_sansio::ProcessId::fixture("process:signal")
+    );
+    assert_eq!(admitted.identity.signal_name(), "ready");
+    assert_eq!(admitted.identity.signal_id(), "signal:1");
+    let append = admitted.append_request();
     assert_eq!(append.event_type, "signal.ready");
-    let command = lash_core::ProcessCommand::try_from(signal).expect("signal command");
+    assert_eq!(
+        append.replay.map(|replay| replay.key),
+        Some(lash_core::facade_support::process_signal_wait_key(
+            &lash_sansio::ProcessId::fixture("process:signal"),
+            "ready",
+            "signal:1",
+        ))
+    );
+    let command = lash_core::ProcessCommand::try_from(signal.clone()).expect("signal command");
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Signal { process_id, signal_name, signal_id, .. }
-            if process_id == lash_sansio::ProcessId::fixture("process:signal")
-                && signal_name == "ready"
-                && signal_id == "signal:1"
+        lash_core::ProcessCommand::Signal { signal } if signal == admitted
     ));
+    // A request that still names its own replay key is refused, not
+    // silently re-keyed.
+    let mut keyed = serde_json::to_value(&signal).expect("encode the signal request");
+    serde_json::from_value::<RemoteProcessSignalRequest>(keyed.clone())
+        .expect("the request round-trips");
+    keyed["replay_key"] = serde_json::json!("caller-selected");
+    assert!(serde_json::from_value::<RemoteProcessSignalRequest>(keyed).is_err());
 
     let await_request = RemoteProcessAwaitRequest {
         process_id: lash_sansio::ProcessId::fixture("process:await"),

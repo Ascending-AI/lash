@@ -707,12 +707,19 @@ fn repair_lifecycle_projection(
     clippy::too_many_arguments,
     reason = "the append plan carries the journal's own positional facts; fleet format joins them as one more stamped input (FIG-3796)"
 )]
+/// `signal_events_before` is how many events of the request's type the
+/// process's log already holds, counted by the store in the append's own
+/// transaction. A store passes it for a signal append (its event type names a
+/// signal) and `None` for every other: the append selects the wait a new
+/// signal resolves from it and the process's current wait
+/// ([`select_process_signal_wait`]).
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
     sequence: u64,
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
+    signal_events_before: Option<u64>,
     occurred_at_ms: u64,
     wake_session_id: Option<&SessionId>,
     fleet_format: crate::FleetFormat,
@@ -853,6 +860,16 @@ pub fn prepare_process_event_append(
             status: record.status,
         });
     }
+    semantics.signal_wait = super::events::process_signal_name_from_event_type(&request.event_type)
+        .map(|signal_name| {
+            select_process_signal_wait(
+                record,
+                signal_name,
+                &request.event_type,
+                signal_events_before,
+            )
+        })
+        .transpose()?;
     let event = ProcessEvent {
         process_id: process_id.clone(),
         sequence,
@@ -893,6 +910,47 @@ pub fn prepare_process_event_append(
         event,
         projected_record,
         wake_delivery,
+    })
+}
+
+/// The wait a newly admitted signal resolves (FIG-4298): the ordinal of the
+/// wait `record` is parked on for this signal, or, when it is parked on none,
+/// the signal's position among the events of its type, which is the ordinal
+/// the process's next wait for the name declares.
+///
+/// The declared ordinal wins over the count: a process's wait ordinals are
+/// its own, and they need not match how many signals of the name its log
+/// holds.
+fn select_process_signal_wait(
+    record: &ProcessRecord,
+    signal_name: &str,
+    event_type: &str,
+    signal_events_before: Option<u64>,
+) -> Result<super::events::ProcessSignalWaitBinding, PluginError> {
+    if let Some(super::model::WaitState {
+        kind:
+            super::model::WaitKind::Signal {
+                name,
+                event_type: waiting_type,
+                ordinal,
+                ..
+            },
+        ..
+    }) = &record.wait
+        && name == signal_name
+        && waiting_type == event_type
+    {
+        return Ok(super::events::ProcessSignalWaitBinding { ordinal: *ordinal });
+    }
+    let before = signal_events_before.ok_or_else(|| {
+        PluginError::Session(format!(
+            "process `{}` signal `{event_type}` append was prepared without the count of its \
+             prior events the store must supply",
+            record.id
+        ))
+    })?;
+    Ok(super::events::ProcessSignalWaitBinding {
+        ordinal: before.saturating_add(1),
     })
 }
 

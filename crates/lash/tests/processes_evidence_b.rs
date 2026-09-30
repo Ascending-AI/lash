@@ -137,22 +137,10 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::ProcessCommand| {
         matches!(value, lash::runtime::ProcessCommand::Signal { .. })
     });
-    // W0373: lash::runtime::ProcessCommand::Signal::request [field]
+    // W0373: lash::runtime::ProcessCommand::Signal::signal [field]
     field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { request, .. } = value {
-            let _ = request;
-        }
-    });
-    // W0374: lash::runtime::ProcessCommand::Signal::signal_id [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { signal_id, .. } = value {
-            let _ = signal_id;
-        }
-    });
-    // W0375: lash::runtime::ProcessCommand::Signal::signal_name [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { signal_name, .. } = value {
-            let _ = signal_name;
+        if let lash::runtime::ProcessCommand::Signal { signal } = value {
+            let _ = signal;
         }
     });
     // W0376: lash::runtime::ProcessCommand::Start::execution_context [field]

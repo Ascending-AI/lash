@@ -65,15 +65,21 @@ impl JournaledProcessOutcome {
     }
 }
 
-/// A signal's recorded append (FIG-3827): the stored event, its realization
-/// and the ordinal the signal's wait resolution is keyed by, all read in the
-/// step that appended it.
+/// A signal's recorded admission (FIG-3827, FIG-4298, FIG-4301): the signal
+/// as it was admitted, the event its append stored and the realization the
+/// store reported, all from the step that appended it.
+///
+/// The event retains the wait its first append selected, so the resolution
+/// is built from recorded fields alone. The admitted signal is what a replay
+/// checks the command it reconstructed against before it resolves anything:
+/// a changed signal under the same effect address is a divergence, never a
+/// resolution with the recorded payload beside today's request.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JournaledSignalAppend {
+    signal: lash_core::ProcessSignal,
     event: Box<lash_core::ProcessEvent>,
     realization: lash_core::StoreRealization,
-    ordinal: u64,
 }
 
 /// Runs a process command's store work as one recorded step named
@@ -966,47 +972,51 @@ where
             ProcessEffectOutcome::CancelRefused { refusal },
             lash_core::StoreRealization::Realized,
         )),
-        ProcessCommand::Signal {
-            process_id,
-            signal_name,
-            request,
-            ..
-        } => {
-            // The append and the ordinal the resolution is keyed by are one
-            // recorded step ahead of the resolution (FIG-3827): a replay after
-            // the target was pruned resolves the recorded wait with the
-            // recorded payload, never re-appending or re-counting a log that
-            // is gone.
+        ProcessCommand::Signal { signal } => {
+            // The append is the signal's admission, one recorded step ahead
+            // of the resolution (FIG-3827): the store derives nothing from
+            // the caller but the signal's identity, retains the wait its
+            // first append selected on the event (FIG-4298), and the step
+            // records the admitted signal beside it (FIG-4301). A replay
+            // answers the recorded event, even after the target was pruned,
+            // and never re-appends or re-reads a wait that has moved on.
             let step_registry = Arc::clone(&registry);
-            let step_process_id = process_id.clone();
-            let step_signal_name = signal_name.clone();
+            let admitted = signal.clone();
             let JournaledSignalAppend {
+                signal: recorded_signal,
                 event,
                 realization,
-                ordinal,
             } = recorded_process_step(context, invocation, "process-signal-append", async move {
                 let appended = step_registry
-                    .append_event(&step_process_id, request)
+                    .append_event(admitted.identity.process_id(), admitted.append_request())
                     .await?;
-                let ordinal = signal_ordinal_for_event(
-                    step_registry.as_ref(),
-                    &step_process_id,
-                    &step_signal_name,
-                    appended.event.event_type.as_str(),
-                    appended.event.sequence,
-                )
-                .await?;
                 Ok(JournaledSignalAppend {
+                    signal: admitted,
                     event: Box::new(appended.event),
                     realization: appended.realization,
-                    ordinal,
                 })
             })
             .await?;
+            if recorded_signal != signal {
+                return Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::EffectReplayDivergence,
+                    format!(
+                        "Restate process signal `{}` to `{}` replays a recorded admission \
+                         of a different signal under the same effect address",
+                        signal.identity.signal_id(),
+                        signal.identity.process_id()
+                    ),
+                ));
+            }
+            let wait = lash_core::runtime::admitted_signal_wait(&event)?;
             let key = restate_await_event_key_for_authority(
                 authority_id,
-                &ExecutionScope::process(process_id.clone()),
-                AwaitEventWaitIdentity::process_signal(process_id, signal_name, ordinal),
+                &ExecutionScope::process(recorded_signal.identity.process_id().clone()),
+                AwaitEventWaitIdentity::process_signal(
+                    recorded_signal.identity.process_id().clone(),
+                    recorded_signal.identity.signal_name(),
+                    wait.ordinal,
+                ),
             )
             .map_err(PluginError::Runtime)?;
             context

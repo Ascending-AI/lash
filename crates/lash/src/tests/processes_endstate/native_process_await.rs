@@ -50,9 +50,6 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let payload = serde_json::json!({ "ok": true, "answer": 42 });
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "e2e-signal-1",
             signal_request(&process_id, "ready", "e2e-signal-1", payload.clone()),
             runtime_operation_scope(&core, "e2e-signal").await,
         )

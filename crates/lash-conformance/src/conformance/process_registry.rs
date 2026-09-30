@@ -15,6 +15,7 @@ pub use identity_claims::*;
 mod observer_transfer;
 mod parent_end;
 mod registration;
+mod signal_admission;
 mod trigger_delivery_pins;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
@@ -82,6 +83,12 @@ pub async fn count_events_through_counts_every_event_at_any_top_bound(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     event_count::count_events_through_counts_every_event_at_any_top_bound(registry).await;
+}
+
+pub async fn signal_admission_retains_its_identity_and_selected_wait(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    signal_admission::signal_admission_retains_its_identity_and_selected_wait(registry).await;
 }
 
 pub async fn long_cancellation_requester_replay_is_backend_safe(

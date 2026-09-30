@@ -1576,11 +1576,13 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_id: fig1767_target(),
-                signal_name: "resume".to_string(),
-                signal_id: "fig1767-signal".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    "signal.resume",
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        fig1767_target(),
+                        "resume".to_string(),
+                        "fig1767-signal".to_string(),
+                    )
+                    .expect("signal identity"),
                     serde_json::json!({"source": "fig1767"}),
                 ),
             }),
@@ -1654,7 +1656,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":15,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"85ee3e3e3b582d47e22a2995dae428d5932b79cf755ce8c28af76855b30cf293"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":15,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"signal\":{\"identity\":{\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\"},\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"5fdcfce131d0cc8e7adc35dcd93313066c80d52144bd147c15d430cb6b0391e7"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"},"replay":{"key":"process:p_00000000000070008000000000000001:signal.resume:fig1767-signal"}},"semantics":{"signal_wait":{"ordinal":1}},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1690,11 +1692,13 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_id: fig1767_target(),
-                signal_name: "resume".to_string(),
-                signal_id: "fig1767-signal".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    "signal.resume",
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        fig1767_target(),
+                        "resume".to_string(),
+                        "fig1767-signal".to_string(),
+                    )
+                    .expect("signal identity"),
                     serde_json::json!({"source": "fig1767"}),
                 ),
             }),

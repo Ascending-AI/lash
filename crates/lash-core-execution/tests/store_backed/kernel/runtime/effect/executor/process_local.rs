@@ -829,4 +829,210 @@ mod tests {
             "the ended start referrer must fence a late publication"
         );
     }
+
+    /// A controller that mints a key for every wait and records every
+    /// resolution it is asked for, in order: the local executor's signal
+    /// resolutions, observed.
+    #[derive(Default)]
+    struct SignalResolutions {
+        resolved: std::sync::Mutex<Vec<(crate::AwaitEventWaitIdentity, crate::Resolution)>>,
+    }
+
+    impl SignalResolutions {
+        fn resolved(&self) -> Vec<(crate::AwaitEventWaitIdentity, crate::Resolution)> {
+            self.resolved
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::AwaitEventResolver for SignalResolutions {
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            None
+        }
+
+        async fn await_event_key(
+            &self,
+            scope: &crate::ExecutionScope,
+            wait: crate::AwaitEventWaitIdentity,
+        ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+            Ok(crate::AwaitEventKey {
+                scope: scope.clone(),
+                key_id: format!("{wait:?}"),
+                wait,
+                signature: "signal-resolutions".to_string(),
+            })
+        }
+
+        async fn resolve_await_event(
+            &self,
+            key: &crate::AwaitEventKey,
+            resolution: crate::Resolution,
+        ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+            self.resolved
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((key.wait.clone(), resolution));
+            Ok(crate::ResolveOutcome::Accepted)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectController for SignalResolutions {
+        async fn execute_effect(
+            &self,
+            _envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("SignalResolutions"))
+        }
+
+        async fn open_effect_group(
+            &self,
+            _group: crate::RuntimeEffectGroup,
+        ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("SignalResolutions"))
+        }
+
+        async fn await_next_settlement(
+            &self,
+            _handle: &mut crate::EffectGroupHandle,
+            _cancel: crate::runtime::TurnCancelWait,
+        ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("SignalResolutions"))
+        }
+
+        async fn close_effect_group(
+            &self,
+            _handle: crate::EffectGroupHandle,
+            _disposition: crate::LoserPolicy,
+        ) -> Result<(), crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("SignalResolutions"))
+        }
+    }
+
+    /// The local controller's leg of FIG-4298: A reaches the ordinal-1 wait,
+    /// the process parks on ordinal 2, and A redelivered resolves only the
+    /// wait its first append selected. Ordinal 2 waits for B.
+    #[tokio::test]
+    async fn a_local_signal_redelivered_after_its_wait_advances_resolves_only_its_admitted_wait() {
+        use crate::TestProcessRegistryWriteExt as _;
+
+        let stores = crate::support::memory_store_set().await;
+        let registry = crate::StoreSet::process_registry(stores.as_ref());
+        let record = registry
+            .register_process(
+                crate::ProcessRegistration::new(
+                    crate::ProcessInput::Engine {
+                        kind: "testing-fixture".to_string(),
+                        payload: serde_json::Value::Null,
+                    },
+                    crate::ProcessProvenance::host(),
+                    crate::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+                    "process-env:local-signal",
+                )))
+                .with_extra_event_types([crate::ProcessEventType {
+                    name: "signal.ready".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                }]),
+            )
+            .await
+            .expect("register the signal target");
+        let process_id = record.id.clone();
+        registry
+            .record_first_started(
+                &process_id,
+                crate::ProcessStarted {
+                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
+                        &process_id,
+                        "local-signal",
+                    ),
+                    attempt: 1,
+                    started_at_ms: 1,
+                    generation: None,
+                    build_generation: None,
+                },
+            )
+            .await
+            .expect("start the signal target");
+        let park_at = |ordinal: u64| crate::WaitState {
+            since_ms: ordinal,
+            kind: crate::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: crate::runtime::process_signal_wait_key(&process_id, "ready", ordinal),
+                ordinal,
+            },
+        };
+        let resolutions = Arc::new(SignalResolutions::default());
+        let deliver = |signal_id: &'static str, payload: serde_json::Value| {
+            let registry = Arc::clone(&registry);
+            let resolutions = Arc::clone(&resolutions);
+            let process_id = process_id.clone();
+            async move {
+                crate::RuntimeEffectLocalExecutor::processes(
+                    Arc::clone(&registry),
+                    Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+                )
+                .with_process_effect_controller(resolutions)
+                .into_process()
+                .expect("a process executor")
+                .execute(
+                    &crate::ExecutionScope::runtime_operation("runtime"),
+                    crate::ProcessCommand::Signal {
+                        signal: crate::ProcessSignal::new(
+                            crate::ProcessSignalIdentity::new(process_id, "ready", signal_id)
+                                .expect("valid signal identity"),
+                            payload,
+                        ),
+                    },
+                )
+                .await
+                .expect("deliver the signal")
+            }
+        };
+        let wait = |ordinal| {
+            crate::AwaitEventWaitIdentity::process_signal(process_id.clone(), "ready", ordinal)
+        };
+        let a = serde_json::json!({"signal": "a"});
+        let b = serde_json::json!({"signal": "b"});
+
+        registry
+            .set_process_wait(&process_id, park_at(1))
+            .await
+            .expect("park on ordinal one");
+        deliver("a", a.clone()).await;
+        registry
+            .set_process_wait(&process_id, park_at(2))
+            .await
+            .expect("park on ordinal two");
+        deliver("a", a.clone()).await;
+        assert_eq!(
+            resolutions.resolved(),
+            vec![
+                (wait(1), crate::Resolution::Ok(a.clone())),
+                (wait(1), crate::Resolution::Ok(a.clone())),
+            ],
+            "a redelivered A resolves only the wait it was admitted to"
+        );
+        deliver("b", b.clone()).await;
+        assert_eq!(
+            resolutions.resolved().last(),
+            Some(&(wait(2), crate::Resolution::Ok(b))),
+            "B is what resolves the ordinal-2 wait"
+        );
+        let signals =
+            crate::ProcessEventLogTestSupport::full_event_window(registry.as_ref(), &process_id, 0)
+                .await
+                .expect("read the event log")
+                .into_iter()
+                .filter(|event| event.event_type == "signal.ready")
+                .count();
+        assert_eq!(signals, 2, "one A and one B");
+    }
 }

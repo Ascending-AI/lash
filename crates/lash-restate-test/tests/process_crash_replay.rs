@@ -449,21 +449,14 @@ async fn run_process(scenario: Scenario) -> Run {
             let core = core.clone();
             let process_id = process_id.clone();
             Box::pin(async move {
-                let event_type = lash_core::facade_support::process_signal_event_type(SIGNAL)
-                    .expect("the signal event type");
-                let request =
-                    lash_core::ProcessEventAppendRequest::new(event_type, json!({"go": 1}))
-                        .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                            &process_id,
-                            SIGNAL,
-                            "signal-1",
-                        ));
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(process_id, SIGNAL, "signal-1")
+                        .expect("the signal identity"),
+                    json!({"go": 1}),
+                );
                 // A signal to a process already cancelled is refused; the
                 // terminal says what happened.
-                let _ = core
-                    .processes()
-                    .signal(&process_id, SIGNAL, "signal-1", request, scoped)
-                    .await;
+                let _ = core.processes().signal(signal, scoped).await;
             })
         })
         .await

@@ -390,69 +390,35 @@ impl ProcessLocalExecution {
                 ProcessEffectOutcome::CancelRefused { refusal },
                 crate::StoreRealization::Realized,
             )),
-            ProcessCommand::Signal {
-                process_id,
-                signal_name,
-                request,
-                ..
-            } => {
+            ProcessCommand::Signal { signal } => {
                 let effect_controller = effect_controller.ok_or_else(|| {
                     RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                         "local process signal execution requires its effect controller",
                     )
                 })?;
-                let result = registry.append_event(&process_id, request).await?;
+                let process_id = signal.identity.process_id();
+                // The append admits the signal and selects the wait it
+                // resolves in one store transaction; a redelivered signal is
+                // served its admitted event and that same wait (FIG-4298).
+                let result = registry
+                    .append_event(process_id, signal.append_request())
+                    .await?;
                 let realization = result.realization;
-                let waiting_ordinal =
-                    registry
-                        .get_process(&process_id)
-                        .await?
-                        .and_then(|record| match record.wait {
-                            Some(crate::WaitState {
-                                kind:
-                                    crate::WaitKind::Signal {
-                                        name,
-                                        event_type,
-                                        ordinal,
-                                        ..
-                                    },
-                                ..
-                            }) if name == signal_name && event_type == result.event.event_type => {
-                                Some(ordinal)
-                            }
-                            _ => None,
-                        });
-                let ordinal = match waiting_ordinal {
-                    Some(ordinal) => ordinal,
-                    None => {
-                        registry
-                            .count_events_through(
-                                &process_id,
-                                result.event.event_type.as_str(),
-                                result.event.sequence,
-                            )
-                            .await?
-                    }
-                };
-                if ordinal > 0 {
-                    let key = effect_controller
-                        .await_event_key(
-                            &crate::ExecutionScope::process(&process_id),
-                            crate::AwaitEventWaitIdentity::process_signal(
-                                &process_id,
-                                &signal_name,
-                                ordinal,
-                            ),
-                        )
-                        .await?;
-                    let _ = effect_controller
-                        .resolve_await_event(
-                            &key,
-                            crate::Resolution::Ok(result.event.payload.clone()),
-                        )
-                        .await?;
-                }
+                let wait = crate::runtime::process::admitted_signal_wait(&result.event)?;
+                let key = effect_controller
+                    .await_event_key(
+                        &crate::ExecutionScope::process(process_id),
+                        crate::AwaitEventWaitIdentity::process_signal(
+                            process_id,
+                            signal.identity.signal_name(),
+                            wait.ordinal,
+                        ),
+                    )
+                    .await?;
+                let _ = effect_controller
+                    .resolve_await_event(&key, crate::Resolution::Ok(result.event.payload.clone()))
+                    .await?;
                 Ok((
                     ProcessEffectOutcome::Signal {
                         event: Box::new(result.event),

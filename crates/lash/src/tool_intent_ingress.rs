@@ -907,21 +907,18 @@ impl ToolIntentIngress {
                     .process_registry()?
                     .require_process_id(&intent.process_id)
                     .await?;
-                let event_type =
-                    lash_core::facade_support::process_signal_event_type(&intent.signal_name)?;
-                // Core's recorded-intent seam mints the same key from the same
-                // three parts; both routes call the one constructor (FIG-2876).
-                let request = lash_core::ProcessEventAppendRequest::new(event_type, intent.payload)
-                    .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                        &intent.process_id,
-                        &intent.signal_name,
-                        &identity.replay_key,
-                    ));
+                // The intent's replay key is the signal's id, as on core's
+                // recorded-intent seam: the append key is derived from the
+                // signal's identity, never spelled here (FIG-4299).
                 lash_core::ProcessCommand::Signal {
-                    process_id,
-                    signal_name: intent.signal_name,
-                    signal_id: identity.replay_key.clone(),
-                    request,
+                    signal: lash_core::ProcessSignal::new(
+                        lash_core::ProcessSignalIdentity::new(
+                            process_id,
+                            intent.signal_name,
+                            identity.replay_key.clone(),
+                        )?,
+                        intent.payload,
+                    ),
                 }
             }
             lash_core::ToolIntent::CancelProcess(intent) => {

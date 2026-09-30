@@ -551,6 +551,25 @@ impl SqliteProcessRegistry {
         Ok((receipt, arm))
     }
 
+    /// How many `event_type` events process `process_id`'s log holds.
+    fn count_events_of_type_conn(
+        conn: &Connection,
+        process_id: &ProcessId,
+        event_type: &str,
+    ) -> Result<u64, lash_core_execution::PluginError> {
+        conn.query_row(
+            process_sql().event.count_by_type_through_sequence.sql(),
+            params![
+                process_id.as_str(),
+                event_type,
+                crate::clamp_sequence_bound(u64::MAX)
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u64)
+        .map_err(process_sqlite_error)
+    }
+
     /// Stage `requests` in order as one batch (FIG-3571): each goes through
     /// the append sequence against the in-memory projection, and the process
     /// is saved once, advancing the change clock once, when any of them moved
@@ -603,6 +622,23 @@ impl SqliteProcessRegistry {
             } else {
                 None
             };
+        // A signal's first append selects the wait it resolves from the
+        // signals of its type the log already holds (FIG-4298); a replayed
+        // signal carries the wait its first append selected.
+        let signal_events_before = if replay_lookup.is_none()
+            && lash_core_execution::runtime::process_signal_name_from_event_type(
+                &request.event_type,
+            )
+            .is_some()
+        {
+            Some(Self::count_events_of_type_conn(
+                conn,
+                &process_id,
+                &request.event_type,
+            )?)
+        } else {
+            None
+        };
         let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
         let (last_sequence, sequence) =
             Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_ref())?;
@@ -612,6 +648,7 @@ impl SqliteProcessRegistry {
             sequence,
             last_sequence,
             replay_lookup,
+            signal_events_before,
             occurred_at_ms,
             wake_session_id.as_ref(),
             fleet_format,

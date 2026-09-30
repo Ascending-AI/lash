@@ -638,21 +638,18 @@ impl Processes {
         Ok(lash_core::ProcessCancelReceipt::from_record(*record)?)
     }
 
-    /// Delivers a signal to the identified process.
+    /// Delivers one signal to the process its identity names.
+    ///
+    /// The signal's identity is its append key (FIG-4299): delivering the
+    /// same signal again, from a retry, a redrive or another host, is served
+    /// the event its first delivery admitted, and the same identity under a
+    /// changed payload is refused as a durable-identity conflict.
     pub async fn signal(
         &self,
-        process_id: &ProcessId,
-        signal_name: impl Into<String>,
-        signal_id: impl Into<String>,
-        request: lash_core::ProcessEventAppendRequest,
+        signal: lash_core::ProcessSignal,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let command = lash_core::ProcessCommand::Signal {
-            process_id: process_id.clone(),
-            signal_name: signal_name.into(),
-            signal_id: signal_id.into(),
-            request,
-        };
+        let command = lash_core::ProcessCommand::Signal { signal };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())
             .await?;

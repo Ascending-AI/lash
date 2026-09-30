@@ -331,6 +331,7 @@ macro_rules! process_registry_tests {
                 (a_process_event_batch_is_one_commit, "process-event-batch"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
+                (signal_admission_retains_its_identity_and_selected_wait, "signal-admission"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),

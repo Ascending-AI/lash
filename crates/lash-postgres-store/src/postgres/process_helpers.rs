@@ -403,6 +403,25 @@ async fn stage_process_event_append_tx(
         } else {
             None
         };
+    // A signal's first append selects the wait it resolves from the signals
+    // of its type the log already holds (FIG-4298); a replayed signal carries
+    // the wait its first append selected.
+    let signal_events_before = if replay_lookup.is_none()
+        && lash_core_execution::runtime::process_signal_name_from_event_type(&request.event_type)
+            .is_some()
+    {
+        let count: i64 =
+            sqlx::query_scalar(process_sql().event.count_by_type_through_sequence.sql())
+                .bind(process_id.as_str())
+                .bind(request.event_type.as_str())
+                .bind(clamp_sequence_bound(u64::MAX))
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        Some(count as u64)
+    } else {
+        None
+    };
     let wake_session_id = wake_session_id_tx(tx, &process_id).await?;
     let (last_sequence, sequence) =
         next_process_event_sequence_tx(tx, &process_id, wake_session_id.as_ref()).await?;
@@ -412,6 +431,7 @@ async fn stage_process_event_append_tx(
         sequence,
         last_sequence,
         replay_lookup,
+        signal_events_before,
         occurred_at_ms,
         wake_session_id.as_ref(),
         fleet_format,

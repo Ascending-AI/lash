@@ -1164,6 +1164,8 @@ async fn live_restate_a_crash_between_a_trigger_reservation_and_its_start_recove
 
 #[path = "crash_windows/recovery.rs"]
 mod recovery;
+#[path = "crash_windows/signal_admission.rs"]
+mod signal_admission;
 
 /// This test crate's one path to a session that may not exist yet
 /// (FIG-4112): only `create` creates, so this creates `session_id` with the

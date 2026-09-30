@@ -34,7 +34,11 @@ pub(super) fn materialize_event_semantics(
         .map(|wake| materialize_wake(process_id, sequence, payload, wake))
         .transpose()?
         .flatten();
-    Ok(ProcessEventSemantics { terminal, wake })
+    Ok(ProcessEventSemantics {
+        terminal,
+        wake,
+        signal_wait: None,
+    })
 }
 
 fn materialize_terminal_semantics(

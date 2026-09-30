@@ -1552,36 +1552,6 @@ async fn execute_restate_journaled_effect(
 mod process_command;
 pub use process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION;
 use process_command::execute_restate_process_command;
-async fn signal_ordinal_for_event(
-    registry: &dyn ProcessRegistry,
-    process_id: &lash_core::ProcessId,
-    signal_name: &str,
-    event_type: &str,
-    sequence: u64,
-) -> Result<u64, PluginError> {
-    if let Some(lash_core::WaitState {
-        kind:
-            lash_core::WaitKind::Signal {
-                name,
-                event_type: waiting_type,
-                ordinal,
-                ..
-            },
-        ..
-    }) = registry
-        .get_process(process_id)
-        .await?
-        .and_then(|record| record.wait)
-        && name == signal_name
-        && waiting_type == event_type
-    {
-        return Ok(ordinal);
-    }
-    // Count at the store without fetching the full event log.
-    registry
-        .count_events_through(process_id, event_type, sequence)
-        .await
-}
 
 mod process_scheduling;
 use process_scheduling::schedule_restate_process;

@@ -1350,7 +1350,6 @@ fn remote_process_dtos_json_round_trip() {
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ready": true }),
-        replay_key: Some("process:1:signal:ready:1".to_string()),
     };
     signal.validate().expect("valid signal request");
     let signal_result = RemoteProcessSignalReceipt {
@@ -2255,6 +2254,7 @@ fn remote_process_event() -> RemoteProcessEvent {
             wake: Some(RemoteProcessWake {
                 input: "wake".to_string(),
             }),
+            signal_wait: None,
         },
         occurred_at_ms: 3,
     }

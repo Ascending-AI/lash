@@ -13,7 +13,7 @@ use lash::observe::SessionResume;
 use lash::restate::RestateWait;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
-use lash_core::{ProcessEventAppendRequest, facade_support::TurnOutcome, facade_support::TurnStop};
+use lash_core::{facade_support::TurnOutcome, facade_support::TurnStop};
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{RestateEffectHost, RestateProcessServing, RestateRuntimeEffectController};
 use restate_sdk::errors::{HandlerResult, TerminalError};
@@ -741,14 +741,15 @@ impl AppState {
             .signal
             .as_ref()
             .ok_or_else(|| terminal_error("signal_process scenario requires a signal payload"))?;
-        let event_type = lash_core::facade_support::process_signal_event_type(&signal.signal_name)
-            .map_err(terminal_error)?;
-        let append = ProcessEventAppendRequest::new(event_type, signal.payload.clone())
-            .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                &signal.process_id,
-                &signal.signal_name,
-                &signal.signal_id,
-            ));
+        let delivered = lash_core::ProcessSignal::new(
+            lash_core::ProcessSignalIdentity::new(
+                signal.process_id.clone(),
+                signal.signal_name.clone(),
+                signal.signal_id.clone(),
+            )
+            .map_err(terminal_error)?,
+            signal.payload.clone(),
+        );
         let scoped = controller
             .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(format!(
                 "e2e:{}:{}",
@@ -757,13 +758,7 @@ impl AppState {
             .map_err(terminal_error)?;
         let event = core
             .processes()
-            .signal(
-                &signal.process_id,
-                signal.signal_name.clone(),
-                signal.signal_id.clone(),
-                append,
-                scoped,
-            )
+            .signal(delivered, scoped)
             .await
             .map_err(terminal_error)?;
         self.finish_response(

@@ -1931,16 +1931,12 @@ impl crate::ProcessService for EffectBackedProcessService {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let event_type = crate::process_signal_event_type(&signal_name)?;
-        let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-            crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-        );
         let process_id = self.registry.require_process_id(process_id).await?;
         let command = crate::ProcessCommand::Signal {
-            process_id,
-            signal_name,
-            signal_id,
-            request,
+            signal: crate::ProcessSignal::new(
+                crate::ProcessSignalIdentity::new(process_id, signal_name, signal_id)?,
+                payload,
+            ),
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Signal { event } => Ok(*event),

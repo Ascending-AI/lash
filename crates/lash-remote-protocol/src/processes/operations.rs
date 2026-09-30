@@ -45,15 +45,19 @@ impl RemoteProcessCancelReceipt {
     }
 }
 
+/// One signal to one process. `signal_id` is the sender's id for this one
+/// signal: with the process and the signal name it is the signal's whole
+/// identity, and the append that delivers it is deduplicated by that
+/// identity alone (FIG-4299). There is no separate replay key to supply; a
+/// request that carries one is refused, not silently re-keyed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessSignalRequest {
     pub process_id: ProcessId,
     pub signal_name: String,
     pub signal_id: String,
     #[serde(default)]
     pub payload: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay_key: Option<String>,
 }
 
 impl RemoteProcessSignalRequest {
@@ -65,9 +69,6 @@ impl RemoteProcessSignalRequest {
             &self.signal_name,
         )?;
         require_non_empty("RemoteProcessSignalRequest", "signal_id", &self.signal_id)?;
-        if let Some(replay_key) = &self.replay_key {
-            require_non_empty("RemoteProcessSignalRequest", "replay_key", replay_key)?;
-        }
         Ok(())
     }
 }
