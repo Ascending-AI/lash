@@ -182,7 +182,7 @@ impl CrashPoint {
     }
 }
 
-/// The S8 slices of ADR 0109 §8 that own a cell today's `main` fails.
+/// The obligation kinds of ADR 0109 §3 that classify a crash-matrix cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum S8Slice {
     /// Ingress: the outbox arm, parks, `TurnStatus::Stalled`.

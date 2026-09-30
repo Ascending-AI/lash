@@ -634,7 +634,7 @@ impl lash_core::store::RuntimeStoreDecorator for WindowLoads {
 
 impl lash_core::DeploymentStoreDecorator for WindowLoads {}
 
-/// ADR 0112 §14.6b: overflow recovery starts a new frame without a reload.
+/// ADR 0112 §14.6: overflow recovery starts a new frame without a reload.
 /// After the recovered turn's commits the head, the window base and the
 /// resident state all name the recovery frame, the resident graph is that
 /// frame alone, and nothing read the window back.
