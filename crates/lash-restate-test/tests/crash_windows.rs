@@ -1645,3 +1645,6 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
         "the live positional engine agrees after cold cell replay"
     );
 }
+
+#[path = "crash_windows/attachment_delivery.rs"]
+mod attachment_delivery;

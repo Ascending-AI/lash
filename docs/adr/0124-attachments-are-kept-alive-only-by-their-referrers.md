@@ -152,7 +152,10 @@ terminal output needs the row anyway.
   commits first, because it mints the id, and then the step acquires
   `ProcessRecord(p)` on the input's stored ids. The starter's own edge
   cannot end before its journal settles, which is after the step; a replay
-  of the step answers `Existing` and acquires again.
+  of the step answers `Existing` and acquires again. An acquisition's
+  `Contended` or `StorageFailure` retains its typed retryable classification:
+  the step records no refusal, and its retry acquires under the same process
+  id and start key.
 - **The boundary commit** acquires `Session(s)` on the committed ids, all or
   nothing. The committed ids are every stored attachment the committed
   history names: tool outputs, omitted calls, message parts, and each
@@ -164,6 +167,13 @@ terminal output needs the row anyway.
 A delivery whose acquisition finds no evidence answers `SourceGone`: the
 producer's edges were already ended and swept. That is the typed outcome of
 a race against prune, never a silent loss.
+
+A delivery into a fenced receiver answers `ReceiverEnded`, distinct from
+`SourceGone`: the producer can still hold all its bytes. The attach records
+the non-acquiring `process_result_receiver_ended` verdict once and finishes
+its wait-index resolution. The receiver gains no edge. Genuine storage
+faults retry the unrecorded acquisition; permanent compatibility refusals
+are recorded once with their typed controller error.
 
 **A turn put nobody references dies at journal settlement.** A put under a
 turn is held by the turn's `Execution` referrer. If no committed message or

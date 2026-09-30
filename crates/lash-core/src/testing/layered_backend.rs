@@ -227,6 +227,7 @@ impl LayeredBackend {
         let inner_stores = self.inner.stores();
         let stores = Arc::new(LayeredStoreSet {
             binding: inner_stores.binding_identity().clone(),
+            attachment_referrers: inner_stores.attachment_referrers(),
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
@@ -261,6 +262,7 @@ impl LayeredStores {
     pub fn over(inner: Arc<dyn StoreSet>) -> Self {
         Self(LayeredStoreSet {
             binding: inner.binding_identity().clone(),
+            attachment_referrers: inner.attachment_referrers(),
             clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
@@ -332,6 +334,15 @@ impl LayeredStores {
         layer: impl FnOnce(Arc<dyn AttachmentStore>) -> Arc<dyn AttachmentStore>,
     ) -> Self {
         self.0.attachment_store = layer(self.0.attachment_store);
+        self
+    }
+
+    /// Replace the attachment referrers before the engine binds its services.
+    pub fn map_attachment_referrers(
+        mut self,
+        layer: impl FnOnce(Arc<dyn crate::AttachmentReferrers>) -> Arc<dyn crate::AttachmentReferrers>,
+    ) -> Self {
+        self.0.attachment_referrers = layer(self.0.attachment_referrers);
         self
     }
 
@@ -410,6 +421,7 @@ struct LayeredStoreSet {
     process_definitions: Arc<dyn ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
+    attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
@@ -428,7 +440,7 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.session_store_factory)
     }
     fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
-        self.inner.attachment_referrers()
+        Arc::clone(&self.attachment_referrers)
     }
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {

@@ -153,9 +153,9 @@ impl LashProcessAttach for LashProcessAttachImpl {
 impl LashProcessAttachImpl {
     /// Acquire the waiter's referrer edge on every stored attachment
     /// `output` delivers, in one journaled step, and answer the value the
-    /// key resolves with: `output`, or the typed source-gone failure when a
-    /// delivered attachment was already swept. A store fault ends the attempt
-    /// retryably and records nothing.
+    /// key resolves with: `output`, or a typed source-gone or receiver-ended
+    /// verdict. A transient store fault retries without recording a result;
+    /// a permanent store refusal is recorded once.
     async fn acquire_delivered(
         &self,
         ctx: &WorkflowContext<'_>,
@@ -165,19 +165,32 @@ impl LashProcessAttachImpl {
         let attachments = Arc::clone(&self.attachments);
         let receiver = key.scope.clone();
         let restate_sdk::serde::Json(delivered) = ctx
-            .run_json_or_retry_send::<ProcessAwaitOutput, _>(
+            .run_json_or_retry_send::<
+                Result<ProcessAwaitOutput, lash_core::RuntimeEffectControllerError>,
+                _,
+            >(
                 PROCESS_ATTACH_ACQUIRE_STEP.to_string(),
                 async move {
-                    lash_core::runtime::attachment_delivery::deliver_output(
+                    match lash_core::runtime::attachment_delivery::deliver_output(
                         attachments.as_ref(),
                         &receiver,
                         output,
                     )
                     .await
-                    .map_err(|error| error.to_string())
+                    {
+                        Ok(delivered) => Ok(Ok(delivered)),
+                        Err(error) => {
+                            let error = lash_core::RuntimeEffectControllerError::from(error);
+                            if error.is_terminal() {
+                                Ok(Err(error))
+                            } else {
+                                Err(error.to_string())
+                            }
+                        }
+                    }
                 },
             )
             .await?;
-        Ok(delivered)
+        delivered.map_err(|error| crate::process::handler_error_from_plugin(error.into()))
     }
 }

@@ -2651,6 +2651,7 @@ dependencies = [
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
+ "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-restate",
  "lash-internal-sqlite-store",
@@ -2659,6 +2660,7 @@ dependencies = [
  "restate-sdk",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

@@ -60,11 +60,14 @@ pub enum DeliveryAcquisition {
     Held,
     /// A digest had no upload evidence: its source was ended and swept.
     SourceGone { digest: AttachmentId },
+    /// The receiver is fenced and acquires no attachment edge.
+    ReceiverEnded { referrer: ArtifactReferrer },
 }
 
 /// Acquire `receiving_claim(receiver)` on every stored attachment `output`
 /// delivers. An attachment the store holds no evidence for answers
-/// `SourceGone`; every other store failure is returned.
+/// `SourceGone`; a fenced receiver answers `ReceiverEnded`. Other store
+/// failures retain their typed controller classification.
 pub async fn acquire_delivered_attachments(
     attachments: &dyn AttachmentReferrers,
     receiver: &ExecutionScope,
@@ -78,7 +81,8 @@ pub async fn acquire_delivered_attachments(
     acquire_under(attachments, &claim, &ids).await
 }
 
-/// Acquire `claim` on `ids`, mapping a missing upload to `SourceGone`.
+/// Acquire `claim` on `ids`, distinguishing a missing source from an ended
+/// receiver. Other store failures retain their classification and cause.
 pub async fn acquire_under(
     attachments: &dyn AttachmentReferrers,
     claim: &ReferrerClaim,
@@ -92,10 +96,18 @@ pub async fn acquire_under(
         Err(crate::StoreError::UnknownAttachment { digest }) => {
             Ok(DeliveryAcquisition::SourceGone { digest })
         }
-        Err(error) => Err(PluginError::Session(format!(
-            "failed to acquire the delivered attachments under `{}`: {error}",
-            claim.referrer().canonical_id()
-        ))),
+        Err(crate::StoreError::ArtifactReferrerEnded { referrer }) => {
+            Ok(DeliveryAcquisition::ReceiverEnded { referrer })
+        }
+        Err(error) => {
+            let mut error = crate::RuntimeEffectControllerError::from(error);
+            error.message = format!(
+                "failed to acquire the delivered attachments under `{}`: {}",
+                claim.referrer().canonical_id(),
+                error.message
+            );
+            Err(PluginError::RuntimeEffectController(error))
+        }
     }
 }
 
@@ -111,9 +123,27 @@ pub fn source_gone_output(digest: &AttachmentId) -> ProcessAwaitOutput {
     ))
 }
 
+/// A completed delivery that acquires nothing because its receiver ended.
+pub fn receiver_ended_output(referrer: &ArtifactReferrer) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "process_result_receiver_ended",
+            referrer.canonical_id(),
+        ),
+    ))
+}
+
+fn receiver_ended_error(referrer: ArtifactReferrer) -> PluginError {
+    PluginError::RuntimeEffectController(
+        crate::StoreError::ArtifactReferrerEnded { referrer }.into(),
+    )
+}
+
 /// Acquire what `output` delivers into `receiver`, and answer the value the
 /// receiver records: `output` itself, or `source_gone_output` when a
-/// delivered attachment's source was already swept.
+/// delivered attachment's source was already swept, or
+/// `receiver_ended_output` when the receiver is fenced.
 pub async fn deliver_output(
     attachments: &dyn AttachmentReferrers,
     receiver: &ExecutionScope,
@@ -122,6 +152,7 @@ pub async fn deliver_output(
     match acquire_delivered_attachments(attachments, receiver, &output).await? {
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Ok(receiver_ended_output(&referrer)),
     }
 }
 
@@ -144,6 +175,7 @@ pub async fn publish_process_terminal(
     match acquire_under(attachments, &process_record_claim(process_id)?, &ids).await? {
         DeliveryAcquisition::Held => Ok(output),
         DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
     }
 }
 
@@ -161,6 +193,7 @@ pub async fn acquire_completion_output(
         DeliveryAcquisition::SourceGone { digest } => {
             Err(PluginError::ProcessOutputAttachmentUnavailable { digest })
         }
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
     }
 }
 
@@ -178,6 +211,7 @@ pub async fn acquire_start_input(
             "process `{}` start input names attachment `{digest}`, which has no upload evidence",
             record.id
         ))),
+        DeliveryAcquisition::ReceiverEnded { referrer } => Err(receiver_ended_error(referrer)),
     }
 }
 
