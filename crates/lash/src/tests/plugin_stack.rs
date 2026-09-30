@@ -553,6 +553,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_sqlite() -> R
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL"]
+#[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.
 async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() -> Result<()> {
     let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL gate URL");
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
