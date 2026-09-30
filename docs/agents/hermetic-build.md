@@ -91,7 +91,9 @@ kiln analyze
 
 `tools/buck2/sync.py --check` rejects stale generated files. The target inventory
 is `tools/buck2/target-inventory.json`. Third-party rules live in
-`third-party/rust/BUCK`, with sources under `vendor/`. Do not hand-edit generated
+`third-party/rust/BUCK`, with checksum-pinned crate archive downloads as Buck2
+inputs. Bootstrap also prepares a Cargo vendor cache, but the generated Buck2
+graph currently consumes the archive directories. Do not hand-edit generated
 BUCK files. Normal builds reject drift; they do not silently update lockfiles
 or Cargo features.
 
