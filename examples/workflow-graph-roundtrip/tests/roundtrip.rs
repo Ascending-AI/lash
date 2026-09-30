@@ -2222,9 +2222,14 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         body["error"]["details"]["found"],
         lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
     );
+    let current = lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION;
     assert_eq!(
-        body["error"]["details"]["expected"],
-        lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION
+        body["error"]["details"],
+        serde_json::json!({
+            "found": current - 1,
+            "supportedRange": { "min": current, "max": current },
+            "fleetWriterVersion": current,
+        })
     );
 
     document.schema_version = lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION;

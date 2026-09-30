@@ -122,7 +122,7 @@ pub(crate) use json::*;
 #[allow(unused_imports)]
 pub(crate) use ops::*;
 pub use state::LASHLANG_SNAPSHOT_VERSION;
-#[cfg(test)]
+#[cfg(all(test, feature = "synthetic-next"))]
 pub(crate) use state::SnapshotStamps;
 pub use state::{
     BINDING_SUMMARY_MAX_CHARS, DurableBaseline, DurableFragment, DurableParts, GlobalPatch,

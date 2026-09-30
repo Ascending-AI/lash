@@ -11,7 +11,7 @@ impl GraphRenderError {
     /// `canonical_source`, and `rendered_source_invalid`.
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
+            Self::UnsupportedSchemaVersion(_) => "unsupported_schema_version",
             Self::DuplicateNodeId { .. } => "duplicate_node_id",
             Self::UnknownNodeReference { .. } => "unknown_node_reference",
             Self::InvalidNodePayload { .. } => "invalid_node_payload",
@@ -34,7 +34,7 @@ impl GraphRenderError {
             | Self::InvalidExpression { node_id, .. }
             | Self::InvalidAssignmentTarget { node_id, .. }
             | Self::InvalidOpaqueSource { node_id, .. } => Some(node_id),
-            Self::UnsupportedSchemaVersion { .. }
+            Self::UnsupportedSchemaVersion(_)
             | Self::DuplicateProcessName { .. }
             | Self::ProcessOriginMismatch { .. }
             | Self::CanonicalSource(_)
@@ -47,7 +47,7 @@ impl GraphRenderError {
         match self {
             Self::InvalidExpression { field, .. } => Some(field.as_str()),
             Self::InvalidAssignmentTarget { field, .. } => Some(field),
-            Self::UnsupportedSchemaVersion { .. }
+            Self::UnsupportedSchemaVersion(_)
             | Self::DuplicateNodeId { .. }
             | Self::UnknownNodeReference { .. }
             | Self::InvalidNodePayload { .. }
@@ -70,10 +70,14 @@ mod tests {
     fn every_error_kind_has_a_literal_code_and_location_oracle() {
         let oracles = [
             (
-                GraphRenderError::UnsupportedSchemaVersion {
+                GraphRenderError::UnsupportedSchemaVersion(lashlang::WorkflowGraphVersionRefusal {
                     found: 12,
-                    expected: 13,
-                },
+                    reads: lash_core_execution::FleetFormat::current().read_window(
+                        lash_core_execution::surface_format!(
+                            lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION
+                        ),
+                    ),
+                }),
                 "unsupported_schema_version",
                 None,
                 None,

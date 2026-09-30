@@ -200,8 +200,10 @@ The structured text fields and their render-time validation are:
 | `data.clauses[].iterable` / `.condition` | `list_comprehension` `for` / `if` clauses | `invalid_expression` (`clause iterable` or `clause condition`) |
 | `data.clauses[].binding` | `list_comprehension` `for` clauses | `invalid_assignment_target` (`clause binding`); a syntactically valid non-simple binding is `invalid_node_payload` |
 
-Changing `schemaVersion` yields `unsupported_schema_version`. Removing a
-required child group yields `missing_required_child`: `if` requires `then` and
+A `schemaVersion` outside the graph read window yields
+`unsupported_schema_version`. Its details carry `found`, `supportedRange`
+with `min` and `max`, and `fleetWriterVersion`. Regenerate an older derived
+graph from its module. Removing a required child group yields `missing_required_child`: `if` requires `then` and
 `else`, `for` and `while` require `body`, and `list_comprehension` requires
 `element`.
 

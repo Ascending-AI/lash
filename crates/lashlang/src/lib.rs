@@ -217,11 +217,11 @@ pub use workflow_graph::{
     WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError, WorkflowGraphReconcilePair,
     WorkflowGraphReconcileSide, WorkflowGraphReconciliation, WorkflowGraphStructuralLocation,
     WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot, WorkflowGraphUnmatchedNode,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath,
-    WorkflowNodeTypeFacets, WorkflowOwnership, WorkflowProcess, WorkflowProjection,
-    WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
-    WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
-    execution_sites,
+    WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets, WorkflowOwnership,
+    WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+    WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
+    WorkflowTypedVariable, child_path, execution_sites,
 };
 pub use workflow_graph::{
     projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,

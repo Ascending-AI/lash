@@ -25,3 +25,5 @@ mod object_sweep_crash_resume;
 mod retention_delivery_rollback;
 mod skipped_compatibility_release_refused;
 mod support;
+
+mod workflow_graph_range;

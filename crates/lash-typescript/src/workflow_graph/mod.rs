@@ -18,10 +18,10 @@ use std::collections::BTreeSet;
 
 use lashlang::{
     AssignTarget, Declaration, Expr, LabelMetadata, LashlangHostEnvironment, ProcessDecl, Program,
-    WORKFLOW_GRAPH_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowGraph,
-    WorkflowGraphProjector, WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource,
-    WorkflowProcess, WorkflowStatementText, WorkflowSubgraph, WorkflowTerminalKind,
-    analyze_workflow_program, workflow_call_to_ir, workflow_effect_to_ir,
+    WorkflowContainer, WorkflowDeclaration, WorkflowGraph, WorkflowGraphProjector,
+    WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowProcess, WorkflowStatementText, WorkflowSubgraph,
+    WorkflowTerminalKind, analyze_workflow_program, workflow_call_to_ir, workflow_effect_to_ir,
 };
 use thiserror::Error;
 
@@ -299,8 +299,8 @@ pub enum WorkflowGraphBuildError {
 #[cfg_attr(test, strum_discriminants(derive(strum::EnumIter, PartialOrd, Ord)))]
 #[non_exhaustive]
 pub enum GraphRenderError {
-    #[error("unsupported workflow graph schema version {found}; expected {expected}")]
-    UnsupportedSchemaVersion { found: u32, expected: u32 },
+    #[error(transparent)]
+    UnsupportedSchemaVersion(#[from] WorkflowGraphVersionRefusal),
     #[error("duplicate workflow node id `{id}`")]
     DuplicateNodeId { id: String },
     #[error("edge `{edge_id}` references unknown {endpoint} node `{node_id}`")]
@@ -350,13 +350,29 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
 /// which parses back successfully. The final-parse check prints once to an
 /// internal buffer, but this function returns no source.
 pub fn validate(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
-    validated_source(graph, &BTreeSet::new())?;
+    validate_for_fleet(graph, lash_core_execution::FleetFormat::current())
+}
+
+/// Validate under the fleet epoch that pinned the graph document.
+pub fn validate_for_fleet(
+    graph: &WorkflowGraph,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<(), GraphRenderError> {
+    validated_source(graph, &BTreeSet::new(), fleet)?;
     Ok(())
 }
 
 /// Validate and render a graph through the canonical TypeScript printer.
 pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
-    validated_source(graph, &BTreeSet::new())
+    workflow_graph_to_source_for_fleet(graph, lash_core_execution::FleetFormat::current())
+}
+
+/// Validate and render under the fleet epoch that pinned the graph document.
+pub fn workflow_graph_to_source_for_fleet(
+    graph: &WorkflowGraph,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<String, GraphRenderError> {
+    validated_source(graph, &BTreeSet::new(), fleet)
 }
 
 /// Validate and render the graph of a session cell: `globals` are the names
@@ -366,14 +382,28 @@ pub fn workflow_graph_to_source_in_session(
     graph: &WorkflowGraph,
     globals: &BTreeSet<String>,
 ) -> Result<String, GraphRenderError> {
-    validated_source(graph, globals)
+    workflow_graph_to_source_in_session_for_fleet(
+        graph,
+        globals,
+        lash_core_execution::FleetFormat::current(),
+    )
+}
+
+/// Validate and render a session cell under its store's fleet epoch.
+pub fn workflow_graph_to_source_in_session_for_fleet(
+    graph: &WorkflowGraph,
+    globals: &BTreeSet<String>,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<String, GraphRenderError> {
+    validated_source(graph, globals, fleet)
 }
 
 fn validated_source(
     graph: &WorkflowGraph,
     globals: &BTreeSet<String>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<String, GraphRenderError> {
-    let program = validated_program(graph, globals)?;
+    let program = validated_program(graph, globals, fleet)?;
     let source = typescript_program_source(&program)?;
     crate::parse_with_globals(&source, globals).map_err(|error| {
         GraphRenderError::RenderedSourceInvalid {
@@ -386,8 +416,9 @@ fn validated_source(
 fn validated_program(
     graph: &WorkflowGraph,
     globals: &BTreeSet<String>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Program, GraphRenderError> {
-    validate_graph(graph)?;
+    validate_graph(graph, fleet)?;
     graph_to_program(graph, globals)
 }
 
@@ -413,7 +444,8 @@ mod validation_tests {
     #[test]
     fn final_parse_fixture_passes_every_preceding_check() {
         let graph = final_parse_failure_graph();
-        validate_graph(&graph).expect("graph invariants hold");
+        validate_graph(&graph, lash_core_execution::FleetFormat::current())
+            .expect("graph invariants hold");
         let program = graph_to_program(&graph, &BTreeSet::new()).expect("graph converts to IR");
         let source = typescript_program_source(&program).expect("IR prints");
         assert_eq!(source, "return 1;\n");
@@ -487,13 +519,11 @@ fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
     )
 }
 
-fn validate_graph(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
-    if graph.schema_version != WORKFLOW_GRAPH_SCHEMA_VERSION {
-        return Err(GraphRenderError::UnsupportedSchemaVersion {
-            found: graph.schema_version,
-            expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        });
-    }
+fn validate_graph(
+    graph: &WorkflowGraph,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<(), GraphRenderError> {
+    WorkflowGraph::admit_schema_version_for_fleet(graph.schema_version, fleet)?;
     let mut all_ids = BTreeSet::new();
     validate_subgraph(&graph.main, &mut all_ids)?;
     let mut process_names = BTreeSet::new();

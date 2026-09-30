@@ -123,6 +123,23 @@ pub struct WorkflowGraph {
 }
 
 impl WorkflowGraph {
+    /// Admit a document stamp against the decoder-backed read window under
+    /// `fleet_format`. Derived graphs have no lift: the fleet pin is readable
+    /// during a roll, and after finalize an older graph must be regenerated.
+    pub fn admit_schema_version_for_fleet(
+        found: u32,
+        fleet_format: lash_core_execution::FleetFormat,
+    ) -> Result<(), WorkflowGraphVersionRefusal> {
+        let reads = fleet_format.read_window(lash_core_execution::surface_format!(
+            WORKFLOW_GRAPH_SCHEMA_VERSION
+        ));
+        if reads.admits(found) {
+            Ok(())
+        } else {
+            Err(WorkflowGraphVersionRefusal { found, reads })
+        }
+    }
+
     /// Decodes a JSON graph after checking its version field in isolation.
     ///
     /// A version mismatch wins over errors in the rest of the document. This
@@ -154,15 +171,8 @@ impl WorkflowGraph {
             .as_u64()
             .and_then(|version| u32::try_from(version).ok())
             .ok_or(WorkflowGraphDecodeError::InvalidSchemaVersion)?;
-        let window = fleet_format.read_window(lash_core_execution::surface_format!(
-            WORKFLOW_GRAPH_SCHEMA_VERSION
-        ));
-        if !window.admits(found) {
-            return Err(WorkflowGraphDecodeError::UnsupportedSchemaVersion {
-                found,
-                expected: window.newest(),
-            });
-        }
+        Self::admit_schema_version_for_fleet(found, fleet_format)
+            .map_err(WorkflowGraphDecodeError::UnsupportedSchemaVersion)?;
         let facets_are_current = value
             .get("facet_schema_version")
             .and_then(serde_json::Value::as_u64)
@@ -526,6 +536,20 @@ fn collect_structural_locations(
     }
 }
 
+/// The decoder's supported range and the fleet-selected writer pin that
+/// refused a workflow graph. The pin is separate because it need not be
+/// contiguous with the supported range.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+#[error(
+    "unsupported workflow graph schema version {found}; supported range {supported}, fleet writer version {recorded}; regenerate from the module",
+    supported = .reads.supported(),
+    recorded = .reads.recorded(),
+)]
+pub struct WorkflowGraphVersionRefusal {
+    pub found: u32,
+    pub reads: lash_core_execution::store::ReadWindow,
+}
+
 /// A refusal from the version-first [`WorkflowGraph`] JSON decoder.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -534,8 +558,8 @@ pub enum WorkflowGraphDecodeError {
     MissingSchemaVersion,
     #[error("workflow graph document has a non-u32 `schema_version`")]
     InvalidSchemaVersion,
-    #[error("unsupported workflow graph schema version {found}; expected {expected}")]
-    UnsupportedSchemaVersion { found: u32, expected: u32 },
+    #[error(transparent)]
+    UnsupportedSchemaVersion(#[from] WorkflowGraphVersionRefusal),
     #[error("invalid workflow graph document: {0}")]
     Document(#[source] serde_json::Error),
 }

@@ -683,9 +683,11 @@ impl RenderErrorResponse {
         let message = error.to_string();
         let code = error.code();
         let mut details = match &error {
-            GraphRenderError::UnsupportedSchemaVersion { found, expected } => {
-                json!({ "found": found, "expected": expected })
-            }
+            GraphRenderError::UnsupportedSchemaVersion(refusal) => json!({
+                "found": refusal.found,
+                "supportedRange": refusal.reads.supported(),
+                "fleetWriterVersion": refusal.reads.recorded(),
+            }),
             GraphRenderError::DuplicateNodeId { id } => json!({ "id": id }),
             GraphRenderError::UnknownNodeReference {
                 edge_id, endpoint, ..

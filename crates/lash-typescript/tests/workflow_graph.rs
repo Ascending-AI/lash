@@ -169,10 +169,11 @@ finish(items);
     previous_schema.schema_version = WORKFLOW_GRAPH_SCHEMA_VERSION - 1;
     assert!(matches!(
         workflow_graph_to_source(&previous_schema),
-        Err(GraphRenderError::UnsupportedSchemaVersion {
-            found,
-            expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        }) if found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+        Err(GraphRenderError::UnsupportedSchemaVersion(refusal))
+            if refusal.found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+                && refusal.reads.supported().min() == WORKFLOW_GRAPH_SCHEMA_VERSION
+                && refusal.reads.supported().max() == WORKFLOW_GRAPH_SCHEMA_VERSION
+                && refusal.reads.recorded() == WORKFLOW_GRAPH_SCHEMA_VERSION
     ));
 
     let legacy_json = json.replacen("\"container_kind\":\"if\"", "\"kind\":\"if\"", 1);
@@ -195,10 +196,11 @@ fn workflow_graph_decode_checks_version_before_shape() {
     let encoded = serde_json::to_string(&value).expect("fixture JSON encodes");
     assert!(matches!(
         WorkflowGraph::decode_json(&encoded),
-        Err(WorkflowGraphDecodeError::UnsupportedSchemaVersion {
-            found,
-            expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
-        }) if found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+        Err(WorkflowGraphDecodeError::UnsupportedSchemaVersion(refusal))
+            if refusal.found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+                && refusal.reads.supported().min() == WORKFLOW_GRAPH_SCHEMA_VERSION
+                && refusal.reads.supported().max() == WORKFLOW_GRAPH_SCHEMA_VERSION
+                && refusal.reads.recorded() == WORKFLOW_GRAPH_SCHEMA_VERSION
     ));
 }
 
