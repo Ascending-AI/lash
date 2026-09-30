@@ -159,12 +159,10 @@ impl Dialect {
     fn provider(
         self,
         transport: Arc<ScriptedLlmHttpTransport>,
-        cap: Option<u64>,
         headers: Vec<(String, String)>,
     ) -> ProviderHandle {
         let transport: Arc<dyn LlmHttpTransport> = transport;
         let options = ProviderOptions {
-            max_output_tokens: cap,
             reliability: lash_core::provider::ProviderReliability::disabled(),
             ..ProviderOptions::default()
         };
@@ -248,12 +246,14 @@ impl Dialect {
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::Auto,
+            attachment_acceptance: Default::default(),
             model_variant: ReasoningSelection::ProviderDefault,
             model_capability: ModelCapability {
                 google_dialect,
                 ..ModelCapability::default()
             },
             extra_body: Default::default(),
+            request_defaults: Default::default(),
             generation: Default::default(),
             scope: LlmRequestScope::new("matrix-session", "matrix-frame", "matrix-request"),
             output_spec: None,
@@ -328,16 +328,22 @@ impl Setting {
     }
 }
 
+/// Stamps the recorded model's output cap default onto a matrix request.
+fn with_model_cap(mut request: LlmRequest, cap: Option<u64>) -> LlmRequest {
+    request.request_defaults.max_output_tokens = cap;
+    request
+}
+
 async fn run(
     dialect: Dialect,
     request: LlmRequest,
     cap: Option<u64>,
 ) -> (Result<(Value, GenerationReceipt), FailureCode>, usize) {
     let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
-    let mut provider = dialect.provider(transport.clone(), cap, Vec::new());
+    let mut provider = dialect.provider(transport.clone(), Vec::new());
     let result = provider
         .complete(
-            request,
+            with_model_cap(request, cap),
             <dyn lash_core::provider::DispatchAdmission>::host_owned(),
         )
         .await
@@ -422,7 +428,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         &transport,
     )
     .expect("runtime provider");
-    let model = lash::ModelSpec::builder("openai/gpt-5.4")
+    let model = lash::ModelMetadata::builder("openai/gpt-5.4")
         .context_window_tokens(200_000)
         .output_token_capacity(2_048)
         .build()
@@ -437,8 +443,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model)
+        .serve_test_model(provider, model)
         .build(crate::sim_process_owner())
         .expect("runtime core");
     let session = crate::open_created_session(&core, "matrix-cap")
@@ -504,8 +509,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
         })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model)
+        .serve_test_model(provider, model)
         .build(crate::sim_process_owner())
         .expect("RLM core");
     let session = crate::open_created_session(&core, "matrix-stop")
@@ -775,12 +779,11 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
         let mut provider = dialect.provider(
             transport.clone(),
-            cap,
             vec![("x-matrix-route".into(), "selected".into())],
         );
         let completion = provider
             .complete(
-                dialect.request(),
+                with_model_cap(dialect.request(), cap),
                 <dyn lash_core::provider::DispatchAdmission>::host_owned(),
             )
             .await
@@ -805,12 +808,11 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
         let mut provider = dialect.provider(
             transport.clone(),
-            cap,
             vec![("CoNtEnT-TyPe".into(), "other".into())],
         );
         let error = provider
             .complete(
-                dialect.request(),
+                with_model_cap(dialect.request(), cap),
                 <dyn lash_core::provider::DispatchAdmission>::host_owned(),
             )
             .await
@@ -836,13 +838,12 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
     for dialect in HTTP_DIALECTS {
         let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
         let cap = matches!(dialect, Dialect::Anthropic).then_some(4096);
-        let mut provider = dialect.provider(transport.clone(), cap, Vec::new());
-        let mut options = provider.options();
-        options.expose_thinking = true;
-        provider.set_options(options);
+        let mut provider = dialect.provider(transport.clone(), Vec::new());
+        let mut request = with_model_cap(dialect.request(), cap);
+        request.request_defaults.expose_thinking = true;
         let completion = provider
             .complete(
-                dialect.request(),
+                request,
                 <dyn lash_core::provider::DispatchAdmission>::host_owned(),
             )
             .await
@@ -887,7 +888,7 @@ async fn receipt_survives_a_failure_after_send() {
         retryable: Some(false),
     });
     let transport = Arc::new(ScriptedLlmHttpTransport::new(script).expect("disconnect script"));
-    let mut provider = dialect.provider(transport.clone(), None, Vec::new());
+    let mut provider = dialect.provider(transport.clone(), Vec::new());
     let mut request = dialect.request();
     request.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
     let error = provider

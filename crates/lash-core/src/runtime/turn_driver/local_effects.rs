@@ -54,7 +54,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 Ok(RuntimeEffectOutcome::BeforeLlmCall { decision })
             }
             RuntimeEffectCommand::LlmCall {
-                provider_id: _,
+                model_key: _,
                 request,
             } => {
                 // The recorded body races the model call against the turn's
@@ -79,7 +79,13 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .call(
                         crate::RuntimeOwner::Session(runner.driver.session_id.clone()),
                         "turn",
-                        runner.driver.policy.model.id.clone(),
+                        runner
+                            .driver
+                            .policy
+                            .model_config()
+                            .model
+                            .wire_model()
+                            .to_string(),
                     )
                     .map_err(|error| {
                         RuntimeEffectControllerError::new(

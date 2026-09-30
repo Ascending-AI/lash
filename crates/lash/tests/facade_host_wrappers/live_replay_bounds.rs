@@ -25,13 +25,21 @@ async fn eviction_law(backend: lash::Backend, tag: &str) {
         .build()
         .into_handle();
     let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("live-replay-bounds")
-                .context_window_tokens(64_000)
-                .build()
-                .expect("model"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "live-replay-bounds",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("live-replay-bounds")
+                            .context_window_tokens(64_000)
+                            .build()
+                            .expect("model"),
+                        provider,
+                    ),
+                )
+                .expect("one key registers"),
+        ))
+        .model("live-replay-bounds")
         .live_replay_store(replay.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

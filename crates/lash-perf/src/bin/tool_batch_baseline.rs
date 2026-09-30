@@ -349,18 +349,18 @@ async fn restate_deployment(
         lash_core::Backend::new(backend.clone()),
         lash::TurnBudget::Unbounded,
     )
-    .provider(
+    .serve_test_model(
         lash_core::testing::TestProvider::builder()
             .kind("tool-batch-probe-deployment")
             .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
             .build()
             .into_handle(),
+        lash_core::ModelMetadata::new(
+            "tool-batch-probe-deployment",
+            std::num::NonZeroUsize::new(1024)
+                .ok_or_else(|| anyhow::anyhow!("the probe's context window is zero"))?,
+        ),
     )
-    .model(lash_core::ModelSpec::new(
-        "tool-batch-probe-deployment",
-        std::num::NonZeroUsize::new(1024)
-            .ok_or_else(|| anyhow::anyhow!("the probe's context window is zero"))?,
-    ))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(

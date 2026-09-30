@@ -418,10 +418,6 @@ pub(super) async fn session_store_factory_runs_every_config_command_alone(
 
 /// A config transaction setting `model` through the core owner, as ingress
 /// records it.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: the model spec is well-formed"
-)]
 fn config_transaction_command(model: &str) -> crate::SessionCommand {
     crate::SessionCommand::ApplyConfigTransaction {
         transaction: Box::new(crate::ConfigTransactionRecord {
@@ -430,12 +426,7 @@ fn config_transaction_command(model: &str) -> crate::SessionCommand {
             entries: vec![crate::ConfigCommandEntry {
                 owner: crate::CORE_CONFIG_OWNER.to_string(),
                 command: "set_model".to_string(),
-                args: serde_json::json!({
-                    "model": crate::ModelSpec::builder(model)
-                        .context_window_tokens(32_000)
-                        .build()
-                        .expect("model"),
-                }),
+                args: serde_json::json!({ "model": model }),
             }],
             implementations: std::collections::BTreeMap::from([(
                 crate::CORE_CONFIG_OWNER.to_string(),
@@ -684,15 +675,26 @@ async fn runtime_for_config_settlement(
         crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(clock as Arc<dyn crate::Clock>);
-    // The laws patch the route's model: S6 validates the route at acceptance,
-    // so the host must serve the request's `conformance-provider`. The model
-    // still never settles — the queued blocker holds the FIFO head.
-    host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-        crate::testing::TestProvider::builder()
-            .kind("conformance-provider")
-            .build()
-            .into_handle(),
-    ));
+    // The laws change the session's model: resolution mints the key through
+    // the host's models, so the host must serve every key the laws name. The
+    // model still never settles — the queued blocker holds the FIFO head.
+    let provider = crate::testing::TestProvider::builder()
+        .kind("conformance-provider")
+        .build()
+        .into_handle();
+    let mut models = crate::ModelRegistry::new();
+    for key in CONFIG_SETTLEMENT_MODEL_KEYS {
+        models = models
+            .register(
+                key,
+                crate::RegisteredModel::new(
+                    crate::testing::test_model_metadata(key),
+                    provider.clone(),
+                ),
+            )
+            .expect("register config-settlement model");
+    }
+    host.providers.models = Arc::new(models);
     let runtime_host = crate::EmbeddedRuntimeHost::new(host);
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
@@ -725,26 +727,34 @@ async fn hold_config_settlement_lease(store: &dyn crate::RuntimeStore, session_i
         .expect("competing writer lease");
 }
 
-/// Submit a config transaction setting `model_id` and read how it settled,
-/// once: a transaction no drive applied yet answers `Pending`.
+/// The keys the config-settlement laws move the session to; the host's
+/// models serve each.
+const CONFIG_SETTLEMENT_MODEL_KEYS: [&str; 3] =
+    ["must-remain-pending", "must-be-cancelled", "first-settled"];
+
+/// A recorded model as a host's models mint it for `key`.
+fn config_command_model(key: &str) -> crate::ModelConfig {
+    crate::testing::test_model_config(key, crate::testing::test_model_metadata(key))
+}
+
+/// Submit a config transaction moving the session to the model `key` and
+/// read how it settled, once: a transaction no drive applied yet answers
+/// `Pending`.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: the model spec is well-formed and the store accepts the transaction"
+    reason = "conformance-law fixture: the store accepts the transaction"
 )]
 async fn submit_config_settlement(
     runtime: &mut crate::LashRuntime,
-    model_id: &str,
+    key: &str,
 ) -> crate::runtime::SessionCommandSettlement {
     let revision = runtime.config_revision();
     let receipt = runtime
         .submit_config_transaction(
-            format!("config-settlement:{model_id}"),
+            format!("config-settlement:{key}"),
             revision,
             &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-                model: crate::ModelSpec::builder(model_id)
-                    .context_window_tokens(32_000)
-                    .build()
-                    .expect("config-settlement model"),
+                model: crate::ModelKey::new(key),
             }),
         )
         .await
@@ -947,10 +957,7 @@ where
     // with a newer model. One commit keeps the law independent of when the
     // facade writer polls: it can only ever observe its command settled under
     // the newer head.
-    let superseding_model = crate::ModelSpec::builder("second-newer")
-        .context_window_tokens(32_000)
-        .build()
-        .expect("superseding model");
+    let superseding_model = Some(config_command_model("second-newer"));
     let newer_model = superseding_model.clone();
     commit_session_command_run_with(&store, &request, &lease, run, move |state| {
         state.policy.model = newer_model;

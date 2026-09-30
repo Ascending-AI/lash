@@ -19,6 +19,7 @@ use super::*;
 mod attachment_capability;
 mod config;
 mod llm;
+mod model_request_defaults;
 mod observations;
 mod processes;
 mod prompt;

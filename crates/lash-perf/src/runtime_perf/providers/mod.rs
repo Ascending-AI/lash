@@ -33,10 +33,23 @@ pub(crate) struct BenchmarkStreamProfile {
     pub(crate) parts: Vec<LlmOutputPart>,
 }
 
+/// A step a scenario runs inside the provider's next completion, before it
+/// answers: a failure fails that call.
+pub(crate) type BeforeCompletion = Box<
+    dyn FnOnce() -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), lash_core::llm::transport::LlmTransportError>,
+                    > + Send,
+            >,
+        > + Send,
+>;
+
 pub(crate) struct BenchmarkProviderControl {
     pub(crate) provider_started: tokio::sync::Notify,
     pub(crate) release_provider: tokio::sync::Notify,
     armed: AtomicBool,
+    before_next_completion: Mutex<Option<BeforeCompletion>>,
 }
 
 impl BenchmarkProviderControl {
@@ -45,7 +58,17 @@ impl BenchmarkProviderControl {
             provider_started: tokio::sync::Notify::new(),
             release_provider: tokio::sync::Notify::new(),
             armed: AtomicBool::new(false),
+            before_next_completion: Mutex::new(None),
         }
+    }
+
+    /// Run `step` inside the provider's next completion, once.
+    pub(crate) fn before_next_completion(&self, step: BeforeCompletion) {
+        *self.before_next_completion.lock_recover() = Some(step);
+    }
+
+    fn take_before_completion(&self) -> Option<BeforeCompletion> {
+        self.before_next_completion.lock_recover().take()
     }
 
     pub(crate) fn arm(&self) {
@@ -134,7 +157,9 @@ pub(crate) fn benchmark_provider_with_control(
 ) -> (TestProvider, Option<Arc<BenchmarkProviderControl>>) {
     let control = matches!(
         scenario,
-        RuntimePerfScenario::TurnCancelRoundTrip | RuntimePerfScenario::IngressAdmissionProjection
+        RuntimePerfScenario::TurnCancelRoundTrip
+            | RuntimePerfScenario::IngressAdmissionProjection
+            | RuntimePerfScenario::DeepTurnComposition
     )
     .then(|| Arc::new(BenchmarkProviderControl::new()))
     .or_else(|| {
@@ -154,6 +179,12 @@ pub(crate) fn benchmark_provider_with_control(
         .complete(move |req| {
             let completion_control = completion_control.clone();
             async move {
+                let before_completion = completion_control
+                    .as_ref()
+                    .and_then(|control| control.take_before_completion());
+                if let Some(step) = before_completion {
+                    step().await?;
+                }
                 if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
                     completion_control
                         .as_ref()

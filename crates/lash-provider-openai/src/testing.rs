@@ -1,7 +1,7 @@
 //! Pure request serializers used by cross-provider regression tests.
 
 use lash_core::LlmRequest;
-use lash_core::provider::{CacheRetention, ProviderOptions};
+use lash_core::provider::CacheRetention;
 use serde_json::Value;
 
 use crate::{CodexProvider, OPENAI_BASE_URL, OpenAiCompatibleProvider};
@@ -44,13 +44,10 @@ pub fn serialize_chat_request(
     request: &LlmRequest,
     retention: CacheRetention,
 ) -> Result<(Value, CacheBreakpointReport), lash_core::facade_support::LlmTransportError> {
-    let provider = OpenAiCompatibleProvider::new("test", "https://provider.test").with_options(
-        ProviderOptions {
-            cache_retention: retention,
-            ..ProviderOptions::default()
-        },
-    );
-    let (built, diagnostics) = provider.build_chat_request_body_with_diagnostics(request, false)?;
+    let provider = OpenAiCompatibleProvider::new("test", "https://provider.test");
+    let request = with_retention(request, retention);
+    let (built, diagnostics) =
+        provider.build_chat_request_body_with_diagnostics(&request, false)?;
     Ok((
         built.body,
         CacheBreakpointReport {
@@ -71,11 +68,7 @@ pub fn serialize_responses_request(
             prompt_cache_retention: Some(true),
             ..crate::OpenAiCompat::default()
         })
-        .with_options(ProviderOptions {
-            cache_retention: retention,
-            ..ProviderOptions::default()
-        })
-        .build_responses_request_body(request, false)
+        .build_responses_request_body(&with_retention(request, retention), false)
 }
 
 pub fn serialize_codex_request(
@@ -83,9 +76,12 @@ pub fn serialize_codex_request(
     retention: CacheRetention,
 ) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     CodexProvider::new("access", "refresh", 0)
-        .with_options(ProviderOptions {
-            cache_retention: retention,
-            ..ProviderOptions::default()
-        })
-        .build_request_body(request, false)
+        .build_request_body(&with_retention(request, retention), false)
+}
+
+/// `request` whose recorded defaults carry `retention`.
+fn with_retention(request: &LlmRequest, retention: CacheRetention) -> LlmRequest {
+    let mut request = request.clone();
+    request.request_defaults.cache_retention = retention;
+    request
 }

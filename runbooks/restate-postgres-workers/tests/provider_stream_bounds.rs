@@ -61,7 +61,6 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = AnthropicProvider::new("fixture-key")
         .with_options(ProviderOptions {
-            max_output_tokens: Some(4096),
             reliability: ProviderReliability::default()
                 .max_attempts(3)
                 .base_delay_ms(0)
@@ -75,10 +74,11 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         lash::Backend::new(engine.clone()),
         lash::TurnBudget::Unbounded,
     )
-    .provider(ProviderHandle::new(provider.into_components()))
-    .model(
-        lash::ModelSpec::builder("fixture-model")
+    .serve_test_model(
+        ProviderHandle::new(provider.into_components()),
+        lash::ModelMetadata::builder("fixture-model")
             .context_window_tokens(200_000)
+            .max_output_tokens(4096)
             .build()?,
     )
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

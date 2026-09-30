@@ -317,9 +317,12 @@ async fn summarize(
         .turn_id()
         .map(ToString::to_string)
         .unwrap_or_else(|| scoped_effect_controller.scope_id().to_string());
+    let model = policy.model.as_ref().ok_or_else(|| {
+        crate::plugin::ContextError::Session("the summary needs the session's model".into())
+    })?;
     let request = crate::LlmRequest {
         instructions: None,
-        model: policy.model.id.clone(),
+        model: model.model.wire_model().to_string(),
         messages: vec![lash_sansio::llm::types::LlmMessage::text(
             lash_sansio::llm::types::LlmRole::User,
             "Summarize the conversation so far.",
@@ -327,9 +330,11 @@ async fn summarize(
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
-        model_variant: policy.model.variant.clone(),
-        model_capability: policy.model.capability.clone(),
-        extra_body: policy.model.extra_body.clone(),
+        attachment_acceptance: Arc::clone(&policy.attachment_acceptance),
+        model_variant: model.reasoning.clone(),
+        model_capability: model.metadata().capability.clone(),
+        extra_body: model.metadata().extra_body.clone(),
+        request_defaults: model.metadata().request_defaults,
         generation: policy.generation.clone(),
         scope: crate::LlmRequestScope::new(
             session_id.clone(),
@@ -1020,7 +1025,7 @@ impl LawSession {
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
                 );
-        host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
+        host.providers.models = crate::testing::standard_test_models(provider);
         let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
         Self {
             parts: LawParts {

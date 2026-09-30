@@ -14,13 +14,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
-    SingleProviderResolver,
 };
 use lash_core::plugin::{PluginSessionRequest, SessionAuthorityContext};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
-    CommitBudget, LlmResponse, ModelSpec, QueuedWorkBatchingConfig, SessionCreationHead,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
+    CommitBudget, LlmResponse, QueuedWorkBatchingConfig, SessionCreationHead, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
 };
 use lash_sansio::llm::types::LlmRequest;
 use lash_sansio::{SessionId, TurnId};
@@ -53,11 +52,10 @@ fn redeploying_config() -> StandardProtocolConfig {
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        provider_id: "standard-recorded-behaviour-law".into(),
-        model: ModelSpec::builder("standard-recorded-behaviour-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
+        model: Some(lash_core::testing::test_model_config(
+            "standard-recorded-behaviour-model",
+            lash_core::testing::test_model_metadata("standard-recorded-behaviour-model"),
+        )),
         ..SessionPolicy::new(TurnBudget::Unbounded)
     }
 }
@@ -143,8 +141,7 @@ async fn open_runtime(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    host_config.providers.provider_resolver =
-        Arc::new(SingleProviderResolver::new(model.provider()));
+    host_config.providers.models = lash_core::testing::models_serving(&policy(), model.provider());
     let runtime_host = EmbeddedRuntimeHost::new(host_config);
     let services = PersistentRuntimeServices::new(
         plugins,

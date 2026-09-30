@@ -211,8 +211,7 @@ async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> R
         crate::TurnBudget::Unbounded,
     ))
     .plugin(probe.clone())
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -227,7 +226,14 @@ fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
 async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeSessionState> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    crate::session::load_state_from_store(&id, &core.policy, &store).await
+    crate::session::load_state_from_store(
+        &id,
+        &core.policy,
+        &core.default_selection,
+        core.env.core.providers.models.as_ref(),
+        &store,
+    )
+    .await
 }
 
 /// The turn budget the session's durable config head records.
@@ -329,7 +335,7 @@ async fn the_command_catalog_lists_every_registered_command() -> Result<()> {
             "set_no_progress_budget",
             "set_prompt",
             "set_prompt_template",
-            "set_provider",
+            "set_reasoning",
             "set_tool_access",
             "set_turn_budget",
         ],

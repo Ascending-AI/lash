@@ -277,8 +277,8 @@ impl LashRuntime {
         let mut provider = self
             .host
             .resolve_session_policy(&session_id, policy)?
-            .binding
-            .provider;
+            .provider()
+            .clone();
         for attempt in outstanding {
             let Some(generation_id) = attempt.generation_id.clone() else {
                 report.unresolved.push(attempt);

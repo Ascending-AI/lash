@@ -1395,9 +1395,9 @@ fn drain_area_witnesses() {
     });
     // W0443: lash::runtime::RuntimeProviderConfig [struct]
     type_witness::<lash::runtime::RuntimeProviderConfig>();
-    // W0444: lash::runtime::RuntimeProviderConfig::provider_resolver [field]
+    // W0444: lash::runtime::RuntimeProviderConfig::models [field]
     field_witness(|value: &lash::runtime::RuntimeProviderConfig| {
-        let _ = &value.provider_resolver;
+        let _ = &value.models;
     });
     // W0445: lash::runtime::RuntimeTracingConfig [struct]
     type_witness::<lash::runtime::RuntimeTracingConfig>();

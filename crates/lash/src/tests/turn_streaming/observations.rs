@@ -102,8 +102,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("reasoning-single-publication")
@@ -232,8 +231,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -289,8 +287,7 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("mixed-reasoning-publication")
@@ -349,8 +346,7 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("reasoning-buffered-text")
@@ -399,8 +395,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("identical-reasoning-publication")
@@ -635,11 +630,13 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .provider(output_then_failing_rlm_prose_provider(
-                Arc::clone(&transport_calls),
-                Arc::clone(&requests),
-            ))
-            .model(mock_model_spec())
+            .serve_test_model(
+                output_then_failing_rlm_prose_provider(
+                    Arc::clone(&transport_calls),
+                    Arc::clone(&requests),
+                ),
+                mock_model_spec(),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-provider-retry-prose")
@@ -777,8 +774,10 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
         const MARKER: &str = "natural completion single-copy marker";
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
-            .model(mock_model_spec())
+            .serve_test_model(
+                natural_prose_reasoning_provider(Arc::clone(&requests)),
+                mock_model_spec(),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-natural-prose-single-copy")
@@ -1118,8 +1117,7 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -1168,8 +1166,7 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -1212,8 +1209,7 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -1427,8 +1423,7 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay_store)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1486,8 +1481,7 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1534,8 +1528,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             double_backend().await,
             crate::TurnBudget::Unbounded,
         ))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .live_replay_store(replay_store.clone())
         .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::from(format!("two-histories-{boundary:?}"));
@@ -1641,8 +1634,7 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay_store.clone())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -2059,8 +2051,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     Box::pin(
         bootstrap_core
@@ -2078,8 +2069,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::default(),
     ))
@@ -2114,8 +2104,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::default(),
     ))
@@ -2202,8 +2191,7 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -2270,8 +2258,7 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -2373,8 +2360,7 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("recoverable-chat-disconnect")

@@ -9,8 +9,14 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .models(test_catalog(
+        mock_provider(),
+        [
+            mock_model_spec(),
+            model_spec("settled-model", Some("settled-variant".to_string()), 64_000),
+        ],
+    ))
+    .model("mock-model")
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked-config").created().await.open().await?;
@@ -18,7 +24,13 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         .send(TurnInput::text("establish head"))
         .output()
         .await?;
-    let expected_model = model_spec("settled-model", Some("settled-variant".to_string()), 64_000);
+    let settled_reasoning = lash_core::ReasoningSelection::Effort("settled-variant".to_string());
+    let expected_model = recorded_model(model_spec(
+        "settled-model",
+        Some("settled-variant".to_string()),
+        64_000,
+    ))
+    .with_reasoning(settled_reasoning.clone());
     let expected_generation = lash_core::GenerationOptions {
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.35).expect("temperature")),
         output_token_cap: std::num::NonZeroUsize::new(777),
@@ -29,7 +41,10 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         .config()
         .configure(
             crate::config::ConfigTransaction::of(crate::config::SetModel {
-                model: expected_model.clone(),
+                model: lash_core::ModelKey::new("settled-model"),
+            })
+            .then(crate::config::SetReasoning {
+                reasoning: settled_reasoning,
             })
             .then(crate::config::SetGeneration {
                 generation: lash_core::facade_support::GenerationOverlay::Replace(
@@ -42,7 +57,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
     let parked = Box::pin(session.park()).await?;
     let resumed = Box::pin(core.resume(parked)).await?;
     let policy = resumed.policy_snapshot();
-    assert_eq!(policy.model, expected_model);
+    assert_eq!(policy.model, Some(expected_model));
     assert_eq!(policy.generation, expected_generation);
     Ok(())
 }
@@ -60,8 +75,14 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .models(test_catalog(
+        mock_provider(),
+        [
+            mock_model_spec(),
+            model_spec("commanded-model", None, 64_000),
+        ],
+    ))
+    .model("mock-model")
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -74,7 +95,7 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
         .send(TurnInput::text("establish head"))
         .output()
         .await?;
-    let commanded_model = model_spec("commanded-model", None, 64_000);
+    let commanded_model = recorded_model(model_spec("commanded-model", None, 64_000));
     let commanded_generation = lash_core::GenerationOptions {
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.55).expect("temperature")),
         ..lash_core::GenerationOptions::default()
@@ -84,7 +105,7 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
         .config()
         .configure(
             crate::config::ConfigTransaction::of(crate::config::SetModel {
-                model: commanded_model.clone(),
+                model: lash_core::ModelKey::new("commanded-model"),
             })
             .then(crate::config::SetGeneration {
                 generation: lash_core::facade_support::GenerationOverlay::Replace(
@@ -103,7 +124,8 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
         .await?;
     let policy = reopened.policy_snapshot();
     assert_eq!(
-        policy.model, commanded_model,
+        policy.model,
+        Some(commanded_model),
         "a default-spec reopen keeps the commanded durable model"
     );
     assert_eq!(

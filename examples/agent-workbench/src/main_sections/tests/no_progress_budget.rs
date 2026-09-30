@@ -36,9 +36,12 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     ));
     assert_eq!(spec.no_progress_budget, expected_workbench_bound);
 
-    let policy = spec.resolve_against(&lash::runtime::SessionPolicy::new(
-        lash::TurnBudget::Unbounded,
-    ));
+    let policy = spec
+        .resolve_against(
+            &lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+            &lash::EmptyModels,
+        )
+        .expect("a spec naming no model resolves without a catalog");
     assert_eq!(policy.turn_budget.max_turns(), Some(WORKBENCH_MAX_TURNS));
     let resolved_attempts = policy.no_progress_budget.max_attempts();
     assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));
@@ -51,7 +54,8 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     // old behaviour can still ask for it in as many words.
     let opted_out = lash::SessionSpec::new()
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .resolve_against(&policy);
+        .resolve_against(&policy, &lash::EmptyModels)
+        .expect("a spec naming no model resolves without a catalog");
     let opted_out_budget = opted_out.no_progress_budget;
     assert_eq!(opted_out_budget, lash::NoProgressBudget::Unbounded);
 }

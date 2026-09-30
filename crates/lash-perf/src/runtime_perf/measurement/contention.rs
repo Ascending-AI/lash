@@ -251,9 +251,15 @@ mod contention_tests {
                 lash_core::TurnBudget::Unbounded,
             ))
         };
-        first_state.policy.provider_id = "first-completer".to_string();
+        first_state.policy.model = Some(lash_core::testing::test_model_config(
+            "first-completer",
+            lash_core::testing::test_model_metadata("first-completer"),
+        ));
         let mut bypass_state = first_state.clone();
-        bypass_state.policy.provider_id = "gate-bypass-completer".to_string();
+        bypass_state.policy.model = Some(lash_core::testing::test_model_config(
+            "gate-bypass-completer",
+            lash_core::testing::test_model_metadata("gate-bypass-completer"),
+        ));
         let shared_operation = lash_core::OperationId::new(
             lash_core::ExecutionScope::runtime_operation("commit-admission-bypass"),
             "commit",
@@ -308,7 +314,10 @@ mod contention_tests {
                     load_runtime_perf_session_state(&store, &SessionId::from(session_id))
                         .await?
                         .expect("session remains durable");
-                fresh.policy.provider_id = "gate-bypass-completer".to_string();
+                fresh.policy.model = Some(lash_core::testing::test_model_config(
+                    "gate-bypass-completer",
+                    lash_core::testing::test_model_metadata("gate-bypass-completer"),
+                ));
                 let retry_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
                     &fresh,
                     lash_core::OperationId::new(

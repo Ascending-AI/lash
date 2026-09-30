@@ -1,60 +1,109 @@
 use std::num::NonZeroUsize;
 
-use crate::provider::{ModelCapability, ReasoningSelection};
+use crate::provider::{CacheRetention, ModelCapability, ModelRequestDefaults, ReasoningSelection};
 
+/// The host's opaque name for one registered model.
+///
+/// Lash never parses it: `glm-5.3-flash@tensorx` names a registration, not a
+/// provider and a model. A session records the key with the metadata the
+/// host's registry minted for it ([`RecordedModel`]), so the key alone never
+/// decides how a recorded root runs.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ModelKey(String);
+
+impl ModelKey {
+    /// A key as the host spells it. A registry refuses an empty key when the
+    /// model is registered, so a lookup of one simply finds nothing.
+    pub fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ModelKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&str> for ModelKey {
+    fn from(key: &str) -> Self {
+        Self::new(key)
+    }
+}
+
+impl From<String> for ModelKey {
+    fn from(key: String) -> Self {
+        Self::new(key)
+    }
+}
+
+/// Host-supplied facts about one registered model (ADR 0026): the exact wire
+/// model a request names, its limits, its execution capabilities and the
+/// request extensions it records.
+///
+/// It carries no reasoning selection and no attachment-acceptance rules: both
+/// are session config ([`ModelConfig::reasoning`] and the session policy's
+/// attachment acceptance), chosen separately from the model.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ModelSpec {
-    pub id: String,
+pub struct ModelMetadata {
+    /// The model id the provider's wire names.
+    pub wire_model: String,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    #[serde(default)]
-    pub variant: ReasoningSelection,
     pub limits: ModelLimits,
     /// Host-supplied capability metadata: reasoning controls and cache-control
-    /// dialect accepted by this model route. Lash validates the requested
-    /// variant and threads all capability data onto every provider request.
+    /// dialect accepted by this model. Lash validates the session's reasoning
+    /// selection against it and threads it onto every provider request.
     #[serde(default, skip_serializing_if = "ModelCapability::is_empty")]
     pub capability: ModelCapability,
+    /// What this model's requests do where a request states nothing:
+    /// recorded with the binding, so a transport change never alters it.
+    #[serde(default, skip_serializing_if = "ModelRequestDefaults::is_default")]
+    pub request_defaults: ModelRequestDefaults,
 }
 
-impl ModelSpec {
-    pub fn builder(id: impl Into<String>) -> ModelSpecBuilder {
-        ModelSpecBuilder::new(id)
+impl ModelMetadata {
+    pub fn builder(wire_model: impl Into<String>) -> ModelMetadataBuilder {
+        ModelMetadataBuilder::new(wire_model)
     }
 
-    pub fn new(id: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
-        Self {
-            id: id.into(),
-            extra_body: serde_json::Map::new(),
-            variant: ReasoningSelection::ProviderDefault,
-            limits: ModelLimits {
+    pub fn new(wire_model: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
+        Self::with_limits(
+            wire_model,
+            ModelLimits {
                 context_window_tokens,
                 output_token_capacity: None,
             },
-            capability: ModelCapability::default(),
-        }
+        )
     }
 
-    pub fn with_limits(
-        id: impl Into<String>,
-        variant: ReasoningSelection,
-        limits: ModelLimits,
-    ) -> Self {
+    pub fn with_limits(wire_model: impl Into<String>, limits: ModelLimits) -> Self {
         Self {
-            id: id.into(),
+            wire_model: wire_model.into(),
             extra_body: serde_json::Map::new(),
-            variant,
             limits,
             capability: ModelCapability::default(),
+            request_defaults: ModelRequestDefaults::default(),
         }
-    }
-
-    pub fn with_variant(mut self, variant: ReasoningSelection) -> Self {
-        self.variant = variant;
-        self
     }
 
     pub fn with_capability(mut self, capability: ModelCapability) -> Self {
@@ -70,23 +119,9 @@ impl ModelSpec {
         self
     }
 
-    /// The prompt budget bounds history pruning and model input construction.
-    ///
-    /// This constructor never produces
-    /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
-    /// argument is always present.
-    #[deprecated(note = "use ModelSpec::builder")]
-    pub fn from_token_limits(
-        id: impl Into<String>,
-        variant: ReasoningSelection,
-        context_window_tokens: usize,
-        output_token_capacity: Option<usize>,
-    ) -> Result<Self, ModelLimitsError> {
-        Ok(Self::with_limits(
-            id,
-            variant,
-            ModelLimits::validated(context_window_tokens, output_token_capacity)?,
-        ))
+    pub fn with_request_defaults(mut self, request_defaults: ModelRequestDefaults) -> Self {
+        self.request_defaults = request_defaults;
+        self
     }
 
     /// Exposes the non-zero prompt budget protocol implementors use for history pruning rather than
@@ -96,36 +131,31 @@ impl ModelSpec {
     }
 }
 
-/// Builder for host-supplied [`ModelSpec`] metadata.
+/// Builder for host-supplied [`ModelMetadata`].
 ///
-/// The context-window token budget is required; variant, output capacity, and
-/// capability metadata retain their provider-default values when omitted.
-/// Setters follow the builder convention and therefore have no `with_` prefix.
+/// The context-window token budget is required; output capacity and
+/// capability metadata are absent when omitted. Setters follow the builder
+/// convention and therefore have no `with_` prefix.
 #[derive(Clone, Debug)]
-pub struct ModelSpecBuilder {
-    id: String,
-    variant: ReasoningSelection,
+pub struct ModelMetadataBuilder {
+    wire_model: String,
     context_window_tokens: Option<usize>,
     output_token_capacity: Option<usize>,
     capability: ModelCapability,
     extra_body: serde_json::Map<String, serde_json::Value>,
+    request_defaults: ModelRequestDefaults,
 }
 
-impl ModelSpecBuilder {
-    fn new(id: impl Into<String>) -> Self {
+impl ModelMetadataBuilder {
+    fn new(wire_model: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            variant: ReasoningSelection::ProviderDefault,
+            wire_model: wire_model.into(),
             context_window_tokens: None,
             output_token_capacity: None,
             capability: ModelCapability::default(),
             extra_body: serde_json::Map::new(),
+            request_defaults: ModelRequestDefaults::default(),
         }
-    }
-
-    pub fn variant(mut self, variant: ReasoningSelection) -> Self {
-        self.variant = variant;
-        self
     }
 
     pub fn context_window_tokens(mut self, context_window_tokens: usize) -> Self {
@@ -149,30 +179,118 @@ impl ModelSpecBuilder {
         self
     }
 
-    pub fn build(self) -> Result<ModelSpec, ModelLimitsError> {
+    /// Surface the reasoning the provider streams in this model's responses.
+    pub fn expose_thinking(mut self, expose_thinking: bool) -> Self {
+        self.request_defaults.expose_thinking = expose_thinking;
+        self
+    }
+
+    /// The output-token cap of this model's calls whose request sets none.
+    pub fn max_output_tokens(mut self, max_output_tokens: u64) -> Self {
+        self.request_defaults.max_output_tokens = Some(max_output_tokens);
+        self
+    }
+
+    /// The prompt-cache lifetime hint of this model's requests.
+    pub fn cache_retention(mut self, cache_retention: CacheRetention) -> Self {
+        self.request_defaults.cache_retention = cache_retention;
+        self
+    }
+
+    pub fn build(self) -> Result<ModelMetadata, ModelLimitsError> {
         let context_window_tokens = self
             .context_window_tokens
             .ok_or(ModelLimitsError::MissingContextWindowTokens)?;
-        Ok(ModelSpec::with_limits(
-            self.id,
-            self.variant,
+        Ok(ModelMetadata::with_limits(
+            self.wire_model,
             ModelLimits::validated(context_window_tokens, self.output_token_capacity)?,
         )
         .with_capability(self.capability)
-        .with_extra_body(self.extra_body))
+        .with_extra_body(self.extra_body)
+        .with_request_defaults(self.request_defaults))
     }
 }
 
-impl Default for ModelSpec {
-    #[expect(
-        clippy::expect_used,
-        reason = "NonZeroUsize::new(1) on a literal one is always Some"
-    )]
-    fn default() -> Self {
-        Self::new(
-            String::new(),
-            NonZeroUsize::new(1).expect("one is non-zero"),
-        )
+/// A model binding a host's [`RuntimeModels`](crate::provider::RuntimeModels)
+/// minted for one key: the key and the metadata it served at that moment.
+///
+/// A session records it at creation and at every model change, and a root
+/// copies it into its recorded run. Every consumer — admission, pruning,
+/// request construction, replay — reads these recorded facts; a later
+/// catalog edit reaches the session only through another model patch.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedModel {
+    key: ModelKey,
+    metadata: ModelMetadata,
+}
+
+impl RecordedModel {
+    /// Mint the binding a registry serves `key` with. Only a
+    /// [`RuntimeModels`](crate::provider::RuntimeModels) implementation
+    /// calls this: everything else copies a recorded value.
+    pub fn mint(key: ModelKey, metadata: ModelMetadata) -> Self {
+        Self { key, metadata }
+    }
+
+    pub fn key(&self) -> &ModelKey {
+        &self.key
+    }
+
+    pub fn metadata(&self) -> &ModelMetadata {
+        &self.metadata
+    }
+
+    /// The recorded wire model a request names.
+    pub fn wire_model(&self) -> &str {
+        &self.metadata.wire_model
+    }
+
+    pub fn context_window_tokens(&self) -> usize {
+        self.metadata.context_window_tokens()
+    }
+}
+
+/// A session's model selection: the recorded binding and the reasoning it
+/// runs that model with. Reasoning is chosen independently of the model and
+/// validated against the recorded capability; the metadata never carries a
+/// second default for it.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ModelConfig {
+    pub model: RecordedModel,
+    #[serde(default)]
+    pub reasoning: ReasoningSelection,
+}
+
+impl ModelConfig {
+    /// `model` with the provider's default reasoning.
+    pub fn new(model: RecordedModel) -> Self {
+        Self {
+            model,
+            reasoning: ReasoningSelection::ProviderDefault,
+        }
+    }
+
+    pub fn with_reasoning(mut self, reasoning: ReasoningSelection) -> Self {
+        self.reasoning = reasoning;
+        self
+    }
+
+    pub fn key(&self) -> &ModelKey {
+        self.model.key()
+    }
+
+    pub fn metadata(&self) -> &ModelMetadata {
+        self.model.metadata()
+    }
+
+    pub fn context_window_tokens(&self) -> usize {
+        self.model.context_window_tokens()
     }
 }
 
@@ -190,7 +308,7 @@ pub struct ModelLimits {
     pub output_token_capacity: Option<NonZeroUsize>,
 }
 
-/// Invalid or incomplete token-limit metadata supplied for a model route.
+/// Invalid or incomplete token-limit metadata supplied for a model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ModelLimitsError {
@@ -203,17 +321,6 @@ pub enum ModelLimitsError {
 }
 
 impl ModelLimits {
-    /// This constructor never produces
-    /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
-    /// argument is always present.
-    #[deprecated(note = "use ModelSpec::builder")]
-    pub fn from_token_limits(
-        context_window_tokens: usize,
-        output_token_capacity: Option<usize>,
-    ) -> Result<Self, ModelLimitsError> {
-        Self::validated(context_window_tokens, output_token_capacity)
-    }
-
     fn validated(
         context_window_tokens: usize,
         output_token_capacity: Option<usize>,
@@ -230,25 +337,20 @@ impl ModelLimits {
     }
 }
 
-impl Default for ModelLimits {
-    #[expect(
-        clippy::expect_used,
-        reason = "NonZeroUsize::new(1) on a literal one is always Some"
-    )]
-    fn default() -> Self {
-        Self {
-            context_window_tokens: NonZeroUsize::new(1).expect("one is non-zero"),
-            output_token_capacity: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn metadata() -> ModelMetadata {
+        ModelMetadata::builder("provider/model")
+            .context_window_tokens(8_192)
+            .output_token_capacity(1_024)
+            .build()
+            .expect("valid metadata")
+    }
+
     #[test]
-    fn model_spec_reasoning_selection_serde_is_explicit() {
+    fn model_config_reasoning_selection_serde_is_explicit() {
         for (selection, expected) in [
             (
                 ReasoningSelection::ProviderDefault,
@@ -260,192 +362,33 @@ mod tests {
                 serde_json::json!({ "effort": "high" }),
             ),
         ] {
-            let spec = ModelSpec::new("model", NonZeroUsize::new(1024).expect("non-zero"))
-                .with_variant(selection.clone());
-            let json = serde_json::to_value(&spec).expect("serialize model spec");
-            assert_eq!(json["variant"], expected);
-            let round_trip: ModelSpec =
-                serde_json::from_value(json).expect("deserialize model spec");
-            assert_eq!(round_trip.variant, selection);
+            let config = ModelConfig::new(RecordedModel::mint(ModelKey::new("key"), metadata()))
+                .with_reasoning(selection.clone());
+            let json = serde_json::to_value(&config).expect("serialize model config");
+            assert_eq!(json["reasoning"], expected);
+            assert_eq!(json["model"]["key"], "key");
+            let round_trip: ModelConfig =
+                serde_json::from_value(json).expect("deserialize model config");
+            assert_eq!(round_trip.reasoning, selection);
+            assert_eq!(round_trip, config);
         }
     }
 
+    /// Metadata has no reasoning selection of its own: a recorded binding
+    /// that carried one would be a second default beside the session's.
     #[test]
-    fn model_spec_constructors_preserve_identity_variant_and_limits() {
-        let limits = ModelLimits {
-            context_window_tokens: NonZeroUsize::new(8_192).expect("non-zero context window"),
-            output_token_capacity: NonZeroUsize::new(1_024),
-        };
-
-        let spec = ModelSpec::with_limits(
-            "provider/model",
-            ReasoningSelection::Effort("fast".to_string()),
-            limits.clone(),
-        );
-
-        assert_eq!(spec.id, "provider/model");
-        assert_eq!(spec.variant, ReasoningSelection::Effort("fast".to_string()));
-        assert_eq!(spec.limits, limits);
-
-        let changed = spec
-            .clone()
-            .with_variant(ReasoningSelection::Effort("accurate".to_string()));
-        assert_eq!(changed.id, "provider/model");
-        assert_eq!(
-            changed.variant,
-            ReasoningSelection::Effort("accurate".to_string())
-        );
-        assert_eq!(changed.limits, spec.limits);
-
-        let cleared = changed.with_variant(ReasoningSelection::ProviderDefault);
-        assert_eq!(cleared.id, "provider/model");
-        assert_eq!(cleared.variant, ReasoningSelection::ProviderDefault);
-        assert_eq!(cleared.context_window_tokens(), 8_192);
+    fn model_metadata_refuses_a_reasoning_variant() {
+        let mut json = serde_json::to_value(metadata()).expect("serialize metadata");
+        json["variant"] = serde_json::json!("disabled");
+        serde_json::from_value::<ModelMetadata>(json).expect_err("a variant is not model metadata");
     }
 
     #[test]
-    fn model_token_limit_constructors_reject_zero_and_preserve_output_cap() {
-        let spec = ModelSpec::builder("provider/model")
-            .variant(ReasoningSelection::Effort("variant-a".to_string()))
-            .context_window_tokens(200_000)
-            .output_token_capacity(4_096)
-            .build()
-            .expect("valid token limits");
-
-        assert_eq!(spec.id, "provider/model");
-        assert_eq!(
-            spec.variant,
-            ReasoningSelection::Effort("variant-a".to_string())
-        );
-        assert_eq!(spec.context_window_tokens(), 200_000);
-        assert_eq!(
-            spec.limits.output_token_capacity.map(NonZeroUsize::get),
-            Some(4_096)
-        );
-
-        let context_error = ModelSpec::builder("bad-context")
-            .context_window_tokens(0)
-            .output_token_capacity(1)
-            .build()
-            .expect_err("zero context");
-        assert_eq!(context_error, ModelLimitsError::ZeroContextWindowTokens);
-        assert_eq!(
-            context_error.to_string(),
-            "context_window_tokens must be greater than zero"
-        );
-
-        let output_error = ModelSpec::builder("bad-output")
-            .context_window_tokens(1)
-            .output_token_capacity(0)
-            .build()
-            .expect_err("zero output cap");
-        assert_eq!(output_error, ModelLimitsError::ZeroOutputTokenCapacity);
-        assert_eq!(
-            output_error.to_string(),
-            "output_token_capacity must be greater than zero"
-        );
-    }
-
-    /// The deprecated token-limit constructors are still the public route hosts
-    /// take to build a spec from raw `usize` budgets, so their validation seam
-    /// and the values they carry through are pinned here, not only through the
-    /// builder.
-    #[test]
-    #[expect(
-        deprecated,
-        reason = "this test is the assertion floor for the deprecated token-limit constructors"
-    )]
-    fn model_deprecated_token_limit_constructors_carry_limits_and_refuse_zero() {
-        let spec = ModelSpec::from_token_limits(
-            "provider/deprecated",
-            ReasoningSelection::Effort("high".to_string()),
-            128_000,
-            Some(8_192),
-        )
-        .expect("valid token limits");
-
-        assert_eq!(spec.id, "provider/deprecated");
-        assert_eq!(spec.variant, ReasoningSelection::Effort("high".to_string()));
-        assert_eq!(spec.context_window_tokens(), 128_000);
-        assert_eq!(
-            spec.limits.output_token_capacity.map(NonZeroUsize::get),
-            Some(8_192)
-        );
-        assert_ne!(
-            spec,
-            ModelSpec::default(),
-            "a constructed spec must not collapse to the default spec"
-        );
-
-        let unknown_output_cap = ModelSpec::from_token_limits(
-            "provider/unknown-output",
-            ReasoningSelection::ProviderDefault,
-            4_096,
-            None,
-        )
-        .expect("an unknown output ceiling is valid");
-        assert_eq!(unknown_output_cap.context_window_tokens(), 4_096);
-        assert_eq!(unknown_output_cap.limits.output_token_capacity, None);
-
-        assert_eq!(
-            ModelSpec::from_token_limits(
-                "provider/zero-context",
-                ReasoningSelection::ProviderDefault,
-                0,
-                Some(16),
-            )
-            .expect_err("a zero prompt budget is refused"),
-            ModelLimitsError::ZeroContextWindowTokens
-        );
-        assert_eq!(
-            ModelSpec::from_token_limits(
-                "provider/zero-output",
-                ReasoningSelection::ProviderDefault,
-                4_096,
-                Some(0),
-            )
-            .expect_err("a present zero output capacity is refused"),
-            ModelLimitsError::ZeroOutputTokenCapacity
-        );
-
-        let limits = ModelLimits::from_token_limits(64_000, Some(4_096)).expect("valid limits");
-        assert_eq!(limits.context_window_tokens.get(), 64_000);
-        assert_eq!(
-            limits.output_token_capacity.map(NonZeroUsize::get),
-            Some(4_096)
-        );
-        assert_ne!(
-            limits,
-            ModelLimits::default(),
-            "constructed limits must not collapse to the default limits"
-        );
-
-        assert_eq!(
-            ModelLimits::from_token_limits(32_000, None).expect("valid limits"),
-            ModelLimits {
-                context_window_tokens: NonZeroUsize::new(32_000).expect("non-zero"),
-                output_token_capacity: None,
-            }
-        );
-        assert_eq!(
-            ModelLimits::from_token_limits(0, None).expect_err("a zero prompt budget is refused"),
-            ModelLimitsError::ZeroContextWindowTokens
-        );
-        assert_eq!(
-            ModelLimits::from_token_limits(32_000, Some(0))
-                .expect_err("a present zero output capacity is refused"),
-            ModelLimitsError::ZeroOutputTokenCapacity
-        );
-    }
-
-    #[test]
-    fn model_spec_builder_covers_model_metadata_and_requires_context_window() {
-        let spec = ModelSpec::builder("provider/model")
-            .variant(ReasoningSelection::Effort("high".to_string()))
+    fn model_metadata_builder_covers_limits_capability_and_requires_context_window() {
+        let spec = ModelMetadata::builder("provider/model")
             .context_window_tokens(200_000)
             .output_token_capacity(8_192)
             .capability(ModelCapability {
-                attachment_acceptance: Default::default(),
                 reasoning: Some(crate::provider::ReasoningCapability {
                     efforts: vec!["high".to_string()],
                     ..Default::default()
@@ -455,8 +398,7 @@ mod tests {
             .build()
             .expect("valid model metadata");
 
-        assert_eq!(spec.id, "provider/model");
-        assert_eq!(spec.variant, ReasoningSelection::Effort("high".to_string()));
+        assert_eq!(spec.wire_model, "provider/model");
         assert_eq!(spec.context_window_tokens(), 200_000);
         assert_eq!(
             spec.limits.output_token_capacity.map(NonZeroUsize::get),
@@ -465,10 +407,22 @@ mod tests {
         assert!(!spec.capability.is_empty());
 
         assert_eq!(
-            ModelSpec::builder("missing-context")
+            ModelMetadata::builder("missing-context")
                 .build()
                 .expect_err("context budget is required"),
             ModelLimitsError::MissingContextWindowTokens
         );
+        let context_error = ModelMetadata::builder("bad-context")
+            .context_window_tokens(0)
+            .output_token_capacity(1)
+            .build()
+            .expect_err("zero context");
+        assert_eq!(context_error, ModelLimitsError::ZeroContextWindowTokens);
+        let output_error = ModelMetadata::builder("bad-output")
+            .context_window_tokens(1)
+            .output_token_capacity(0)
+            .build()
+            .expect_err("zero output cap");
+        assert_eq!(output_error, ModelLimitsError::ZeroOutputTokenCapacity);
     }
 }

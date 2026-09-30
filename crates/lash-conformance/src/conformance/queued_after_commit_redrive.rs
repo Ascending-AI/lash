@@ -141,8 +141,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
         );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let mut accepted = Vec::new();
     for text in ["first queued question", "second queued question"] {

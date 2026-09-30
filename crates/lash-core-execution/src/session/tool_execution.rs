@@ -1503,7 +1503,7 @@ mod attachment_materialization_tests {
             crate::ModelToolReturn::from_output("workspace_badge".to_string(), &output);
 
         surface_attachment_materialization_notices(
-            &crate::attachments::attachment_test_capability().attachment_acceptance,
+            &crate::attachments::attachment_test_acceptance(),
             &output,
             &mut model_return,
         );

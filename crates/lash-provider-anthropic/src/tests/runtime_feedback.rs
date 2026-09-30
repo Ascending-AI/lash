@@ -197,11 +197,9 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
             }],
         ),
     ]);
+    req.request_defaults.cache_retention = CacheRetention::Short;
     req.model_capability.native_mid_conversation_system = true;
-    let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-        cache_retention: CacheRetention::Short,
-        ..Default::default()
-    });
+    let provider = AnthropicProvider::new("key");
     let body = provider.build_request_body(&req).unwrap();
     let parts = body["messages"][2]["content"].as_array().unwrap();
     assert_eq!(parts[0]["type"], "tool_result");

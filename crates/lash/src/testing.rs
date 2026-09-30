@@ -34,6 +34,11 @@ pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_attempt_context_with_execution_binding, test_code_protocol_factories,
 };
+/// Model catalogs for host tests: a registry serving one model through a
+/// test provider, and the metadata and recorded selection it mints.
+pub use lash_core::testing::{
+    single_model_registry, standard_test_models, test_model_config, test_model_metadata,
+};
 
 /// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)
 /// constructors for host tests that drive context-bound execution —

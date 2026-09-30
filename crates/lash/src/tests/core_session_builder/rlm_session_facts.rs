@@ -132,8 +132,7 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -207,8 +206,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
         .build(crate::testing::runtime_lease_owner())?;
 
@@ -341,8 +339,7 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -429,8 +426,7 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
 #[tokio::test]
 async fn create_options_naming_a_dialect_fail_during_session_creation() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let mut options = lash_core::PluginOptions::default();
     options.plugins.insert(
@@ -491,8 +487,7 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
             .into_handle()
     };
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("projected-typescript")
@@ -548,8 +543,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_ch
     use crate::rlm::RlmSessionExt as _;
 
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-typed-read")
@@ -631,8 +625,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_ch
 #[tokio::test]
 async fn a_render_change_emits_its_committed_revision() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-resident-publication")
@@ -684,8 +677,7 @@ async fn a_render_change_written_against_a_stale_revision_settles_stale() -> Res
 
     let build_core = || {
         explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-            .provider(mock_provider())
-            .model(mock_model_spec())
+            .serve_test_model(mock_provider(), mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
     };
     let stale_core = build_core()?;
@@ -756,8 +748,7 @@ async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()
     .into();
     let writes = ledger.expect("the catalog is decorated");
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let finish_required = crate::rlm::RlmTermination::FinishRequired { schema: None };
     create_stating_termination(&core, "rlm-reopen-ignores", finish_required.clone()).await?;
@@ -812,8 +803,7 @@ async fn a_render_change_survives_a_cold_reopen() -> Result<()> {
     let backend = double.lash_backend();
 
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core

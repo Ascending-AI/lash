@@ -68,8 +68,7 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
         double.lash_backend(),
         lash_core::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
         id: "protocol",
         calls: Arc::clone(&calls),
@@ -120,8 +119,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(SurfacePluginFactory))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -182,8 +180,7 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("static-tools").created().await.open().await?;
@@ -201,8 +198,7 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("tool-state").created().await.open().await?;
@@ -255,8 +251,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -275,8 +270,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("persisted-tools"),
         policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -289,8 +283,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
 
@@ -369,8 +362,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                 )),
             ),
         )
-        .provider(standard_provider)
-        .model(mock_model_spec())
+        .serve_test_model(standard_provider, mock_model_spec())
         .tools(Arc::new(LongTextTools))
         .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core
@@ -407,11 +399,13 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         #[cfg(feature = "rlm")]
         {
             let rlm_core = explicit_ephemeral_facets(rlm_core_builder().await)
-                .provider(queued_text_provider(vec![typescript_block(
-                    r#"const value = await tools.app_lookup({});
+                .serve_test_model(
+                    queued_text_provider(vec![typescript_block(
+                        r#"const value = await tools.app_lookup({});
 finish("done");"#,
-                )]))
-                .model(mock_model_spec())
+                    )]),
+                    mock_model_spec(),
+                )
                 .tools(Arc::new(LongTextTools))
                 .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core
@@ -504,8 +498,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(BuilderSentinelTools {
         calls: Arc::clone(&calls),
     }))

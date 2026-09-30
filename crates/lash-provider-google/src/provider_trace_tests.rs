@@ -95,7 +95,10 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             Some(LlmProviderTraceSender::new(move |event| {
                 event_sink.lock_recover().push(event);
             })),
-            StreamTermination::EofTolerated,
+            crate::provider::ResponseReading {
+                stream_termination: StreamTermination::EofTolerated,
+                expose_thinking: false,
+            },
             None,
         )
         .await
@@ -142,7 +145,10 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             Some(LlmProviderTraceSender::new(move |event| {
                 error_event_sink.lock_recover().push(event);
             })),
-            StreamTermination::EofTolerated,
+            crate::provider::ResponseReading {
+                stream_termination: StreamTermination::EofTolerated,
+                expose_thinking: false,
+            },
             None,
         )
         .await

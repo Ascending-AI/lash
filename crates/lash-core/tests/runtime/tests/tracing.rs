@@ -110,13 +110,18 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         serializations_after_first,
         "an identical composition must not serialize schemas or allocate a fresh schema Vec"
     );
+    let noise_key = serve_model_beside(
+        &mut runtime,
+        "different-route",
+        lash_core::ModelMetadata::builder("different-route")
+            .context_window_tokens(150_000)
+            .build()
+            .expect("route-noise model"),
+    );
     crate::runtime_support::configure_storeless(
         &mut runtime,
         lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelSpec::builder("different-route")
-                .context_window_tokens(150_000)
-                .build()
-                .expect("route-noise model"),
+            model: noise_key,
         }),
     )
     .await;

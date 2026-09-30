@@ -164,12 +164,11 @@ impl LashRuntime {
             .require_runtime_owner()
             .map_err(SessionError::Plugin)?;
         // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
-        // by fresh-session constructors) carries an empty policy.
+        // by fresh-session constructors) selects no model.
         // Fill it in from the caller's policy so tests and hosts that
         // pass a real policy alongside default state don't trip the explicit
-        // model-spec guard below.
-        let state_policy_was_unconfigured = state.policy.recorded_provider_id().is_empty()
-            && state.policy.model.id.trim().is_empty();
+        // model guard below.
+        let state_policy_was_unconfigured = state.policy.model.is_none();
         if state_policy_was_unconfigured {
             state.policy = policy.clone();
         }
@@ -178,10 +177,9 @@ impl LashRuntime {
             state.authority.subagent = services.plugins.subagent_context();
         }
         state.ensure_agent_frame_initialized();
-        if state.effective_policy().model.id.trim().is_empty() {
+        if state.effective_policy().model.is_none() {
             return Err(SessionError::Protocol(
-                "session policy missing model spec; hosts must supply explicit model metadata"
-                    .to_string(),
+                "session policy selects no model; hosts must select a registered model".to_string(),
             ));
         }
         let mut host = host;

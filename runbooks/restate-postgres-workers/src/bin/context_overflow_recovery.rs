@@ -43,6 +43,9 @@ use lash::tools::{
 };
 use serde_json::{Value, json};
 
+/// The key the recovery run serves its one scripted model under.
+const MODEL_KEY: &str = "context-overflow-recovery-mock";
+
 /// The oversized tool result. Large enough that no reader mistakes it for an
 /// ordinary payload, small enough that the harness stays fast.
 const OVERSIZED_BYTES: usize = 512 * 1024;
@@ -361,17 +364,19 @@ impl Harness {
             }
         };
         let builder = builder
-            .provider(scripted_provider(
-                script,
-                protocol,
-                Arc::clone(&provider_calls),
+            .models(Arc::new(
+                lash::ModelRegistry::new().register(
+                    MODEL_KEY,
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("context-overflow-recovery-mock")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .map_err(anyhow::Error::msg)?,
+                        scripted_provider(script, protocol, Arc::clone(&provider_calls)),
+                    ),
+                )?,
             ))
-            .model(
-                lash::ModelSpec::builder("context-overflow-recovery-mock")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .map_err(anyhow::Error::msg)?,
-            )
+            .model(MODEL_KEY)
             .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .trace_jsonl_path(

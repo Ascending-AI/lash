@@ -473,13 +473,8 @@ finish("done via Restate E2E");
             lash::TurnBudget::Unbounded,
             factory,
         )
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("valid mock model spec"),
-            )
+            .serve_test_model(provider, lash::ModelMetadata::builder("mock-model")
+                    .context_window_tokens(200_000).build().expect("valid mock model spec"))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             // The `processes` module is catalogue presence, not an ability bit

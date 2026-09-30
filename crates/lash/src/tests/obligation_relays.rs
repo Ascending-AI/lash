@@ -139,7 +139,7 @@ async fn recorded_backend() -> (lash_core::Backend, Passes) {
 
 fn configured(builder: crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder {
     builder
-        .model(mock_model_spec())
+        .model("mock-model")
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
 }

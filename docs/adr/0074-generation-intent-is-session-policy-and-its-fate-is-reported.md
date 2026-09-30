@@ -24,11 +24,11 @@ explicitly replaces them.
 The durable config includes the generation controls and session prompt. The
 live core prompt remains a separate base layer rendered on each request. A
 legacy absent session prompt reconstructs as an empty session layer; explicit
-emptiness also remains empty. Provider handles on open resolve the recorded
-provider pin and cannot silently replace it.
+emptiness also remains empty. On open, the recorded model binds back to its
+transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the
-request's model. `ModelSpec` clamps a requested output cap to that model's
+request's model. `ModelMetadata` clamps a requested output cap to that model's
 capacity without rewriting stored intent. A cap is an upper bound, so using a
 smaller capacity satisfies bounded execution while reducing the requested
 allowance. The runtime records `ClampedToCapacity` on the response and attempt
@@ -36,8 +36,14 @@ receipts. Direct calls through a tool's `AttemptContext::direct_completions`
 carry explicit request intent; a tool selecting a different model owns that
 pairing.
 
-Provider resolution layers its configured cap beneath request intent exactly
-once. It invents no cap or temperature. Unsupported explicit controls are typed,
+Provider resolution layers the recorded model's default cap
+(`ModelRequestDefaults::max_output_tokens`) beneath request intent exactly
+once. It invents no cap or temperature. The model's other behavioural defaults,
+thinking visibility and prompt-cache retention, are recorded with the model in
+the same `ModelRequestDefaults` and ride every `LlmRequest`, so a replay sends
+what was recorded rather than whatever the provider handle is configured with
+now (FIG-4374). `ProviderOptions` keeps only transport concerns: reliability,
+response budgets and response-metadata allowlists. Unsupported explicit controls are typed,
 non-retryable refusals before I/O under
 [ADR 0121](0121-host-generation-settings-are-sent-or-refused.md). A mixed-model
 session uses an explicit replacement or update to clear incompatible intent.

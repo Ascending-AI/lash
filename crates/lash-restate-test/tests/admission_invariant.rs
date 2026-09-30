@@ -23,8 +23,8 @@ use lash_restate_test::{RestateTestBackend, ServerConfig};
 
 const CODE: &str = "process_segment_admission_invariant";
 
-fn model_spec() -> lash_core::ModelSpec {
-    lash_core::ModelSpec::builder("mock-model")
+fn model_spec() -> lash_core::ModelMetadata {
+    lash_core::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("model spec")
@@ -57,8 +57,7 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
             "admission-invariant",

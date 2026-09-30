@@ -56,7 +56,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::LlmCall {
-                provider_id: "test".to_string(),
+                model_key: lash_core::ModelKey::new("test"),
                 request: Box::new(llm_spec()),
             },
             "journaled_run",

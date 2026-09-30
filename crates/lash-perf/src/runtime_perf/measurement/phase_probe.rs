@@ -172,59 +172,39 @@ async fn deep_turn_session(
     source_id: String,
     probe: Arc<RuntimePerfPhaseProbe>,
 ) -> anyhow::Result<lash::LashSession> {
-    use lash_core::provider::Provider as _;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let scripted =
-        super::super::providers::benchmark_provider(RuntimePerfScenario::DeepTurnComposition);
-    let config = scripted.serialize_config();
     let durable = runtime.session().durable();
     let turn_id = turn_id.clone();
-    let first_call = Arc::new(AtomicBool::new(true));
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind(scripted.kind())
-        .serialize_config(move || config.clone())
-        .requires_streaming(scripted.requires_streaming())
-        .options(scripted.options())
-        .complete(move |request| {
-            let mut scripted = scripted.clone();
-            let durable = durable.clone();
-            let turn_id = turn_id.clone();
-            let source_id = source_id.clone();
-            let first_call = Arc::clone(&first_call);
-            async move {
-                // A provider call follows durable admission. Enqueue before
-                // returning its response, so AfterWork still sees the marker.
-                if first_call.swap(false, Ordering::SeqCst) {
-                    let root = durable.unfinished_root().await.map_err(|error| {
+    // A provider call follows durable admission. Enqueue inside the turn's
+    // first call, before it answers, so AfterWork still sees the marker.
+    runtime
+        .provider_control()?
+        .before_next_completion(Box::new(move || {
+            Box::pin(async move {
+                let root = durable.unfinished_root().await.map_err(|error| {
+                    lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                })?;
+                if !root.is_some_and(|root| root.root == turn_id) {
+                    return Err(lash_core::llm::transport::LlmTransportError::new(
+                        "deep composition ingress requires its durably running turn",
+                    ));
+                }
+                durable
+                    .send(TurnInput::text("deep composition ingress marker"))
+                    .id(source_id)
+                    .ingress(lash_core::TurnInputIngress::active_turn(
+                        &turn_id,
+                        lash_core::TurnInputCheckpointBoundary::AfterWork,
+                    ))
+                    .await
+                    .map_err(|error| {
                         lash_core::llm::transport::LlmTransportError::new(error.to_string())
                     })?;
-                    if !root.is_some_and(|root| root.root == turn_id) {
-                        return Err(lash_core::llm::transport::LlmTransportError::new(
-                            "deep composition ingress requires its durably running turn",
-                        ));
-                    }
-                    durable
-                        .send(TurnInput::text("deep composition ingress marker"))
-                        .id(source_id)
-                        .ingress(lash_core::TurnInputIngress::active_turn(
-                            &turn_id,
-                            lash_core::TurnInputCheckpointBoundary::AfterWork,
-                        ))
-                        .await
-                        .map_err(|error| {
-                            lash_core::llm::transport::LlmTransportError::new(error.to_string())
-                        })?;
-                }
-                scripted.complete(request).await
-            }
-        })
-        .build()
-        .into_handle();
+                Ok(())
+            })
+        }));
     let session = runtime
         .core()
         .session(runtime.session().session_id())
-        .provider(provider)
         .open()
         .await?;
     session.set_turn_phase_probe(probe).await;

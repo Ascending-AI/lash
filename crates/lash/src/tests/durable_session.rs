@@ -88,8 +88,7 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -639,8 +638,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = drive_core
         .session("checkpointed")
@@ -691,8 +689,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let absent = core.session("sqlite-absent").durable().await?;
@@ -768,8 +765,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("durable-observation")
@@ -830,8 +826,7 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
@@ -880,8 +875,7 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-beside-writer");
     let writer = core
@@ -1133,8 +1127,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core
@@ -1185,8 +1178,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
             .into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
@@ -1318,8 +1310,7 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     // The session exists because create wrote its catalog metadata.
@@ -1387,8 +1378,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-held-input");
     let session = core
@@ -1472,8 +1462,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
             .into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
@@ -1535,8 +1524,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     // `idle`'s created handle still holds a writer claim: the drive core's
     // open races its release under the double.
@@ -1573,8 +1561,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("create-parent")
@@ -1687,8 +1674,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("create-deleted")
@@ -1729,8 +1715,7 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> 
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
     let durable = core.session("fig3544-enqueue-conflict").durable().await?;

@@ -192,6 +192,12 @@ pub struct SessionCreateRequest {
     pub start: SessionStartPoint,
     #[serde(default)]
     pub policy: Option<SessionPolicy>,
+    /// A model key the child runs instead of the recorded model its policy
+    /// carries. The creating runtime's models mint it when the child is
+    /// created, and the child records that binding with its config. `None`
+    /// keeps the policy's recorded model verbatim; nothing re-resolves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::ModelKey>,
     #[serde(default)]
     pub plugin_source: SessionPluginSource,
     #[serde(default)]
@@ -232,6 +238,7 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             plugin_init: None,
+            model: None,
         }
     }
 
@@ -255,6 +262,7 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             plugin_init: None,
+            model: None,
         }
     }
 
@@ -279,7 +287,14 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             plugin_init: None,
+            model: None,
         }
+    }
+
+    /// Run the child on `key`, minted when the child is created.
+    pub fn with_model(mut self, key: crate::ModelKey) -> Self {
+        self.model = Some(key);
+        self
     }
 
     pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {

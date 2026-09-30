@@ -8,7 +8,7 @@
 //! the `testing`-feature seam that keeps exactly that surface reachable without
 //! widening the crate's shipped API.
 
-pub use crate::attachments::test_capability::attachment_test_capability;
+pub use crate::attachments::test_capability::attachment_test_acceptance;
 pub use crate::attachments::{
     AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
 };

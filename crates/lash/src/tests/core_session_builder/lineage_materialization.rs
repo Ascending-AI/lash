@@ -115,8 +115,7 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
         crate::TurnBudget::Unbounded,
     ))
     .plugin(owner.clone())
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let id = SessionId::from("ordinary-lineage-child");
     let durable = core
@@ -128,7 +127,14 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
         .await?;
     assert_eq!(*owner.resolved.lock_recover(), vec![false]);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
+    let state = crate::session::load_state_from_store(
+        &id,
+        &core.policy,
+        &core.default_selection,
+        core.env.core.providers.models.as_ref(),
+        &store,
+    )
+    .await?;
     assert!(state.authority.subagent.is_none());
     assert_eq!(
         state.authority.plugin_config.get(LINEAGE),
@@ -157,7 +163,7 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
 
     let double = restate_double(0x4252).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .provider(
+        .serve_test_model(
             crate::testing::TestProvider::builder()
                 .kind("lineage-defaults")
                 .complete(|_| async {
@@ -167,8 +173,8 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 })
                 .build()
                 .into_handle(),
+            mock_model_spec(),
         )
-        .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     for engine in [false, true] {
         for (case, parent, stated, expected) in [
@@ -213,7 +219,14 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 .await?;
             let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
             let policy = core.policy.clone();
-            let state = crate::session::load_state_from_store(&id, &policy, &store).await?;
+            let state = crate::session::load_state_from_store(
+                &id,
+                &policy,
+                &core.default_selection,
+                core.env.core.providers.models.as_ref(),
+                &store,
+            )
+            .await?;
             assert!(state.authority.subagent.is_none());
             assert_eq!(
                 lash_protocol_rlm::rlm_session_config(&state.effective_protocol_turn_options())

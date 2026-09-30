@@ -11,11 +11,11 @@ use serde_json::{Value, json};
 use crate::capability::{CapabilityRegistry, SubagentSpawnContext};
 
 #[cfg(test)]
-pub(crate) fn build_session_policy(
+pub(crate) fn build_session_request(
     registry: &CapabilityRegistry,
     current_policy: &lash_core::SessionPolicy,
     capability_name: &str,
-) -> Result<lash_core::SessionPolicy, String> {
+) -> Result<SessionCreateRequest, String> {
     let current_snapshot = SessionSnapshot {
         policy: current_policy.clone(),
         ..SessionSnapshot::new(lash_core::SessionPolicy::new(
@@ -24,7 +24,7 @@ pub(crate) fn build_session_policy(
     };
     let session_spec = SessionSpec::inherit();
     let tool_access = SessionToolAccess::default();
-    let request = build_spawn_create_request(SpawnCreateRequestInput {
+    build_spawn_create_request(SpawnCreateRequestInput {
         registry,
         parent_session_id: &SessionId::from("root"),
         current_snapshot,
@@ -36,10 +36,7 @@ pub(crate) fn build_session_policy(
         seed: Default::default(),
         parent_subagent: None,
         caused_by: None,
-    })?;
-    request
-        .policy
-        .ok_or_else(|| "capability did not resolve a child policy".to_string())
+    })
 }
 
 pub(crate) struct SpawnCreateRequestInput<'a> {

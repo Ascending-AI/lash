@@ -56,13 +56,21 @@ async fn websocket_core(
         .await
         .expect("build the Restate server double");
     let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("gpt-5.4")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gpt-5.4",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gpt-5.4")
+                            .context_window_tokens(16_000)
+                            .build()
+                            .expect("valid model spec"),
+                        provider,
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gpt-5.4")
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -181,13 +189,21 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .await
         .expect("build the Restate server double");
     let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(websocket_provider(&server))
-        .model(
-            lash::ModelSpec::builder("gpt-5.4")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gpt-5.4",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gpt-5.4")
+                            .context_window_tokens(16_000)
+                            .build()
+                            .expect("valid model spec"),
+                        websocket_provider(&server),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gpt-5.4")
         .tools(Arc::new(StaticToolProvider::new(
             vec![echo_probe_definition()],
             EchoProbe {

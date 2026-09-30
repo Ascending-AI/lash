@@ -658,7 +658,6 @@ async fn complete_websocket_with_events_and_capture(
             .force_websocket_transport()
             .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
             .with_options(ProviderOptions {
-                expose_thinking: true,
                 reliability: ProviderReliability::codex()
                     .max_attempts(3)
                     .base_delay_ms(0)
@@ -837,7 +836,6 @@ async fn complete_http_with_events(
     );
     let mut provider = http_provider(dialect, transport);
     let mut options = provider.options();
-    options.expose_thinking = true;
     options.reliability = ProviderReliability::default()
         .max_attempts(3)
         .base_delay_ms(0)
@@ -858,11 +856,6 @@ fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> Pro
         "anthropic.messages" => ProviderHandle::new(
             AnthropicProvider::new("matrix-key")
                 .with_base_url(Some("https://anthropic.matrix".to_string()))
-                // Anthropic requires a cap, and lash invents none.
-                .with_options(ProviderOptions {
-                    max_output_tokens: Some(4_096),
-                    ..ProviderOptions::default()
-                })
                 .with_transport(transport)
                 .into_components(),
         ),
@@ -907,7 +900,6 @@ fn matrix_request(
 ) -> LlmRequest {
     let model = dialect_model(dialect);
     let model_capability = lash_core::ModelCapability {
-        attachment_acceptance: Default::default(),
         stream_termination: Some(StreamTermination::RequireTerminalEvidence),
         ..Default::default()
     };
@@ -918,9 +910,17 @@ fn matrix_request(
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability,
         extra_body: Default::default(),
+        // Every matrix row records a model that exposes thinking; Anthropic
+        // additionally requires a cap, and lash invents none.
+        request_defaults: lash_core::provider::ModelRequestDefaults {
+            expose_thinking: true,
+            max_output_tokens: (dialect == "anthropic.messages").then_some(4_096),
+            ..Default::default()
+        },
         generation: lash_core::GenerationOptions {
             stop_sequences: (row.variation == "stop_consumed")
                 .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())

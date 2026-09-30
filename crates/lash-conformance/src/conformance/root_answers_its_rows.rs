@@ -450,7 +450,7 @@ impl LawParts {
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 );
-        host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(model));
+        host.providers.models = crate::testing::standard_test_models(model);
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(self.session_id.clone());
         Box::pin(

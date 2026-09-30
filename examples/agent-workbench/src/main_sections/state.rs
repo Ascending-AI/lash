@@ -59,11 +59,18 @@ pub(crate) struct ModelSelection {
 }
 
 impl ModelSelection {
-    pub(crate) fn from_spec(model: &lash::ModelSpec) -> Self {
-        Self {
-            model: model.id.clone(),
-            model_variant: model.variant.effort().map(str::to_string),
-        }
+    /// The catalog key the selection names: the workbench keys every model
+    /// by its id.
+    pub(crate) fn key(&self) -> lash::ModelKey {
+        lash::ModelKey::new(self.model.clone())
+    }
+
+    /// The reasoning the selection runs its model with.
+    pub(crate) fn reasoning(&self) -> lash::provider::ReasoningSelection {
+        self.model_variant
+            .clone()
+            .map(lash::provider::ReasoningSelection::Effort)
+            .unwrap_or_default()
     }
 }
 

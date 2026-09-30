@@ -126,11 +126,10 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_provider_resolver(
-        mut self,
-        provider_resolver: Arc<dyn crate::RuntimeProviderResolver>,
-    ) -> Self {
-        self.core.providers.provider_resolver = provider_resolver;
+    /// The host's models: the registry that mints model bindings and binds
+    /// recorded ones to their transports.
+    pub fn with_models(mut self, models: Arc<dyn crate::RuntimeModels>) -> Self {
+        self.core.providers.models = models;
         self
     }
 
@@ -196,18 +195,9 @@ impl EmbeddedRuntimeBuilder {
                         state.session_id = session_id.clone();
                     }
                     if let Some(policy) = &self.policy {
-                        // The recorded provider id is a durable fact (ADR 0066):
-                        // a builder policy naming a different provider is refused
-                        // here, never discarded.
-                        state.policy.provider_id = crate::SessionPolicy::settle_provider_pin(
-                            &state.session_id,
-                            state.policy.recorded_provider_id(),
-                            policy.recorded_provider_id(),
-                        )?;
+                        // The recorded model is a durable fact: the builder's
+                        // policy never replaces or fills it.
                         state.policy.session_id = policy.session_id.clone();
-                        if state.policy.model.id.trim().is_empty() {
-                            state.policy.model = policy.model.clone();
-                        }
                     }
                     state
                 },
@@ -237,18 +227,9 @@ impl EmbeddedRuntimeBuilder {
                     )));
                 }
                 if let Some(policy) = &self.policy {
-                    // The recorded provider id is a durable fact (ADR 0066):
-                    // a builder policy naming a different provider is refused
-                    // here, never discarded.
-                    state.policy.provider_id = crate::SessionPolicy::settle_provider_pin(
-                        &state.session_id,
-                        state.policy.recorded_provider_id(),
-                        policy.recorded_provider_id(),
-                    )?;
+                    // The recorded model is a durable fact: the builder's
+                    // policy never replaces or fills it.
                     state.policy.session_id = policy.session_id.clone();
-                    if state.policy.model.id.trim().is_empty() {
-                        state.policy.model = policy.model.clone();
-                    }
                 }
                 return Ok((state, false));
             }

@@ -31,10 +31,15 @@ pub enum RemoteChargeSafetyPolicy {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessExecutionPolicy {
-    #[serde(default)]
-    pub model: RemoteProcessModelSpec,
-    #[serde(default)]
-    pub provider_id: String,
+    /// The recorded model selection; absent for a policy that selects none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<RemoteModelConfig>,
+    /// The session's recorded attachment-acceptance rules.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::llm::RemoteAttachmentCapabilitySnapshot::is_empty"
+    )]
+    pub attachment_acceptance: crate::llm::RemoteAttachmentCapabilitySnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     #[serde(default)]
@@ -73,8 +78,8 @@ pub struct RemoteProcessExecutionEnvSpec {
 impl RemoteProcessExecutionPolicy {
     pub fn new(turn_budget: RemoteTurnBudget) -> Self {
         Self {
-            model: RemoteProcessModelSpec::default(),
-            provider_id: String::new(),
+            model: None,
+            attachment_acceptance: Default::default(),
             session_id: None,
             autonomous: false,
             turn_budget,
@@ -101,27 +106,23 @@ impl RemoteProcessExecutionEnvSpec {
     }
 
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        if self.policy.model.limits.context_window_tokens == 0 {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message:
-                    "env_spec.policy.model.limits.context_window_tokens must be greater than zero"
+        if let Some(model) = &self.policy.model {
+            require_non_empty(type_name, "env_spec.policy.model.key", &model.key)?;
+            let limits = &model.metadata.limits;
+            if limits.context_window_tokens == 0 {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: "env_spec.policy.model.metadata.limits.context_window_tokens must be greater than zero"
                         .to_string(),
-            });
-        }
-        if self
-            .policy
-            .model
-            .limits
-            .output_token_capacity
-            .is_some_and(|value| value == 0)
-        {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message:
-                    "env_spec.policy.model.limits.output_token_capacity must be greater than zero"
+                });
+            }
+            if limits.output_token_capacity.is_some_and(|value| value == 0) {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: "env_spec.policy.model.metadata.limits.output_token_capacity must be greater than zero"
                         .to_string(),
-            });
+                });
+            }
         }
         self.policy.generation.validate(type_name)?;
         Ok(())

@@ -47,8 +47,7 @@ async fn fixture_with_batching(batching: crate::QueuedWorkBatchingConfig) -> Res
     let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
-        .provider(counting_provider(Arc::clone(&calls)))
-        .model(mock_model_spec())
+        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
@@ -198,8 +197,7 @@ impl HeldDriveFixture {
             .queued_work_batching(
                 crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
             )
-            .provider(counting_provider(Arc::clone(&calls)))
-            .model(mock_model_spec())
+            .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session_id = lash_core::SessionId::from(session);
         drop(core.session(session).created().await.open().await?);
@@ -424,8 +422,7 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
     let _core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .provider(counting_provider(Arc::clone(&calls)))
-        .model(mock_model_spec())
+        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     tokio::time::timeout(std::time::Duration::from_secs(60), async {

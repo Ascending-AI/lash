@@ -147,7 +147,7 @@ fn chat_refuses_unencodable_host_declared_provider_file_without_panicking() {
             source: Box::new(attachment),
         }],
     )]);
-    Arc::make_mut(&mut req.model_capability.attachment_acceptance)
+    Arc::make_mut(&mut req.attachment_acceptance)
         .acceptors
         .push(lash_core::provider::AttachmentAcceptor {
             provider: "OpenAI Chat Completions".into(),

@@ -760,12 +760,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub(super) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
-        &self
-            .execution_env_spec
-            .policy
-            .model
-            .capability
-            .attachment_acceptance
+        &self.execution_env_spec.policy.attachment_acceptance
     }
 
     pub fn with_execution_env_spec(

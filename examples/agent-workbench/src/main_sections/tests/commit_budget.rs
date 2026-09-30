@@ -36,8 +36,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
 
     let backend = double.lash_backend();
     let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(trigger_registration_provider())
-        .model(test_model())
+        .serve_workbench_model(trigger_registration_provider(), test_model())
         .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a commit budget"),
@@ -47,8 +46,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
 
     let backend = double.lash_backend();
     let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(trigger_registration_provider())
-        .model(test_model())
+        .serve_workbench_model(trigger_registration_provider(), test_model())
         .commit_budget(bounded)
         .build(crate::test_core_owner())
     {
@@ -59,8 +57,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
 
     let backend = double.lash_backend();
     let configured = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(trigger_registration_provider())
-        .model(test_model())
+        .serve_workbench_model(trigger_registration_provider(), test_model())
         .commit_budget(bounded)
         .queued_work_batching(batching)
         .build(crate::test_core_owner());

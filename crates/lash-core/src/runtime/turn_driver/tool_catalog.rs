@@ -108,7 +108,7 @@ impl RuntimeTurnDriver<'_> {
             turn_id: self.turn_id.clone(),
             autonomous: session_policy.autonomous,
             model,
-            max_context_tokens: Some(session_policy.context_window_tokens()),
+            max_context_tokens: Some(session_policy.model_config().context_window_tokens()),
             messages,
             events: self.turn_pipeline.active_events(),
             turn_causes: self.turn_causes.clone(),
@@ -121,9 +121,11 @@ impl RuntimeTurnDriver<'_> {
             projector_turn_inputs: Default::default(),
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
-            model_variant: session_policy.model.variant.clone(),
-            model_capability: session_policy.model.capability.clone(),
-            extra_body: session_policy.model.extra_body.clone(),
+            model_variant: session_policy.model_config().reasoning.clone(),
+            model_capability: session_policy.model_config().metadata().capability.clone(),
+            attachment_acceptance: Arc::clone(&session_policy.attachment_acceptance),
+            extra_body: session_policy.model_config().metadata().extra_body.clone(),
+            request_defaults: session_policy.model_config().metadata().request_defaults,
             generation: session_policy.generation.clone(),
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
@@ -343,15 +345,16 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         policy: &mut RuntimeSessionPolicy,
     ) -> Result<String, Box<SessionStreamEvent>> {
-        let model = policy.model.id.clone();
+        let model = policy.model_config().model.wire_model().to_string();
         let provider_kind = policy.provider().kind();
-        // Validate the requested effort against the host-supplied capability.
+        // Validate the recorded reasoning against the recorded capability.
         // Effort names match exactly, so the selection travels unchanged.
-        match policy.model.capability.validate_selection(
-            &model,
-            provider_kind,
-            &policy.model.variant,
-        ) {
+        match policy
+            .model_config()
+            .metadata()
+            .capability
+            .validate_selection(&model, provider_kind, &policy.model_config().reasoning)
+        {
             Ok(()) => {}
             Err(error) => {
                 return Err(Box::new(make_error_event(

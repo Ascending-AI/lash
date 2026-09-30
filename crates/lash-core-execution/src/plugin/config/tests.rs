@@ -194,10 +194,6 @@ fn increment(owner: &str, by: u32, limit: u32) -> ConfigCommandEntry {
     }
 }
 
-fn no_route_check(_: &CoreConfig, _: &CoreConfig) -> Result<(), ConfigRefusal> {
-    Ok(())
-}
-
 #[test]
 fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
     let (registry, _, _) = counters();
@@ -303,7 +299,7 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
     let transaction = registry
         .admit("t", 3, vec![increment("first", 1, 10)])
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &no_route_check);
+    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
     assert_eq!(
         resolution.result,
         ConfigResolutionDecision::Stale {
@@ -338,7 +334,7 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
             ],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &no_route_check);
+    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
     let mut published = base.clone();
     assert_eq!(
         resolution.publish(&mut published),
@@ -374,7 +370,7 @@ fn a_refused_member_refuses_the_whole_transaction() {
             vec![increment("first", 2, 10), increment("second", 50, 10)],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &no_route_check);
+    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
     let mut published = base.clone();
     let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published) else {
         panic!("the transaction is refused");
@@ -403,7 +399,7 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
             vec![increment("first", 60, 1000), increment("first", 60, 1000)],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &no_route_check);
+    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the final candidate is refused");
     };
@@ -448,37 +444,119 @@ fn typed_commands_address_the_owner_that_registered_their_type() {
     assert_eq!(entries[0].command, "set_turn_budget");
 }
 
+/// A catalog serving each `(key, context window, efforts)` entry under its
+/// key, with the key as its wire model.
+fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::ModelRegistry {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("config-tests")
+        .build()
+        .into_handle();
+    entries
+        .iter()
+        .try_fold(
+            crate::ModelRegistry::new(),
+            |registry, (key, context_window_tokens, efforts)| {
+                registry.register(
+                    *key,
+                    crate::RegisteredModel::new(
+                        metadata(key, *context_window_tokens, efforts),
+                        provider.clone(),
+                    ),
+                )
+            },
+        )
+        .expect("every key registers once")
+}
+
+fn metadata(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate::ModelMetadata {
+    let metadata = crate::ModelMetadata::builder(key)
+        .context_window_tokens(context_window_tokens)
+        .build()
+        .expect("model metadata");
+    if efforts.is_empty() {
+        return metadata;
+    }
+    metadata.with_capability(crate::ModelCapability {
+        reasoning: Some(crate::ReasoningCapability {
+            efforts: efforts.iter().map(|effort| (*effort).to_string()).collect(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+fn recorded(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate::ModelConfig {
+    crate::ModelConfig::new(crate::RecordedModel::mint(
+        crate::ModelKey::new(key),
+        metadata(key, context_window_tokens, efforts),
+    ))
+}
+
+fn resolve_core(
+    registry: &ConfigRegistry,
+    base: &crate::PersistedSessionConfig,
+    models: &dyn crate::RuntimeModels,
+    transaction: ConfigTransaction,
+) -> ConfigResolution {
+    let entries = registry.entries(&transaction).expect("entries");
+    let transaction = registry.admit("t", 0, entries).expect("admitted");
+    registry.resolve(base, &transaction, models)
+}
+
+fn core_refusal(resolution: &ConfigResolution) -> (Option<usize>, core::CoreConfigRefusal) {
+    let ConfigResolutionDecision::Refused { refusal } = &resolution.result else {
+        panic!("the core owner refuses: {resolution:?}");
+    };
+    assert_eq!(refusal.owner, CORE_CONFIG_OWNER);
+    (
+        refusal.index,
+        serde_json::from_value(refusal.refusal.clone()).expect("the core owner's typed refusal"),
+    )
+}
+
 #[test]
 fn core_commands_keep_what_they_do_not_name() {
     let (registry, _, _) = counters();
     let mut base = head(&registry, 0);
-    base.model.capability.attachment_acceptance =
-        Arc::new(crate::provider::AttachmentCapabilitySnapshot::default());
-    let acceptance = Arc::clone(&base.model.capability.attachment_acceptance);
-    let entries = registry
-        .entries(
-            &ConfigTransaction::new()
-                .then(core::SetModel {
-                    model: crate::ModelSpec::builder("next-model")
-                        .context_window_tokens(1000)
-                        .build()
-                        .expect("model"),
-                })
-                .then(core::AddPromptContribution {
-                    contribution: crate::PromptContribution::guidance("Added", "added"),
-                }),
-        )
-        .expect("entries");
-    let transaction = registry.admit("t", 0, entries).expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &no_route_check);
+    base.model = Some(
+        recorded("base-model", 1000, &["low"])
+            .with_reasoning(crate::ReasoningSelection::Effort("low".to_string())),
+    );
+    base.attachment_acceptance = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
+        revision: "recorded-acceptance".to_string(),
+        acceptors: Vec::new(),
+    });
+    let models = catalog(&[
+        ("base-model", 1000, &["low"]),
+        ("next-model", 2000, &["low"]),
+    ]);
+    let resolution = resolve_core(
+        &registry,
+        &base,
+        &models,
+        ConfigTransaction::new()
+            .then(core::SetModel {
+                model: crate::ModelKey::new("next-model"),
+            })
+            .then(core::AddPromptContribution {
+                contribution: crate::PromptContribution::guidance("Added", "added"),
+            }),
+    );
     let mut published = base.clone();
     assert!(matches!(
         resolution.publish(&mut published),
         ConfigTransactionOutcome::Applied { revision: 1, .. }
     ));
-    assert_eq!(published.model.id, "next-model");
     assert_eq!(
-        published.model.capability.attachment_acceptance, acceptance,
+        published.model,
+        Some(
+            recorded("next-model", 2000, &["low"])
+                .with_reasoning(crate::ReasoningSelection::Effort("low".to_string()))
+        ),
+        "a model change records the minted binding and keeps the reasoning"
+    );
+    assert_eq!(
+        published.attachment_acceptance, base.attachment_acceptance,
         "a model change keeps the attachment-acceptance snapshot"
     );
     assert_eq!(
@@ -490,6 +568,131 @@ fn core_commands_keep_what_they_do_not_name() {
         Some(1)
     );
     assert_eq!(published.plugin_config, base.plugin_config);
+}
+
+/// Selecting the recorded key again mints its binding from the catalog the
+/// transaction resolves against: the one way a catalog edit reaches a
+/// session.
+#[test]
+fn a_model_command_naming_the_recorded_key_mints_it_again() {
+    let (registry, _, _) = counters();
+    let mut base = head(&registry, 0);
+    base.model = Some(recorded("model", 1000, &[]));
+    let models = catalog(&[("model", 4000, &[])]);
+    let resolution = resolve_core(
+        &registry,
+        &base,
+        &models,
+        ConfigTransaction::of(core::SetModel {
+            model: crate::ModelKey::new("model"),
+        }),
+    );
+    let mut published = base.clone();
+    assert!(matches!(
+        resolution.publish(&mut published),
+        ConfigTransactionOutcome::Applied { .. }
+    ));
+    assert_eq!(published.model, Some(recorded("model", 4000, &[])));
+}
+
+#[test]
+fn a_model_command_naming_an_unregistered_key_is_refused_typed() {
+    let (registry, _, _) = counters();
+    let mut base = head(&registry, 0);
+    base.model = Some(recorded("model", 1000, &[]));
+    let resolution = resolve_core(
+        &registry,
+        &base,
+        &catalog(&[("model", 1000, &[])]),
+        ConfigTransaction::of(core::SetModel {
+            model: crate::ModelKey::new("missing"),
+        }),
+    );
+    assert_eq!(
+        core_refusal(&resolution),
+        (
+            Some(0),
+            core::CoreConfigRefusal::UnknownModel {
+                key: crate::ModelKey::new("missing"),
+            }
+        )
+    );
+}
+
+/// A reasoning is judged against the model the final candidate records: an
+/// effort the recorded model does not declare is refused, the same effort
+/// applies beside a model change to one that declares it, whatever the
+/// order, and a session with no model takes no reasoning.
+#[test]
+fn a_reasoning_command_is_judged_against_the_final_recorded_model() {
+    let (registry, _, _) = counters();
+    let deep = crate::ReasoningSelection::Effort("deep".to_string());
+    let models = catalog(&[("plain", 1000, &[]), ("deep-model", 1000, &["deep"])]);
+    let mut base = head(&registry, 0);
+    base.model = Some(recorded("plain", 1000, &[]));
+
+    let alone = resolve_core(
+        &registry,
+        &base,
+        &models,
+        ConfigTransaction::of(core::SetReasoning {
+            reasoning: deep.clone(),
+        }),
+    );
+    let (index, refusal) = core_refusal(&alone);
+    assert_eq!(index, None, "the final candidate is refused, not a command");
+    assert!(
+        matches!(
+            &refusal,
+            core::CoreConfigRefusal::ReasoningRefused { key, reasoning, .. }
+                if key.as_str() == "plain" && *reasoning == deep
+        ),
+        "{refusal:?}"
+    );
+
+    for transaction in [
+        ConfigTransaction::of(core::SetReasoning {
+            reasoning: deep.clone(),
+        })
+        .then(core::SetModel {
+            model: crate::ModelKey::new("deep-model"),
+        }),
+        ConfigTransaction::of(core::SetModel {
+            model: crate::ModelKey::new("deep-model"),
+        })
+        .then(core::SetReasoning {
+            reasoning: deep.clone(),
+        }),
+    ] {
+        let resolution = resolve_core(&registry, &base, &models, transaction);
+        let mut published = base.clone();
+        assert!(matches!(
+            resolution.publish(&mut published),
+            ConfigTransactionOutcome::Applied { .. }
+        ));
+        assert_eq!(
+            published.model,
+            Some(recorded("deep-model", 1000, &["deep"]).with_reasoning(deep.clone()))
+        );
+    }
+
+    let mut unselected = head(&registry, 0);
+    unselected.model = None;
+    let without_model = resolve_core(
+        &registry,
+        &unselected,
+        &models,
+        ConfigTransaction::of(core::SetReasoning {
+            reasoning: deep.clone(),
+        }),
+    );
+    assert_eq!(
+        core_refusal(&without_model),
+        (
+            Some(0),
+            core::CoreConfigRefusal::ReasoningWithoutModel { reasoning: deep }
+        )
+    );
 }
 
 #[test]

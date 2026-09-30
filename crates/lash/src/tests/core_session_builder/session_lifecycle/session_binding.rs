@@ -103,23 +103,19 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(text_provider(
-        "resume-provider",
-        "resume-model",
-        "source-provider",
-    ))
-    .model(model_spec("resume-model", None, 200_000))
+    .serve_test_model(
+        text_provider("resume-provider", "resume-model", "source-provider"),
+        model_spec("resume-model", None, 200_000),
+    )
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(text_provider(
-        "resume-provider",
-        "resume-model",
-        "receiving-provider",
-    ))
-    .model(model_spec("resume-model", None, 200_000))
+    .serve_test_model(
+        text_provider("resume-provider", "resume-model", "receiving-provider"),
+        model_spec("resume-model", None, 200_000),
+    )
     .build(owner)?;
 
     let parked = Box::pin(
@@ -195,8 +191,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-retry").created().await.open().await?);
     let first = delete_bound_session_outcome(&core, "delete-retry").await?;
@@ -265,8 +260,7 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> R
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("relation-child")
@@ -340,23 +334,27 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(text_provider(
-        "owner-services-provider",
-        "owner-services-model",
-        "source-provider",
-    ))
-    .model(model_spec("owner-services-model", None, 200_000))
+    .serve_test_model(
+        text_provider(
+            "owner-services-provider",
+            "owner-services-model",
+            "source-provider",
+        ),
+        model_spec("owner-services-model", None, 200_000),
+    )
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
         receiving_backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(text_provider(
-        "owner-services-provider",
-        "owner-services-model",
-        "receiving-provider",
-    ))
-    .model(model_spec("owner-services-model", None, 200_000))
+    .serve_test_model(
+        text_provider(
+            "owner-services-provider",
+            "owner-services-model",
+            "receiving-provider",
+        ),
+        model_spec("owner-services-model", None, 200_000),
+    )
     .build(owner)?;
 
     let session = source.session(session_id).created().await.open().await?;

@@ -42,7 +42,10 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                 json!({"model": "gemini-test"}),
                 Some(LlmEventSender::new(|_| {})),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                crate::provider::ResponseReading {
+                    stream_termination: StreamTermination::RequireTerminalEvidence,
+                    expose_thinking: false,
+                },
                 None,
             )
             .await

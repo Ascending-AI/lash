@@ -12,9 +12,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(vec![]),
         tool_choice: Default::default(),
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: Default::default(),
         scope: lash_core::LlmRequestScope::new("session", "frame", "request"),
         output_spec: None,
@@ -352,9 +354,9 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(
-            lash_core::ModelSpec::builder("cache-regression-model")
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("cache-regression-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),
@@ -505,9 +507,9 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
     let core = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(
-            lash_core::ModelSpec::builder("cache-regression-model")
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("cache-regression-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),
@@ -725,7 +727,7 @@ fn feedback_image(wire: Wire) {
                 text(LlmRole::Assistant, "AFTER"),
             ]);
             req.model_capability.instruction_role = role;
-            req.model_capability.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
+            req.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
                 revision: "feedback-image".into(),
                 acceptors: [
                     "OpenAI Responses",
@@ -856,7 +858,7 @@ fn runtime_feedback_unresolved_attachment_errors_retain_message_index() {
             }],
         ),
     ]);
-    req.model_capability.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
+    req.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
         revision: "feedback-stored".into(),
         acceptors: [
             "OpenAI Responses",

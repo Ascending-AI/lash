@@ -6,13 +6,13 @@
 //! execution environment, the way a process worker builds a process's runtime:
 //! a plugin host of the core's plugin factories (its own, because a plugin
 //! host admits one session of a given id and the child's session may be open
-//! in this process), the core's provider and work ports, and the recorded
+//! in this process), the core's models and work ports, and the recorded
 //! policy and plugin options, under the session's recorded tool access and
 //! subagent context. The runtime is storeless: it persists nothing, and the
 //! driver refuses any session read or change the child makes on it.
 //! Everything the child produces rides its settlement to the opener, as it
 //! does on the live path. What a particular open or turn added (overlay
-//! tools, per-open plugins or provider, forked plugins, plugin state) is not
+//! tools, per-open plugins, forked plugins, plugin state) is not
 //! part of the core's wiring: a child whose request records one is refused
 //! before this source is asked, and waits for its live opener.
 
@@ -20,7 +20,7 @@ use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 use std::sync::Arc;
 
 use lash_core::facade_support::{
-    DeploymentToolChildContext, LashRuntime, PluginFactory, ProviderHandle, RuntimeEnvironment,
+    DeploymentToolChildContext, LashRuntime, PluginFactory, RuntimeEnvironment,
     ToolChildContextSource,
 };
 use lash_core::{PluginError, RuntimeSessionState, ScopedEffectController};
@@ -43,7 +43,6 @@ pub(crate) struct CoreToolChildContextSource {
     env: RuntimeEnvironment,
     protocol_factory: Option<Arc<dyn PluginFactory>>,
     plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-    provider: Option<ProviderHandle>,
     process_lifecycle_available: bool,
     work_ports: CoreWorkPorts,
     drive_owner: lash_core::LeaseOwnerIdentity,
@@ -63,7 +62,6 @@ impl CoreToolChildContextSource {
         env: &RuntimeEnvironment,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        provider: Option<ProviderHandle>,
         process_lifecycle_available: bool,
         work_ports: CoreWorkPorts,
         drive_owner: lash_core::LeaseOwnerIdentity,
@@ -72,7 +70,6 @@ impl CoreToolChildContextSource {
             env: env.clone(),
             protocol_factory,
             plugin_factories,
-            provider,
             process_lifecycle_available,
             work_ports,
             drive_owner,
@@ -104,11 +101,6 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         lent_controller: ScopedEffectController<'static>,
     ) -> Result<DeploymentToolChildContext, PluginError> {
         let mut env = self.env.clone();
-        if let Some(provider) = self.provider.clone() {
-            env.core.providers.provider_resolver = Arc::new(
-                lash_core::facade_support::SingleProviderResolver::new(provider),
-            );
-        }
         let plugin_host = super::build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),

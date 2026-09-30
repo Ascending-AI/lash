@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use clap::Parser;
-use lash::provider::{ProviderHandle, ProviderOptions};
+use lash::provider::ProviderHandle;
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
@@ -463,10 +463,6 @@ async fn main() -> Result<()> {
     let provider = ProviderHandle::new(
         OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
-            .with_options(ProviderOptions {
-                expose_thinking: true,
-                ..ProviderOptions::default()
-            })
             .into_components(),
     );
     // One SQLite file store set under the data directory holds the sessions
@@ -496,13 +492,23 @@ async fn main() -> Result<()> {
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder(&args.model)
-                .context_window_tokens(200_000)
-                .build()
-                .context("build model metadata")?,
-        )
+        // The smoke run serves one model, keyed by its wire model.
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    args.model.as_str(),
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder(&args.model)
+                            .context_window_tokens(200_000)
+                            .expose_thinking(true)
+                            .build()
+                            .context("build model metadata")?,
+                        provider,
+                    ),
+                )
+                .context("register the smoke model")?,
+        ))
+        .model(args.model.as_str())
         .tools(workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

@@ -1419,7 +1419,7 @@ mod handle_tests {
     #[test]
     fn into_components_recovers_the_original_bundle() {
         let options = ProviderOptions {
-            max_output_tokens: Some(2_048),
+            response_body_bytes: Some(2_048),
             ..Default::default()
         };
         let mut provider = UnconfiguredProvider::default();

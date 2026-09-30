@@ -79,8 +79,7 @@ impl TestBackend {
             .into_iter()
             .fold(builder, |builder, plugin| builder.plugin(plugin));
         explicit_ephemeral_facets(builder)
-            .provider(provider)
-            .model(mock_model_spec())
+            .serve_test_model(provider, mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
             .expect("a core over the Restate double")
     }
@@ -305,11 +304,10 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         backend.backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(counting_text_provider(
-        Arc::clone(&provider_calls),
-        Arc::clone(&requests),
-    ))
-    .model(mock_model_spec())
+    .serve_test_model(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     // The engine drives a send as soon as it is accepted. Hold the session's

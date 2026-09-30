@@ -221,9 +221,9 @@ pub(super) fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCor
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("process-root-recovery")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("process-root-recovery")
                 .context_window_tokens(100_000)
                 .build()
                 .unwrap(),

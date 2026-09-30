@@ -75,11 +75,10 @@ pub fn validate_responses_attachments(
         {
             let validation = (|| {
                 if !req
-                    .model_capability
                     .attachment_acceptance
                     .accepts("OpenAI Responses", source)
                 {
-                    let accepted = req.model_capability.attachment_acceptance.acceptors(source);
+                    let accepted = req.attachment_acceptance.acceptors(source);
                     return Err(
                         lash_core::llm::transport::unsupported_attachment_capability(
                             provider, source, &accepted,
@@ -530,7 +529,7 @@ pub struct ResponsesStreamState {
     /// parser about a new event may make that classification more precise, but
     /// schema drift must never make a second generation look charge-safe.
     pub unrecognized_event_observed: bool,
-    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
     pub expose_thinking: bool,

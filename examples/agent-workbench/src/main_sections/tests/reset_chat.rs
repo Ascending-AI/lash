@@ -13,8 +13,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     let model = test_model();
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");

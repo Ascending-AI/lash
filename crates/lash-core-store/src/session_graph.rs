@@ -446,8 +446,17 @@ pub enum SessionNodePayload {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PersistedSessionConfig {
-    pub provider_id: String,
-    pub model: crate::ModelSpec,
+    /// The recorded model selection; `None` for a session that has selected
+    /// no model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::ModelConfig>,
+    /// The session's attachment-acceptance rules (ADR 0026), recorded apart
+    /// from the model so a model change keeps them.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
     /// The bound on protocol iterations per turn (FIG-4376). Like every
     /// execution control below it is session config: recorded at creation and
     /// snapshotted per root in its recorded
@@ -495,12 +504,22 @@ pub struct PersistedSessionConfig {
 }
 
 impl PersistedSessionConfig {
+    /// The recorded model key, when the session has selected a model.
+    pub fn model_key(&self) -> Option<&crate::ModelKey> {
+        self.model.as_ref().map(crate::ModelConfig::key)
+    }
+
+    /// The recorded wire model, when the session has selected a model.
+    pub fn wire_model(&self) -> Option<&str> {
+        self.model.as_ref().map(|model| model.model.wire_model())
+    }
+
     /// The session policy this config records. Only the session binding is
     /// not config, and starts unbound.
     pub fn session_policy(&self) -> crate::SessionPolicy {
         let mut policy = crate::SessionPolicy::new(self.turn_budget);
-        policy.provider_id = self.provider_id.clone();
         policy.model = self.model.clone();
+        policy.attachment_acceptance = self.attachment_acceptance.clone();
         policy.autonomous = self.autonomous;
         policy.no_progress_budget = self.no_progress_budget;
         policy.charge_safety = self.charge_safety.clone();
@@ -513,16 +532,16 @@ impl PersistedSessionConfig {
 
     /// Builds an empty persisted config carrying the required per-turn budget.
     ///
-    /// Store implementors reading durable session heads populate the provider
-    /// and model fields from the row; the budget has no default by doctrine,
+    /// Store implementors reading durable session heads populate the model
+    /// fields from the row; the budget has no default by doctrine,
     /// so every construction names `TurnBudget::Bounded(n)` or `Unbounded`
     /// explicitly. The other execution controls start at the values
     /// [`SessionPolicy::new`](crate::SessionPolicy::new) states.
     pub fn new(turn_budget: crate::TurnBudget) -> Self {
         let neutral = crate::SessionPolicy::new(turn_budget);
         Self {
-            provider_id: String::new(),
-            model: crate::ModelSpec::default(),
+            model: None,
+            attachment_acceptance: std::sync::Arc::default(),
             turn_budget,
             autonomous: neutral.autonomous,
             no_progress_budget: neutral.no_progress_budget,
@@ -546,8 +565,8 @@ impl From<crate::SessionPolicy> for PersistedSessionConfig {
 impl From<&crate::SessionPolicy> for PersistedSessionConfig {
     fn from(policy: &crate::SessionPolicy) -> Self {
         Self {
-            provider_id: policy.recorded_provider_id().to_string(),
             model: policy.model.clone(),
+            attachment_acceptance: policy.attachment_acceptance.clone(),
             turn_budget: policy.turn_budget,
             autonomous: policy.autonomous,
             no_progress_budget: policy.no_progress_budget,

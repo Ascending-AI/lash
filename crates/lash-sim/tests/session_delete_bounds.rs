@@ -97,8 +97,7 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
     let core = LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model)
+        .serve_test_model(provider, model)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "session-delete-bounds",
             "session-delete-bounds-boot",

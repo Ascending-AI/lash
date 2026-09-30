@@ -635,9 +635,11 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
             output_schema: json!({}).into(),
         }]),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -658,9 +660,11 @@ fn responses_request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",

@@ -2,8 +2,8 @@ use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
-    DeploymentStore, Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimeSessionState,
-    SessionPolicy, TokenUsage, facade_support::LashRuntime,
+    DeploymentStore, Message, MessageRole, Part, RuntimeCommit, RuntimeSessionState, SessionPolicy,
+    TokenUsage, facade_support::LashRuntime,
 };
 use lash_sqlite_store::SqliteStoreSet;
 
@@ -11,11 +11,14 @@ use lash_sqlite_store::SqliteStoreSet;
     clippy::expect_used,
     reason = "test support: a fixed, always-valid model spec; any builder refusal is a broken test fixture"
 )]
-fn test_model_spec() -> ModelSpec {
-    ModelSpec::builder("gpt-5.4-mini")
-        .context_window_tokens(200_000)
-        .build()
-        .expect("valid test model spec")
+fn test_model() -> Option<lash_core::ModelConfig> {
+    Some(lash_core::testing::test_model_config(
+        "gpt-5.4-mini",
+        lash_core::ModelMetadata::builder("gpt-5.4-mini")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("valid test model"),
+    ))
 }
 
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
@@ -36,8 +39,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
-            provider_id: "openai-compatible".into(),
-            model: test_model_spec(),
+            model: test_model(),
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         turn_index: 3,
@@ -92,7 +94,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     );
     assert_eq!(state.turn_index, 3);
     assert_eq!(state.token_usage.input_tokens, 20);
-    assert_eq!(state.policy.model.id, "gpt-5.4-mini");
+    assert_eq!(state.policy.model, test_model());
     assert_eq!(state.session_id, "stored-session");
 }
 
@@ -105,8 +107,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
-            provider_id: "openai-compatible".into(),
-            model: test_model_spec(),
+            model: test_model(),
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(

@@ -3,12 +3,13 @@ use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, DeploymentStore, EmbedError, LashCore, PluginFactory, ProcessRegistry,
-    PromptLayerSink, ProviderHandle, Result, RunActivityCollector, RuntimeSessionState,
-    SessionError, SessionObservationSubscription, SessionResume, StaticPluginFactory, StdMutex,
-    ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput,
-    TurnOutcome, TurnReport, async_trait, message_text,
+    PromptLayerSink, Result, RunActivityCollector, RuntimeSessionState, SessionError,
+    SessionObservationSubscription, SessionResume, StaticPluginFactory, StdMutex, ToolProvider,
+    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
+    async_trait, message_text,
 };
 use lash_core::ProcessExecutionEnvStore;
+use lash_core::facade_support::ProviderHandle;
 #[cfg(feature = "rlm")]
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core::facade_support::{
@@ -70,8 +71,7 @@ pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) ->
 ///
 /// Only `create` creates, so a test that is not about creation reaches its
 /// session through this: [`created`](Self::created) creates the builder's
-/// session with the core's config — pinned to the builder's provider, when it
-/// names one — unless the catalog already holds it, then hands the builder
+/// session with the core's config unless the catalog already holds it, then hands the builder
 /// back for its terminal verb. An existing or deleted id is left as it is,
 /// so the verb that follows reports it. Tests about creation call
 /// [`SessionBuilder::create`](crate::SessionBuilder::create) themselves.
@@ -96,10 +96,7 @@ pub(crate) trait CreatedSession: Sized {
 
 impl CreatedSession for crate::SessionBuilder {
     async fn created(self) -> Self {
-        let mut spec = crate::SessionSpec::default();
-        if let Some(provider) = &self.provider {
-            spec = spec.provider_id(provider.kind());
-        }
+        let spec = crate::SessionSpec::default();
         match self
             .core
             .session(self.session_id.clone())
@@ -225,31 +222,6 @@ pub(crate) async fn backend_seeded_with_config(
     (backend, store)
 }
 
-/// Commit a new head of `store`'s session whose config records
-/// `provider_id`: another runtime moving the durable provider pin.
-pub(crate) async fn set_head_provider_id(
-    store: &lash_core::store::SessionStore,
-    provider_id: impl Into<String>,
-) {
-    let loaded = lash_core::store::load_session_window_state(
-        store,
-        lash_core::store::WindowSelector::Current,
-    )
-    .await
-    .expect("load the seeded head")
-    .expect("the seeded session has a head");
-    let mut commit = lash_core::RuntimeCommit::persisted_state_with_operation_for_testing(
-        &loaded.state,
-        seed_operation("provider"),
-    );
-    commit.config = loaded.config;
-    commit.config.provider_id = provider_id.into();
-    store
-        .commit_runtime_state(commit)
-        .await
-        .expect("commit the moved provider pin");
-}
-
 /// A memory backend whose catalog is decorated by `decorate`: a test
 /// catalog that records or faults the requests it serves.
 pub(crate) async fn backend_with_catalog(
@@ -257,54 +229,6 @@ pub(crate) async fn backend_with_catalog(
 ) -> DecoratedBackend {
     DecoratedBackend::over(double_backend().await).session_store_factory(decorate)
 }
-
-/// Admits on the catalog it wraps and records the request of every
-/// admission that created its session.
-struct RecordingAdmissions {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-    requests: Arc<std::sync::Mutex<Vec<lash_core::SessionStoreCreateRequest>>>,
-}
-
-impl RecordingAdmissions {
-    /// A recording layer and the requests it will record.
-    fn over(
-        inner: Arc<dyn lash_core::DeploymentStore>,
-    ) -> (
-        Arc<dyn lash_core::DeploymentStore>,
-        Arc<std::sync::Mutex<Vec<lash_core::SessionStoreCreateRequest>>>,
-    ) {
-        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let layer = Arc::new(Self {
-            inner,
-            requests: Arc::clone(&requests),
-        });
-        (layer, requests)
-    }
-}
-
-#[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for RecordingAdmissions {
-    type Inner = dyn lash_core::DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn admit_session(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<lash_core::store::SessionAdmission, StoreError> {
-        let admission = self.inner.admit_session(request).await?;
-        // Only the admission that creates the session records what it was
-        // created with; a rebinding admission leaves the row untouched.
-        if admission == lash_core::store::SessionAdmission::Created {
-            self.requests.lock_recover().push(request.clone());
-        }
-        Ok(admission)
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for RecordingAdmissions {}
 
 /// Serves the catalog it wraps and names every session write it serves: an
 /// admission that creates a session, a runtime commit and a session-meta save.
@@ -861,25 +785,6 @@ fn mock_provider() -> ProviderHandle {
         .into_handle()
 }
 
-/// A second provider whose kind differs from [`mock_provider`], for pinning
-/// tests that must name a provider the session did not record.
-fn other_kind_provider() -> ProviderHandle {
-    crate::testing::TestProvider::builder()
-        .kind("other-embed-test")
-        .complete(|_request| async move {
-            Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "other".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            })
-        })
-        .build()
-        .into_handle()
-}
-
 fn tool_roundtrip_provider() -> ProviderHandle {
     let responses = Arc::new(TokioMutex::new(VecDeque::from([
         LlmResponse {
@@ -1218,8 +1123,7 @@ pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core")
 }
@@ -1267,10 +1171,10 @@ pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
     double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
-    mock_model_spec, model_spec, output_into_cancelled_by, postgres_store_set, redeploy,
-    restate_double, retry_when_claim_frees, run_async_test_on_stack_budget, serve_processes,
-    settle_session_drive, sqlite_memory_store_backend, sqlite_memory_store_set,
-    store_backend_with_clock, turn_input_states,
+    mock_model_spec, model_spec, output_into_cancelled_by, postgres_store_set, recorded_model,
+    redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
+    serve_processes, settle_session_drive, sqlite_memory_store_backend, sqlite_memory_store_set,
+    store_backend_with_clock, test_catalog, turn_input_states,
 };
 #[cfg(feature = "rlm")]
 mod adr_claims;

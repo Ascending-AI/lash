@@ -34,10 +34,13 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("TypeScript signal test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript signal test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(

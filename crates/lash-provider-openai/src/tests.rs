@@ -168,7 +168,6 @@ fn reasoning_capability() -> ModelCapability {
     ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -186,7 +185,6 @@ fn budget_reasoning_capability() -> ModelCapability {
     ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -211,9 +209,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: crate::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -325,9 +325,7 @@ fn openai_route_headers_refuse_case_variant_of_adapter_header() {
 fn route_headers_stay_out_of_the_persisted_session_config() {
     let provider = OpenAiCompatibleProvider::new("key", "https://example.test")
         .with_extra_headers(vec![("x-host-credential".into(), "header-sentinel".into())]);
-    let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
-    policy.provider_id = provider.kind().into();
-    policy.model = lash_core::ModelSpec::builder("model")
+    let metadata = lash_core::ModelMetadata::builder("model")
         .context_window_tokens(1024)
         .extra_body(
             json!({"host_route":{"enabled":true}})
@@ -337,9 +335,24 @@ fn route_headers_stay_out_of_the_persisted_session_config() {
         )
         .build()
         .unwrap();
+    // The registry mints the recorded model; the transport it binds carries
+    // the credential headers and never enters the record.
+    let models = lash_core::ModelRegistry::new()
+        .register(
+            "model",
+            lash_core::RegisteredModel::new(
+                metadata,
+                lash_core::facade_support::ProviderHandle::new(provider.into_components()),
+            ),
+        )
+        .unwrap();
+    let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    policy.model = Some(lash_core::ModelConfig::new(
+        lash_core::RuntimeModels::snapshot(&models, &lash_core::ModelKey::new("model")).unwrap(),
+    ));
     let row = serde_json::to_value(lash_core::PersistedSessionConfig::from(&policy)).unwrap();
     assert_eq!(
-        row["model"]["extra_body"],
+        row["model"]["model"]["metadata"]["extra_body"],
         json!({"host_route":{"enabled":true}})
     );
     assert!(!row.to_string().contains("header-sentinel"));
@@ -800,11 +813,9 @@ fn responses_body_refuses_an_effort_without_capability() {
 
 #[test]
 fn responses_body_requests_reasoning_summaries_when_provider_exposes_thinking() {
-    let provider = OpenAiProvider::new("key").with_options(ProviderOptions {
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    });
+    let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.expose_thinking = true;
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
     req.model_capability = reasoning_capability();
 
@@ -1106,6 +1117,7 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
             ],
         )],
     );
+    req.request_defaults.cache_retention = CacheRetention::Long;
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
     req.tools = Arc::new(vec![LlmToolSpec {
@@ -1116,10 +1128,6 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
     }]);
 
     let body = openrouter_provider()
-        .with_options(ProviderOptions {
-            cache_retention: CacheRetention::Long,
-            ..ProviderOptions::default()
-        })
         .build_chat_request_body(&req, true)
         .unwrap();
 
@@ -1416,13 +1424,10 @@ fn cache_retention_none_removes_chat_cache_markers() {
         "stable system prompt",
         vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
     );
+    req.request_defaults.cache_retention = CacheRetention::None;
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
-        .with_options(ProviderOptions {
-            cache_retention: CacheRetention::None,
-            ..ProviderOptions::default()
-        })
         .build_chat_request_body(&req, true)
         .unwrap();
 
@@ -1445,13 +1450,10 @@ fn cache_retention_long_uses_anthropic_ttl_on_chat_cache_markers() {
         "stable system prompt",
         vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
     );
+    req.request_defaults.cache_retention = CacheRetention::Long;
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
-        .with_options(ProviderOptions {
-            cache_retention: CacheRetention::Long,
-            ..ProviderOptions::default()
-        })
         .build_chat_request_body(&req, true)
         .unwrap();
 
@@ -1463,11 +1465,9 @@ fn cache_retention_long_uses_anthropic_ttl_on_chat_cache_markers() {
 
 #[test]
 fn responses_long_cache_retention_emits_openai_retention() {
-    let provider = OpenAiProvider::new("key").with_options(ProviderOptions {
-        cache_retention: CacheRetention::Long,
-        ..ProviderOptions::default()
-    });
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let provider = OpenAiProvider::new("key");
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.cache_retention = CacheRetention::Long;
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -1478,11 +1478,9 @@ fn responses_long_cache_retention_emits_openai_retention() {
 
 #[test]
 fn responses_none_cache_retention_omits_prompt_cache_fields() {
-    let provider = OpenAiProvider::new("key").with_options(ProviderOptions {
-        cache_retention: CacheRetention::None,
-        ..ProviderOptions::default()
-    });
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let provider = OpenAiProvider::new("key");
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.cache_retention = CacheRetention::None;
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 

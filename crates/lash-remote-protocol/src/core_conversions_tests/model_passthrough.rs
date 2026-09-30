@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn remote_model_intent_and_process_model_spec_round_trip_reasoning_selections() {
+fn remote_model_intent_and_process_model_config_round_trip_reasoning_selections() {
     for selection in [
         RemoteReasoningSelection::ProviderDefault,
         RemoteReasoningSelection::Disabled,
@@ -13,6 +13,7 @@ fn remote_model_intent_and_process_model_spec_round_trip_reasoning_selections() 
                 "route".into(),
                 serde_json::json!({"value":42}),
             )]),
+            request_defaults: Default::default(),
             variant: selection.clone(),
             capability: RemoteModelCapability::default(),
             provider: None,
@@ -24,17 +25,31 @@ fn remote_model_intent_and_process_model_spec_round_trip_reasoning_selections() 
         assert_eq!(intent_round_trip.variant, selection);
         assert_eq!(intent_round_trip.extra_body, intent.extra_body);
 
-        let spec = RemoteProcessModelSpec {
-            id: "remote-model".to_string(),
-            extra_body: intent.extra_body.clone(),
-            variant: selection.clone(),
-            capability: RemoteModelCapability::default(),
-            limits: RemoteProcessModelLimits::default(),
+        let config = RemoteModelConfig {
+            key: "remote-key".to_string(),
+            metadata: RemoteModelMetadata {
+                wire_model: "remote-model".to_string(),
+                extra_body: intent.extra_body.clone(),
+                request_defaults: Default::default(),
+                capability: RemoteModelCapability::default(),
+                limits: RemoteProcessModelLimits {
+                    context_window_tokens: 4096,
+                    output_token_capacity: None,
+                },
+            },
+            reasoning: selection.clone(),
         };
-        let spec_json = serde_json::to_value(&spec).expect("serialize process model spec");
-        let spec_round_trip: RemoteProcessModelSpec =
-            serde_json::from_value(spec_json).expect("deserialize process model spec");
-        assert_eq!(spec_round_trip.variant, selection);
-        assert_eq!(spec_round_trip.extra_body, spec.extra_body);
+        let config_json = serde_json::to_value(&config).expect("serialize process model config");
+        let config_round_trip: RemoteModelConfig =
+            serde_json::from_value(config_json).expect("deserialize process model config");
+        assert_eq!(config_round_trip.reasoning, selection);
+        assert_eq!(
+            config_round_trip.metadata.extra_body,
+            config.metadata.extra_body
+        );
+        let core = lash_core::ModelConfig::try_from(config.clone()).expect("core model config");
+        assert_eq!(core.key().as_str(), "remote-key");
+        assert_eq!(core.model.wire_model(), "remote-model");
+        assert_eq!(RemoteModelConfig::from(core), config);
     }
 }

@@ -23,13 +23,21 @@ async fn core(
     let double = crate::support::restate_double(SEED).await;
     let mut builder =
         LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("mock-model")
-                    .context_window_tokens(16_000)
-                    .build()
-                    .expect("valid model spec"),
-            )
+            .models(Arc::new(
+                lash::ModelRegistry::new()
+                    .register(
+                        "mock-model",
+                        lash::RegisteredModel::new(
+                            lash::ModelMetadata::builder("mock-model")
+                                .context_window_tokens(16_000)
+                                .build()
+                                .expect("valid model metadata"),
+                            provider,
+                        ),
+                    )
+                    .expect("one model registers"),
+            ))
+            .model("mock-model")
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
     if let Some(factory) = install {

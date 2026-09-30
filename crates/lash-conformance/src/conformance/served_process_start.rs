@@ -166,8 +166,7 @@ impl SpawnWorld {
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             );
-        host.providers.provider_resolver =
-            Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+        host.providers.models = crate::testing::standard_test_models(model.into_handle());
         let faults = crate::testing::ProcessRegistryFaults::new(stores.process_registry());
         let watched = crate::facade_support::watch_process_registry(Arc::new(faults.clone()));
         let worker_factories = rlm

@@ -22,7 +22,9 @@ fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
         tool_choice: LlmToolChoice::None,
         model_variant: Default::default(),
         model_capability: Default::default(),
+        attachment_acceptance: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: lash_core::llm::types::LlmRequestScope::new("session", "frame", "call"),
         output_spec: None,
         stream_events: None,
@@ -157,11 +159,11 @@ pub async fn attachment_materialization_turn_witnesses(
                 max_blob_bytes: 4,
                 max_request_bytes,
             });
-        host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
+        host.providers.models = crate::testing::standard_test_models(provider);
         let store = law_session_store(stores.as_ref(), &session_id).await;
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(session_id.clone());
-        policy.model = policy.model.with_capability(attachment_test_capability());
+        policy.attachment_acceptance = attachment_test_acceptance();
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
             policy: policy.clone(),

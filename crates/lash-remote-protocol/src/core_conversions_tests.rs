@@ -237,11 +237,11 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             output_schema: serde_json::Value::Null.into(),
         }]),
         tool_choice: core_llm::LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
         model_capability: core_llm::ModelCapability {
             instruction_role: core_llm::InstructionRole::Developer,
             native_mid_conversation_system: true,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
                 efforts: vec!["fast".to_string(), "slow".to_string()],
@@ -261,6 +261,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             "host_option".to_string(),
             serde_json::json!({"enabled": true}),
         )]),
+        request_defaults: Default::default(),
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
             temperature: Some(
@@ -698,12 +699,14 @@ fn process_start_requests_round_trip_core_values() {
                 lash_core::AdmittedPluginConfig::new(config, 3)
             },
             lash_core::SessionPolicy {
-                provider_id: "process-provider".to_string(),
-                model: lash_core::ModelSpec::builder("process-model")
-                    .context_window_tokens(4096)
-                    .output_token_capacity(512)
-                    .build()
-                    .expect("model"),
+                model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                    lash_core::ModelKey::from("process-model"),
+                    lash_core::ModelMetadata::builder("process-model")
+                        .context_window_tokens(4096)
+                        .output_token_capacity(512)
+                        .build()
+                        .expect("model"),
+                ))),
                 generation: lash_core::GenerationOptions {
                     output_token_cap: std::num::NonZeroUsize::new(256),
                     temperature: Some(

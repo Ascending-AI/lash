@@ -1,0 +1,17 @@
+warning: function `a_recorded_model_is_minted_by_the_registry_only` is never used
+ --> tests/ui/recorded_model_is_minted_by_the_registry.rs:5:4
+  |
+5 | fn a_recorded_model_is_minted_by_the_registry_only(metadata: lash::ModelMetadata) {
+  |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0451]: fields `key` and `metadata` of struct `RecordedModel` are private
+ --> tests/ui/recorded_model_is_minted_by_the_registry.rs:7:9
+  |
+6 |     let _ = lash::RecordedModel {
+  |             ------------------- in this type
+7 |         key: lash::ModelKey::new("forged"),
+  |         ^^^ private field
+8 |         metadata,
+  |         ^^^^^^^^ private field

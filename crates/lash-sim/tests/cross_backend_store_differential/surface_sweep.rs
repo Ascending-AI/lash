@@ -343,7 +343,7 @@ const SURFACE_INGRESS_CLAIM_TTL_MS: u64 = 60_000;
 /// The run spec the sweep's spec input carries (FIG-3838).
 fn surface_run_spec() -> lash_core::RunSpec {
     lash_core::RunSpec::overrides(lash_core::RunOverrides {
-        provider_id: Some("surface-run-spec-route".to_string()),
+        model: Some(lash_core::ModelKey::new("surface-run-spec-model")),
         ..lash_core::RunOverrides::default()
     })
 }

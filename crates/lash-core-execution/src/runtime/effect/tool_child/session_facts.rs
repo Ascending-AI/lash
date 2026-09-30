@@ -53,9 +53,6 @@ pub struct UnrecordedSessionSources {
     /// The session's plugins were forked from a parent session.
     #[serde(default)]
     pub fork_plugins: bool,
-    /// The session was opened with a provider of its own.
-    #[serde(default)]
-    pub open_provider: bool,
     /// The session was opened with its own tool-source policy or tool-surface
     /// open mode.
     #[serde(default)]
@@ -72,7 +69,6 @@ impl UnrecordedSessionSources {
         Self {
             context_overlay_tools: self.context_overlay_tools || other.context_overlay_tools,
             fork_plugins: self.fork_plugins || other.fork_plugins,
-            open_provider: self.open_provider || other.open_provider,
             open_tool_policy: self.open_tool_policy || other.open_tool_policy,
             plugin_state: self.plugin_state || other.plugin_state,
         }
@@ -87,7 +83,6 @@ impl UnrecordedSessionSources {
                 ToolChildRebuildRefusal::ContextOverlayTools,
             ),
             (self.fork_plugins, ToolChildRebuildRefusal::ForkPlugins),
-            (self.open_provider, ToolChildRebuildRefusal::OpenProvider),
             (
                 self.open_tool_policy,
                 ToolChildRebuildRefusal::OpenToolPolicy,
@@ -107,7 +102,6 @@ impl UnrecordedSessionSources {
 pub enum ToolChildRebuildRefusal {
     ContextOverlayTools,
     ForkPlugins,
-    OpenProvider,
     OpenToolPolicy,
     PluginState,
     /// The child wrote the session graph or read session state, which only
@@ -127,7 +121,6 @@ impl std::fmt::Display for ToolChildRebuildRefusal {
         formatter.write_str(match self {
             Self::ContextOverlayTools => "its turn's context overlay contributed tools",
             Self::ForkPlugins => "its session's plugins were forked from a parent session",
-            Self::OpenProvider => "its session was opened with a provider of its own",
             Self::OpenToolPolicy => {
                 "its session was opened with its own tool-source policy or open mode"
             }

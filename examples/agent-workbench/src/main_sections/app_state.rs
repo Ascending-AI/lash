@@ -15,7 +15,9 @@ impl AppState {
     /// at the moment of creation.
     pub(crate) fn session_creation(&self) -> lash::SessionCreation {
         lash::SessionCreation {
-            spec: lash::SessionSpec::new().model(model_spec_from_selection(self.selected_model())),
+            spec: lash::SessionSpec::new()
+                .model(self.selected_model().key())
+                .reasoning(self.selected_model().reasoning()),
             ..Default::default()
         }
     }
@@ -987,27 +989,25 @@ pub(crate) fn new_session_id() -> SessionId {
     ))
 }
 
-pub(crate) fn model_spec_for_request(
+/// The model a request selects: its own id and variant, or the host's current
+/// selection for what it leaves out.
+pub(crate) fn model_selection_for_request(
     selected_model: &ModelSelection,
     model: Option<&str>,
     model_variant: Option<&str>,
-) -> Result<lash::ModelSpec, AppError> {
+) -> Result<ModelSelection, AppError> {
     let model = model
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(selected_model.model.as_str())
         .to_string();
-    let model_variant = model_variant_for_request(selected_model, model_variant);
-    lash::ModelSpec::builder(model)
-        .variant(
-            model_variant
-                .map(lash::provider::ReasoningSelection::Effort)
-                .unwrap_or_default(),
-        )
-        .context_window_tokens(workbench_context_window_tokens())
-        .build()
-        .map(with_workbench_model_capability)
-        .map_err(|error| AppError::bad_request(error.to_string()))
+    if model.is_empty() {
+        return Err(AppError::bad_request("model is required"));
+    }
+    Ok(ModelSelection {
+        model,
+        model_variant: model_variant_for_request(selected_model, model_variant),
+    })
 }
 
 pub(crate) fn model_variant_for_request(
@@ -1027,27 +1027,66 @@ pub(crate) fn model_variant_for_request(
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the token limit comes from workbench_context_window_tokens, which accepts only \
-              values at or above MIN_CONTEXT_WINDOW_TOKENS (see context_window_tokens_from), \
-              so ModelSpec::build cannot reject it"
-)]
-pub(crate) fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
-    lash::ModelSpec::builder(selection.model)
-        .variant(
-            selection
-                .model_variant
-                .map(lash::provider::ReasoningSelection::Effort)
-                .unwrap_or_default(),
-        )
-        .context_window_tokens(workbench_context_window_tokens())
-        .build()
-        .expect("workbench model selection should use a valid token limit")
-        .with_capability(workbench_model_capability())
+/// The workbench's model catalog. OpenRouter's catalog is open: a selection
+/// may name any model id, and every id runs through the one OpenRouter
+/// transport with the workbench's context window and capability. The
+/// workbench keys each model by its id, so a session records the id it
+/// selected.
+pub(crate) struct WorkbenchModels {
+    pub(crate) provider: lash::provider::ProviderHandle,
 }
 
-pub(crate) fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::ModelSpec {
+impl lash::RuntimeModels for WorkbenchModels {
+    fn snapshot(
+        &self,
+        key: &lash::ModelKey,
+    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+        workbench_recorded_model(key)
+    }
+
+    fn bind(
+        &self,
+        recorded: &lash::RecordedModel,
+    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
+        // Every id is served as its own wire model; a recording that names
+        // another wire model under the id was never this catalog's.
+        if recorded.wire_model() != recorded.key().as_str() {
+            return Err(lash::ModelUnavailable::new(
+                recorded.key().clone(),
+                lash::ModelUnavailableReason::WireModelChanged {
+                    recorded: recorded.wire_model().to_string(),
+                    served: recorded.key().to_string(),
+                },
+            ));
+        }
+        Ok(self.provider.clone())
+    }
+}
+
+/// `key`'s model as the workbench catalog mints it.
+pub(crate) fn workbench_recorded_model(
+    key: &lash::ModelKey,
+) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+    if key.as_str().trim().is_empty() {
+        return Err(lash::ModelUnavailable::new(
+            key.clone(),
+            lash::ModelUnavailableReason::UnknownKey,
+        ));
+    }
+    let metadata = lash::ModelMetadata::builder(key.as_str())
+        .context_window_tokens(workbench_context_window_tokens())
+        .expose_thinking(true)
+        .build()
+        .map_err(|_| {
+            lash::ModelUnavailable::new(key.clone(), lash::ModelUnavailableReason::UnknownKey)
+        })?;
+    Ok(lash::RecordedModel::mint(
+        key.clone(),
+        with_workbench_model_capability(metadata),
+    ))
+}
+
+pub(crate) fn with_workbench_model_capability(model: lash::ModelMetadata) -> lash::ModelMetadata {
     model.with_capability(workbench_model_capability())
 }
 
@@ -1055,7 +1094,6 @@ pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: workbench_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -1076,10 +1114,10 @@ pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
 pub(crate) async fn apply_model_selection_to_session(
     state: &AppState,
     session: &lash::LashSession,
-    model: lash::ModelSpec,
+    model: ModelSelection,
     reason: &str,
 ) -> Result<(), AppError> {
-    state.set_selected_model(ModelSelection::from_spec(&model));
+    state.set_selected_model(model.clone());
     // The transaction returns only once its outcome is durable: written
     // against the revision read here, under an id naming the change. A stale
     // or refused outcome, like a queue rejection or a settlement failure,
@@ -1089,12 +1127,17 @@ pub(crate) async fn apply_model_selection_to_session(
     let outcome = config
         .apply(
             lash::config::ConfigWrite::new(
-                format!("model-selection:{}:{revision}", model.id),
+                format!(
+                    "model-selection:{}:{}:{revision}",
+                    model.model,
+                    model.model_variant.as_deref().unwrap_or("provider-default")
+                ),
                 revision,
             ),
-            lash::config::ConfigTransaction::of(lash::config::SetModel {
-                model: model.clone(),
-            }),
+            lash::config::ConfigTransaction::of(lash::config::SetModel { model: model.key() })
+                .then(lash::config::SetReasoning {
+                    reasoning: model.reasoning(),
+                }),
         )
         .await
         .map_err(AppError::internal)?;
@@ -1543,7 +1586,7 @@ impl IntoResponse for AppError {
     }
 }
 
-fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
+pub(crate) fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
     use lash::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
         AttachmentMimeSource,

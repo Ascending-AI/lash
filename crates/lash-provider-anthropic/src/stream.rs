@@ -158,7 +158,7 @@ pub(crate) struct StreamState {
     pub(crate) message_stopped: bool,
     /// A repeated stop for one content block must not emit a second part.
     pub(crate) stopped_blocks: HashSet<usize>,
-    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
     pub(crate) expose_thinking: bool,

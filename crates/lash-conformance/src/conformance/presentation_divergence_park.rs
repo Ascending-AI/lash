@@ -217,8 +217,7 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let session_id = SessionId::from(format!("{prefix}-presentation-divergence-session"));
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = Parts {

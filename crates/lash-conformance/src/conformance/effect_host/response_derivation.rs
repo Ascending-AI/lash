@@ -115,16 +115,18 @@ where
         let mut envelope =
             journaled_conformance_envelope(invocation.execution_scope(), &key, "unused");
         envelope.command = RuntimeEffectCommand::LlmCall {
-            provider_id: "attempt-ledger".into(),
+            model_key: crate::ModelKey::new("attempt-ledger"),
             request: Box::new(crate::runtime::LlmRequestSpec {
                 instructions: None,
                 model: "ledger-model".into(),
                 messages: Vec::new(),
                 tools: Arc::new(Vec::new()),
                 tool_choice: crate::llm::types::LlmToolChoice::None,
+                attachment_acceptance: Default::default(),
                 model_variant: Default::default(),
                 model_capability: Default::default(),
                 extra_body: Default::default(),
+                request_defaults: Default::default(),
                 generation: Default::default(),
                 scope: crate::LlmRequestScope::new("session", "session:frame", &key),
                 output_spec: None,

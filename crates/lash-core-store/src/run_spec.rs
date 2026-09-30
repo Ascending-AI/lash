@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 
 use crate::session_graph::PersistedSessionConfig;
-use crate::{GenerationOptions, ModelSpec, PromptLayer, ProtocolTurnOptions};
+use crate::{GenerationOptions, ModelKey, PromptLayer, ProtocolTurnOptions, ReasoningSelection};
 
 /// Family version of the [`RunSpecHash`] preimage and of the canonical spec
 /// bytes it hashes.
@@ -151,12 +151,15 @@ pub struct RunOverrides {
     /// that slot, and other contributions add.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PromptLayer>,
-    /// The provider route id. A provider-only override keeps the snapshot's
-    /// model and variant.
+    /// The model this root runs, by the host's key. The root resolves it once,
+    /// when it records its shape: the registry mints the binding then, and
+    /// every replay reads the recorded binding. The snapshot's reasoning
+    /// stays unless [`Self::reasoning`] is set too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_id: Option<String>,
+    pub model: Option<ModelKey>,
+    /// The reasoning this root runs its model with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<ModelSpec>,
+    pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
     /// Protocol-owned turn options (RLM finish policy and schema included),
@@ -177,8 +180,8 @@ impl RunOverrides {
 
     pub fn is_empty(&self) -> bool {
         self.prompt.is_none()
-            && self.provider_id.is_none()
             && self.model.is_none()
+            && self.reasoning.is_none()
             && self.generation.is_none()
             && self.protocol_turn_options.is_none()
     }
@@ -194,8 +197,8 @@ impl RunOverrides {
                 }
                 (under, top) => top.or(under),
             },
-            provider_id: self.provider_id.or(under.provider_id),
             model: self.model.or(under.model),
+            reasoning: self.reasoning.or(under.reasoning),
             generation: self.generation.or(under.generation),
             protocol_turn_options: match (under.protocol_turn_options, self.protocol_turn_options) {
                 (Some(under), Some(top)) => Some(under.merged_with(&top)),
@@ -204,32 +207,69 @@ impl RunOverrides {
         }
     }
 
-    /// Apply these overrides to `config`, the root's snapshot.
-    fn apply(&self, config: &mut PersistedSessionConfig) -> Result<(), serde_json::Error> {
+    /// Apply these overrides to `config`, the root's snapshot. An override
+    /// key is resolved through `models` here, once; a reasoning override
+    /// applies to whichever model the root ends up with.
+    fn apply(
+        &self,
+        config: &mut PersistedSessionConfig,
+        models: &dyn crate::provider::RuntimeModels,
+    ) -> Result<(), RunResolveError> {
         if let Some(prompt) = &self.prompt {
             let mut stacked = config.prompt.clone().unwrap_or_default();
             stack_prompt_layer(&mut stacked, prompt);
             config.prompt = Some(stacked);
         }
-        if let Some(provider_id) = &self.provider_id {
-            config.provider_id.clone_from(provider_id);
+        if let Some(key) = &self.model {
+            let recorded = models.snapshot(key).map_err(RunResolveError::Model)?;
+            let reasoning = config
+                .model
+                .as_ref()
+                .map(|current| current.reasoning.clone())
+                .unwrap_or_default();
+            config.model = Some(crate::ModelConfig {
+                model: recorded,
+                reasoning,
+            });
         }
-        if let Some(model) = &self.model {
-            config.model = model.clone();
+        if let Some(reasoning) = &self.reasoning {
+            let model = config
+                .model
+                .as_mut()
+                .ok_or(RunResolveError::ReasoningWithoutModel)?;
+            model.reasoning = reasoning.clone();
         }
         if let Some(generation) = &self.generation {
             config.generation = generation.clone();
         }
         if let Some(options) = &self.protocol_turn_options {
             if config.plugin_config.protocol_plugin_id().is_none() {
-                return Err(<serde_json::Error as serde::de::Error>::custom(
-                    "run overrides state protocol turn options, but the session records no protocol plugin",
-                ));
+                return Err(RunResolveError::ProtocolOptionsWithoutProtocol);
             }
             config.plugin_config.override_protocol_turn_options(options);
         }
         Ok(())
     }
+}
+
+/// Why a spec did not resolve to a recorded shape.
+#[derive(Debug, thiserror::Error)]
+pub enum RunResolveError {
+    /// The spec's model key has no binding on this deployment: a redeploy
+    /// repairs it, so it is never the root's recorded outcome.
+    #[error(transparent)]
+    Model(crate::provider::ModelUnavailable),
+    /// The spec sets a reasoning selection for a session with no model.
+    #[error("a reasoning override needs a model, and the session has selected none")]
+    ReasoningWithoutModel,
+    /// The spec states protocol turn options for a session that records no
+    /// protocol plugin.
+    #[error(
+        "run overrides state protocol turn options, but the session records no protocol plugin"
+    )]
+    ProtocolOptionsWithoutProtocol,
+    #[error("the spec could not be encoded: {0}")]
+    Encode(#[from] serde_json::Error),
 }
 
 /// Stack `top` on `base` so that resolving `[base]` equals resolving
@@ -348,17 +388,19 @@ impl RunSpec {
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
     /// `termination` is the host's policy the root records.
+    /// `models` mints the binding of an override key.
     pub fn resolve(
         &self,
         snapshot: &PersistedSessionConfig,
         definition: Option<RunOverrides>,
         termination: TerminationPolicy,
-    ) -> Result<ResolvedRun, serde_json::Error> {
+        models: &dyn crate::provider::RuntimeModels,
+    ) -> Result<ResolvedRun, RunResolveError> {
         let mut config = snapshot.clone();
         let overrides = (*self.overrides)
             .clone()
             .over(definition.unwrap_or_default());
-        overrides.apply(&mut config)?;
+        overrides.apply(&mut config, models)?;
         Ok(ResolvedRun {
             spec: self.hash()?,
             resolved: (config != *snapshot).then(|| Box::new(config)),

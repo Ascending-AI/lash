@@ -123,13 +123,17 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(
+    .models(crate::tests::test_catalog(
         crate::testing::TestProvider::builder()
             .kind("admin-cancel-test")
             .build()
             .into_handle(),
-    )
-    .model(crate::tests::mock_model_spec())
+        [
+            crate::tests::mock_model_spec(),
+            crate::tests::model_spec("cancelled-next-model", None, 64_000),
+        ],
+    ))
+    .model("mock-model")
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("cancelled-config-before-ask");
     let session = core.session(&session_id).created().await.open().await?;
@@ -143,7 +147,7 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
             .config()
             .configure(crate::config::ConfigTransaction::of(
                 crate::config::SetModel {
-                    model: crate::tests::model_spec("cancelled-next-model", None, 64_000),
+                    model: lash_core::ModelKey::new("cancelled-next-model"),
                 },
             ))
             .await

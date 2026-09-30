@@ -115,6 +115,7 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
         model_intent: RemoteModelIntent::new("gpt-test"),
+        attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::User,
             content: vec![RemoteLlmContentBlock::Attachment {
@@ -1876,7 +1877,20 @@ fn remote_process_env_persistence_dtos_validate() {
     );
 
     let mut invalid = request;
-    invalid.env_spec.policy.model.limits.context_window_tokens = 0;
+    invalid.env_spec.policy.model = Some(RemoteModelConfig {
+        key: "remote-key".to_string(),
+        metadata: RemoteModelMetadata {
+            wire_model: "remote-model".to_string(),
+            extra_body: Default::default(),
+            request_defaults: Default::default(),
+            capability: Default::default(),
+            limits: RemoteProcessModelLimits {
+                context_window_tokens: 0,
+                output_token_capacity: None,
+            },
+        },
+        reasoning: Default::default(),
+    });
     assert!(matches!(
         invalid.validate(),
         Err(RemoteProtocolError::InvalidEnvelope { .. })
@@ -1886,15 +1900,20 @@ fn remote_process_env_persistence_dtos_validate() {
 #[test]
 fn process_execution_policy_carries_session_generation_options() {
     let mut policy = RemoteProcessExecutionPolicy {
-        provider_id: "remote-provider".to_string(),
-        model: RemoteProcessModelSpec {
-            id: "remote-model".to_string(),
-            limits: RemoteProcessModelLimits {
-                context_window_tokens: 4096,
-                output_token_capacity: Some(1024),
+        model: Some(RemoteModelConfig {
+            key: "remote-key".to_string(),
+            metadata: RemoteModelMetadata {
+                wire_model: "remote-model".to_string(),
+                extra_body: Default::default(),
+                request_defaults: Default::default(),
+                capability: Default::default(),
+                limits: RemoteProcessModelLimits {
+                    context_window_tokens: 4096,
+                    output_token_capacity: Some(1024),
+                },
             },
-            ..Default::default()
-        },
+            reasoning: Default::default(),
+        }),
         ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
     };
     assert!(

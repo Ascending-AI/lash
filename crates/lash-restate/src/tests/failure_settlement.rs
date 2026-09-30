@@ -68,9 +68,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
         .build()
         .into_handle();
     let mut host = memory_host_config().await;
-    host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
+    host.providers.models = lash_core::testing::standard_test_models(provider);
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),

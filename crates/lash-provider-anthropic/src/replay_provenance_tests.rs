@@ -39,9 +39,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: crate::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

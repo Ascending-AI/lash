@@ -219,8 +219,7 @@ fn core_over(
         LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-            .provider(provider)
-            .model(mock_model_spec());
+            .serve_test_model(provider, mock_model_spec());
     if with_hook {
         builder = builder.plugin(Arc::new(deriving_plugin(hook_calls)));
     }

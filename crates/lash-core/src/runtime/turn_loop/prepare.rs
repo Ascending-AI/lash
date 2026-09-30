@@ -179,12 +179,18 @@ impl LashRuntime {
             // root's recorded config, adopted on resident state at the
             // funnel's `ResolveTurnConfig` step.
             trace_metadata.insert(
-                "provider_id".to_string(),
-                serde_json::json!(self.state.policy.provider_id),
+                "model_key".to_string(),
+                serde_json::json!(
+                    self.state
+                        .policy
+                        .model
+                        .as_ref()
+                        .map(|model| model.key().as_str())
+                ),
             );
             trace_metadata.insert(
                 "model".to_string(),
-                serde_json::json!(self.state.policy.model.id),
+                serde_json::json!(self.state.policy.wire_model()),
             );
             trace_metadata.insert(
                 "config_revision".to_string(),
@@ -344,7 +350,7 @@ impl LashRuntime {
             plugin_config: self.state.admitted_plugin_config(),
             state: prepare_read_view,
             prompt_usage: previous_prompt_usage.clone(),
-            max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
+            max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
             traces: manager.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             direct_completions: manager.direct_completion_client(

@@ -105,14 +105,13 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
     let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
         double.stores().attachment_store();
     let model = with_workbench_model_capability(
-        lash::ModelSpec::builder("test-model")
+        lash::ModelMetadata::builder("test-model")
             .context_window_tokens(4096)
             .build()
             .expect("store-maintenance model spec"),
     );
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build store-maintenance core");
     let process_observer = core

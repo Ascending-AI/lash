@@ -1,6 +1,7 @@
 //! `resolve_generation_policy`: every host setting is sent or refused before
 //! any I/O, and the receipt joins resolution with adapter emission (ADR 0121).
 use super::*;
+use crate::provider::{CacheRetention, ModelRequestDefaults};
 
 fn open_wire() -> GenerationWire {
     GenerationWire {
@@ -22,25 +23,27 @@ fn generation_request(generation: GenerationOptions) -> LlmRequest {
     }
 }
 
+/// `request` carrying the recorded model request `defaults`.
+fn with_defaults(request: LlmRequest, defaults: ModelRequestDefaults) -> LlmRequest {
+    LlmRequest {
+        request_defaults: defaults,
+        ..request
+    }
+}
+
 fn refusal_code(error: &LlmTransportError) -> Option<TurnFailureCode> {
     error.code.as_ref().and_then(FailureCode::turn_code)
 }
 
 #[test]
-fn generation_policy_prefers_request_then_provider_and_invents_no_cap() {
-    let provider_options = ProviderOptions {
+fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
+    let model_defaults = ModelRequestDefaults {
         max_output_tokens: Some(8_192),
         cache_retention: CacheRetention::Long,
         expose_thinking: true,
-        ..ProviderOptions::default()
     };
-    let unset = resolve_generation_policy(
-        &empty_request(),
-        &ProviderOptions::default(),
-        "test",
-        &open_wire(),
-    )
-    .expect("nothing to refuse");
+    let unset = resolve_generation_policy(&empty_request(), "test", &open_wire())
+        .expect("nothing to refuse");
     assert_eq!(unset.max_output_tokens, None, "lash invents no cap");
     assert_eq!(unset.cache_retention, CacheRetention::Short);
     assert!(!unset.expose_thinking);
@@ -49,22 +52,27 @@ fn generation_policy_prefers_request_then_provider_and_invents_no_cap() {
     assert_eq!(unset.parallel_tool_calls, None);
     assert_eq!(unset.reasoning, None);
 
-    let provider_limited =
-        resolve_generation_policy(&empty_request(), &provider_options, "test", &open_wire())
-            .expect("provider cap");
-    assert_eq!(provider_limited.max_output_tokens, Some(8_192));
-    assert_eq!(provider_limited.cache_retention, CacheRetention::Long);
-    assert!(provider_limited.expose_thinking);
+    let default_limited = resolve_generation_policy(
+        &with_defaults(empty_request(), model_defaults),
+        "test",
+        &open_wire(),
+    )
+    .expect("provider cap");
+    assert_eq!(default_limited.max_output_tokens, Some(8_192));
+    assert_eq!(default_limited.cache_retention, CacheRetention::Long);
+    assert!(default_limited.expose_thinking);
 
     let request_limited = resolve_generation_policy(
-        &generation_request(GenerationOptions {
-            output_token_cap: NonZeroUsize::new(2_048),
-            temperature: Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
-            seed: Some(-7),
-            parallel_tool_calls: Some(false),
-            ..GenerationOptions::default()
-        }),
-        &provider_options,
+        &with_defaults(
+            generation_request(GenerationOptions {
+                output_token_cap: NonZeroUsize::new(2_048),
+                temperature: Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
+                seed: Some(-7),
+                parallel_tool_calls: Some(false),
+                ..GenerationOptions::default()
+            }),
+            model_defaults,
+        ),
         "test",
         &open_wire(),
     )
@@ -83,7 +91,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
     struct Case {
         name: &'static str,
         generation: GenerationOptions,
-        options: ProviderOptions,
+        options: ModelRequestDefaults,
         wire: GenerationWire,
         code: TurnFailureCode,
     }
@@ -95,7 +103,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 output_token_cap: NonZeroUsize::new(1_024),
                 ..GenerationOptions::default()
             },
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
                 ..open_wire()
@@ -103,11 +111,11 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
             code: TurnFailureCode::UnsupportedGenerationOption,
         },
         Case {
-            name: "provider cap on a wire without one",
+            name: "default cap on a wire without one",
             generation: GenerationOptions::default(),
-            options: ProviderOptions {
+            options: ModelRequestDefaults {
                 max_output_tokens: Some(1_024),
-                ..ProviderOptions::default()
+                ..ModelRequestDefaults::default()
             },
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
@@ -118,7 +126,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "no cap on a wire that requires one",
             generation: GenerationOptions::default(),
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Required,
                 ..open_wire()
@@ -131,7 +139,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 temperature: temperature(),
                 ..GenerationOptions::default()
             },
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 temperature: false,
                 ..open_wire()
@@ -144,7 +152,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 seed: Some(1),
                 ..GenerationOptions::default()
             },
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 seed: false,
                 ..open_wire()
@@ -157,7 +165,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 stop_sequences: vec!["END".to_string()],
                 ..GenerationOptions::default()
             },
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 stop_sequences: false,
                 ..open_wire()
@@ -170,7 +178,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 parallel_tool_calls: Some(true),
                 ..GenerationOptions::default()
             },
-            options: ProviderOptions::default(),
+            options: ModelRequestDefaults::default(),
             wire: GenerationWire {
                 parallel_tool_calls: false,
                 ..open_wire()
@@ -180,8 +188,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
     ];
     for case in cases {
         let error = resolve_generation_policy(
-            &generation_request(case.generation),
-            &case.options,
+            &with_defaults(generation_request(case.generation), case.options),
             "test",
             &case.wire,
         )
@@ -208,8 +215,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
             active_thinking_pins_sampling: pins,
             ..open_wire()
         };
-        let error = resolve_generation_policy(&pinned, &ProviderOptions::default(), "test", &wire)
-            .expect_err("pinned model");
+        let error = resolve_generation_policy(&pinned, "test", &wire).expect_err("pinned model");
         assert_eq!(
             refusal_code(&error),
             Some(TurnFailureCode::UnsupportedGenerationOption)
@@ -232,35 +238,25 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
         ..open_wire()
     };
     thinking.model_variant = ReasoningSelection::Effort("high".to_string());
-    let error = resolve_generation_policy(
-        &thinking,
-        &ProviderOptions::default(),
-        "test",
-        &pinning_wire,
-    )
-    .expect_err("active thinking pins sampling");
+    let error = resolve_generation_policy(&thinking, "test", &pinning_wire)
+        .expect_err("active thinking pins sampling");
     assert_eq!(
         refusal_code(&error),
         Some(TurnFailureCode::UnsupportedGenerationOption)
     );
-    resolve_generation_policy(&thinking, &ProviderOptions::default(), "test", &open_wire())
+    resolve_generation_policy(&thinking, "test", &open_wire())
         .expect("a wire whose thinking does not pin sampling sends the temperature");
     thinking.model_variant = ReasoningSelection::Disabled;
-    let off = resolve_generation_policy(
-        &thinking,
-        &ProviderOptions::default(),
-        "test",
-        &pinning_wire,
-    )
-    .expect("reasoning off does not pin sampling");
+    let off = resolve_generation_policy(&thinking, "test", &pinning_wire)
+        .expect("reasoning off does not pin sampling");
     assert_eq!(off.reasoning, Some(ReasoningIntent::Off));
 }
 
 #[test]
 fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
-    let options = ProviderOptions {
+    let options = ModelRequestDefaults {
         expose_thinking: true,
-        ..ProviderOptions::default()
+        ..ModelRequestDefaults::default()
     };
     for (summary, expected) in [
         (ThinkingSummaryWire::NoField, false),
@@ -271,8 +267,9 @@ fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
             thinking_summary: summary,
             ..open_wire()
         };
-        let policy = resolve_generation_policy(&empty_request(), &options, "test", &wire)
-            .expect("expose_thinking is never refused");
+        let policy =
+            resolve_generation_policy(&with_defaults(empty_request(), options), "test", &wire)
+                .expect("expose_thinking is never refused");
         assert!(policy.expose_thinking);
         assert_eq!(policy.request_thinking_summary, expected, "{summary:?}");
         let receipt = policy.receipt(
@@ -302,9 +299,8 @@ fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
 fn generation_policy_refuses_an_invalid_reasoning_selection() {
     let mut request = empty_request();
     request.model_variant = ReasoningSelection::Effort("high".to_string());
-    let error =
-        resolve_generation_policy(&request, &ProviderOptions::default(), "test", &open_wire())
-            .expect_err("no reasoning capability");
+    let error = resolve_generation_policy(&request, "test", &open_wire())
+        .expect_err("no reasoning capability");
     assert_eq!(
         refusal_code(&error),
         Some(TurnFailureCode::EffortNotConfigurable)
@@ -327,13 +323,17 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
         crate::provider::ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: NonZeroUsize::new(1).expect("positive"),
         };
-    let options = ProviderOptions {
+    let options = ModelRequestDefaults {
         max_output_tokens: Some(4_096),
         expose_thinking: true,
-        ..ProviderOptions::default()
+        ..ModelRequestDefaults::default()
     };
-    let policy =
-        resolve_generation_policy(&request, &options, "test", &open_wire()).expect("resolved");
+    let policy = resolve_generation_policy(
+        &with_defaults(request.clone(), options),
+        "test",
+        &open_wire(),
+    )
+    .expect("resolved");
     let receipt = policy.receipt(
         &request,
         &GenerationEmission {

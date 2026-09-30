@@ -10,6 +10,15 @@ struct GoogleCredentialCallContext<'a> {
     request: &'a LlmRequest,
 }
 
+/// How to read one response, fixed by the request before any I/O: whether
+/// the stream must end with terminal evidence, and whether the recorded model
+/// surfaces thinking.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResponseReading {
+    pub(crate) stream_termination: StreamTermination,
+    pub(crate) expose_thinking: bool,
+}
+
 impl GoogleOAuthProvider {
     fn should_retry_inline(err: &LlmTransportError) -> bool {
         matches!(err.http_status, Some(400 | 404))
@@ -24,9 +33,13 @@ impl GoogleOAuthProvider {
         request: Value,
         stream_events: Option<lash_core::llm::types::LlmEventSender>,
         provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
-        stream_termination: StreamTermination,
+        reading: ResponseReading,
         generation_disposition: Option<GenerationReceipt>,
     ) -> Result<LlmResponse, LlmTransportError> {
+        let ResponseReading {
+            stream_termination,
+            expose_thinking,
+        } = reading;
         let request_body_bytes = serde_json::to_vec(&request).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
                 .with_kind(lash_core::ProviderFailureKind::Validation)
@@ -159,12 +172,12 @@ impl GoogleOAuthProvider {
                 execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
-                expose_thinking: Some(self.options.expose_thinking),
+                expose_thinking: Some(expose_thinking),
             });
         }
 
         let mut stream_state = GoogleStreamState::default();
-        stream_state.expose_thinking = self.options.expose_thinking;
+        stream_state.expose_thinking = expose_thinking;
         stream_state.execution_evidence =
             provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
@@ -188,7 +201,7 @@ impl GoogleOAuthProvider {
                 let first_new_tool_call = stream_state.tool_call_parts.len();
                 let deltas = stream_state.push_event(self, raw, origin_model.as_deref())?;
                 if let Some(tx) = stream_events.as_ref()
-                    && self.options.expose_thinking
+                    && expose_thinking
                 {
                     for event in deltas.reasoning_events {
                         tx.send(event);
@@ -229,7 +242,7 @@ impl GoogleOAuthProvider {
         if stream_result.is_ok()
             && let Some(tx) = stream_events.as_ref()
         {
-            if self.options.expose_thinking {
+            if expose_thinking {
                 for event in stream_state.flush_open_reasoning_part() {
                     tx.send(event);
                 }
@@ -403,10 +416,13 @@ impl GoogleOAuthProvider {
     ) -> Result<LlmResponse, LlmTransportError> {
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
-        let stream_termination = req
-            .model_capability
-            .stream_termination
-            .unwrap_or(self.stream_termination);
+        let reading = ResponseReading {
+            stream_termination: req
+                .model_capability
+                .stream_termination
+                .unwrap_or(self.stream_termination),
+            expose_thinking: req.request_defaults.expose_thinking,
+        };
         let GoogleCredential {
             access_token,
             refresh_token,
@@ -462,7 +478,7 @@ impl GoogleOAuthProvider {
                 request,
                 stream_events.clone(),
                 provider_trace.clone(),
-                stream_termination,
+                reading,
                 generation_disposition,
             )
             .await
@@ -490,7 +506,7 @@ impl GoogleOAuthProvider {
                     inline_request,
                     stream_events,
                     provider_trace,
-                    stream_termination,
+                    reading,
                     generation_disposition,
                 )
                 .await
@@ -587,7 +603,7 @@ impl Provider for GoogleOAuthProvider {
         Self::build_request_with_receipt(self, &req, Vec::new(), None)?;
         // Every generation refusal lands before the credential refresh, the
         // project lookup and any attachment upload.
-        Self::resolve_generation(self, &req)?;
+        Self::resolve_generation(&req)?;
         let manager = Arc::clone(&self.credentials);
         let mut context = GoogleCredentialCallContext {
             provider: self,
@@ -694,9 +710,11 @@ mod error_detail_tests {
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<lash_core::llm::types::LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
+            attachment_acceptance: Default::default(),
             model_variant: Default::default(),
             model_capability: Default::default(),
             extra_body: Default::default(),
+            request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "project-resolution",
                 "project-resolution:frame",
@@ -727,7 +745,10 @@ mod error_detail_tests {
                 json!({ "model": "gemini-test" }),
                 None,
                 None,
-                StreamTermination::EofTolerated,
+                ResponseReading {
+                    stream_termination: StreamTermination::EofTolerated,
+                    expose_thinking: false,
+                },
                 None,
             )
             .await

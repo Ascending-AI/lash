@@ -241,9 +241,9 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
     );
     let core =
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::bounded(TURN_BUDGET), factory)
-            .provider(served.provider().into_handle())
-            .model(
-                lash::ModelSpec::builder("e2e-mock")
+            .serve_test_model(
+                served.provider().into_handle(),
+                lash::ModelMetadata::builder("e2e-mock")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("the load model spec"),

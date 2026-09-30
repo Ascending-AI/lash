@@ -111,10 +111,13 @@ pub(crate) fn host_claim() -> lash_core::ReferrerClaim {
 
 fn harness_session_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("harness model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("harness model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     }
 }

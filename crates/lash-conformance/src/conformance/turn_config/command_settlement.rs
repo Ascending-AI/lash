@@ -10,14 +10,34 @@ enum Law {
     Conflict,
 }
 
-#[expect(clippy::expect_used, reason = "conformance fixture setup")]
 fn transaction(model: &str) -> crate::ConfigTransaction {
     crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-        model: crate::ModelSpec::builder(model)
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model"),
+        model: crate::ModelKey::new(model),
     })
+}
+
+/// The keys these laws apply. A stale transaction's key is never minted, so
+/// it is deliberately not served.
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
+fn command_models() -> Arc<crate::ModelRegistry> {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .build()
+        .into_handle();
+    Arc::new(
+        [SECOND_MODEL, "newest-model"]
+            .into_iter()
+            .try_fold(crate::ModelRegistry::new(), |registry, key| {
+                registry.register(
+                    key,
+                    crate::RegisteredModel::new(
+                        crate::testing::test_model_metadata(key),
+                        provider.clone(),
+                    ),
+                )
+            })
+            .expect("register the command laws' models"),
+    )
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture submission")]
@@ -106,12 +126,7 @@ async fn command_law(
         "command-settlement",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(
-            crate::testing::TestProvider::builder()
-                .kind("stub")
-                .build()
-                .into_handle(),
-        )),
+        command_models(),
     )
     .await;
     let mut runtime = build_runtime(parts.clone()).await;
@@ -187,8 +202,13 @@ async fn command_law(
         );
         assert_eq!(runtime.export_persistence_state().config_revision, 2);
         assert_eq!(
-            runtime.export_persistence_state().policy.model.id,
-            "newest-model"
+            runtime
+                .export_persistence_state()
+                .policy
+                .model
+                .as_ref()
+                .map(|model| model.key().as_str()),
+            Some("newest-model")
         );
     } else {
         for (index, request) in ["apply-later-1", "apply-later-2", "apply-later-3"]

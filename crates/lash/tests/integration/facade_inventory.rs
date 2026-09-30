@@ -28,10 +28,15 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash::Backend as _;
-use lash::ModelSpec as _;
+use lash::ModelConfig as _;
+use lash::ModelKey as _;
+use lash::ModelMetadata as _;
+use lash::ModelRegistry as _;
 use lash::PendingTurnInput as _;
 use lash::PendingTurnInputCancelOutcome as _;
 use lash::PendingTurnInputSuffixCancelOutcome as _;
+use lash::RecordedModel as _;
+use lash::RuntimeModels as _;
 use lash::StoreSet as _;
 use lash::TurnActivity as _;
 use lash::TurnCancelRequest as _;

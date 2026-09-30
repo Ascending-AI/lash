@@ -111,7 +111,7 @@ pub mod config {
     pub use lash_core::plugin::config::core::{
         AddPromptContribution, ClearPromptSlot, ClearPromptTemplate, ReplacePromptSlot,
         SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetModel,
-        SetNoProgressBudget, SetPrompt, SetPromptTemplate, SetProvider, SetToolAccess,
+        SetNoProgressBudget, SetPrompt, SetPromptTemplate, SetReasoning, SetToolAccess,
         SetTurnBudget,
     };
     pub use lash_core::{
@@ -212,24 +212,26 @@ pub use lash_core::store::{
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
-    FrameKey, InputId, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec,
-    ModelSpecBuilder, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
+    EmptyModels, FrameKey, InputId, InputItem, LlmCallRecord, ModelConfig, ModelKey, ModelLimits,
+    ModelLimitsError, ModelMetadata, ModelMetadataBuilder, ModelRegistry, ModelUnavailable,
+    ModelUnavailableReason, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkBatchingConfig, Resolution, ResolveOutcome, RuntimeOwner,
+    QueuedDrainSelection, QueuedWorkBatchingConfig, RecordedModel, RegisteredModel,
+    RegistrationError, Resolution, ResolveOutcome, RuntimeModels, RuntimeOwner,
     SessionCreateRequest, SessionError, SessionId, SessionListFilter, SessionRelationKind,
     SessionStartPoint, SessionView, TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent,
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
     TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
     facade_support::SessionCommand, facade_support::SessionCommandReceipt,
-    facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
-    facade_support::TurnAttach, facade_support::TurnCancelOutcome,
-    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
-    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
-    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
-    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
-    facade_support::TurnWorkDriver,
+    facade_support::SessionSpec, facade_support::SpecResolveError,
+    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
+    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
+    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
+    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
+    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
@@ -248,7 +250,7 @@ pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
 /// [`RunDefinition`]s a [`LashCoreBuilder`] registers for specs to name.
 pub use lash_core::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, RunDefinition, RunOverrides,
-    RunShapeError, RunSpec, SlotId,
+    RunResolveError, RunShapeError, RunSpec, SlotId,
 };
 /// Lash's identity for one tool call (ADR 0117): what a tool keys its
 /// idempotency on, through [`tools::AttemptContext::call_id`].
@@ -262,14 +264,12 @@ pub use lash_core::ConfigTransactionRecord;
 pub use lash_core::SessionPluginInit;
 pub use lash_core::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
 pub use lash_core::drive::{ObligationRelayUnavailable, RelayNeed};
-pub use lash_core::facade_support::ConfigRefusalCode;
 pub use lash_core::runtime::ConfigTransactionSubmitError;
 pub use lash_core::session_close::SessionCloseServices;
 pub use lash_core::session_delete::SessionDeleteStores;
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::build_generation::BuildGenerationParseError;
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
-pub use lash_core_store::session_policy::ProviderPinMismatch;
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
 pub use lash_sansio::llm::types::{
     AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockKind,
@@ -285,10 +285,11 @@ pub use lash_sansio::{
 pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
-        DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
-        ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
-        ParkedSession, PendingTurnInputCancelOutcome, PluginOperations, PluginStack,
-        PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
+        DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelConfig,
+        ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
+        ModelRegistry, NoProgressBudget, ObservableSession, ParkedSession,
+        PendingTurnInputCancelOutcome, PluginOperations, PluginStack, PromptLayerSink,
+        RegisteredModel, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionCreateRequest,
         SessionCreation, SessionDeleteReport, SessionDeletion, SessionListFilter,
         SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
@@ -959,22 +960,22 @@ pub mod remote {
             RemoteAttachmentAcceptor, RemoteAttachmentCapabilitySnapshot,
             RemoteAttachmentMimeSource, RemoteAttachmentRef, RemoteAttachmentSource,
             RemoteAttachmentTypeMetadata, RemoteAttemptOutcome, RemoteAttemptRecord,
-            RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteCacheRetention, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
             RemoteInstructionRole, RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage,
             RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope,
             RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice,
-            RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent, RemoteNormalizedError,
-            RemoteOpenAiReasoningContext, RemoteProtocolPosition, RemoteProviderFailureKind,
-            RemoteProviderFileScope, RemoteProviderMetadata, RemoteProviderReasoningReplay,
-            RemoteProviderReplayDrop, RemoteProviderReplayDropReason, RemoteProviderReplayKind,
-            RemoteProviderReplayMeta, RemoteProviderRouteIdentity, RemoteReasoningCapability,
-            RemoteReasoningEncoding, RemoteReasoningRetentionCapability,
-            RemoteReasoningRetentionPolicy, RemoteReasoningRetentionSelection,
-            RemoteReasoningSelection, RemoteResponseTextMeta, RemoteRetryDecision,
-            RemoteSchemaContract, RemoteSchemaProjectionOverride, RemoteSchemaProjectionPolicy,
-            RemoteToolResultBlock,
+            RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent,
+            RemoteModelRequestDefaults, RemoteNormalizedError, RemoteOpenAiReasoningContext,
+            RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
+            RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
+            RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
+            RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningEncoding,
+            RemoteReasoningRetentionCapability, RemoteReasoningRetentionPolicy,
+            RemoteReasoningRetentionSelection, RemoteReasoningSelection, RemoteResponseTextMeta,
+            RemoteRetryDecision, RemoteSchemaContract, RemoteSchemaProjectionOverride,
+            RemoteSchemaProjectionPolicy, RemoteToolResultBlock,
         };
     }
 
@@ -1010,17 +1011,17 @@ pub mod remote {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonWriter, RemoteChargeSafetyPolicy,
             RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
-            RemoteLifetimeDecision, RemoteNoProgressBudget, RemoteObservedProcess,
-            RemoteObservedProcessEvent, RemoteObservedProcessFailure, RemoteObservedWorkItemState,
-            RemoteParkReason, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
-            RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
-            RemoteProcessCancelReceipt, RemoteProcessCancelRequest, RemoteProcessDefinition,
-            RemoteProcessEvent, RemoteProcessEventSemantics, RemoteProcessEventSemanticsSpec,
-            RemoteProcessEventType, RemoteProcessEventsRequest, RemoteProcessEventsResponse,
-            RemoteProcessExecutionEnvRef, RemoteProcessExecutionEnvSpec,
-            RemoteProcessExecutionPolicy, RemoteProcessExternalRef, RemoteProcessHandleView,
-            RemoteProcessIdentity, RemoteProcessInput, RemoteProcessListFilter,
-            RemoteProcessListResponse, RemoteProcessModelLimits, RemoteProcessModelSpec,
+            RemoteLifetimeDecision, RemoteModelConfig, RemoteModelMetadata, RemoteNoProgressBudget,
+            RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
+            RemoteObservedWorkItemState, RemoteParkReason, RemotePersistProcessEnvReceipt,
+            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteProcessDefinition, RemoteProcessEvent, RemoteProcessEventSemantics,
+            RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
+            RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
+            RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
+            RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
+            RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
             RemoteProcessObserverBy, RemoteProcessOriginator, RemoteProcessOriginatorFilter,
             RemoteProcessPark, RemoteProcessPluginConfig, RemoteProcessProvenance,
             RemoteProcessRecord, RemoteProcessResumeRefusal, RemoteProcessSignalReceipt,
@@ -1282,9 +1283,6 @@ pub mod runtime {
     pub use lash_core::facade_support::{
         ToolChildDriver, ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts,
         UnrecordedSessionSources,
-    };
-    pub use lash_core::provider::{
-        ProviderBinding, ProviderResolutionError, RuntimeProviderResolver,
     };
     pub use lash_core::runtime::DirectUsage;
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
@@ -1607,9 +1605,9 @@ pub mod provider {
     /// call's accounting itself (ADR 0125).
     pub use lash_core::provider::{
         CacheRetention, DefaultProviderFailureClassifier, DispatchAdmission, DispatchRefused,
-        ProviderCompletion, ProviderCompletionError, ProviderDispatch, ProviderFailureClassifier,
-        ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
-        ProviderRetryPolicy, RequestTimeout,
+        ModelRequestDefaults, ProviderCompletion, ProviderCompletionError, ProviderDispatch,
+        ProviderFailureClassifier, ProviderRateLimitPermit, ProviderRateLimitPolicy,
+        ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

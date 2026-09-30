@@ -81,13 +81,15 @@ fn core(engine: &Engine) -> lash::LashCore {
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(
-            lash_core::ModelSpec::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "mock-model",
+                    lash::RegisteredModel::new(mock_model_metadata(), provider),
+                )
                 .unwrap(),
-        )
+        ))
+        .model("mock-model")
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "uploaded-start",
             "boot",
@@ -162,11 +164,18 @@ async fn sweep(backend: &lash_core::Backend) {
     .unwrap();
 }
 
-fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    let model = lash_core::ModelSpec::builder("mock-model")
+fn mock_model_metadata() -> lash::ModelMetadata {
+    lash::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
-        .unwrap();
+        .unwrap()
+}
+
+fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
+    let model = Some(lash::ModelConfig::new(lash::RecordedModel::mint(
+        lash::ModelKey::new("mock-model"),
+        mock_model_metadata(),
+    )));
     lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::SessionTurn {
             definition_key: "uploaded-start-input".into(),

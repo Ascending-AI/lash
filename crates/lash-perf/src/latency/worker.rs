@@ -46,9 +46,9 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
         )),
     )));
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("latency-model")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("latency-model")
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))?,

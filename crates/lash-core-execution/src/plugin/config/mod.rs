@@ -2,7 +2,8 @@
 //!
 //! A session records every installed owner's config namespace with its
 //! config head, the protocol's among them, beside the core owner's share
-//! (provider, model, prompt, generation, budget and tool access). Each
+//! (model, reasoning, attachment acceptance, prompt, generation, budget and
+//! tool access). Each
 //! namespace has one owner:
 //!
 //! - An owner registers before any session exists
@@ -12,7 +13,10 @@
 //! - The owner's typed [`ConfigCommand`]s are the only changes the namespace
 //!   admits. A setting no command changes is immutable by construction.
 //!   A reducer sees the recorded namespace and its command, and nothing else:
-//!   no graph, process, session-write or I/O services.
+//!   no graph, process, session-write or I/O services. The core owner's
+//!   model command alone also reads the host's models, to mint the binding
+//!   its key names; the resolution records that binding, so nothing
+//!   re-derives it.
 //! - A config transaction orders commands of any owners. It resolves once,
 //!   over one private candidate, into a recorded
 //!   [`ConfigResolution`], which one fenced commit publishes with one config
@@ -214,6 +218,50 @@ impl ConfigRegistrar {
         );
         Ok(())
     }
+
+    /// Register the core command `C`, whose reducer also reads the host's
+    /// models. Only the core owner registers one: a plugin's reducer never
+    /// sees the host's models.
+    fn models_command<C: ConfigCommand>(
+        &mut self,
+        reduce: impl Fn(
+            &RecordedOf<C>,
+            C,
+            &dyn crate::RuntimeModels,
+        ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<(), ConfigRegistrationError> {
+        let plugin_id = self.owner_id.clone();
+        let Some(owner) = self
+            .owner
+            .as_mut()
+            .filter(|owner| owner.type_id == TypeId::of::<C::Owner>())
+        else {
+            return Err(ConfigRegistrationError::ForeignCommand {
+                plugin_id,
+                command: C::NAME.to_string(),
+            });
+        };
+        if owner.commands.contains_key(C::NAME) {
+            return Err(ConfigRegistrationError::DuplicateCommand {
+                plugin_id,
+                command: C::NAME.to_string(),
+            });
+        }
+        owner
+            .command_types
+            .insert(TypeId::of::<C>(), C::NAME.to_string());
+        owner.commands.insert(
+            C::NAME.to_string(),
+            Arc::new(ModelsCommand::<C, _> {
+                reduce,
+                _command: std::marker::PhantomData,
+            }),
+        );
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -272,6 +320,7 @@ trait ErasedCommand: Send + Sync {
         &self,
         recorded: &serde_json::Value,
         args: &serde_json::Value,
+        models: &dyn crate::RuntimeModels,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure>;
     fn input_schema(&self) -> serde_json::Value;
     fn output_schema(&self) -> serde_json::Value;
@@ -415,25 +464,11 @@ where
         &self,
         recorded: &serde_json::Value,
         args: &serde_json::Value,
+        _models: &dyn crate::RuntimeModels,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
-        let recorded =
-            serde_json::from_value::<RecordedOf<C>>(recorded.clone()).map_err(|error| {
-                ConfigCommandFailure::Unreadable(format!("recorded config: {error}"))
-            })?;
-        let command = serde_json::from_value::<C>(args.clone())
-            .map_err(|error| ConfigCommandFailure::Unreadable(format!("arguments: {error}")))?;
-        let change =
-            (self.reduce)(&recorded, command).map_err(|refusal| ConfigCommandFailure::Refused {
-                refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
-                message: refusal.to_string(),
-            })?;
-        let next = serde_json::to_value(change.recorded).map_err(|error| {
-            ConfigCommandFailure::Unreadable(format!("next config does not encode: {error}"))
-        })?;
-        let output = serde_json::to_value(change.output).map_err(|error| {
-            ConfigCommandFailure::Unreadable(format!("output does not encode: {error}"))
-        })?;
-        Ok((next, output))
+        reduce_typed::<C>(recorded, args, |recorded, command| {
+            (self.reduce)(recorded, command)
+        })
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -443,6 +478,78 @@ where
     fn output_schema(&self) -> serde_json::Value {
         schema_of::<C::Output>()
     }
+}
+
+/// A core command whose reducer also reads the host's models: the one place
+/// a reducer mints a model binding.
+struct ModelsCommand<C, F> {
+    reduce: F,
+    _command: std::marker::PhantomData<fn() -> C>,
+}
+
+impl<C, F> ErasedCommand for ModelsCommand<C, F>
+where
+    C: ConfigCommand,
+    F: Fn(
+            &RecordedOf<C>,
+            C,
+            &dyn crate::RuntimeModels,
+        ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>
+        + Send
+        + Sync
+        + 'static,
+{
+    fn decode(&self, args: &serde_json::Value) -> Result<(), String> {
+        serde_json::from_value::<C>(args.clone())
+            .map(drop)
+            .map_err(|error| error.to_string())
+    }
+
+    fn reduce(
+        &self,
+        recorded: &serde_json::Value,
+        args: &serde_json::Value,
+        models: &dyn crate::RuntimeModels,
+    ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
+        reduce_typed::<C>(recorded, args, |recorded, command| {
+            (self.reduce)(recorded, command, models)
+        })
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        schema_of::<C>()
+    }
+
+    fn output_schema(&self) -> serde_json::Value {
+        schema_of::<C::Output>()
+    }
+}
+
+/// Decode `recorded` and `args` as `C`'s namespace and command, reduce them
+/// with `reduce`, and encode the change.
+fn reduce_typed<C: ConfigCommand>(
+    recorded: &serde_json::Value,
+    args: &serde_json::Value,
+    reduce: impl FnOnce(
+        &RecordedOf<C>,
+        C,
+    ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>,
+) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
+    let recorded = serde_json::from_value::<RecordedOf<C>>(recorded.clone())
+        .map_err(|error| ConfigCommandFailure::Unreadable(format!("recorded config: {error}")))?;
+    let command = serde_json::from_value::<C>(args.clone())
+        .map_err(|error| ConfigCommandFailure::Unreadable(format!("arguments: {error}")))?;
+    let change = reduce(&recorded, command).map_err(|refusal| ConfigCommandFailure::Refused {
+        refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
+        message: refusal.to_string(),
+    })?;
+    let next = serde_json::to_value(change.recorded).map_err(|error| {
+        ConfigCommandFailure::Unreadable(format!("next config does not encode: {error}"))
+    })?;
+    let output = serde_json::to_value(change.output).map_err(|error| {
+        ConfigCommandFailure::Unreadable(format!("output does not encode: {error}"))
+    })?;
+    Ok((next, output))
 }
 
 /// A creation or a transaction named config owners no installed plugin
@@ -757,19 +864,20 @@ impl ConfigRegistry {
     /// against resolves `Stale` without running a reducer. Otherwise the
     /// commands reduce in order over one private candidate, and every owner
     /// with a recorded namespace validates the final candidate, touched or
-    /// not, and the core's route by `validate_core` when the core changed;
-    /// the first refusal refuses the whole transaction.
+    /// not, and the core's model and reasoning when the core changed; the
+    /// first refusal refuses the whole transaction. A model command mints
+    /// its key's binding through `models` here, once.
     /// Nothing here publishes: the caller records the resolution, then
     /// publishes it.
     pub fn resolve(
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
-        validate_core: &dyn Fn(&CoreConfig, &CoreConfig) -> Result<(), ConfigRefusal>,
+        models: &dyn crate::RuntimeModels,
     ) -> ConfigResolution {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
-            self.reduce(base, transaction, validate_core)
+            self.reduce(base, transaction, models)
         } else {
             ConfigResolutionDecision::Stale {
                 expected: transaction.expected_revision,
@@ -786,7 +894,7 @@ impl ConfigRegistry {
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
-        validate_core: &dyn Fn(&CoreConfig, &CoreConfig) -> Result<(), ConfigRefusal>,
+        models: &dyn crate::RuntimeModels,
     ) -> ConfigResolutionDecision {
         let base_core = CoreConfig::of(base);
         let mut candidate: BTreeMap<String, serde_json::Value> = BTreeMap::new();
@@ -835,7 +943,7 @@ impl ConfigRegistry {
                     }
                 },
             };
-            match command.reduce(&recorded, &entry.args) {
+            match command.reduce(&recorded, &entry.args, models) {
                 Ok((next, output)) => {
                     candidate.insert(entry.owner.clone(), next);
                     outputs.push(output);
@@ -868,9 +976,11 @@ impl ConfigRegistry {
             plugin_config: &final_plugins,
         };
         if core.is_some()
-            && let Err(refusal) = validate_core(&base_core, &final_core)
+            && let Err(refusal) = core::validate_candidate(&base_core, &final_core)
         {
-            return ConfigResolutionDecision::Refused { refusal };
+            return ConfigResolutionDecision::Refused {
+                refusal: owner_refusal(CORE_CONFIG_OWNER, &refusal),
+            };
         }
         // Every owner judges the final candidate, touched or not: a change
         // to one namespace, the core's included, can break another owner's

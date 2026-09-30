@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context as _, Result};
 use lash::direct::LlmOutputPart;
 use lash::provider::{LlmResponse, ProviderHandle};
-use lash::{ModelSpec, sync::MutexExt as _};
+use lash::{ModelMetadata, sync::MutexExt as _};
 use serde_json::json;
 
 use crate::log_err;
@@ -25,7 +25,7 @@ use crate::mcp_server::{
 
 const SELECTOR_ENV: &str = "SLACK_CLONE_E2E_PROVIDER_DIR";
 
-pub(super) fn scripted_provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
+pub(super) fn scripted_provider_from_env() -> Result<(ProviderHandle, ModelMetadata)> {
     let root = std::env::var(SELECTOR_ENV)
         .map(PathBuf::from)
         .with_context(|| format!("{SELECTOR_ENV} is required by the scripted E2E provider"))?;
@@ -50,7 +50,7 @@ pub(super) fn scripted_provider_from_env() -> Result<(ProviderHandle, ModelSpec)
         })
         .build()
         .into_handle();
-    let model = ModelSpec::builder("test/slack-clone-e2e")
+    let model = ModelMetadata::builder("test/slack-clone-e2e")
         .context_window_tokens(200_000)
         .build()
         .context("build deterministic E2E model metadata")?;

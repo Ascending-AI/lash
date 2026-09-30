@@ -88,10 +88,8 @@ mod tests {
 
     fn request_with_capability(
         model_variant: Option<&str>,
-        mut model_capability: ModelCapability,
+        model_capability: ModelCapability,
     ) -> LlmRequest {
-        model_capability.attachment_acceptance =
-            crate::attachment_test_capability().attachment_acceptance;
         LlmRequest {
             instructions: None,
             model: "gemini-3.1-pro-preview".to_string(),
@@ -99,11 +97,13 @@ mod tests {
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
+            attachment_acceptance: crate::attachment_test_acceptance(),
             model_variant: model_variant
                 .map(|effort| lash_core::provider::ReasoningSelection::Effort(effort.to_string()))
                 .unwrap_or_default(),
             model_capability,
             extra_body: Default::default(),
+            request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -113,6 +113,14 @@ mod tests {
             stream_events: None::<LlmEventSender>,
             generation: lash_core::GenerationOptions::default(),
             provider_trace: None,
+        }
+    }
+
+    /// How the stream tests read a response: thinking stays hidden.
+    fn hidden_thinking(stream_termination: StreamTermination) -> crate::provider::ResponseReading {
+        crate::provider::ResponseReading {
+            stream_termination,
+            expose_thinking: false,
         }
     }
 
@@ -159,7 +167,7 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                hidden_thinking(StreamTermination::RequireTerminalEvidence),
                 None,
             )
             .await
@@ -211,7 +219,7 @@ mod tests {
                 wire_request.clone(),
                 Some(LlmEventSender::new(|_| {})),
                 None,
-                StreamTermination::EofTolerated,
+                hidden_thinking(StreamTermination::EofTolerated),
                 None,
             )
             .await
@@ -238,7 +246,7 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                hidden_thinking(StreamTermination::RequireTerminalEvidence),
                 None,
             )
             .await
@@ -310,7 +318,7 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                hidden_thinking(StreamTermination::RequireTerminalEvidence),
                 None,
             )
             .await
@@ -347,7 +355,7 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                hidden_thinking(StreamTermination::RequireTerminalEvidence),
                 None,
             )
             .await
@@ -522,10 +530,6 @@ mod tests {
                 secret: "oauth-client-secret".into(),
             },
         )
-        .with_options(ProviderOptions {
-            expose_thinking,
-            ..ProviderOptions::default()
-        })
         .with_transport(Arc::new(StaticSseTransport::new(sse_body(wire_events))));
         let response = provider
             .execute_request(
@@ -535,7 +539,10 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                StreamTermination::RequireTerminalEvidence,
+                crate::provider::ResponseReading {
+                    stream_termination: StreamTermination::RequireTerminalEvidence,
+                    expose_thinking,
+                },
                 None,
             )
             .await
@@ -785,7 +792,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().copied().map(str::to_string).collect(),
@@ -804,7 +810,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: entries
@@ -1173,17 +1178,15 @@ mod tests {
                 id: "oauth-client-id".into(),
                 secret: "oauth-client-secret".into(),
             },
-        )
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        });
+        );
+        let mut exposed_request = request_with_capability(
+            Some("medium"),
+            effort_capability(&["low", "medium", "high"]),
+        );
+        exposed_request.request_defaults.expose_thinking = true;
         let exposed = GoogleOAuthProvider::build_request(
             &exposed_provider,
-            &request_with_capability(
-                Some("medium"),
-                effort_capability(&["low", "medium", "high"]),
-            ),
+            &exposed_request,
             Vec::new(),
             None,
         )
@@ -1204,23 +1207,22 @@ mod tests {
                 id: "oauth-client-id".into(),
                 secret: "oauth-client-secret".into(),
             },
-        )
-        .with_options(ProviderOptions {
-            max_output_tokens: Some(9999),
-            ..ProviderOptions::default()
-        });
+        );
 
         let mut req = request(None);
+        req.request_defaults.max_output_tokens = Some(9999);
         req.generation.output_token_cap = NonZeroUsize::new(4096);
         let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
             .expect("schema projection");
 
         assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 4096);
-        let provider_limited =
-            GoogleOAuthProvider::build_request(&provider, &request(None), Vec::new(), None)
+        let mut model_limited_request = request(None);
+        model_limited_request.request_defaults.max_output_tokens = Some(9999);
+        let model_limited =
+            GoogleOAuthProvider::build_request(&provider, &model_limited_request, Vec::new(), None)
                 .expect("schema projection");
         assert_eq!(
-            provider_limited["request"]["generationConfig"]["maxOutputTokens"],
+            model_limited["request"]["generationConfig"]["maxOutputTokens"],
             9999
         );
 
@@ -1597,4 +1599,4 @@ mod tests {
 #[cfg(test)]
 mod attachment_capability_fixture;
 #[cfg(test)]
-pub(crate) use attachment_capability_fixture::attachment_test_capability;
+pub(crate) use attachment_capability_fixture::attachment_test_acceptance;

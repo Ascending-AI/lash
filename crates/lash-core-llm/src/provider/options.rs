@@ -1,5 +1,5 @@
 use super::support::*;
-use lash_sansio::llm::capability::ReasoningRetentionSelection;
+use lash_sansio::llm::capability::{CacheRetention, ReasoningRetentionSelection};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -105,46 +105,11 @@ impl<'de> Deserialize<'de> for RequestTimeout {
     }
 }
 
-/// Prompt-cache lifetime hint. Providers translate this into their own
-/// wire dialect (Anthropic and OpenRouter Claude/Gemini `cache_control`,
-/// OpenAI Responses and Codex `prompt_cache_key`, and OpenAI
-/// `prompt_cache_retention`). Providers without a cache-control concept,
-/// such as direct Google, read the value but emit nothing for it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CacheRetention {
-    /// Do not emit any prompt-cache hints.
-    None,
-    /// Default Anthropic ephemeral window (5 minutes).
-    #[default]
-    Short,
-    /// Extend to a 1-hour TTL where the API supports it.
-    Long,
-}
-
-impl CacheRetention {
-    pub(crate) fn is_default(&self) -> bool {
-        matches!(self, CacheRetention::Short)
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderOptions {
     #[serde(default)]
     pub reliability: ProviderReliability,
-    /// Surface provider reasoning/thinking output in responses.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub expose_thinking: bool,
-    /// Output-token cap for calls whose request sets none. `None` sends no
-    /// cap; a wire that requires one (Anthropic Messages) then refuses the
-    /// call. Providers translate to their wire-specific field (`max_tokens`,
-    /// `max_output_tokens`, `maxOutputTokens`, …).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
-    /// Prompt-cache lifetime hint; see [`CacheRetention`].
-    #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
-    pub cache_retention: CacheRetention,
     /// Response header names (case-insensitive) captured into
     /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
     /// Headers not named here are never retained.
@@ -177,9 +142,6 @@ impl ProviderOptions {
 
     pub fn is_default(&self) -> bool {
         self.reliability == ProviderReliability::default()
-            && !self.expose_thinking
-            && self.max_output_tokens.is_none()
-            && self.cache_retention.is_default()
             && self.response_metadata_headers.is_empty()
             && self.response_metadata_body_paths.is_empty()
             && self.sse_event_bytes.is_none_or(|bytes| bytes == 0)
@@ -239,11 +201,12 @@ pub struct GenerationWire {
 }
 
 /// Every host generation setting for one call, resolved once: request options
-/// over provider options, the reasoning selection over the host capability,
-/// and every refusal already applied.
+/// over the model's recorded request defaults, the reasoning selection over
+/// the host capability, and every refusal already applied.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedGenerationPolicy {
-    /// The request's cap, else the provider options'. `None` sends no cap.
+    /// The request's cap, else the model's recorded default. `None` sends no
+    /// cap.
     pub max_output_tokens: Option<u64>,
     pub temperature: Option<crate::NonNegativeFiniteF64>,
     pub seed: Option<i64>,
@@ -301,18 +264,18 @@ fn unsupported(wire: &GenerationWire, setting: &str, reason: &str) -> LlmTranspo
 /// non-retryable failure, before the adapter does any I/O; nothing is dropped
 /// and nothing is remapped.
 ///
-/// Lash invents no defaults: with no request cap and no provider
-/// `max_output_tokens` no cap is sent, and a wire that requires one refuses
-/// the call with `output_token_cap_required`. A pinned model
+/// Lash invents no defaults: with no request cap and no recorded
+/// `max_output_tokens` default no cap is sent, and a wire that requires one
+/// refuses the call with `output_token_cap_required`. A pinned model
 /// ([`SamplingCapability::Pinned`](lash_sansio::llm::capability::SamplingCapability))
 /// or active thinking that pins sampling refuses a set temperature on every
 /// adapter.
 pub fn resolve_generation_policy(
     request: &LlmRequest,
-    options: &ProviderOptions,
     provider_kind: &str,
     wire: &GenerationWire,
 ) -> Result<ResolvedGenerationPolicy, LlmTransportError> {
+    let defaults = &request.request_defaults;
     let reasoning = request
         .model_capability
         .reasoning_intent(&request.model, provider_kind, &request.model_variant)
@@ -323,13 +286,13 @@ pub fn resolve_generation_policy(
     let generation = &request.generation;
     let max_output_tokens = generation
         .output_token_cap_u64()
-        .or(options.max_output_tokens);
+        .or(defaults.max_output_tokens);
     match (wire.output_token_cap, max_output_tokens) {
         (OutputCapWire::Required, None) => {
             return Err(refused(
                 TurnFailureCode::OutputTokenCapRequired,
                 format!(
-                    "{} requires an output-token cap; set the request's `output_token_cap` or the provider's `max_output_tokens`.",
+                    "{} requires an output-token cap; set the request's `output_token_cap` or the model's `max_output_tokens` default.",
                     wire.label
                 ),
             ));
@@ -376,7 +339,7 @@ pub fn resolve_generation_policy(
             "has no field, for this request, for",
         ));
     }
-    let request_thinking_summary = options.expose_thinking
+    let request_thinking_summary = defaults.expose_thinking
         && match wire.thinking_summary {
             ThinkingSummaryWire::NoField => false,
             ThinkingSummaryWire::Always => true,
@@ -392,8 +355,8 @@ pub fn resolve_generation_policy(
         stop_sequences: generation.stop_sequences.clone(),
         parallel_tool_calls: generation.parallel_tool_calls,
         reasoning,
-        cache_retention: options.cache_retention,
-        expose_thinking: options.expose_thinking,
+        cache_retention: defaults.cache_retention,
+        expose_thinking: defaults.expose_thinking,
         request_thinking_summary,
     })
 }

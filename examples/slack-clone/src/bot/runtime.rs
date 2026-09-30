@@ -15,9 +15,9 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use lash::persistence::LeaseOwnerIdentity;
 use lash::prompt::{PromptContribution, PromptLayer};
-use lash::provider::{ProviderHandle, ProviderOptions};
+use lash::provider::ProviderHandle;
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
-use lash::{LashCore, ModelSpec, SessionSpec};
+use lash::{LashCore, ModelMetadata, SessionSpec};
 use lash_plugin_mcp::{
     McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
 };
@@ -191,7 +191,7 @@ pub async fn build_core(
     config: &RuntimeConfig,
     backend: lash::Backend,
     provider: ProviderHandle,
-    model: ModelSpec,
+    model: ModelMetadata,
     api: Arc<SlackApi>,
 ) -> Result<BotRuntime> {
     validate_stdio_commands(&config.mcp_servers)?;
@@ -224,10 +224,19 @@ pub async fn build_core(
             status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
+    // The bot runs one model: the registry keys it by its wire model, and
+    // every channel session records that key when it is created.
+    let model_key = lash::ModelKey::new(model.wire_model.clone());
+    let models = lash::ModelRegistry::new()
+        .register(
+            model_key.clone(),
+            lash::RegisteredModel::new(model.clone(), provider.clone()),
+        )
+        .context("register the bot's model")?;
     let builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider)
+        .models(Arc::new(models))
         // `session_spec` replaces the builder's whole spec, so it must precede
-        // `model`, which writes into that same spec.
+        // `model`, `attachment_acceptance`, which write into that same spec.
         .session_spec(
             SessionSpec::new()
                 .turn_budget(lash::TurnBudget::Unbounded)
@@ -235,7 +244,8 @@ pub async fn build_core(
                     config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
                 )),
         )
-        .model(model)
+        .model(model_key)
+        .attachment_acceptance(Arc::new(slack_attachment_acceptance()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tools(tools::workspace_tools(api))
@@ -351,7 +361,7 @@ fn trace_sink(config: &RuntimeConfig) -> Arc<dyn TraceSink> {
 
 /// Kept separate from [`build_core`] so tests can hand in
 /// `lash::testing::TestProvider` and never reach for a network or a key.
-pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
+pub fn provider_from_env() -> Result<(ProviderHandle, ModelMetadata)> {
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .context("OPENROUTER_API_KEY is required to run the bot against a real model")?;
     let model = std::env::var("OPENROUTER_MODEL")
@@ -359,18 +369,13 @@ pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
     let provider = ProviderHandle::new(
         OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
-            .with_options(ProviderOptions {
-                expose_thinking: false,
-                ..ProviderOptions::default()
-            })
             .into_components(),
     );
-    let spec = ModelSpec::builder(model)
+    let spec = ModelMetadata::builder(model)
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow::anyhow!("invalid OPENROUTER_MODEL metadata: {error}"))?
         .with_capability(lash::provider::ModelCapability {
-            attachment_acceptance: slack_attachment_acceptance().into(),
             cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
             ..Default::default()
         });

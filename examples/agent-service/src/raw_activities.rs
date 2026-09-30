@@ -21,7 +21,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::remote_protocol::negotiate_remote;
 use crate::routes::{
     ChannelTurnEvents, TurnPersistenceState, TurnRefusal, answered_output,
-    assistant_text_for_persistence, model_spec_for_chat_selection,
+    assistant_text_for_persistence, model_choice_for_chat_selection,
 };
 use crate::state::{AppError, AppResult, AppStateData};
 
@@ -67,7 +67,7 @@ pub(crate) async fn stream_raw_activities(
         })
         .await?;
 
-    let turn_model = model_spec_for_chat_selection(&model_selection)?;
+    let turn_model = model_choice_for_chat_selection(&model_selection);
     let session = state.open_session(&chat_id, turn_model).await?;
     let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
     // Accepted before the response starts, so a refused acceptance is the
@@ -297,9 +297,9 @@ finish("done through raw activities");
             &backend,
         );
         let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("scripted-model")
+            .serve_test_model(
+                provider,
+                lash::ModelMetadata::builder("scripted-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),

@@ -2,7 +2,7 @@
 // options are creation config, stated once in the `SessionCreation` passed to
 // `create`; the open builder cannot carry them.
 
-fn open_takes_no_model(core: lash::LashCore, model: lash::ModelSpec) {
+fn open_takes_no_model(core: lash::LashCore, model: lash::ModelKey) {
     let _ = core
         .session("stated-at-open")
         .session_spec(lash::SessionSpec::new().model(model))

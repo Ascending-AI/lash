@@ -1,12 +1,14 @@
 //! The core owner's config commands (FIG-4379): the changes a session's
-//! provider, model, prompt, generation, execution controls (turn budget,
-//! autonomy, no-progress budget, charge safety; FIG-4376) and tool access
-//! admit.
+//! model, reasoning, attachment acceptance, prompt, generation, execution
+//! controls (turn budget, autonomy, no-progress budget, charge safety;
+//! FIG-4376) and tool access admit.
 //!
 //! The core owner is not a plugin. Its share of the session's config is the
-//! [`CoreConfig`] view of the config head, its reducers are the functions
-//! here, and its candidate is validated by the runtime, which alone knows
-//! which provider routes this host serves.
+//! [`CoreConfig`] view of the config head and its reducers are the functions
+//! here. [`SetModel`] names a key; its reducer mints the key's binding
+//! through the host's models when the transaction resolves, and the
+//! resolution records it (FIG-4374). The final candidate's reasoning is
+//! judged against the model it records.
 //!
 //! Adding a core command:
 //! 1. Give the fact a field on [`CoreConfig`], read by `CoreConfig::of` and
@@ -43,27 +45,36 @@ pub struct CoreConfigOwner;
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreConfigRefusal {
-    /// No provider of this host serves the candidate's route.
-    UnservableRoute {
-        code: crate::provider::ConfigRefusalCode,
-        provider_id: String,
-        model: String,
+    /// The host's models register no model under the key a [`SetModel`]
+    /// named.
+    UnknownModel { key: crate::ModelKey },
+    /// The candidate's reasoning does not fit the capability its recorded
+    /// model declares.
+    ReasoningRefused {
+        key: crate::ModelKey,
+        reasoning: crate::ReasoningSelection,
+        category: crate::provider::ModelEffortValidationCategory,
+        message: String,
     },
     /// A charge-safety policy that accepts more unsafe retries than Lash admits.
     UnsafeRetriesAboveCeiling { requested: u8, ceiling: u8 },
+    /// The candidate selects a reasoning but records no model to run it
+    /// with.
+    ReasoningWithoutModel {
+        reasoning: crate::ReasoningSelection,
+    },
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnservableRoute {
-                code,
-                provider_id,
-                model,
-            } => write!(
+            Self::UnknownModel { key } => {
+                write!(formatter, "the host's models register no model `{key}`")
+            }
+            Self::ReasoningRefused { message, .. } => formatter.write_str(message),
+            Self::ReasoningWithoutModel { reasoning } => write!(
                 formatter,
-                "no provider of this host serves provider `{provider_id}` with model `{model}`: \
-                 {code}"
+                "reasoning {reasoning:?} needs a model, and the session records none"
             ),
             Self::UnsafeRetriesAboveCeiling { requested, ceiling } => write!(
                 formatter,
@@ -113,7 +124,8 @@ impl ConfigOwner for CoreConfigOwner {
         Ok(None)
     }
 
-    /// The core candidate is validated by the runtime's route check.
+    /// The core candidate is judged by [`validate_candidate`] when a
+    /// transaction changes it.
     fn validate(
         &self,
         _value: &CoreConfig,
@@ -124,33 +136,39 @@ impl ConfigOwner for CoreConfigOwner {
     }
 }
 
-/// The provider route the session runs from here on. A route this host
-/// cannot serve is refused.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetProvider {
-    pub provider_id: String,
-}
-
-impl ConfigCommand for SetProvider {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_provider";
-}
-
-/// The model the session runs from here on. It keeps the session's
-/// attachment-acceptance snapshot (ADR 0026); only
-/// [`SetAttachmentAcceptance`] replaces that.
+/// The model the session runs from here on, by the host's key. The host's
+/// models mint the key's binding when the transaction resolves, even when
+/// the key is the session's current one, and the session records exactly
+/// that binding; a key they do not register is refused typed. It keeps the
+/// session's reasoning, which [`SetReasoning`] changes, and its
+/// attachment-acceptance snapshot (ADR 0026), which only
+/// [`SetAttachmentAcceptance`] replaces.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetModel {
-    pub model: crate::ModelSpec,
+    pub model: crate::ModelKey,
 }
 
 impl ConfigCommand for SetModel {
     type Owner = CoreConfigOwner;
     type Output = ();
     const NAME: &'static str = "set_model";
+}
+
+/// The reasoning the session runs its model with from here on. It is judged
+/// against the model the transaction's final candidate records, so one
+/// transaction can change the model and a reasoning only the new model
+/// supports together.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetReasoning {
+    pub reasoning: crate::ReasoningSelection,
+}
+
+impl ConfigCommand for SetReasoning {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_reasoning";
 }
 
 /// Replace the session's attachment-acceptance snapshot, whole.
@@ -330,6 +348,36 @@ impl ConfigCommand for SetToolAccess {
     const NAME: &'static str = "set_tool_access";
 }
 
+/// Judge the core candidate a transaction changed: its reasoning must fit
+/// the capability of the model it records. Nothing is judged when neither
+/// the model nor the reasoning moved.
+pub(super) fn validate_candidate(
+    base: &CoreConfig,
+    candidate: &CoreConfig,
+) -> Result<(), CoreConfigRefusal> {
+    if base.model == candidate.model {
+        return Ok(());
+    }
+    let Some(model) = candidate.model.as_ref() else {
+        return Ok(());
+    };
+    model
+        .metadata()
+        .capability
+        .reasoning_intent(
+            model.model.wire_model(),
+            &format!("key `{}`", model.key()),
+            &model.reasoning,
+        )
+        .map(drop)
+        .map_err(|error| CoreConfigRefusal::ReasoningRefused {
+            key: model.key().clone(),
+            reasoning: model.reasoning.clone(),
+            category: error.category,
+            message: error.message,
+        })
+}
+
 fn changed(core: CoreConfig) -> Result<OwnerChange<CoreConfig, ()>, CoreConfigRefusal> {
     Ok(OwnerChange {
         recorded: core,
@@ -352,25 +400,41 @@ fn edit_prompt(
 pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError> {
     let mut reg = ConfigRegistrar::new(CORE_CONFIG_OWNER);
     reg.owner(CoreConfigOwner)?;
-    reg.command::<SetProvider>(|core, command| {
+    reg.models_command::<SetModel>(|core, command, models| {
+        let recorded =
+            models
+                .snapshot(&command.model)
+                .map_err(|_| CoreConfigRefusal::UnknownModel {
+                    key: command.model.clone(),
+                })?;
+        let reasoning = core
+            .model
+            .as_ref()
+            .map(|model| model.reasoning.clone())
+            .unwrap_or_default();
         changed(CoreConfig {
-            provider_id: command.provider_id,
+            model: Some(crate::ModelConfig {
+                model: recorded,
+                reasoning,
+            }),
             ..core.clone()
         })
     })?;
-    reg.command::<SetModel>(|core, command| {
-        let mut model = command.model;
-        model.capability.attachment_acceptance =
-            core.model.capability.attachment_acceptance.clone();
-        changed(CoreConfig {
-            model,
-            ..core.clone()
-        })
+    reg.command::<SetReasoning>(|core, command| {
+        let mut next = core.clone();
+        let Some(model) = next.model.as_mut() else {
+            return Err(CoreConfigRefusal::ReasoningWithoutModel {
+                reasoning: command.reasoning,
+            });
+        };
+        model.reasoning = command.reasoning;
+        changed(next)
     })?;
     reg.command::<SetAttachmentAcceptance>(|core, command| {
-        let mut next = core.clone();
-        next.model.capability.attachment_acceptance = std::sync::Arc::new(command.acceptance);
-        changed(next)
+        changed(CoreConfig {
+            attachment_acceptance: std::sync::Arc::new(command.acceptance),
+            ..core.clone()
+        })
     })?;
     reg.command::<SetPrompt>(|core, command| {
         changed(CoreConfig {

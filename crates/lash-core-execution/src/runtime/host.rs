@@ -56,7 +56,9 @@ pub struct RuntimeDurabilityConfig {
 
 #[derive(Clone)]
 pub struct RuntimeProviderConfig {
-    pub provider_resolver: Arc<dyn crate::RuntimeProviderResolver>,
+    /// The host's models: the registry that mints a session's model binding
+    /// and binds a recorded one to its transport.
+    pub models: Arc<dyn crate::RuntimeModels>,
     /// The run definitions this deployment registers (FIG-3838): a root
     /// whose spec names a definition resolves it here, by exact reference.
     pub run_definitions: crate::RunDefinitions,
@@ -226,7 +228,7 @@ impl RuntimeHostConfig {
             },
             process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
-                provider_resolver: Arc::new(crate::EmptyProviderResolver),
+                models: Arc::new(crate::EmptyModels),
                 run_definitions: crate::RunDefinitions::default(),
             },
             prompt: RuntimePromptConfig {
@@ -626,6 +628,7 @@ impl RuntimeHost {
         self.work.queued_arc()
     }
 
+    /// Bind `policy`'s recorded model to the transport that executes it.
     pub fn resolve_session_policy(
         &self,
         session_id: &SessionId,
@@ -633,28 +636,17 @@ impl RuntimeHost {
     ) -> Result<crate::RuntimeSessionPolicy, crate::SessionError> {
         self.resolve_policy_binding(policy)
             .map_err(|err| match err {
-                crate::ProviderResolutionError::MissingProviderId => {
-                    crate::SessionError::ProviderUnconfigured {
-                        session_id: SessionId::from(session_id.to_string()),
-                    }
-                }
-                crate::ProviderResolutionError::UnknownProvider { provider_id } => {
-                    crate::SessionError::ProviderUnavailable {
-                        provider_id,
-                        session_id: SessionId::from(session_id.to_string()),
-                    }
-                }
-                crate::ProviderResolutionError::ProviderIdMismatch { expected, actual } => {
-                    crate::SessionError::ProviderMismatch {
-                        expected,
-                        actual,
-                        session_id: SessionId::from(session_id.to_string()),
-                    }
-                }
+                None => crate::SessionError::ModelUnconfigured {
+                    session_id: session_id.clone(),
+                },
+                Some(source) => crate::SessionError::ModelUnavailable {
+                    session_id: session_id.clone(),
+                    source,
+                },
             })
     }
 
-    /// Resolve `policy`'s provider binding for `owner`: a session's through
+    /// Bind `policy`'s recorded model for `owner`: a session's through
     /// [`Self::resolve_session_policy`], a process runtime's directly, with
     /// its failures named by the process.
     pub fn resolve_owner_policy(
@@ -668,25 +660,29 @@ impl RuntimeHost {
                 .map_err(|err| crate::PluginError::Session(err.to_string())),
             crate::RuntimeOwner::Process(process_id) => {
                 self.resolve_policy_binding(policy).map_err(|err| {
-                    crate::PluginError::Session(format!(
-                        "process `{process_id}` cannot resolve its provider: {err}"
-                    ))
+                    crate::PluginError::Session(match err {
+                        None => format!("process `{process_id}` has selected no model"),
+                        Some(err) => format!("process `{process_id}` cannot run its model: {err}"),
+                    })
                 })
             }
         }
     }
 
+    /// `None` is a policy with no model selected.
     fn resolve_policy_binding(
         &self,
         policy: crate::SessionPolicy,
-    ) -> Result<crate::RuntimeSessionPolicy, crate::ProviderResolutionError> {
-        let mut binding = self
+    ) -> Result<crate::RuntimeSessionPolicy, Option<crate::ModelUnavailable>> {
+        let model = policy.model.as_ref().ok_or(None)?;
+        let provider = self
             .core
             .providers
-            .provider_resolver
-            .resolve_provider_binding(policy.recorded_provider_id())?;
-        binding.provider = binding.provider.with_clock(Arc::clone(&self.core.clock));
-        Ok(crate::RuntimeSessionPolicy::new(policy, binding))
+            .models
+            .bind(&model.model)
+            .map_err(Some)?
+            .with_clock(Arc::clone(&self.core.clock));
+        crate::RuntimeSessionPolicy::new(policy, provider).ok_or(None)
     }
 }
 

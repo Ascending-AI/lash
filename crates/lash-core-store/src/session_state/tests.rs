@@ -3,6 +3,18 @@
 
 use super::*;
 
+/// `key`'s binding as a registry mints it: its own wire model and a 32k
+/// window.
+fn recorded_model(key: &str) -> crate::ModelConfig {
+    crate::ModelConfig::new(crate::RecordedModel::mint(
+        crate::ModelKey::new(key),
+        lash_core_llm::model::ModelMetadata::builder(format!("{key}-wire"))
+            .context_window_tokens(32_000)
+            .build()
+            .expect("model"),
+    ))
+}
+
 #[test]
 fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
     let first = boundary_operation(
@@ -399,7 +411,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("snapshot-test"),
         policy: SessionPolicy {
-            provider_id: "mock".to_string(),
+            model: Some(recorded_model("mock")),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
         head_revision: 42,
@@ -430,7 +442,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     let hydrated = RuntimeSessionState::from_snapshot(snapshot);
 
     assert_eq!(hydrated.session_id, "snapshot-test");
-    assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
+    assert_eq!(hydrated.policy.model, Some(recorded_model("mock")));
     assert_eq!(hydrated.head_revision, 0);
     assert!(hydrated.tool_state_snapshot().is_none());
     assert!(hydrated.plugin_state().is_none());
@@ -669,10 +681,10 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.session_id = SessionId::from("root-config-law");
-    state.policy.provider_id = "sticky-route".into();
+    state.policy.model = Some(recorded_model("sticky-route"));
     let sticky = crate::store::persisted_session_config_from_state(&state);
     let mut root = sticky.clone();
-    root.provider_id = "root-route".into();
+    root.model = Some(recorded_model("root-route"));
     root.prompt = Some(crate::PromptLayer::with_template(
         crate::PromptTemplate::new(vec![]),
     ));
@@ -692,7 +704,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         )
         .expect("root commit");
     assert_eq!(commit.config, sticky);
-    assert_eq!(commit.config.provider_id, "sticky-route");
+    assert_eq!(commit.config.model, Some(recorded_model("sticky-route")));
 
     // A failed settlement leaves only the in-memory execution view. A
     // subsequent head reload and recorded replay must still commit the head.
@@ -731,7 +743,10 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::store::FleetFormat::current(),
     )
     .expect("next root reload");
-    assert_eq!(state.to_snapshot().policy.provider_id, "sticky-route");
+    assert_eq!(
+        state.to_snapshot().policy.model,
+        Some(recorded_model("sticky-route"))
+    );
     assert_eq!(state.to_snapshot().policy.prompt, sticky.prompt.unwrap());
 }
 
@@ -745,7 +760,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.session_id = SessionId::from("root-config-identity");
-    state.policy.provider_id = "first-route".into();
+    state.policy.model = Some(recorded_model("first-route"));
     let first = crate::store::persisted_session_config_from_state(&state);
     let commit_under = |state: &RuntimeSessionState| {
         crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
@@ -770,7 +785,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     // A config change lands on the head after the root committed; the
     // redrive adopts that head, then replays the root's recorded view.
     let mut changed = first.clone();
-    changed.provider_id = "second-route".into();
+    changed.model = Some(recorded_model("second-route"));
     changed.config_revision += 1;
     state.authority.committed_config = None;
     adopt_session_config(&mut state, &changed);
@@ -788,7 +803,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
 
     // A root that ran under another view is another operation.
     let mut other = first.clone();
-    other.provider_id = "other-route".into();
+    other.model = Some(recorded_model("other-route"));
     adopt_root_execution_config(&mut state, &other);
     assert_ne!(
         commit_under(&state)
@@ -964,6 +979,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
             &admitted,
             None,
             crate::run_spec::TerminationPolicy::default(),
+            &crate::provider::EmptyModels,
         )
         .expect("resolve the root");
 

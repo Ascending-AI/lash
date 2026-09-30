@@ -463,7 +463,10 @@ pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn Ru
         );
         let mut changed =
             RuntimeCommit::persisted_state_with_operation_for_testing(&retry_state, operation);
-        changed.config.provider_id = format!("changed-{key}");
+        changed.config.model = Some(crate::testing::test_model_config(
+            format!("changed-{key}"),
+            crate::testing::test_model_metadata(&format!("changed-{key}")),
+        ));
         changed
             .stamp_semantic_boundary()
             .expect("stamp changed semantic-boundary identity");

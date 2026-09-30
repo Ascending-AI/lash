@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::rlm_support::{
-    SpawnCreateRequestInput, build_session_policy, build_spawn_create_request,
+    SpawnCreateRequestInput, build_session_request, build_spawn_create_request,
 };
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole};
 use lash_core::runtime::RuntimeSessionState;
@@ -38,20 +38,23 @@ const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 /// server double.
 const SEED: u64 = 0xf10_a06;
 
+/// `model`'s binding as the host catalog mints it, run with `variant`.
 fn model_spec(
-    model: impl Into<String>,
+    model: &str,
     variant: Option<String>,
     context_window_tokens: usize,
-) -> lash_core::ModelSpec {
-    lash_core::ModelSpec::builder(model)
-        .variant(
-            variant
-                .map(lash_core::ReasoningSelection::Effort)
-                .unwrap_or_default(),
-        )
-        .context_window_tokens(context_window_tokens)
-        .build()
-        .expect("valid model spec")
+) -> Option<lash_core::ModelConfig> {
+    let config = lash_core::testing::test_model_config(
+        model,
+        lash_core::ModelMetadata::builder(model)
+            .context_window_tokens(context_window_tokens)
+            .build()
+            .expect("valid model spec"),
+    );
+    Some(match variant {
+        Some(effort) => config.with_reasoning(lash_core::ReasoningSelection::Effort(effort)),
+        None => config,
+    })
 }
 
 struct SeedProbeState {
@@ -99,15 +102,19 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
         },
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
-    let spec = SessionSpec::inherit().model(model_spec("child-model", None, 100_000));
+    let spec = SessionSpec::inherit().model("child-model");
     let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new("child", spec)));
 
-    let policy = build_session_policy(&registry, &current, "child").expect("policy");
-
-    assert_eq!(policy.model.id, "child-model");
+    let request = build_session_request(&registry, &current, "child").expect("request");
     assert_eq!(
-        policy.model.variant,
-        lash_core::ReasoningSelection::ProviderDefault
+        request.model,
+        Some(lash_core::ModelKey::new("child-model")),
+        "the capability's key rides the request, minted when the child is created"
+    );
+    let policy = request.policy.expect("policy");
+    assert_eq!(
+        policy.model, current.model,
+        "until creation mints the key the child carries the parent's recorded model"
     );
     assert_eq!(
         policy.generation, current.generation,
@@ -119,7 +126,10 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
         ..Default::default()
     });
     let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new("child", pinned)));
-    let policy = build_session_policy(&registry, &current, "child").expect("policy");
+    let policy = build_session_request(&registry, &current, "child")
+        .expect("request")
+        .policy
+        .expect("policy");
     assert_eq!(policy.generation.seed, Some(5));
 }
 
@@ -141,7 +151,7 @@ impl Capability for CustomRequestCapability {
         let request = lash_core::SessionCreateRequest::child(
             ctx.parent_session_id,
             lash_core::SessionStartPoint::Empty,
-            ctx.base_policy(),
+            ctx.base_policy()?,
             lash_core::PluginOptions::default(),
         )
         .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh)
@@ -349,12 +359,10 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     // one. The final child policy inherits the live policy's explicit
     // model spec.
     let stale_policy = SessionPolicy {
-        provider_id: "stale-stub".to_string(),
         model: model_spec("stale-parent", None, 200_000),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let live_policy = SessionPolicy {
-        provider_id: "live-stub".to_string(),
         model: model_spec("live-parent", None, 1234),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
@@ -387,16 +395,21 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     // the stale one. This pins the behaviour where the spawn
     // pipeline always resolves models against the *current* session
     // policy snapshot, even when the factory was built earlier.
-    let stale_choice = build_session_policy(&registry, &stale_policy, "explore")
+    let stale_choice = build_session_request(&registry, &stale_policy, "explore")
+        .expect("stale request")
+        .policy
         .expect("stale policy")
         .model;
-    assert_eq!(child_policy.provider_id, live_policy.provider_id);
     assert_eq!(
-        child_policy.model.context_window_tokens(),
-        live_policy.model.context_window_tokens()
+        child_policy.context_window_tokens(),
+        live_policy.context_window_tokens()
     );
-    assert_ne!(child_policy.model.id, stale_choice.id);
-    assert_eq!(child_policy.model.id, "live-parent");
+    assert_ne!(child_policy.model, stale_choice);
+    assert_eq!(child_policy.model, live_policy.model);
+    assert_eq!(
+        request.model, None,
+        "an explore tier without a key copies the recorded model"
+    );
     assert!(request.tool_access.restricted_tools().is_none());
     assert!(
         !request
@@ -428,7 +441,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
         .policy
         .as_ref()
         .expect("structured child policy");
-    assert_eq!(structured_policy.model.id, "live-parent");
+    assert_eq!(structured_policy.model, live_policy.model);
     let extras = structured_request
         .plugin_options
         .decode::<lash_rlm_types::RlmCreateExtras>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
@@ -1084,16 +1097,13 @@ async fn run_seed_probe_inner(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.provider_resolver = Arc::new(
-            lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
-        );
+        config.providers.models = lash_core::testing::standard_test_models(provider.clone());
         config.with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
             process_engine.clone(),
         ))
     });
     let policy = SessionPolicy {
-        provider_id: provider.kind().to_string(),
-        model: model_spec("seed-probe-model", None, 64_000),
+        model: model_spec("mock-model", None, 64_000),
         turn_budget: lash_core::TurnBudget::bounded(4),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
@@ -1112,9 +1122,8 @@ async fn run_seed_probe_inner(
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 );
-                config.providers.provider_resolver = Arc::new(
-                    lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
-                );
+                config.providers.models =
+                    lash_core::testing::standard_test_models(provider.clone());
                 config.with_process_engine_registration(
                     lash_core::ProcessEngineRegistration::accepting(process_engine),
                 )

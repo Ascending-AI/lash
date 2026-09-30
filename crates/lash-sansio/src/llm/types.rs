@@ -915,8 +915,23 @@ pub struct LlmRequest {
     pub model_variant: crate::llm::capability::ReasoningSelection,
     #[serde(default)]
     pub model_capability: crate::llm::capability::ModelCapability,
+    /// The session's recorded attachment-acceptance rules (ADR 0026). They
+    /// are session config, not model metadata: they decide whether an
+    /// attachment reaches this request or degrades to a placeholder.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::llm::capability::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
+    /// The recorded model's request defaults: what the call does where
+    /// [`Self::generation`] states nothing.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::llm::capability::ModelRequestDefaults::is_default"
+    )]
+    pub request_defaults: crate::llm::capability::ModelRequestDefaults,
     #[serde(default)]
     pub generation: GenerationOptions,
     pub scope: LlmRequestScope,
@@ -1751,7 +1766,7 @@ pub struct LlmResponse {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     /// Whether the caller asked the provider to surface reasoning. Providers
-    /// stamp this from `ProviderOptions::expose_thinking`; reasoning parts
+    /// stamp this from the request's recorded `expose_thinking` default; reasoning parts
     /// stay in `parts` for multi-turn replay regardless, but the runtime only
     /// suppresses unstreamed reasoning blocks when a provider explicitly
     /// reports `Some(false)` — `None` (providers that do not stamp the flag,

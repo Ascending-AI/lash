@@ -98,8 +98,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("retire-delete-session")

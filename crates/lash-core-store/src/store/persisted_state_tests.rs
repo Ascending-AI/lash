@@ -1,13 +1,20 @@
 use super::*;
 
 #[test]
-fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
+fn persisted_state_hydrates_the_recorded_model_without_live_rebinding() {
+    let recorded = crate::ModelConfig::new(crate::RecordedModel::mint(
+        crate::ModelKey::new("stored-key"),
+        lash_core_llm::model::ModelMetadata::builder("stored-wire-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model"),
+    ));
     let state = persisted_session_state_from_head(
         SessionId::from("stored"),
         7,
         crate::PersistedSessionConfig {
-            provider_id: "stored-provider".to_string(),
-            model: crate::ModelSpec::default(),
+            model: Some(recorded.clone()),
+            attachment_acceptance: Default::default(),
             turn_budget: crate::TurnBudget::Unbounded,
             autonomous: false,
             no_progress_budget: crate::NoProgressBudget::default(),
@@ -23,7 +30,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
     )
     .expect("valid persisted state");
 
-    assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
+    assert_eq!(state.policy.model, Some(recorded));
     assert_eq!(state.head_revision, 7);
 }
 
@@ -214,14 +221,17 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         },
     };
     let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
-    config.model = crate::ModelSpec::builder("model")
-        .context_window_tokens(200_000)
-        .build()
-        .expect("model")
-        .with_capability(crate::ModelCapability {
-            reasoning_retention: Box::new(retention.clone()),
-            ..Default::default()
-        });
+    config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
+        crate::ModelKey::new("model"),
+        lash_core_llm::model::ModelMetadata::builder("model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model")
+            .with_capability(crate::ModelCapability {
+                reasoning_retention: Box::new(retention.clone()),
+                ..Default::default()
+            }),
+    )));
     let payload = SessionHeadPayload {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("retention-cold-reopen"),
@@ -239,7 +249,13 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
     .expect("current head decodes");
 
     assert_eq!(
-        *decoded.config.model.capability.reasoning_retention,
+        *decoded
+            .config
+            .model
+            .expect("recorded model")
+            .metadata()
+            .capability
+            .reasoning_retention,
         retention
     );
 }

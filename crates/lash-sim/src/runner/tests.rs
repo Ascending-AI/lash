@@ -105,16 +105,15 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(ProviderHandle::new(provider.into_components()))
-            .model(
-                lash_core::ModelSpec::builder(model)
+            .serve_test_model(
+                ProviderHandle::new(provider.into_components()),
+                lash_core::ModelMetadata::builder(model)
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model limits")
                     .with_capability(lash_core::ModelCapability {
                         instruction_role: Default::default(),
                         native_mid_conversation_system: false,
-                        attachment_acceptance: Default::default(),
                         cache_control: Some(cache_control),
                         ..lash_core::ModelCapability::default()
                     }),

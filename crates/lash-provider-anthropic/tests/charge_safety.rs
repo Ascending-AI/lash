@@ -51,9 +51,11 @@ fn request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "charge-safety",
             "charge-safety:frame",

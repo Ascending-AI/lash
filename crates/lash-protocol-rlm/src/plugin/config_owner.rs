@@ -392,7 +392,7 @@ mod tests {
                 )
                 .expect("admitted");
             let outcome = registry
-                .resolve(config, &record, &|_, _| Ok(()))
+                .resolve(config, &record, &lash_core::EmptyModels)
                 .publish(config);
             assert!(
                 matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),

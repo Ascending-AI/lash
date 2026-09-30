@@ -9,17 +9,16 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
-    SingleProviderResolver,
 };
 use lash_core::plugin::{PluginFactory, SessionAuthorityContext};
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    AttachmentStorePersistence, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
-    QueuedWorkBatchingConfig, RuntimeSessionState, SessionCreationHead, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoredAttachment, StoredBlobRef,
-    ToolAttemptOutcome, ToolCall, ToolCallOutput, ToolContract, ToolDefinition, ToolId,
-    ToolManifest, ToolOutcomeDone, ToolProvider, TurnBudget, TurnInput,
+    AttachmentStorePersistence, CommitBudget, LlmOutputPart, LlmResponse, QueuedWorkBatchingConfig,
+    RuntimeSessionState, SessionCreationHead, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, StoredAttachment, StoredBlobRef, ToolAttemptOutcome, ToolCall,
+    ToolCallOutput, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcomeDone,
+    ToolProvider, TurnBudget, TurnInput,
 };
 use lash_protocol_standard::render::{ToolOutputRendererSlot, ToolRenderParams};
 use lash_protocol_standard::{
@@ -150,11 +149,13 @@ struct Script {
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        provider_id: "standard-render-law".into(),
-        model: ModelSpec::builder("standard-render-law-model")
-            .context_window_tokens(100_000)
-            .build()
-            .expect("model spec"),
+        model: Some(lash_core::testing::test_model_config(
+            "standard-render-law-model",
+            lash_core::ModelMetadata::builder("standard-render-law-model")
+                .context_window_tokens(100_000)
+                .build()
+                .expect("model spec"),
+        )),
         ..SessionPolicy::new(TurnBudget::Unbounded)
     }
 }
@@ -283,8 +284,7 @@ async fn open_runtime(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    host_config.providers.provider_resolver =
-        Arc::new(SingleProviderResolver::new(provider(script)));
+    host_config.providers.models = lash_core::testing::models_serving(&policy(), provider(script));
     let mut runtime_host = EmbeddedRuntimeHost::new(host_config);
     runtime_host.core.durability.attachment_store =
         Arc::new(lash_core::facade_support::RuntimeAttachmentStore::new(

@@ -1,8 +1,9 @@
 #[cfg(test)]
-pub(crate) fn attachment_test_capability() -> lash_core::provider::ModelCapability {
+pub(crate) fn attachment_test_acceptance()
+-> std::sync::Arc<lash_core::provider::AttachmentCapabilitySnapshot> {
     use lash_core::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource, ModelCapability,
+        AttachmentMimeSource,
     };
     let types_0 = [
         "image/jpeg",
@@ -29,15 +30,11 @@ pub(crate) fn attachment_test_capability() -> lash_core::provider::ModelCapabili
         provider: "anthropic".into(),
     }])
     .collect();
-    ModelCapability {
-        attachment_acceptance: AttachmentCapabilitySnapshot {
-            revision: "test-host-revision-1".into(),
-            acceptors: vec![AttachmentAcceptor {
-                provider: "Anthropic Messages".into(),
-                rules: rules_0,
-            }],
-        }
-        .into(),
-        ..Default::default()
-    }
+    std::sync::Arc::new(AttachmentCapabilitySnapshot {
+        revision: "test-host-revision-1".into(),
+        acceptors: vec![AttachmentAcceptor {
+            provider: "Anthropic Messages".into(),
+            rules: rules_0,
+        }],
+    })
 }

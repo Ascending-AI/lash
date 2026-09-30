@@ -526,12 +526,7 @@ mod tests {
         let backend = double.lash_backend();
         let registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-            .model(
-                lash::ModelSpec::builder("test-model")
-                    .context_window_tokens(4096)
-                    .build()
-                    .expect("model spec"),
-            )
+            .model("test-model")
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .build(crate::test_core_owner())

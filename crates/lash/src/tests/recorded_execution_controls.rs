@@ -74,8 +74,7 @@ fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<La
         backend,
         crate::TurnBudget::bounded(CORE_DEFAULT_TURNS),
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())
 }
@@ -84,9 +83,7 @@ fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<La
 async fn create_with_budget(core: &LashCore, id: &str, budget: crate::TurnBudget) -> Result<()> {
     core.session(id)
         .create(crate::SessionCreation {
-            spec: crate::SessionSpec::default()
-                .provider_id("recorded-controls")
-                .turn_budget(budget),
+            spec: crate::SessionSpec::default().turn_budget(budget),
             ..Default::default()
         })
         .await?;
@@ -224,7 +221,14 @@ async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::Persist
 async fn reopened_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
+    let state = crate::session::load_state_from_store(
+        &id,
+        &core.policy,
+        &core.default_selection,
+        core.env.core.providers.models.as_ref(),
+        &store,
+    )
+    .await?;
     Ok(lash_core::PersistedSessionConfig::from(&state.policy))
 }
 
@@ -300,13 +304,15 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             max_unsafe_retries: requested,
             max_duplicate_cost_tokens: None,
         };
-        let error = lash_core::runtime::EmbeddedRuntimeBuilder::new(
-            core.env.core.clone(),
-            crate::testing::runtime_lease_owner(),
+        let error = Box::pin(
+            lash_core::runtime::EmbeddedRuntimeBuilder::new(
+                core.env.core.clone(),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id(ID)
+            .with_policy(policy)
+            .build(),
         )
-        .with_session_id(ID)
-        .with_policy(policy)
-        .build()
         .await
         .err()
         .expect("direct runtime creation must refuse the same policy");
@@ -346,13 +352,12 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(looping_provider(&calls))
     .session_spec(
         crate::SessionSpec::default()
             .turn_budget(crate::TurnBudget::Unbounded)
             .charge_safety(charge_safety_above_the_ceiling().charge_safety),
     )
-    .model(mock_model_spec())
+    .serve_test_model(looping_provider(&calls), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let error = inherited
         .session(ID)
@@ -761,8 +766,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
         second.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(endless_provider(&calls))
-    .model(mock_model_spec())
+    .serve_test_model(endless_provider(&calls), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     for id in [CREATED, COMMANDED] {

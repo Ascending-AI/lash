@@ -5,41 +5,33 @@ use lash_sansio::sync::MutexExt;
 
 #[test]
 fn output_token_cap_maps_to_wire_fields() {
-    let options = ProviderOptions {
-        max_output_tokens: Some(9999),
-        ..ProviderOptions::default()
-    };
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.max_output_tokens = Some(9999);
     req.generation.output_token_cap = NonZeroUsize::new(2048);
 
     let responses_body = OpenAiProvider::new("key")
-        .with_options(options.clone())
         .build_responses_request_body(&req, true)
         .unwrap();
     assert_eq!(responses_body["max_output_tokens"], 2048);
-    let provider_limited_responses_body = OpenAiProvider::new("key")
-        .with_options(options.clone())
-        .build_responses_request_body(
-            &request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            true,
-        )
+    let mut model_limited_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    model_limited_req.request_defaults.max_output_tokens = Some(9999);
+    let model_limited_responses_body = OpenAiProvider::new("key")
+        .build_responses_request_body(&model_limited_req, true)
         .unwrap();
-    assert_eq!(provider_limited_responses_body["max_output_tokens"], 9999);
+    assert_eq!(model_limited_responses_body["max_output_tokens"], 9999);
 
     let mut chat_req = req;
     chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
     let chat_body = openrouter_provider()
-        .with_options(options.clone())
         .build_chat_request_body(&chat_req, true)
         .unwrap();
     assert_eq!(chat_body["max_tokens"], 2048);
-    let mut provider_limited_chat_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    provider_limited_chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
-    let provider_limited_chat_body = openrouter_provider()
-        .with_options(options)
-        .build_chat_request_body(&provider_limited_chat_req, true)
+    let mut model_limited_chat_req = model_limited_req;
+    model_limited_chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
+    let model_limited_chat_body = openrouter_provider()
+        .build_chat_request_body(&model_limited_chat_req, true)
         .unwrap();
-    assert_eq!(provider_limited_chat_body["max_tokens"], 9999);
+    assert_eq!(model_limited_chat_body["max_tokens"], 9999);
 }
 
 fn refusal_code(error: &LlmTransportError) -> Option<String> {
@@ -158,7 +150,6 @@ fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
     }]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = ModelCapability {
-        attachment_acceptance: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["high".to_string()],
             encoding: ReasoningEncoding::Effort,
@@ -251,27 +242,21 @@ fn responses_body_carries_temperature_and_refuses_a_seed() {
 
 #[test]
 fn codex_refuses_every_sampling_control_and_the_cap() {
-    let mut cases: Vec<(&str, LlmRequest, ProviderOptions)> = Vec::new();
+    let mut cases: Vec<(&str, LlmRequest)> = Vec::new();
     let mut temperature = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     temperature.generation.temperature = Some(NonNegativeFiniteF64::new(0.0).expect("finite"));
-    cases.push(("temperature", temperature, ProviderOptions::default()));
+    cases.push(("temperature", temperature));
     let mut seed = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     seed.generation.seed = Some(1);
-    cases.push(("seed", seed, ProviderOptions::default()));
+    cases.push(("seed", seed));
     let mut cap = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     cap.generation.output_token_cap = NonZeroUsize::new(1_024);
-    cases.push(("output_token_cap", cap, ProviderOptions::default()));
-    cases.push((
-        "output_token_cap",
-        request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-        ProviderOptions {
-            max_output_tokens: Some(1_024),
-            ..ProviderOptions::default()
-        },
-    ));
-    for (setting, req, options) in cases {
+    cases.push(("output_token_cap", cap));
+    let mut model_cap = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    model_cap.request_defaults.max_output_tokens = Some(1_024);
+    cases.push(("output_token_cap", model_cap));
+    for (setting, req) in cases {
         let error = CodexProvider::new("access", "refresh", 0)
-            .with_options(options)
             .build_request_body(&req, false)
             .expect_err(setting);
         assert_eq!(
@@ -505,17 +490,12 @@ fn parallel_tool_calls_is_sent_as_the_host_set_it() {
 
 #[test]
 fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort() {
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let options = ProviderOptions {
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    };
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.expose_thinking = true;
     let responses = OpenAiProvider::new("key")
-        .with_options(options.clone())
         .build_responses_request(&req, true)
         .unwrap();
     let codex = CodexProvider::new("access", "refresh", 0)
-        .with_options(options)
         .build_request(&req, true)
         .unwrap();
     for built in [responses, codex] {
@@ -537,12 +517,9 @@ fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort
 
 #[test]
 fn expose_thinking_on_chat_is_local_visibility_only() {
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.expose_thinking = true;
     let (chat, _) = openrouter_provider()
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
         .build_chat_request_body_with_diagnostics(&req, true)
         .expect("expose_thinking is not refused on Chat");
     assert!(chat.body.get("reasoning").is_none());

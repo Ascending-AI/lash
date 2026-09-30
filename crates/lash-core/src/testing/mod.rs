@@ -39,16 +39,17 @@ pub use lash_core_execution::testing::{
     execute_tool_intents_with_services_and_trigger_router, fixture_echo_definition,
     graph_integrity, host_pin_claim_for_testing, lineage, measure_runtime_commit_budget,
     mock_assembled_turn, mock_attempt_context, mock_attempt_context_with_execution_binding,
-    mock_attempt_context_with_host, mock_session_policy, process_engine_fixture,
+    mock_attempt_context_with_host, mock_session_policy, models_serving, process_engine_fixture,
     process_engine_plugin_fixture, process_engine_run_context_for_validation,
     process_execution_env_fixture, process_execution_env_fixture_ref,
     process_work_wiring_for_registry, publish_process_execution_env_for_testing,
     queued_work_admission_policy, run_tool, run_tool_granted, runbook_evidence,
-    runtime_lease_owner, runtime_services_without_ports, sansio_transcript,
-    stage_execution_state_components, standard_test_policy, store_fixtures,
-    test_code_protocol_factories, test_plugin_host, test_protocol_factories_ending_without_done,
-    test_standard_protocol_factories, test_standard_protocol_factory_with_runtime_state,
-    test_trigger_router, tool_registry_with_live_provider, trace_capture,
+    runtime_lease_owner, runtime_services_without_ports, sansio_transcript, single_model_registry,
+    stage_execution_state_components, standard_test_models, standard_test_policy, store_fixtures,
+    test_code_protocol_factories, test_model_config, test_model_metadata, test_plugin_host,
+    test_protocol_factories_ending_without_done, test_standard_protocol_factories,
+    test_standard_protocol_factory_with_runtime_state, test_trigger_router,
+    tool_registry_with_live_provider, trace_capture,
 };
 
 // Each submodule documents itself in its own file. Adding an outer doc comment

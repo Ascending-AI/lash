@@ -3,9 +3,9 @@ pub mod context;
 pub use lash_sansio::session_model::message;
 pub use lash_sansio::session_model::prompt;
 
-use crate::ModelSpec;
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
-use crate::provider::{ProviderBinding, ProviderHandle, ProviderResolutionError};
+use crate::provider::{AttachmentCapabilitySnapshot, ProviderHandle, ReasoningSelection};
+use crate::{ModelConfig, ModelKey, ModelUnavailable, RuntimeModels};
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
@@ -50,28 +50,34 @@ pub fn plugin_runtime_event_from_protocol(
 
 pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
 
-/// Runtime-only policy resolved against host-owned live dependencies.
+/// Runtime-only policy: a session policy with its recorded model bound to the
+/// transport that executes it on this worker.
 #[derive(Clone, Debug)]
 pub struct RuntimeSessionPolicy {
     pub policy: SessionPolicy,
-    pub binding: ProviderBinding,
+    model: ModelConfig,
+    provider: ProviderHandle,
 }
 
 impl RuntimeSessionPolicy {
-    pub fn new(policy: SessionPolicy, binding: ProviderBinding) -> Self {
-        Self { policy, binding }
+    /// `policy` bound to `provider`; `None` when the policy selects no
+    /// model, since there is nothing to bind.
+    pub fn new(policy: SessionPolicy, provider: ProviderHandle) -> Option<Self> {
+        let model = policy.model.clone()?;
+        Some(Self {
+            policy,
+            model,
+            provider,
+        })
     }
 
-    pub fn from_provider(
-        policy: SessionPolicy,
-        provider: ProviderHandle,
-    ) -> Result<Self, ProviderResolutionError> {
-        let binding = ProviderBinding::from_provider(provider);
-        Ok(Self { policy, binding })
+    /// The recorded model selection this policy was bound for.
+    pub fn model_config(&self) -> &ModelConfig {
+        &self.model
     }
 
     pub fn provider(&self) -> &ProviderHandle {
-        &self.binding.provider
+        &self.provider
     }
 }
 
@@ -93,12 +99,20 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 ///
 /// `SessionSpec` is the public configuration shape for callers that want to
 /// describe either a root session or a child session without constructing the
-/// persisted [`SessionPolicy`] directly.
+/// persisted [`SessionPolicy`] directly. It selects a model by key; resolving
+/// the spec mints that key's binding through the host's models, once, and the
+/// resulting policy records it. A spec that selects no model keeps the base
+/// policy's recorded binding verbatim, never re-resolving its key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionSpec {
     inherit: bool,
-    pub provider_id: Option<String>,
-    pub model: Option<ModelSpec>,
+    pub model: Option<ModelKey>,
+    /// The reasoning the session runs its model with. `None` keeps the base
+    /// policy's selection.
+    pub reasoning: Option<ReasoningSelection>,
+    /// The attachment-acceptance rules the session renders attachments
+    /// against (ADR 0026). `None` keeps the base policy's.
+    pub attachment_acceptance: Option<std::sync::Arc<AttachmentCapabilitySnapshot>>,
     pub turn_budget: Option<TurnBudget>,
     /// Whether the session's turns run autonomously. `None` keeps the base
     /// policy's.
@@ -121,8 +135,9 @@ impl SessionSpec {
     pub fn new() -> Self {
         Self {
             inherit: false,
-            provider_id: None,
             model: None,
+            reasoning: None,
+            attachment_acceptance: None,
             turn_budget: None,
             autonomous: None,
             no_progress_budget: None,
@@ -140,13 +155,25 @@ impl SessionSpec {
         }
     }
 
-    pub fn provider_id(mut self, provider_id: impl Into<String>) -> Self {
-        self.provider_id = Some(provider_id.into());
+    /// The model the session runs, by the host's key.
+    pub fn model(mut self, key: impl Into<ModelKey>) -> Self {
+        self.model = Some(key.into());
         self
     }
 
-    pub fn model(mut self, model: ModelSpec) -> Self {
-        self.model = Some(model);
+    /// The reasoning the session runs its model with.
+    pub fn reasoning(mut self, reasoning: ReasoningSelection) -> Self {
+        self.reasoning = Some(reasoning);
+        self
+    }
+
+    /// The attachment-acceptance rules the session renders attachments
+    /// against.
+    pub fn attachment_acceptance(
+        mut self,
+        acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
+    ) -> Self {
+        self.attachment_acceptance = Some(acceptance);
         self
     }
 
@@ -209,13 +236,35 @@ impl SessionSpec {
         self
     }
 
-    pub fn resolve_against(&self, base: &SessionPolicy) -> SessionPolicy {
+    /// Resolve this spec over `base`. A selected key is minted through
+    /// `models` now; with none, `base`'s recorded model is kept as recorded.
+    pub fn resolve_against(
+        &self,
+        base: &SessionPolicy,
+        models: &dyn RuntimeModels,
+    ) -> Result<SessionPolicy, SpecResolveError> {
         let mut policy = base.clone();
-        if let Some(provider_id) = self.provider_id.as_ref() {
-            policy.provider_id = provider_id.clone();
+        if let Some(key) = self.model.as_ref() {
+            let recorded = models.snapshot(key).map_err(SpecResolveError::Model)?;
+            let reasoning = base
+                .model
+                .as_ref()
+                .map(|model| model.reasoning.clone())
+                .unwrap_or_default();
+            policy.model = Some(ModelConfig {
+                model: recorded,
+                reasoning,
+            });
         }
-        if let Some(model) = self.model.as_ref() {
-            policy.model = model.clone();
+        if let Some(reasoning) = self.reasoning.as_ref() {
+            policy
+                .model
+                .as_mut()
+                .ok_or(SpecResolveError::ReasoningWithoutModel)?
+                .reasoning = reasoning.clone();
+        }
+        if let Some(acceptance) = self.attachment_acceptance.as_ref() {
+            policy.attachment_acceptance = acceptance.clone();
         }
         if let Some(turn_budget) = self.turn_budget {
             policy.turn_budget = turn_budget;
@@ -235,8 +284,20 @@ impl SessionSpec {
         if let Some(generation) = self.generation.as_ref() {
             policy.generation = generation.resolve(&policy.generation);
         }
-        policy
+        Ok(policy)
     }
+}
+
+/// Why a [`SessionSpec`] did not resolve to a policy.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SpecResolveError {
+    /// The spec's model key has no binding on this deployment.
+    #[error(transparent)]
+    Model(ModelUnavailable),
+    /// The spec selects reasoning, but neither it nor its base selects a
+    /// model.
+    #[error("a reasoning selection needs a model, and none is selected")]
+    ReasoningWithoutModel,
 }
 
 impl Default for SessionSpec {
@@ -297,23 +358,6 @@ mod tests {
         let serialized = serde_json::to_value(event).expect("serialize");
         assert_eq!(serialized["plugin_id"], "test_protocol");
         assert!(serialized.get("payload").is_some());
-    }
-
-    #[test]
-    fn session_policy_rejects_legacy_provider_config() {
-        let err = serde_json::from_value::<SessionPolicy>(serde_json::json!({
-            "model": {},
-            "provider": {
-                "type": "openai",
-                "api_key": "must-not-load"
-            }
-        }))
-        .expect_err("legacy provider config must fail");
-
-        assert!(
-            err.to_string()
-                .contains("legacy serialized provider config is not supported")
-        );
     }
 
     #[test]
@@ -387,14 +431,15 @@ mod tests {
         };
 
         assert_eq!(
-            SessionSpec::inherit().resolve_against(&base).charge_safety,
+            resolve(&SessionSpec::inherit(), &base).charge_safety,
             ChargeSafetyPolicy::RequireGuarantee
         );
         assert_eq!(
-            SessionSpec::inherit()
-                .charge_safety(appetite.clone())
-                .resolve_against(&base)
-                .charge_safety,
+            resolve(
+                &SessionSpec::inherit().charge_safety(appetite.clone()),
+                &base
+            )
+            .charge_safety,
             appetite
         );
     }
@@ -416,20 +461,162 @@ mod tests {
     }
 
     #[test]
-    fn session_policy_serializes_provider_id_without_provider_handle() {
+    fn session_policy_serializes_the_recorded_model_and_no_transport() {
         let policy = SessionPolicy {
-            provider_id: "mock-provider".to_string(),
-            model: ModelSpec::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("valid test model"),
+            model: Some(recorded("mock-model")),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
 
         let value = serde_json::to_value(&policy).expect("serialize policy");
 
-        assert_eq!(value["provider_id"], "mock-provider");
+        assert_eq!(value["model"]["model"]["key"], "mock-model");
+        assert_eq!(
+            value["model"]["model"]["metadata"]["wire_model"],
+            "mock-model-wire"
+        );
         assert!(value.get("provider").is_none());
+        assert!(value.get("provider_id").is_none());
+        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
+        assert_eq!(decoded.model, policy.model);
+    }
+
+    /// A catalog serving the listed keys, counting its mints; it is never
+    /// asked to bind.
+    struct CountingModels {
+        keys: &'static [&'static str],
+        snapshots: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CountingModels {
+        fn serving(keys: &'static [&'static str]) -> Self {
+            Self {
+                keys,
+                snapshots: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn snapshots(&self) -> usize {
+            self.snapshots.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl RuntimeModels for CountingModels {
+        fn snapshot(&self, key: &ModelKey) -> Result<crate::RecordedModel, ModelUnavailable> {
+            self.snapshots
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.keys.contains(&key.as_str()) {
+                Ok(recorded(key.as_str()).model)
+            } else {
+                Err(ModelUnavailable::new(
+                    key.clone(),
+                    crate::ModelUnavailableReason::UnknownKey,
+                ))
+            }
+        }
+
+        fn bind(
+            &self,
+            recorded: &crate::RecordedModel,
+        ) -> Result<ProviderHandle, ModelUnavailable> {
+            panic!(
+                "resolving a spec never binds a transport: {}",
+                recorded.key()
+            )
+        }
+    }
+
+    fn recorded(key: &str) -> ModelConfig {
+        ModelConfig::new(crate::RecordedModel::mint(
+            ModelKey::new(key),
+            crate::ModelMetadata::builder(format!("{key}-wire"))
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid test model"),
+        ))
+    }
+
+    fn resolve(spec: &SessionSpec, base: &SessionPolicy) -> SessionPolicy {
+        spec.resolve_against(base, &crate::EmptyModels)
+            .expect("a spec naming no model resolves without a catalog")
+    }
+
+    #[test]
+    fn an_inheriting_spec_copies_the_recorded_model_without_minting() {
+        let base = SessionPolicy {
+            model: Some(
+                recorded("parent-model")
+                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
+            ),
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        let models = CountingModels::serving(&["parent-model"]);
+        let child = SessionSpec::inherit()
+            .resolve_against(&base, &models)
+            .expect("inherit");
+        assert_eq!(
+            child.model, base.model,
+            "the child copies the resolved fact"
+        );
+        assert_eq!(
+            models.snapshots(),
+            0,
+            "inheritance never re-derives the model"
+        );
+    }
+
+    #[test]
+    fn a_spec_key_is_minted_once_and_keeps_the_base_reasoning() {
+        let base = SessionPolicy {
+            model: Some(
+                recorded("parent-model")
+                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
+            ),
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        let models = CountingModels::serving(&["parent-model", "child-model"]);
+        let child = SessionSpec::inherit()
+            .model("child-model")
+            .resolve_against(&base, &models)
+            .expect("mint");
+        assert_eq!(models.snapshots(), 1);
+        assert_eq!(
+            child.model,
+            Some(
+                recorded("child-model")
+                    .with_reasoning(ReasoningSelection::Effort("high".to_string()))
+            )
+        );
+
+        let low = SessionSpec::inherit()
+            .model("child-model")
+            .reasoning(ReasoningSelection::Effort("low".to_string()))
+            .resolve_against(&base, &models)
+            .expect("mint with reasoning");
+        assert_eq!(
+            low.model.expect("model").reasoning,
+            ReasoningSelection::Effort("low".to_string())
+        );
+    }
+
+    #[test]
+    fn a_spec_naming_an_unserved_key_or_reasoning_without_a_model_is_refused() {
+        let base = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let models = CountingModels::serving(&["served"]);
+        assert!(matches!(
+            SessionSpec::inherit()
+                .model("retired")
+                .resolve_against(&base, &models),
+            Err(SpecResolveError::Model(ModelUnavailable {
+                reason: crate::ModelUnavailableReason::UnknownKey,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            SessionSpec::inherit()
+                .reasoning(ReasoningSelection::Effort("high".to_string()))
+                .resolve_against(&base, &models),
+            Err(SpecResolveError::ReasoningWithoutModel)
+        ));
     }
 
     #[test]
@@ -480,15 +667,16 @@ mod tests {
     fn session_spec_generation_inherits_when_absent_and_merges_per_option_when_present() {
         let base = pinned_base_policy();
 
-        let inherited = SessionSpec::inherit().resolve_against(&base);
+        let inherited = resolve(&SessionSpec::inherit(), &base);
         assert_eq!(inherited.generation, base.generation);
 
-        let merged = SessionSpec::inherit()
-            .generation(crate::GenerationOptions {
+        let merged = resolve(
+            &SessionSpec::inherit().generation(crate::GenerationOptions {
                 seed: Some(11),
                 ..Default::default()
-            })
-            .resolve_against(&base);
+            }),
+            &base,
+        );
         assert_eq!(merged.generation.seed, Some(11));
         assert_eq!(
             merged.generation.temperature, base.generation.temperature,
@@ -514,12 +702,13 @@ mod tests {
             ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
 
-        let child = SessionSpec::inherit()
-            .generation(crate::GenerationOptions {
+        let child = resolve(
+            &SessionSpec::inherit().generation(crate::GenerationOptions {
                 output_token_cap: std::num::NonZeroUsize::new(4096),
                 ..Default::default()
-            })
-            .resolve_against(&base);
+            }),
+            &base,
+        );
 
         assert_eq!(
             child.generation,
@@ -538,12 +727,13 @@ mod tests {
     fn session_spec_generation_replaces_and_clears_only_when_asked() {
         let base = pinned_base_policy();
 
-        let replaced = SessionSpec::inherit()
-            .replace_generation(crate::GenerationOptions {
+        let replaced = resolve(
+            &SessionSpec::inherit().replace_generation(crate::GenerationOptions {
                 seed: Some(11),
                 ..Default::default()
-            })
-            .resolve_against(&base);
+            }),
+            &base,
+        );
         assert_eq!(
             replaced.generation,
             crate::GenerationOptions {
@@ -553,14 +743,13 @@ mod tests {
             "an explicit replace discards every inherited option"
         );
 
-        let cleared = SessionSpec::inherit()
-            .clear_generation()
-            .resolve_against(&base);
+        let cleared = resolve(&SessionSpec::inherit().clear_generation(), &base);
         assert_eq!(cleared.generation, crate::GenerationOptions::default());
 
-        let merged_default = SessionSpec::inherit()
-            .generation(crate::GenerationOptions::default())
-            .resolve_against(&base);
+        let merged_default = resolve(
+            &SessionSpec::inherit().generation(crate::GenerationOptions::default()),
+            &base,
+        );
         assert_eq!(
             merged_default.generation, base.generation,
             "an empty merge overlay expresses nothing and so clears nothing"

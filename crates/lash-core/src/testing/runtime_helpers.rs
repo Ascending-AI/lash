@@ -458,59 +458,138 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
         .build()
 }
 
+/// Serve the runtime session's recorded model with `provider`: the host's
+/// models become a one-model registry holding exactly that binding. A
+/// session with no model records the standard test model first.
 pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::ProviderHandle) {
-    runtime.host.core.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(provider.clone()));
+    let config = runtime
+        .state()
+        .policy
+        .model
+        .clone()
+        .unwrap_or_else(standard_test_model_config);
+    runtime.host.core.providers.models = crate::testing::single_model_registry(
+        config.key().clone(),
+        config.metadata().clone(),
+        provider,
+    );
     runtime.edit_resident_state_for_test(|state| {
-        state.policy.provider_id = provider.kind().to_string();
+        if state.policy.model.is_none() {
+            state.policy.model = Some(config);
+        }
     });
 }
 
-/// Serve `providers` beside the provider the runtime's resolver serves for
-/// its session, so a config command can route the session to any of them
-/// (D3 Q10). A provider under the session's own id replaces that one.
+/// The model selection [`standard_test_policy`] records.
+pub fn standard_test_model_config() -> crate::ModelConfig {
+    crate::testing::test_model_config(
+        "mock-model",
+        crate::testing::test_model_metadata("mock-model"),
+    )
+}
+
+/// A catalog serving `extra` first and everything `base` serves after it.
+struct LayeredModels {
+    extra: crate::ModelRegistry,
+    base: Arc<dyn crate::RuntimeModels>,
+}
+
+impl crate::RuntimeModels for LayeredModels {
+    fn snapshot(
+        &self,
+        key: &crate::ModelKey,
+    ) -> Result<crate::RecordedModel, crate::ModelUnavailable> {
+        self.extra
+            .snapshot(key)
+            .or_else(|_| self.base.snapshot(key))
+    }
+
+    fn bind(
+        &self,
+        recorded: &crate::RecordedModel,
+    ) -> Result<crate::ProviderHandle, crate::ModelUnavailable> {
+        match self.extra.bind(recorded) {
+            Ok(provider) => Ok(provider),
+            Err(crate::ModelUnavailable {
+                reason: crate::ModelUnavailableReason::UnknownKey,
+                ..
+            }) => self.base.bind(recorded),
+            Err(other) => Err(other),
+        }
+    }
+}
+
+/// Serve `metadata` under `key` beside everything the runtime serves now,
+/// through the transport that serves the session's recorded model, and
+/// return the key a config command selects it by.
 #[expect(
     clippy::expect_used,
-    reason = "test helper: a duplicate provider id is a fixture defect"
+    reason = "test helper: the session's own model always binds in a fixture"
 )]
-pub fn serve_runtime_providers(
+pub fn serve_model_beside(
     runtime: &mut LashRuntime,
-    providers: impl IntoIterator<Item = crate::ProviderHandle>,
+    key: &str,
+    metadata: crate::ModelMetadata,
+) -> crate::ModelKey {
+    let current = runtime
+        .state()
+        .policy
+        .model
+        .clone()
+        .unwrap_or_else(standard_test_model_config);
+    let base = Arc::clone(&runtime.host.core.providers.models);
+    let provider = base
+        .bind(&current.model)
+        .expect("the session's recorded model binds");
+    let extra = crate::ModelRegistry::new()
+        .register(key, crate::RegisteredModel::new(metadata, provider))
+        .expect("a non-empty key registers");
+    runtime.host.core.providers.models = Arc::new(LayeredModels { extra, base });
+    crate::ModelKey::new(key)
+}
+
+/// Register `models` beside the runtime session's recorded model, so a
+/// config command can move the session to any of them. The session's own
+/// model keeps the transport it is served by now.
+#[expect(
+    clippy::expect_used,
+    reason = "test helper: a duplicate model key is a fixture defect"
+)]
+pub fn serve_runtime_models(
+    runtime: &mut LashRuntime,
+    models: impl IntoIterator<Item = (crate::ModelKey, crate::RegisteredModel)>,
 ) {
-    let mut registry = crate::provider::ProviderRegistry::new();
+    let mut registry = crate::ModelRegistry::new();
     let mut served = std::collections::BTreeSet::new();
-    for provider in providers {
-        served.insert(provider.kind().to_string());
+    for (key, entry) in models {
+        served.insert(key.clone());
         registry = registry
-            .with(provider)
-            .expect("each served provider has its own id");
+            .register(key, entry)
+            .expect("each served model has its own key");
     }
-    let current = runtime.state().policy.recorded_provider_id().to_string();
-    if !served.contains(&current)
-        && let Ok(binding) = runtime
-            .host
-            .core
-            .providers
-            .provider_resolver
-            .resolve_provider_binding(&current)
+    if let Some(current) = runtime.state().policy.model.clone()
+        && !served.contains(current.key())
+        && let Ok(provider) = runtime.host.core.providers.models.bind(&current.model)
     {
         registry = registry
-            .with(binding.provider)
-            .expect("the session's provider registers once");
+            .register(
+                current.key().clone(),
+                crate::RegisteredModel::new(current.metadata().clone(), provider),
+            )
+            .expect("the session's model registers once");
     }
-    runtime.host.core.providers.provider_resolver = Arc::new(registry);
+    runtime.host.core.providers.models = Arc::new(registry);
 }
 
 pub use crate::testing::standard_test_policy;
 
-/// A host over `backend` whose provider resolver answers with an empty mock
-/// provider.
+/// A host over `backend` whose models serve the standard test model with an
+/// empty mock provider.
 pub fn test_host_config(backend: &crate::Backend) -> EmbeddedRuntimeHost {
-    let mut config = test_runtime_host_config(backend);
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+    EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
+        backend,
         mock_provider(Vec::new()).into_handle(),
-    ));
-    EmbeddedRuntimeHost::new(config)
+    ))
 }
 
 pub fn test_host_config_with_trace_path(
@@ -695,7 +774,12 @@ pub fn test_runtime_host_config_with_provider(
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
     let mut config = test_runtime_host_config(backend);
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
+    let model = standard_test_model_config();
+    config.providers.models = crate::testing::single_model_registry(
+        model.key().clone(),
+        model.metadata().clone(),
+        provider,
+    );
     config
 }
 
@@ -826,8 +910,8 @@ impl TestRuntime {
             initial_state.policy.session_id = Some(session_id);
         }
         let mut policy = standard_test_policy();
-        policy.model.capability.attachment_acceptance = self.attachment_acceptance.clone();
-        initial_state.policy.model.capability.attachment_acceptance = self.attachment_acceptance;
+        policy.attachment_acceptance = self.attachment_acceptance.clone();
+        initial_state.policy.attachment_acceptance = self.attachment_acceptance;
         let attachment_store = Arc::clone(&self.host.core.durability.attachment_store);
         let process_env_store = Arc::clone(&self.host.core.durability.process_env_store);
         if let Some(store) = self.store.as_ref() {

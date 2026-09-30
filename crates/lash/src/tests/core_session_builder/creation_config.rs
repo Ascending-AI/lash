@@ -14,13 +14,13 @@ fn snapshot(revision: &str) -> Arc<lash_core::AttachmentCapabilitySnapshot> {
     })
 }
 
-/// `id` at the mock model's shape, carrying the attachment snapshot
-/// `attachments`.
-fn model_with_attachments(id: &str, attachments: &str) -> lash_core::ModelSpec {
-    let mut model = model_spec(id, None, 64_000);
-    model.capability.attachment_acceptance = snapshot(attachments);
-    model
-}
+/// Every model key these laws select, each at the mock model's shape.
+const SERVED_MODELS: [&str; 4] = [
+    "mock-model",
+    "created-model",
+    "patched-model",
+    "upgraded-model",
+];
 
 fn guidance(text: &str) -> lash_core::PromptLayer {
     lash_core::PromptLayer::new()
@@ -29,10 +29,8 @@ fn guidance(text: &str) -> lash_core::PromptLayer {
 
 fn creation_spec() -> crate::SessionSpec {
     crate::SessionSpec::new()
-        .model(model_with_attachments(
-            "created-model",
-            "created-attachments",
-        ))
+        .model("created-model")
+        .attachment_acceptance(snapshot("created-attachments"))
         .prompt_layer(guidance("CREATED PROMPT"))
         .generation(lash_core::GenerationOptions {
             seed: Some(7),
@@ -86,8 +84,11 @@ async fn counting_core(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(capturing_provider(captures))
-    .model(mock_model_spec())
+    .models(test_catalog(
+        capturing_provider(captures),
+        SERVED_MODELS.map(|key| model_spec(key, None, 64_000)),
+    ))
+    .model("mock-model")
     .build(crate::testing::runtime_lease_owner())?;
     Ok((core, backend, ledger.expect("the catalog is decorated")))
 }
@@ -110,9 +111,9 @@ async fn recorded_config(
 }
 
 fn assert_runs_creation_config(policy: &lash_core::SessionPolicy) {
-    assert_eq!(policy.model.id, "created-model");
+    assert_eq!(policy.wire_model(), Some("created-model"));
     assert_eq!(
-        policy.model.capability.attachment_acceptance,
+        policy.attachment_acceptance,
         snapshot("created-attachments")
     );
     assert_eq!(policy.prompt, guidance("CREATED PROMPT"));
@@ -175,7 +176,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
         .config()
         .configure(
             crate::config::ConfigTransaction::of(crate::config::SetModel {
-                model: model_with_attachments("patched-model", "ignored-attachments"),
+                model: lash_core::ModelKey::new("patched-model"),
             })
             .then(crate::config::SetAttachmentAcceptance {
                 acceptance: (*snapshot("patched-attachments")).clone(),
@@ -194,9 +195,9 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
     Box::pin(session.close()).await?;
 
     let (_, config) = recorded_config(&backend, "patch-each-field").await;
-    assert_eq!(config.model.id, "patched-model");
+    assert_eq!(config.wire_model(), Some("patched-model"));
     assert_eq!(
-        config.model.capability.attachment_acceptance,
+        config.attachment_acceptance,
         snapshot("patched-attachments")
     );
     assert_eq!(config.prompt, Some(guidance("PATCHED PROMPT")));
@@ -208,9 +209,9 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
 
     let reopened = core.session("patch-each-field").open().await?;
     let policy = reopened.policy_snapshot();
-    assert_eq!(policy.model.id, "patched-model");
+    assert_eq!(policy.wire_model(), Some("patched-model"));
     assert_eq!(
-        policy.model.capability.attachment_acceptance,
+        policy.attachment_acceptance,
         snapshot("patched-attachments")
     );
     assert_eq!(policy.prompt, guidance("PATCHED PROMPT"));
@@ -221,7 +222,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
 /// ADR 0026: a model change retains the session's attachment snapshot; only
 /// `SetAttachmentAcceptance` replaces it.
 #[tokio::test]
-async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Result<()> {
+async fn a_model_change_keeps_the_attachment_snapshot() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(captures).await?;
     create_with_creation_spec(&core, "patch-keeps-attachments").await?;
@@ -230,20 +231,20 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
     config
         .configure(crate::config::ConfigTransaction::of(
             crate::config::SetModel {
-                model: model_with_attachments("upgraded-model", "catalogue-attachments"),
+                model: lash_core::ModelKey::new("upgraded-model"),
             },
         ))
         .await?;
     let policy = session.policy_snapshot();
-    assert_eq!(policy.model.id, "upgraded-model");
+    assert_eq!(policy.wire_model(), Some("upgraded-model"));
     assert_eq!(
-        policy.model.capability.attachment_acceptance,
+        policy.attachment_acceptance,
         snapshot("created-attachments"),
         "the model change retains the opening snapshot"
     );
     let (_, recorded) = recorded_config(&backend, "patch-keeps-attachments").await;
     assert_eq!(
-        recorded.model.capability.attachment_acceptance,
+        recorded.attachment_acceptance,
         snapshot("created-attachments")
     );
 
@@ -255,9 +256,9 @@ async fn a_model_change_through_the_patch_keeps_the_attachment_snapshot() -> Res
         ))
         .await?;
     let (_, recorded) = recorded_config(&backend, "patch-keeps-attachments").await;
-    assert_eq!(recorded.model.id, "upgraded-model");
+    assert_eq!(recorded.wire_model(), Some("upgraded-model"));
     assert_eq!(
-        recorded.model.capability.attachment_acceptance,
+        recorded.attachment_acceptance,
         snapshot("adopted-attachments")
     );
     Ok(())

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use lash_core::provider::{ProviderHandle, ProviderOptions, StreamTermination};
+use lash_core::provider::{ProviderHandle, StreamTermination};
 use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
@@ -113,23 +113,28 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         },
     )
     .with_project_id(Some("test-project".into()))
-    .with_options(ProviderOptions {
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(ProviderHandle::new(provider.into_components()))
-        .model(
-            lash::ModelSpec::builder("gemini-test")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gemini-test",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gemini-test")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(true)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gemini-test")
         .tools(Arc::new(RuntimeLookupTool))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -200,23 +205,28 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         },
     )
     .with_project_id(Some("test-project".into()))
-    .with_options(ProviderOptions {
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(ProviderHandle::new(provider.into_components()))
-        .model(
-            lash::ModelSpec::builder("gemini-test")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gemini-test",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gemini-test")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(true)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gemini-test")
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

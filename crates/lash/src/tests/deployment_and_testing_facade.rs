@@ -5,7 +5,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -73,7 +73,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
             LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
-                .model(mock_model_spec()),
+                .model("mock-model"),
         )
         .build(crate::testing::runtime_lease_owner())
         .expect("build core");
@@ -176,7 +176,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
         LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
-            .model(mock_model_spec()),
+            .model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core");
@@ -440,7 +440,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     let registry = backend.process_registry();
     let own = backend.build_generation().clone();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -655,7 +655,7 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
     let factory = backend.session_store_factory();
     let clock = backend.clock();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build the core");

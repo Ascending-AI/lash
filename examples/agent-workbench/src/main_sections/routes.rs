@@ -322,7 +322,7 @@ pub(crate) async fn send_turn(
             Err(err) => return Err(AppError::internal(err)),
         },
     };
-    let turn_model = model_spec_for_request(
+    let turn_model = model_selection_for_request(
         &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
@@ -336,7 +336,7 @@ pub(crate) async fn send_turn(
             "model": serde_json::to_value(&turn_model).unwrap_or(Value::Null),
         }),
     );
-    state.set_selected_model(ModelSelection::from_spec(&turn_model));
+    state.set_selected_model(turn_model.clone());
     // A session runs one turn at a time, and the durable authorities say so: the
     // session execution lease and the commit CAS refuse the second writer. So a
     // send that arrives while a turn is running cannot start one, and answering
@@ -407,7 +407,7 @@ pub(crate) async fn send_turn(
                 turn_id: turn_id.clone(),
                 session_id: session_id.clone(),
                 text,
-                model: ModelSelection::from_spec(&turn_model),
+                model: turn_model.clone(),
                 attachment_id,
             },
             chat_attachments,
@@ -426,12 +426,12 @@ pub(crate) async fn button_trigger(
     // Side-effect ingress: the fence refuses before any message is pushed or
     // any workflow submitted for a retired session.
     let session_id = state.admit_session(&query, "api.button_trigger").await?;
-    let turn_model = model_spec_for_request(
+    let turn_model = model_selection_for_request(
         &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
-    let model = ModelSelection::from_spec(&turn_model);
+    let model = turn_model.clone();
     state.set_selected_model(model.clone());
     state.trace_for_session(
         &session_id,
@@ -730,12 +730,12 @@ pub(crate) async fn inject_message(
     // Side-effect ingress: the fence refuses before mail is delivered or any
     // workflow submitted for a retired session.
     let session_id = state.admit_session(&query, "api.accounts.inject").await?;
-    let turn_model = model_spec_for_request(
+    let turn_model = model_selection_for_request(
         &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
-    let model = ModelSelection::from_spec(&turn_model);
+    let model = turn_model;
     state.set_selected_model(model.clone());
     let delivered = state
         .mail_world

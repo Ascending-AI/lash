@@ -117,10 +117,13 @@ async fn process_context<'h>(
     let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("L11 test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("L11 test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {

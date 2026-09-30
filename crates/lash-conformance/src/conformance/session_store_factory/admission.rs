@@ -99,10 +99,13 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     assert_eq!(created_head.leaf_node_id, None);
     let restated = crate::SessionStoreCreateRequest {
         config: crate::PersistedSessionConfig::from(&crate::SessionPolicy {
-            model: crate::ModelSpec::builder("a-rebinding-model")
-                .context_window_tokens(1_000)
-                .build()
-                .expect("model spec"),
+            model: Some(crate::testing::test_model_config(
+                "a-rebinding-model",
+                crate::ModelMetadata::builder("a-rebinding-model")
+                    .context_window_tokens(1_000)
+                    .build()
+                    .expect("valid test model"),
+            )),
             ..request.config.session_policy()
         }),
         ..request.clone()

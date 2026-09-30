@@ -54,8 +54,23 @@ pub struct DirectRequest {
     pub model_variant: crate::ReasoningSelection,
     #[serde(default, skip_serializing_if = "ModelCapability::is_empty")]
     pub model_capability: ModelCapability,
+    /// The attachment-acceptance rules the request renders its attachments
+    /// under. A durable direct completion replaces them with its session's
+    /// recorded rules.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
+    /// What the call does where [`Self::generation`] states nothing: a
+    /// session's direct completion carries its recorded model's defaults.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::ModelRequestDefaults::is_default"
+    )]
+    pub request_defaults: crate::provider::ModelRequestDefaults,
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
@@ -100,7 +115,9 @@ impl DirectRequest {
             model: model.into(),
             model_variant: crate::ReasoningSelection::ProviderDefault,
             model_capability: ModelCapability::default(),
+            attachment_acceptance: Arc::default(),
             extra_body: serde_json::Map::new(),
+            request_defaults: crate::provider::ModelRequestDefaults::default(),
             messages: vec![DirectMessage {
                 role: DirectRole::User,
                 parts: vec![DirectPart::Text(prompt.into())],
@@ -348,7 +365,9 @@ pub fn build_llm_request(
         model: _,
         model_variant,
         model_capability,
+        attachment_acceptance,
         extra_body,
+        request_defaults,
         messages,
         output,
         generation,
@@ -427,9 +446,11 @@ pub fn build_llm_request(
         resolved_stored: Default::default(),
         tools: Vec::new().into(),
         tool_choice: LlmToolChoice::None,
+        attachment_acceptance,
         model_variant,
         model_capability,
         extra_body,
+        request_defaults,
         generation,
         scope,
         output_spec,
@@ -596,7 +617,7 @@ mod tests {
 
         let options = ProviderOptions {
             reliability: ProviderReliability::default().max_attempts(7),
-            max_output_tokens: Some(123),
+            response_body_bytes: Some(123),
             ..Default::default()
         };
         client.provider_mut().set_options(options.clone());
@@ -880,7 +901,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(crate::ReasoningCapability {
                 efforts: ["low", "medium", "high", "max"]

@@ -307,8 +307,7 @@ impl AgentScenarioSetup {
             .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
         let mut builder =
             explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), turn_budget, factory))
-                .provider(provider)
-                .model(mock_model_spec());
+                .serve_test_model(provider, mock_model_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -889,7 +888,7 @@ impl AgentSessionTurnProcessScenario {
 
     fn child_create_request(&self) -> lash_core::SessionCreateRequest {
         let child_policy = lash_core::SessionPolicy {
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             turn_budget: lash_core::TurnBudget::bounded(2),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };

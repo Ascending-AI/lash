@@ -258,8 +258,7 @@ impl CodexProvider {
             .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
-        let policy =
-            resolve_generation_policy(req, &self.options, self.kind(), &Self::GENERATION_WIRE)?;
+        let policy = resolve_generation_policy(req, self.kind(), &Self::GENERATION_WIRE)?;
         // Codex is Responses in the OpenAI reasoning dialect.
         let mut reasoning_body = json!({});
         if let Some(intent) = &policy.reasoning {

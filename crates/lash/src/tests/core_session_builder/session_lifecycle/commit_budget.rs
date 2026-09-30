@@ -24,8 +24,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
             crate::CommitBudgetLimit::Unbounded,
         ),
     )
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("commit-budget-surface")
@@ -78,8 +77,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
             crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
         ),
     )
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("commit-node-budget-surface")
@@ -128,15 +126,13 @@ fn core_over_backend_with_commit_budget(
         LashCore::standard_builder(backend, crate::TurnBudget::Unbounded),
         commit_budget,
     )
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
 }
 
 fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
     let policy = lash_core::SessionPolicy {
-        provider_id: mock_provider().kind().to_string(),
-        model: mock_model_spec(),
+        model: Some(recorded_model(mock_model_spec())),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState::new(policy);

@@ -214,7 +214,10 @@ async fn start_turn_child(
         session_id,
         lash_core::SessionStartPoint::Empty,
         lash_core::SessionPolicy {
-            model: law_model(),
+            model: Some(lash_core::testing::test_model_config(
+                law_model().wire_model,
+                law_model(),
+            )),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         lash_core::PluginOptions::default(),
@@ -373,8 +376,8 @@ fn responses(scripted: Vec<LlmResponse>) -> Responses {
     Arc::new(Mutex::new(VecDeque::from(scripted)))
 }
 
-fn law_model() -> lash::ModelSpec {
-    lash::ModelSpec::builder("attachment-referrers")
+fn law_model() -> lash::ModelMetadata {
+    lash::ModelMetadata::builder("attachment-referrers")
         .context_window_tokens(16_000)
         .build()
         .expect("model spec")
@@ -418,8 +421,7 @@ fn law_core_over(
         &backend,
     );
     let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
-        .model(law_model())
+        .serve_test_model(provider, law_model())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tools(Arc::new(BlobTools {

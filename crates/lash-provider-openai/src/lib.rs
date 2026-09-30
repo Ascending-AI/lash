@@ -31,4 +31,4 @@ pub use driver::CompletionEndpoint;
 #[cfg(test)]
 mod attachment_capability_fixture;
 #[cfg(test)]
-pub(crate) use attachment_capability_fixture::attachment_test_capability;
+pub(crate) use attachment_capability_fixture::attachment_test_acceptance;

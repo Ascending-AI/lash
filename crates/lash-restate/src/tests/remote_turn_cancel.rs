@@ -56,10 +56,8 @@ impl TurnFixture {
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.provider_resolver =
-            Arc::new(lash_core::facade_support::SingleProviderResolver::new(
-                self.provider.clone().into_handle(),
-            ));
+        config.providers.models =
+            lash_core::testing::standard_test_models(self.provider.clone().into_handle());
         let mut policy = lash_core::testing::mock_session_policy();
         policy.session_id = Some(self.view.session_id().clone());
         let state = lash_core::RuntimeSessionState {

@@ -1,10 +1,10 @@
 use crate::support::{
     Arc, DeploymentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
     LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec,
-    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
-    RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter,
-    SessionPolicy, SessionSpec, SessionView, SessionWorkEngine, StaticPluginFactory,
-    TerminationPolicy, ToolProvider,
+    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, Result, RuntimeEnvironment,
+    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
+    SessionSpec, SessionView, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
+    ToolProvider,
 };
 use lash_core::Backend;
 use lash_core::facade_support;
@@ -32,7 +32,12 @@ pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
 pub struct LashCore {
     pub(crate) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
+    /// The live policy every session starts from. It selects no model: a
+    /// session records the binding its key minted at creation.
     pub(crate) policy: SessionPolicy,
+    /// The model key and reasoning a session is created with when its
+    /// creation spec names none.
+    pub(crate) default_selection: crate::session::DefaultSelection,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
     pub(crate) backend: Backend,
@@ -42,7 +47,6 @@ pub struct LashCore {
     /// on the core's clock).
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-    pub(crate) provider: Option<ProviderHandle>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
@@ -383,7 +387,7 @@ impl LashCore {
         SessionBuilder {
             core: self.clone(),
             session_id: session_id.into(),
-            provider: None,
+
             tool_source_policy: None,
             tool_surface_open_mode: None,
         }
@@ -600,7 +604,7 @@ impl LashCore {
     /// `EmbedError::Store(StoreError::ForkPointNotRetained { .. })`; Lash never
     /// silently substitutes a different checkpoint. An explicit pin remains
     /// forkable after its source session is deleted because the retained frame
-    /// carries the provider and model needed to create the branch.
+    /// carries the recorded model needed to create the branch.
     pub async fn fork_at(&self, request: ForkRequest) -> Result<lash_core::ForkSessionReceipt> {
         let store_factory = &self.store_factory;
         let ForkRequest {
@@ -618,11 +622,12 @@ impl LashCore {
                 node_id: node_id.clone(),
             })?;
         let mut fork_policy = self.policy.clone();
-        fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
         // The fork records the plugin configuration its fork point's frame
-        // captured, as it does the provider and model (FIG-4379).
+        // captured, as it does the model and attachment acceptance
+        // (FIG-4379).
         let plugin_config = point.config.plugin_config;
+        fork_policy.attachment_acceptance = point.config.attachment_acceptance;
         let mut selected = std::collections::HashSet::new();
         let mut pending_observer_intents = Vec::new();
         for process_id in observed_processes {
@@ -747,7 +752,7 @@ impl LashCore {
 pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     session_spec: SessionSpec,
-    provider: Option<ProviderHandle>,
+    models: Option<Arc<dyn lash_core::RuntimeModels>>,
     /// The run definitions sent inputs' specs may name (FIG-3838).
     run_definitions: lash_core::RunDefinitions,
     /// The one substrate every persistence port and the effect host come from.
@@ -781,7 +786,7 @@ impl LashCoreBuilder {
         Self {
             protocol_factory: None,
             session_spec: SessionSpec::new().turn_budget(turn_budget),
-            provider: None,
+            models: None,
             run_definitions: lash_core::RunDefinitions::default(),
             backend,
             commit_budget: None,
@@ -823,11 +828,31 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configures the provider and returns the updated builder.
-    pub fn provider(mut self, provider: ProviderHandle) -> Self {
-        self.session_spec = self.session_spec.provider_id(provider.kind());
-        self.provider = Some(provider);
+    /// The host's models: the registry that mints a session's model binding
+    /// by key at creation and at every model change, and binds a recorded
+    /// binding to the transport that executes it. Without it no session can
+    /// be created or run a turn.
+    pub fn models(mut self, models: Arc<dyn lash_core::RuntimeModels>) -> Self {
+        self.models = Some(models);
         self
+    }
+
+    /// Test convenience: serve one model through `provider` and select it as
+    /// the core's default. The registry keys the model by its wire model, so
+    /// a test reads the key it selected off the metadata it built.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn serve_test_model(
+        self,
+        provider: facade_support::ProviderHandle,
+        metadata: lash_core::ModelMetadata,
+    ) -> Self {
+        let key = lash_core::ModelKey::new(metadata.wire_model.clone());
+        self.models(lash_core::testing::single_model_registry(
+            key.clone(),
+            metadata,
+            provider,
+        ))
+        .model(key)
     }
 
     /// Configure the byte and graph-node limits for each atomic runtime
@@ -1017,31 +1042,32 @@ impl LashCoreBuilder {
         if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
         }
-        let provider_id = self
-            .session_spec
-            .provider_id
-            .clone()
-            .or_else(|| {
-                self.provider
-                    .as_ref()
-                    .map(|provider| provider.kind().to_string())
-            })
-            .unwrap_or_default();
-        let model = self
-            .session_spec
-            .model
-            .clone()
-            .ok_or(EmbedError::MissingModelSpec)?;
-        let turn_budget = self
-            .session_spec
+        let mut session_spec = self.session_spec.clone();
+        let default_selection = crate::session::DefaultSelection {
+            model: session_spec.model.take().ok_or(EmbedError::MissingModel)?,
+            reasoning: session_spec.reasoning.take(),
+        };
+        let turn_budget = session_spec
             .turn_budget
             .ok_or(EmbedError::MissingTurnBudget)?;
-        let base_policy = SessionPolicy {
-            provider_id,
-            model,
-            ..SessionPolicy::new(turn_budget)
-        };
-        let policy = self.session_spec.resolve_against(&base_policy);
+        // The default key must name a registered model now; the binding a
+        // session records is still minted when that session is created.
+        if let Some(models) = self.models.as_ref() {
+            models
+                .snapshot(&default_selection.model)
+                .map_err(EmbedError::ModelUnknown)?;
+        }
+        // With the model fields taken, resolving the spec mints nothing.
+        let policy = session_spec
+            .resolve_against(&SessionPolicy::new(turn_budget), &lash_core::EmptyModels)
+            .map_err(|error| match error {
+                lash_core::facade_support::SpecResolveError::Model(error) => {
+                    EmbedError::ModelUnknown(error)
+                }
+                lash_core::facade_support::SpecResolveError::ReasoningWithoutModel => {
+                    EmbedError::MissingModel
+                }
+            })?;
 
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
@@ -1119,6 +1145,7 @@ impl LashCoreBuilder {
             drive_owner.clone(),
             env.clone(),
             policy.clone(),
+            default_selection.clone(),
             protocol_factory.clone(),
             Arc::new(plugin_factories.clone()),
             &store_factory,
@@ -1164,7 +1191,6 @@ impl LashCoreBuilder {
             &env,
             protocol_factory.clone(),
             Arc::clone(&plugin_factories),
-            self.provider.clone(),
             process_lifecycle_available,
             {
                 let substrate_slot = Arc::clone(&substrate_slot);
@@ -1182,11 +1208,11 @@ impl LashCoreBuilder {
             drive_owner,
             env,
             policy,
+            default_selection,
             backend,
             store_factory,
             process_registry,
             plugin_factories,
-            provider: self.provider,
             live_replay_store,
             process_observation_hub,
             process_lifecycle_feed,
@@ -1211,6 +1237,7 @@ impl LashCoreBuilder {
         drive_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
+        default_selection: crate::session::DefaultSelection,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
         store_factory: &Arc<dyn DeploymentStore>,
@@ -1226,6 +1253,7 @@ impl LashCoreBuilder {
             drive_owner,
             env,
             policy,
+            default_selection,
             protocol_factory,
             plugin_factories,
             store_factory: Arc::clone(store_factory),

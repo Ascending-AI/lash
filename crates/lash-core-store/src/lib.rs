@@ -78,7 +78,7 @@ pub(crate) use lash_core_ids::clock::{Clock, ClockWallTime, SystemClock};
 pub(crate) use lash_core_ids::perf_witness;
 pub(crate) use lash_core_ids::{identity_json, operational_metrics, stable_hash, stable_identity};
 pub(crate) use lash_core_llm::llm;
-pub(crate) use lash_core_llm::model::ModelSpec;
+pub(crate) use lash_core_llm::model::{ModelConfig, ModelKey, RecordedModel};
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_sansio::AcceptedInjectedTurnInput;

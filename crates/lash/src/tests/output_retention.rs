@@ -188,8 +188,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         crate::TurnBudget::Unbounded,
     ))
     .output_retention(POLICY)
-    .provider(tool_calling_provider())
-    .model(mock_model_spec())
+    .serve_test_model(tool_calling_provider(), mock_model_spec())
     .tools(Arc::new(RetentionTools))
     .plugin(Arc::new(StaticPluginFactory::new(
         "output-retention-appendix",
@@ -252,16 +251,18 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
     const SESSION: &str = "rlm-output-retention";
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(backend.clone()))
         .output_retention(POLICY)
-        .provider(super::queued_text_provider(vec![super::typescript_block(
-            r#"
+        .serve_test_model(
+            super::queued_text_provider(vec![super::typescript_block(
+                r#"
 const rows = [];
 for (let i = 0; i < 3000; i++) {
   rows.push({ index: i, text: "a row the cell prints and finishes with" });
 }
 print(rows);
 finish({ rows });"#,
-        )]))
-        .model(mock_model_spec())
+            )]),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     let output = session

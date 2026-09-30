@@ -148,10 +148,15 @@ fn realistic_commit(
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: SessionPolicy {
-            model: lash_core_execution::ModelSpec::builder("benchmark-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("benchmark model"),
+            model: Some(lash_core_execution::ModelConfig::new(
+                lash_core_execution::RecordedModel::mint(
+                    lash_core_execution::ModelKey::from("benchmark-model"),
+                    lash_core_execution::ModelMetadata::builder("benchmark-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("benchmark model"),
+                ),
+            )),
             ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
@@ -164,7 +169,6 @@ fn realistic_commit(
     );
     commit.current_frame_node_id = Some(frame_node_id);
     commit.config = PersistedSessionConfig::from(&state.policy);
-    commit.config.provider_id = "benchmark".to_string();
     commit.graph = GraphAppend::Extend { nodes };
     for index in 0..SMALL_CHECKPOINT_COMPONENTS {
         let len = 64 + (index % 5) * 32;

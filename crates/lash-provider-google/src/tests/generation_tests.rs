@@ -115,12 +115,11 @@ fn reasoning_maps_per_google_dialect() {
 
 #[test]
 fn expose_thinking_requests_thoughts_without_a_reasoning_selection() {
-    let provider = GoogleOAuthProvider::for_test().with_options(ProviderOptions {
-        expose_thinking: true,
-        ..ProviderOptions::default()
-    });
+    let provider = GoogleOAuthProvider::for_test();
+    let mut req = request(None);
+    req.request_defaults.expose_thinking = true;
     let (body, receipt) =
-        GoogleOAuthProvider::build_request_with_receipt(&provider, &request(None), vec![], None)
+        GoogleOAuthProvider::build_request_with_receipt(&provider, &req, vec![], None)
             .expect("body");
     assert_eq!(
         body["request"]["generationConfig"]["thinkingConfig"],

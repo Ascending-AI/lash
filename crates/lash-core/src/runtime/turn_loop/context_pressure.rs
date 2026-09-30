@@ -189,7 +189,7 @@ impl LashRuntime {
             plugin_config: self.state.admitted_plugin_config(),
             state: read_view,
             prompt_usage: previous_prompt_usage,
-            max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
+            max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
             traces: manager.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             direct_completions: manager.direct_completion_client(

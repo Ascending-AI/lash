@@ -226,8 +226,10 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -325,13 +327,15 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-        response_with_usage("explicit summary", 1),
-        response_with_usage("after response", 1),
-    ]))
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+            response_with_usage("explicit summary", 1),
+            response_with_usage("after response", 1),
+        ]),
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -392,8 +396,10 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 200_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 200_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -549,8 +555,10 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 200_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 200_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -665,8 +673,10 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 200_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 200_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -852,8 +862,10 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(responses))
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(responses),
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -934,8 +946,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -1041,11 +1055,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![response_with_usage(
-        "response after reopen",
-        1,
-    )]))
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![response_with_usage("response after reopen", 1)]),
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -1086,15 +1099,17 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-        response_with_usage("first summary", 1),
-        response_with_usage("third response", 1),
-        response_with_usage("fourth response", 1),
-        response_with_usage("second summary", 1),
-    ]))
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+            response_with_usage("first summary", 1),
+            response_with_usage("third response", 1),
+            response_with_usage("fourth response", 1),
+            response_with_usage("second summary", 1),
+        ]),
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -1165,11 +1180,13 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 60_000),
-        response_with_usage("second response", 1),
-    ]))
-    .model(model_spec("attachment-prune-model", None, 100_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 60_000),
+            response_with_usage("second response", 1),
+        ]),
+        model_spec("attachment-prune-model", None, 100_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -1292,8 +1309,10 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(responses))
-    .model(model_spec("plugin-message-id-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(responses),
+        model_spec("plugin-message-id-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
@@ -1354,8 +1373,10 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(provider)
-        .model(model_spec("standard-compaction-rlm-model", None, 40_000))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-rlm-model", None, 40_000),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
 
@@ -1473,11 +1494,13 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-    ]))
-    .model(model_spec("after-turn-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]),
+        model_spec("after-turn-model", None, 40_000),
+    )
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
@@ -1609,11 +1632,13 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-    ]))
-    .model(model_spec("mid-turn-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]),
+        model_spec("mid-turn-model", None, 40_000),
+    )
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
@@ -1745,11 +1770,13 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-    ]))
-    .model(model_spec("same-turn-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]),
+        model_spec("same-turn-model", None, 40_000),
+    )
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
@@ -1871,11 +1898,10 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(standard_compaction_provider(vec![response_with_usage(
-        "first response",
-        1,
-    )]))
-    .model(model_spec("after-turn-model", None, 40_000))
+    .serve_test_model(
+        standard_compaction_provider(vec![response_with_usage("first response", 1)]),
+        model_spec("after-turn-model", None, 40_000),
+    )
     .plugin(Arc::new(plugin))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
@@ -1974,8 +2000,10 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-model", None, 40_000))
+    .serve_test_model(
+        provider,
+        model_spec("standard-compaction-model", None, 40_000),
+    )
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))

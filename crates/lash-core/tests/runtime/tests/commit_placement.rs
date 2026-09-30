@@ -105,15 +105,20 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         &SessionId::from(session_id),
     )
     .await;
+    let engine_command_model = lash_core::testing::runtime_helpers::serve_model_beside(
+        &mut runtime,
+        "engine-command-model",
+        lash_core::ModelMetadata::builder("engine-command-model")
+            .context_window_tokens(32_000)
+            .build()
+            .unwrap(),
+    );
     enqueue_config_transaction(
         store.as_ref(),
         &runtime,
         "engine-command",
         lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelSpec::builder("engine-command-model")
-                .context_window_tokens(32_000)
-                .build()
-                .unwrap(),
+            model: engine_command_model,
         }),
     )
     .await;

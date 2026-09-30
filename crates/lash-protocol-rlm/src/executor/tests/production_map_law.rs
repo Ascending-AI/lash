@@ -425,10 +425,13 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("L1 process test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("L1 process test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let traced_engine = || {

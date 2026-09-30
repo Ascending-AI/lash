@@ -10,8 +10,8 @@ fn committed_prompt_layer() -> crate::PromptLayer {
 #[test]
 fn legacy_config_keeps_prompt_absence_distinct() {
     let config = crate::PersistedSessionConfig {
-        provider_id: "stored-provider".to_string(),
-        model: crate::ModelSpec::default(),
+        model: None,
+        attachment_acceptance: Default::default(),
         turn_budget: crate::TurnBudget::Unbounded,
         autonomous: false,
         no_progress_budget: crate::NoProgressBudget::default(),
@@ -38,12 +38,6 @@ fn legacy_config_keeps_prompt_absence_distinct() {
     assert_eq!(
         old_writer_value,
         serde_json::json!({
-            "provider_id": "stored-provider",
-            "model": {
-                "id": "",
-                "variant": "provider_default",
-                "limits": { "context_window_tokens": 1 }
-            },
             "turn_budget": "unbounded",
             "autonomous": false,
             "no_progress_budget": { "bounded": 12 },
@@ -75,11 +69,15 @@ fn legacy_config_keeps_prompt_absence_distinct() {
 #[test]
 fn persisted_config_without_plugin_config_is_refused() {
     let unrecorded = serde_json::json!({
-        "provider_id": "provider",
         "model": {
-            "id": "model",
-            "variant": "provider_default",
-            "limits": { "context_window_tokens": 4096 }
+            "model": {
+                "key": "model",
+                "metadata": {
+                    "wire_model": "model",
+                    "limits": { "context_window_tokens": 4096 }
+                }
+            },
+            "reasoning": "provider_default"
         },
         "turn_budget": "unbounded",
         "autonomous": false,
@@ -106,12 +104,6 @@ fn persisted_config_without_plugin_config_is_refused() {
 #[test]
 fn persisted_config_without_config_revision_is_refused() {
     let pre_contract = serde_json::json!({
-        "provider_id": "provider",
-        "model": {
-            "id": "model",
-            "variant": "provider_default",
-            "limits": { "context_window_tokens": 4096 }
-        },
         "turn_budget": "unbounded",
         "autonomous": false,
         "no_progress_budget": { "bounded": 12 },
@@ -156,12 +148,6 @@ fn config_transaction_without_expected_revision_is_refused() {
 #[test]
 fn persisted_config_without_tool_access_is_refused() {
     let legacy = serde_json::json!({
-        "provider_id": "provider",
-        "model": {
-            "id": "model",
-            "variant": "provider_default",
-            "limits": { "context_window_tokens": 4096 }
-        },
         "turn_budget": "unbounded",
         "autonomous": false,
         "no_progress_budget": { "bounded": 12 },
@@ -179,8 +165,8 @@ fn persisted_config_without_tool_access_is_refused() {
 #[test]
 fn current_config_serializes_default_authority_explicitly() {
     let value = serde_json::to_value(crate::PersistedSessionConfig {
-        provider_id: "stored-provider".to_string(),
-        model: crate::ModelSpec::default(),
+        model: None,
+        attachment_acceptance: Default::default(),
         turn_budget: crate::TurnBudget::Unbounded,
         autonomous: false,
         no_progress_budget: crate::NoProgressBudget::default(),
@@ -204,8 +190,8 @@ fn current_config_serializes_default_authority_explicitly() {
 #[test]
 fn explicit_empty_prompt_is_serialized_as_present() {
     let value = serde_json::to_value(crate::PersistedSessionConfig {
-        provider_id: "stored-provider".to_string(),
-        model: crate::ModelSpec::default(),
+        model: None,
+        attachment_acceptance: Default::default(),
         turn_budget: crate::TurnBudget::Unbounded,
         autonomous: false,
         no_progress_budget: crate::NoProgressBudget::default(),
@@ -233,8 +219,8 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("committed-session"),
         config: crate::PersistedSessionConfig {
-            provider_id: "stored-provider".to_string(),
-            model: crate::ModelSpec::default(),
+            model: None,
+            attachment_acceptance: Default::default(),
             turn_budget: crate::TurnBudget::Unbounded,
             autonomous: false,
             no_progress_budget: crate::NoProgressBudget::default(),
@@ -273,8 +259,8 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("committed-generation"),
         config: crate::PersistedSessionConfig {
-            provider_id: "stored-provider".to_string(),
-            model: crate::ModelSpec::default(),
+            model: None,
+            attachment_acceptance: Default::default(),
             turn_budget: crate::TurnBudget::Unbounded,
             autonomous: false,
             no_progress_budget: crate::NoProgressBudget::default(),

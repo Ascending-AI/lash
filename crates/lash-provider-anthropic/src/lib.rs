@@ -95,7 +95,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().map(|e| e.to_string()).collect(),
@@ -119,7 +118,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: ["low", "medium", "high"]
@@ -149,9 +147,11 @@ mod tests {
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
+            attachment_acceptance: crate::attachment_test_acceptance(),
             model_variant: Default::default(),
-            model_capability: crate::attachment_test_capability(),
+            model_capability: Default::default(),
             extra_body: Default::default(),
+            request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -941,7 +941,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_display_is_omitted_unless_provider_exposes_thinking() {
+    fn thinking_display_is_omitted_unless_the_model_exposes_thinking() {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
         req.model_capability = effort_capability(&["low", "medium", "high"]);
@@ -951,11 +951,8 @@ mod tests {
             .expect("body");
         assert_eq!(hidden["thinking"]["display"], "omitted");
 
+        req.request_defaults.expose_thinking = true;
         let exposed = AnthropicProvider::new("key")
-            .with_options(ProviderOptions {
-                expose_thinking: true,
-                ..ProviderOptions::default()
-            })
             .build_request_body(&req)
             .expect("body");
         assert_eq!(exposed["thinking"]["display"], "summarized");
@@ -1262,14 +1259,12 @@ mod tests {
 
     #[test]
     fn cache_retention_none_removes_cache_control() {
-        let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-            cache_retention: CacheRetention::None,
-            ..ProviderOptions::default()
-        });
-        let req = request_with_instructions(
+        let provider = AnthropicProvider::new("key");
+        let mut req = request_with_instructions(
             "stable system prompt",
             vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
         );
+        req.request_defaults.cache_retention = CacheRetention::None;
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1283,14 +1278,12 @@ mod tests {
 
     #[test]
     fn cache_retention_long_emits_ttl() {
-        let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-            cache_retention: CacheRetention::Long,
-            ..ProviderOptions::default()
-        });
-        let req = request_with_instructions(
+        let provider = AnthropicProvider::new("key");
+        let mut req = request_with_instructions(
             "stable system prompt",
             vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
         );
+        req.request_defaults.cache_retention = CacheRetention::Long;
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1306,20 +1299,19 @@ mod tests {
 
     #[test]
     fn output_token_cap_maps_to_max_tokens() {
-        let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-            max_output_tokens: Some(9999),
-            ..ProviderOptions::default()
-        });
+        let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.request_defaults.max_output_tokens = Some(9999);
         req.generation.output_token_cap = NonZeroUsize::new(2048);
 
         let body = provider.build_request_body(&req).expect("body");
 
         assert_eq!(body["max_tokens"], 2048);
-        let mut uncapped = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        uncapped.generation.output_token_cap = None;
-        let provider_limited_body = provider.build_request_body(&uncapped).expect("body");
-        assert_eq!(provider_limited_body["max_tokens"], 9999);
+        let mut model_limited = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        model_limited.generation.output_token_cap = None;
+        model_limited.request_defaults.max_output_tokens = Some(9999);
+        let model_limited_body = provider.build_request_body(&model_limited).expect("body");
+        assert_eq!(model_limited_body["max_tokens"], 9999);
     }
 
     #[test]
@@ -1594,4 +1586,4 @@ mod tests {
 #[cfg(test)]
 mod attachment_capability_fixture;
 #[cfg(test)]
-pub(crate) use attachment_capability_fixture::attachment_test_capability;
+pub(crate) use attachment_capability_fixture::attachment_test_acceptance;

@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::config::core::{
-    SetGeneration, SetModel, SetPrompt, SetPromptTemplate, SetProvider, SetTurnBudget,
+    SetGeneration, SetModel, SetPrompt, SetPromptTemplate, SetTurnBudget,
 };
 
 const SEED: u64 = 0x5_f420;
@@ -76,15 +76,20 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
         standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
             .await;
     assert_eq!(runtime.config_revision(), 0);
+    let transaction_model = serve_model_beside(
+        &mut runtime,
+        "transaction-model",
+        lash_core::ModelMetadata::builder("transaction-model")
+            .context_window_tokens(32_000)
+            .build()
+            .expect("model"),
+    );
     enqueue_config_transaction(
         store.as_ref(),
         &runtime,
         "one-step",
         lash_core::ConfigTransaction::of(SetModel {
-            model: lash_core::ModelSpec::builder("transaction-model")
-                .context_window_tokens(32_000)
-                .build()
-                .expect("model"),
+            model: transaction_model,
         })
         .then(SetTurnBudget {
             turn_budget: lash_core::TurnBudget::bounded(7),
@@ -138,7 +143,7 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
     );
     assert_eq!(runtime.config_revision(), 1, "one revision step");
     let policy = runtime.session_policy();
-    assert_eq!(policy.model.id, "transaction-model");
+    assert_eq!(policy.wire_model(), Some("transaction-model"));
     assert_eq!(policy.turn_budget, lash_core::TurnBudget::bounded(7));
     assert_eq!(policy.generation.seed, Some(42));
 }
@@ -220,12 +225,17 @@ pub(super) async fn config_submission_refuses_what_no_owner_registers() {
     let backend = sqlite_memory_store_backend().await;
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let original_model = runtime.session_policy().model.clone();
+    let admitted_model = serve_model_beside(
+        &mut runtime,
+        "admitted-model",
+        lash_core::ModelMetadata::builder("admitted-model")
+            .context_window_tokens(32_000)
+            .build()
+            .expect("model"),
+    );
     let set_model = || {
         lash_core::ConfigTransaction::of(SetModel {
-            model: lash_core::ModelSpec::builder("admitted-model")
-                .context_window_tokens(32_000)
-                .build()
-                .expect("model"),
+            model: admitted_model.clone(),
         })
     };
 
@@ -306,7 +316,10 @@ pub(super) async fn config_submission_refuses_what_no_owner_registers() {
             outputs: vec![serde_json::Value::Null],
         }
     );
-    assert_eq!(runtime.session_policy().model.id, "admitted-model");
+    assert_eq!(
+        runtime.session_policy().wire_model(),
+        Some("admitted-model")
+    );
 }
 
 /// A turn budget a config transaction sets is the session's durable budget:
@@ -421,45 +434,62 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
         .complete_error("alt provider not wired")
         .build()
         .into_handle();
-    let alt_model = lash_core::ModelSpec::builder("alt-model")
+    let alt_model = lash_core::ModelMetadata::builder("alt-model")
         .context_window_tokens(123_456)
         .build()
-        .expect("valid model spec");
+        .expect("valid model metadata");
+    let combined_provider = TestProvider::builder()
+        .kind("combined")
+        .complete_error("combined provider not wired")
+        .build()
+        .into_handle();
+    let combined_model = lash_core::ModelMetadata::builder("combined-model")
+        .context_window_tokens(234_567)
+        .build()
+        .expect("valid combined model metadata");
+    // Two keys share one wire model on different transports: a model change
+    // moves the transport only through the key the registry minted.
+    serve_runtime_models(
+        &mut runtime,
+        [
+            (
+                lash_core::ModelKey::new("alt-model"),
+                lash_core::RegisteredModel::new(
+                    alt_model.clone(),
+                    mock_provider(Vec::new()).into_handle(),
+                ),
+            ),
+            (
+                lash_core::ModelKey::new("alt-model-on-alt"),
+                lash_core::RegisteredModel::new(alt_model.clone(), alt_provider.clone()),
+            ),
+            (
+                lash_core::ModelKey::new("combined-model"),
+                lash_core::RegisteredModel::new(combined_model.clone(), combined_provider.clone()),
+            ),
+        ],
+    );
     apply(
         &mut runtime,
         lash_core::ConfigTransaction::of(SetModel {
-            model: alt_model.clone(),
+            model: lash_core::ModelKey::new("alt-model"),
         }),
     )
     .await;
-    serve_runtime_providers(&mut runtime, [alt_provider.clone()]);
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetProvider {
-            provider_id: alt_provider.kind().to_string(),
+        lash_core::ConfigTransaction::of(SetModel {
+            model: lash_core::ModelKey::new("alt-model-on-alt"),
         }),
     )
     .await;
 
     assert_eq!(observed.lock().await.len(), 2);
 
-    let combined_provider = TestProvider::builder()
-        .kind("combined")
-        .complete_error("combined provider not wired")
-        .build()
-        .into_handle();
-    let combined_model = lash_core::ModelSpec::builder("combined-model")
-        .context_window_tokens(234_567)
-        .build()
-        .expect("valid combined model spec");
-    serve_runtime_providers(&mut runtime, [combined_provider.clone()]);
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetProvider {
-            provider_id: combined_provider.kind().to_string(),
-        })
-        .then(SetModel {
-            model: combined_model.clone(),
+        lash_core::ConfigTransaction::of(SetModel {
+            model: lash_core::ModelKey::new("combined-model"),
         }),
     )
     .await;
@@ -507,26 +537,34 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     let changes = observed.lock().await;
     assert_eq!(changes.len(), 6);
+    let key = |policy: &lash_core::SessionPolicy| {
+        policy
+            .model_key()
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    };
     let (previous, current) = &changes[0];
-    assert_eq!(previous.provider_id, "mock");
-    assert_eq!(current.provider_id, "mock");
-    assert_eq!(current.model.id, "alt-model");
+    assert_eq!(key(previous), "mock-model");
+    assert_eq!(key(current), "alt-model");
     assert_ne!(
         previous.context_window_tokens(),
         current.context_window_tokens()
     );
     let (previous, current) = &changes[1];
-    assert_eq!(previous.provider_id, "mock");
-    assert_eq!(previous.model.id, "alt-model");
-    assert_eq!(current.provider_id, "alt");
-    assert_eq!(current.model.id, "alt-model");
+    assert_eq!(key(previous), "alt-model");
+    assert_eq!(key(current), "alt-model-on-alt");
+    assert_eq!(previous.wire_model(), current.wire_model());
     let (previous, current) = &changes[2];
-    assert_eq!(previous.provider_id, "alt");
-    assert_eq!(previous.model.id, "alt-model");
-    assert_eq!(current.provider_id, "combined");
-    assert_eq!(current.model, combined_model);
+    assert_eq!(key(previous), "alt-model-on-alt");
+    assert_eq!(
+        current.model,
+        Some(lash_core::testing::test_model_config(
+            "combined-model",
+            combined_model
+        ))
+    );
     let (previous, current) = &changes[3];
-    assert_eq!(previous.model.id, "combined-model");
+    assert_eq!(key(previous), "combined-model");
     assert_eq!(current.prompt, prompt);
     let (previous, current) = &changes[4];
     assert_eq!(previous.prompt, prompt);

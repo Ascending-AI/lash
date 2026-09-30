@@ -34,6 +34,7 @@ fn fig1123_remote_llm_request_json_round_trips() {
         request_id: "request-1".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-1"),
         model_intent,
+        attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::User,
             content: vec![RemoteLlmContentBlock::Text {
@@ -73,6 +74,7 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
         request_id: "request-userinfo".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
         model_intent: RemoteModelIntent::new("gpt-test"),
+        attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::Assistant,
             content: vec![RemoteLlmContentBlock::Text {

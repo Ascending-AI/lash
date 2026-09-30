@@ -2039,17 +2039,14 @@ pub fn degrade_unmaterializable_request_attachments(
         .attachments()
         .into_iter()
         .filter_map(|source| {
-            attachment_materialization_notice(
-                &request.model_capability.attachment_acceptance,
-                source,
-            )
+            attachment_materialization_notice(&request.attachment_acceptance, source)
         })
         .collect::<Vec<_>>();
     if notices.is_empty() {
         return notices;
     }
     let request = Arc::make_mut(request);
-    let snapshot = &request.model_capability.attachment_acceptance;
+    let snapshot = &request.attachment_acceptance;
     for message in &mut request.messages {
         use crate::llm::types::LlmContentBlock;
         if !message
@@ -2134,7 +2131,7 @@ mod referrer_failure_tests;
 #[path = "attachments/test_capability.rs"]
 pub mod test_capability;
 #[cfg(any(test, feature = "testing"))]
-pub use test_capability::attachment_test_capability;
+pub use test_capability::attachment_test_acceptance;
 
 #[cfg(test)]
 #[path = "attachments/read_budget_tests.rs"]

@@ -90,7 +90,7 @@ fn attachment_provider(
                 }
                 if let Some(source) = request.attachments().iter().find(|source| {
                     lash_core::llm::transport::known_attachment_acceptors(
-                        &request.model_capability.attachment_acceptance,
+                        &request.attachment_acceptance,
                         source,
                     )
                     .is_empty()
@@ -147,9 +147,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     let provider = attachment_provider(Arc::clone(&requests));
     let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
-        .attachment_acceptance(
-            lash_core::attachments::attachment_test_capability().attachment_acceptance,
-        )
+        .attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
         .tools(Arc::new(AttachmentResultTool {
             media_type: "application/octet-stream",
             bytes: UNSUPPORTED_BYTES,
@@ -252,9 +250,7 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
     let provider = attachment_provider(Arc::clone(&requests));
     let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
-        .attachment_acceptance(
-            lash_core::attachments::attachment_test_capability().attachment_acceptance,
-        )
+        .attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
         .tools(Arc::new(AttachmentResultTool {
             media_type: "image/png",
             bytes: IMAGE_BYTES,
@@ -405,9 +401,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
-        .attachment_acceptance(
-            lash_core::attachments::attachment_test_capability().attachment_acceptance,
-        )
+        .attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
         .tools(Arc::new(ArrayAttachmentTool))
         .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
             test_runtime_host_config(&backend),

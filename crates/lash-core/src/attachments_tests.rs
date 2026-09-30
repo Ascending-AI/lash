@@ -1828,9 +1828,11 @@ fn attachment_request(
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
+        attachment_acceptance: lash_core_store::attachments::attachment_test_acceptance(),
         model_variant: crate::ReasoningSelection::ProviderDefault,
-        model_capability: lash_core_store::attachments::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         scope: crate::llm::types::LlmRequestScope::new(
             "attachment-session",
@@ -2023,24 +2025,50 @@ fn accepted_then_degraded_attachment_keeps_surviving_source() {
 fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let source =
         crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
+    let recorded = |key: &str| {
+        crate::testing::test_model_config(key, crate::testing::test_model_metadata(key))
+    };
     let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    policy.model.id = "attachment-model".into();
-    policy.model.capability = lash_core_store::attachments::attachment_test_capability();
-    let mut upgraded_model = policy.model.clone();
-    upgraded_model.id = "upgraded-attachment-model".into();
-    upgraded_model.capability.attachment_acceptance =
-        crate::provider::AttachmentCapabilitySnapshot {
-            revision: "test-host-revision-2".to_string(),
-            acceptors: Vec::new(),
-        }
-        .into();
-    let changed_host = upgraded_model.capability.clone();
-    policy.replace_model_retaining_attachment_acceptance(upgraded_model);
-    assert_eq!(policy.model.id, "upgraded-attachment-model");
+    policy.model = Some(recorded("attachment-model"));
+    policy.attachment_acceptance = lash_core_store::attachments::attachment_test_acceptance();
+    let changed_host = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
+        revision: "test-host-revision-2".to_string(),
+        acceptors: Vec::new(),
+    });
+    // A model command moves the session to another model; its acceptance is
+    // its own recorded field and stays.
+    let registry = crate::ConfigRegistry::build(&[]).expect("the core owner registers");
+    let models = crate::testing::single_model_registry(
+        crate::ModelKey::new("upgraded-attachment-model"),
+        crate::testing::test_model_metadata("upgraded-attachment-model"),
+        crate::testing::TestProvider::builder()
+            .kind("attachment-catalogue")
+            .build()
+            .into_handle(),
+    );
+    let entries = registry
+        .entries(&crate::ConfigTransaction::of(
+            crate::plugin::config::core::SetModel {
+                model: crate::ModelKey::new("upgraded-attachment-model"),
+            },
+        ))
+        .expect("the core owner registers the model command");
+    let transaction = registry
+        .admit("upgrade-model", 0, entries)
+        .expect("the model command is admitted");
+    let mut config = crate::PersistedSessionConfig::from(&policy);
+    assert!(matches!(
+        registry
+            .resolve(&config, &transaction, models.as_ref())
+            .publish(&mut config),
+        crate::ConfigTransactionOutcome::Applied { .. }
+    ));
+    let policy = config.session_policy();
+    assert_eq!(policy.model, Some(recorded("upgraded-attachment-model")));
     let restored: crate::SessionPolicy =
         serde_json::from_slice(&serde_json::to_vec(&policy).unwrap()).unwrap();
     let mut historical = attachment_request(vec![source.clone()]);
-    Arc::make_mut(&mut historical).model_capability = restored.model.capability;
+    Arc::make_mut(&mut historical).attachment_acceptance = restored.attachment_acceptance;
     let notices = degrade_unmaterializable_request_attachments(&mut historical);
     assert!(
         notices.is_empty(),
@@ -2048,11 +2076,11 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     );
     assert_eq!(historical.attachments(), vec![&source]);
     assert_eq!(
-        historical.model_capability.attachment_acceptance.revision,
+        historical.attachment_acceptance.revision,
         "test-host-revision-1"
     );
     let mut unpinned = attachment_request(vec![source]);
-    Arc::make_mut(&mut unpinned).model_capability = changed_host;
+    Arc::make_mut(&mut unpinned).attachment_acceptance = changed_host;
     assert_eq!(
         degrade_unmaterializable_request_attachments(&mut unpinned).len(),
         1

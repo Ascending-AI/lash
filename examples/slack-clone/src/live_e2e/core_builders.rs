@@ -13,7 +13,7 @@ use lash::tools::{
     ToolOutcome, ToolProvider,
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
-use lash::{LashCore, ModelSpec, PromptLayerSink as _};
+use lash::{LashCore, ModelMetadata, PromptLayerSink as _};
 use lash_provider_openai::{
     OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
 };
@@ -27,7 +27,6 @@ use super::{
 pub(super) fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle {
     let options = ProviderOptions {
         reliability: ProviderReliability::disabled(),
-        max_output_tokens: Some(config.output_token_cap as u64),
         ..ProviderOptions::default()
     };
     // Sonnet 5 advertises tools but not parallel_tool_calls; lash sends that
@@ -50,7 +49,7 @@ pub(super) fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle 
     ProviderHandle::new(components)
 }
 
-pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelSpec> {
+pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelMetadata> {
     let (context, output_capacity, cache_control, sampling, efforts) = match model {
         DEFAULT_RLM_MODEL => (
             1_000_000,
@@ -68,10 +67,10 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelSpec> {
         ),
         _ => bail!("ModelNotPriced: {model}"),
     };
-    ModelSpec::builder(model)
-        .variant(ReasoningSelection::Effort("low".to_string()))
+    ModelMetadata::builder(model)
         .context_window_tokens(context)
         .output_token_capacity(output_capacity)
+        .max_output_tokens(output_cap as u64)
         .capability(ModelCapability {
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.into_iter().map(String::from).collect(),
@@ -84,6 +83,24 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelSpec> {
         })
         .build()
         .with_context(|| format!("build model metadata for {model} with cap {output_cap}"))
+}
+
+/// A catalog serving `model` alone through `provider`, keyed by its wire
+/// model, and that key: a live run records the model it was priced for.
+fn one_model(
+    provider: ProviderHandle,
+    model: ModelMetadata,
+) -> Result<(Arc<lash::ModelRegistry>, lash::ModelKey)> {
+    let key = lash::ModelKey::new(model.wire_model.clone());
+    let models = lash::ModelRegistry::new()
+        .register(key.clone(), lash::RegisteredModel::new(model, provider))
+        .context("register the live run's model")?;
+    Ok((Arc::new(models), key))
+}
+
+/// Every live run reasons at low effort: it pays for correctness, not depth.
+fn live_reasoning() -> ReasoningSelection {
+    ReasoningSelection::Effort("low".to_string())
 }
 
 fn generation(output_cap: usize) -> GenerationOptions {
@@ -200,7 +217,7 @@ pub(super) struct StandardCoreSpec<'a> {
 
 pub(super) async fn standard_core(
     provider: ProviderHandle,
-    model: ModelSpec,
+    model: ModelMetadata,
     spec: StandardCoreSpec<'_>,
 ) -> Result<LiveCore> {
     let live = live_engine("slack-live-standard").await?;
@@ -217,13 +234,15 @@ pub(super) async fn standard_core(
 pub(super) fn standard_core_over(
     backend: lash::Backend,
     provider: ProviderHandle,
-    model: ModelSpec,
+    model: ModelMetadata,
     spec: StandardCoreSpec<'_>,
 ) -> Result<LashCore> {
+    let (models, model_key) = one_model(provider, model)?;
     let mut builder =
         LashCore::standard_builder(backend, lash::TurnBudget::bounded(spec.turn_budget))
-            .provider(provider)
-            .model(model)
+            .models(models)
+            .model(model_key)
+            .reasoning(live_reasoning())
             .generation(generation(spec.output_cap))
             .instructions(spec.instructions)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -251,7 +270,7 @@ pub(super) fn standard_core_over(
 
 pub(super) async fn rlm_core(
     provider: ProviderHandle,
-    model: ModelSpec,
+    model: ModelMetadata,
     output_cap: usize,
     instructions: &str,
     tools: Arc<dyn ToolProvider>,
@@ -268,13 +287,15 @@ pub(super) async fn rlm_core(
         std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
+    let (models, model_key) = one_model(provider, model)?;
     let mut builder = LashCore::rlm_builder(
         backend,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         factory,
     )
-    .provider(provider)
-    .model(model)
+    .models(models)
+    .model(model_key)
+    .reasoning(live_reasoning())
     .generation(generation(output_cap))
     .instructions(instructions)
     .tools(tools)

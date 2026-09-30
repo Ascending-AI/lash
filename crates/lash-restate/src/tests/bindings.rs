@@ -141,17 +141,17 @@ pub(super) async fn backend_and_process_worker()
         lash_core::Backend::from(Arc::clone(&backend)),
         lash::TurnBudget::Unbounded,
     )
-    .provider(
+    .serve_test_model(
         lash_core::testing::TestProvider::builder()
             .kind("endpoint-builder-stub")
             .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
             .build()
             .into_handle(),
+        lash_core::ModelMetadata::new(
+            "endpoint-builder-model",
+            std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
+        ),
     )
-    .model(lash_core::ModelSpec::new(
-        "endpoint-builder-model",
-        std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
-    ))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(

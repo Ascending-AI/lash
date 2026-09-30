@@ -615,13 +615,6 @@ mod tests {
             ),
             (
                 UnrecordedSessionSources {
-                    open_provider: true,
-                    ..Default::default()
-                },
-                ToolChildRebuildRefusal::OpenProvider,
-            ),
-            (
-                UnrecordedSessionSources {
                     open_tool_policy: true,
                     ..Default::default()
                 },

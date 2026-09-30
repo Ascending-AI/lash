@@ -346,8 +346,12 @@ impl DirectCompletionCapability {
         } else {
             context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
-        let normalized = crate::direct::build_llm_request(&provider, request, model)
+        let mut normalized = crate::direct::build_llm_request(&provider, request, model)
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        // A durable direct completion renders attachments under its session's
+        // recorded acceptance rules, never a caller's.
+        normalized.attachment_acceptance =
+            std::sync::Arc::clone(&context.current.policy.attachment_acceptance);
         let plan = self
             .plan_direct_effect(
                 &context,
@@ -388,7 +392,7 @@ impl DirectCompletionCapability {
             .model_capability
             .validate_selection(
                 &request.model,
-                resolved.binding.provider.kind(),
+                resolved.provider().kind(),
                 &request.model_variant,
             )
             .map_err(|error| crate::PluginError::Session(error.message))?;
@@ -399,7 +403,7 @@ impl DirectCompletionCapability {
         let plan = self
             .plan_direct_effect(
                 &context,
-                resolved.binding.provider,
+                resolved.provider().clone(),
                 request,
                 usage_source,
                 DirectReplayPosition {
@@ -470,11 +474,13 @@ mod tests {
     async fn a_rebound_completion_service_resolves_the_childs_recorded_policy() {
         let (services, opener_policy) = Box::pin(session_services()).await;
         let mut child_policy = opener_policy.clone();
-        child_policy.model = crate::ModelSpec::builder("child-recorded-model")
-            .context_window_tokens(128_000)
-            .build()
-            .expect("valid child model spec");
-        child_policy.provider_id = "child-recorded-provider".to_string();
+        child_policy.model = Some(crate::testing::test_model_config(
+            "child-recorded-model",
+            crate::ModelMetadata::builder("child-recorded-model")
+                .context_window_tokens(128_000)
+                .build()
+                .expect("valid child model"),
+        ));
         let child_env = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
             child_policy.clone(),

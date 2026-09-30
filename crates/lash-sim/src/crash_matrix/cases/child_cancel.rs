@@ -112,7 +112,7 @@ fn tool_provider() -> lash_core::facade_support::ProviderHandle {
 
 fn tool_core(executions: Arc<AtomicUsize>) -> CoreBuild {
     Arc::new(move |backend, owner| {
-        let model = lash_core::ModelSpec::builder("crash-matrix-model")
+        let model = lash_core::ModelMetadata::builder("crash-matrix-model")
             .context_window_tokens(200_000)
             .build()
             .map_err(|error| format!("model spec: {error}"))?;
@@ -120,8 +120,7 @@ fn tool_core(executions: Arc<AtomicUsize>) -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .recovery_lease(super::recovery_lease())
-            .provider(tool_provider())
-            .model(model)
+            .serve_test_model(tool_provider(), model)
             .tools(Arc::new(StuckTool {
                 executions: Arc::clone(&executions),
             }) as Arc<dyn lash_core::ToolProvider>)

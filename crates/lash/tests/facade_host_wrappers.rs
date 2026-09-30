@@ -218,9 +218,9 @@ fn core(
     };
     LashCore::builder(backend, lash::TurnBudget::Unbounded)
         .protocol_plugin(Arc::new(protocol))
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("facade-host-wrappers")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("facade-host-wrappers")
                 .context_window_tokens(64_000)
                 .build()
                 .expect("model spec"),

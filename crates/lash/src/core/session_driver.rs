@@ -12,6 +12,8 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
     pub(super) policy: SessionPolicy,
+    /// What a catalog row with no head mints when the engine opens it.
+    pub(super) default_selection: crate::session::DefaultSelection,
     pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) store_factory: Arc<dyn DeploymentStore>,
@@ -153,7 +155,15 @@ impl CoreSessionDriver {
                     )));
                 }
             };
-        let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
+        let state = match crate::session::load_state_from_store(
+            session_id,
+            &policy,
+            &self.config.default_selection,
+            self.config.env.core.providers.models.as_ref(),
+            &store,
+        )
+        .await
+        {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
                 return Err(OpenFailure::Contended);

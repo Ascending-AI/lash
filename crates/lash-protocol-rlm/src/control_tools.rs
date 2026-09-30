@@ -180,11 +180,11 @@ mod tests {
     };
     use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
 
-    fn model_spec(model: &str) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::builder(model)
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid test model spec")
+    fn model_spec(model: &str) -> Option<lash_core::ModelConfig> {
+        Some(lash_core::testing::test_model_config(
+            model,
+            lash_core::testing::test_model_metadata(model),
+        ))
     }
 
     #[test]

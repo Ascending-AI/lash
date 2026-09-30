@@ -8,7 +8,7 @@ async fn observation_get_preserves_config(path: &str) {
         .create_or_open_session(&session_id, "test")
         .await
         .unwrap();
-    let peer_model = lash::ModelSpec::builder("peer-commanded-model")
+    let peer_model = lash::ModelMetadata::builder("peer-commanded-model")
         .context_window_tokens(8192)
         .build()
         .unwrap();
@@ -17,7 +17,7 @@ async fn observation_get_preserves_config(path: &str) {
         .config()
         .configure(lash::config::ConfigTransaction::of(
             lash::config::SetModel {
-                model: peer_model.clone(),
+                model: lash::ModelKey::new(peer_model.wire_model.clone()),
             },
         ))
         .await
@@ -35,7 +35,14 @@ async fn observation_get_preserves_config(path: &str) {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(before.config.model.id, peer_model.id);
+    assert_eq!(
+        before
+            .config
+            .model
+            .as_ref()
+            .map(|model| model.key().as_str()),
+        Some(peer_model.wire_model.as_str())
+    );
     let app = Router::new()
         .route("/api/state", get(app_state))
         .route("/api/observations", get(session_observations))

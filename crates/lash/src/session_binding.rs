@@ -30,7 +30,7 @@ pub(crate) struct BoundSession {
     /// configured attempt budget (FIG-4246).
     relay_policy: lash_core::drive::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
-    provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+    models: Arc<dyn lash_core::RuntimeModels>,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -62,7 +62,7 @@ impl BoundSession {
             scope_close: Arc::clone(&env.core.control.scope_close),
             relay_policy: env.core.control.relay_policy(),
             clock: Arc::clone(&env.core.clock),
-            provider_resolver: Arc::clone(&env.core.providers.provider_resolver),
+            models: Arc::clone(&env.core.providers.models),
             tool_child_context_source: None,
         }
     }
@@ -142,10 +142,8 @@ impl BoundSession {
         Arc::clone(&self.catalog)
     }
 
-    pub(crate) fn provider_resolver(
-        &self,
-    ) -> Arc<dyn lash_core::provider::RuntimeProviderResolver> {
-        Arc::clone(&self.provider_resolver)
+    pub(crate) fn models(&self) -> Arc<dyn lash_core::RuntimeModels> {
+        Arc::clone(&self.models)
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {

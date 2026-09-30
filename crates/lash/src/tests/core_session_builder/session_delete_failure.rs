@@ -27,8 +27,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         backend.into(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("delete-partial-report")

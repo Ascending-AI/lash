@@ -21,25 +21,27 @@
 //! assembly reads, so a worker with another policy assembles the same
 //! terminal for the same recorded work (FIG-4389).
 //!
-//! The record is data. The route it names is bound to a live provider handle
-//! after the step, on every execution: a handle is this worker's capability,
-//! not a decision. A route that cannot be bound here was validated when it
-//! was set, so the failure is the worker's deployment: the root retries, and
-//! its engine's retry budget parks it (D3 Q3). A config transaction that
-//! changes the route is validated when it resolves, and is refused typed if
-//! no provider serves it (FIG-4379).
+//! The record is data. The model binding it records is bound to a live
+//! provider handle after the step, on every execution: a handle is this
+//! worker's capability, not a decision. A recorded model that cannot be bound
+//! here was adopted when it was set, so the failure is the worker's
+//! deployment: the root retries, and its engine's retry budget parks it
+//! (D3 Q3). A spec's per-run model key is resolved here, once, on the step's
+//! first execution; a replay reads the binding the step recorded. A config
+//! transaction that changes the model mints its binding when it resolves,
+//! and is refused typed if the host serves no such key (FIG-4379).
 //!
 //! Resolution faults that a redeploy repairs stay out of the record (P3): a
-//! spec read the store did not answer, or a definition revision this worker
-//! does not register, ends the attempt unrecorded, so the root retries, parks
-//! on its engine's budget, and recovers once the worker serves it. Only a
-//! definition's deterministic refusal of the spec's context is recorded.
+//! spec read the store did not answer, a definition revision this worker
+//! does not register, or a per-run model key this worker's models do not
+//! serve, ends the attempt unrecorded, so the root retries, parks on its
+//! engine's budget, and recovers once the worker serves it. Only a
+//! deterministic refusal of the spec is recorded.
 
-use crate::provider::{ConfigRefusalCode, RuntimeProviderResolver};
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
-    EffectAddress, ModelSpec, PersistedSessionConfig, RuntimeAttribution, RuntimeEffectCommand,
+    EffectAddress, PersistedSessionConfig, RuntimeAttribution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError,
     TurnId,
@@ -92,6 +94,7 @@ impl LashRuntime {
                         )
                     })?,
                 definitions: self.host.core.providers.run_definitions.clone(),
+                models: std::sync::Arc::clone(&self.host.core.providers.models),
             }),
         };
         let runner = ResolveTurnConfigRunner {
@@ -135,29 +138,12 @@ impl LashRuntime {
     }
 }
 
-/// Whether `resolver` serves the route `provider_id` + `model` (D3 §3.3).
-pub fn validate_route(
-    resolver: &dyn RuntimeProviderResolver,
-    provider_id: &str,
-    model: &ModelSpec,
-) -> Result<(), ConfigRefusalCode> {
-    resolver.validate_route(provider_id, model)
-}
-
-/// The route validator a config-command planner applies at the drain
-/// (D3 §3.3): [`validate_route`] over `resolver`.
-pub fn validate_route_with(
-    resolver: &dyn RuntimeProviderResolver,
-) -> impl Fn(&str, &ModelSpec) -> Result<(), ConfigRefusalCode> + '_ {
-    move |provider_id, model| validate_route(resolver, provider_id, model)
-}
-
-/// A turn's recorded route that this worker cannot bind: retried, never the
+/// A turn's recorded model that this worker cannot bind: retried, never the
 /// turn's outcome (D3 Q3).
-pub(crate) fn provider_binding_unavailable(error: SessionError) -> RuntimeError {
+pub(crate) fn model_unavailable(error: SessionError) -> RuntimeError {
     RuntimeError::new(
-        RuntimeErrorCode::ProviderBindingUnavailable,
-        format!("the turn's recorded provider route cannot be bound on this worker: {error}"),
+        RuntimeErrorCode::ModelUnavailable,
+        format!("the turn's recorded model cannot be bound on this worker: {error}"),
     )
 }
 
@@ -187,6 +173,7 @@ struct RootSpec {
     session_id: crate::SessionId,
     store: crate::store::SessionStore,
     definitions: crate::RunDefinitions,
+    models: std::sync::Arc<dyn crate::RuntimeModels>,
 }
 
 impl RootSpec {
@@ -244,12 +231,20 @@ impl RootSpec {
                 )
             }
         };
-        spec.resolve(snapshot, definition, termination)
-            .map_err(|error| {
-                RuntimeEffectControllerError::new(
+        spec.resolve(snapshot, definition, termination, self.models.as_ref())
+            .map_err(|error| match error {
+                crate::RunResolveError::Model(error) => repairable(
+                    RuntimeErrorCode::ModelUnavailable,
+                    format!(
+                        "run spec `{}` names a model this worker does not serve; the root \
+                         retries until a deployment serves it: {error}",
+                        self.hash
+                    ),
+                ),
+                error => RuntimeEffectControllerError::new(
                     RuntimeErrorCode::RunShapeRefused,
                     format!("run spec `{}` could not be resolved: {error}", self.hash),
-                )
+                ),
             })
     }
 }
@@ -338,10 +333,13 @@ mod tests {
             .with_session_id("root-view-authority")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::builder("test-model")
-                    .context_window_tokens(1024)
-                    .build()
-                    .expect("model"),
+                model: Some(crate::testing::test_model_config(
+                    "test-model",
+                    crate::ModelMetadata::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                )),
                 ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
             })
             .build(),

@@ -451,7 +451,6 @@ fn build_turn_core(
             OpenAiCompatibleProvider::new(api_key.to_string(), recorder_base_url)
                 .with_compat(OpenAiCompat::openrouter())
                 .with_options(ProviderOptions {
-                    expose_thinking: true,
                     reliability: lash::provider::ProviderReliability {
                         retry: crate::provider_log::retry_policy(provider_retries),
                         ..Default::default()
@@ -509,8 +508,13 @@ fn build_turn_core(
                 stack.push(witness);
             }
         })
-        .provider(provider)
-        .model(model_spec(model, effort)?)
+        // The bench runs one model, keyed by its wire model.
+        .models(Arc::new(lash::ModelRegistry::new().register(
+            model,
+            lash::RegisteredModel::new(model_metadata(model)?, provider),
+        )?))
+        .model(model)
+        .reasoning(reasoning(effort))
         .tools(if channel == crate::ChannelSelection::Standard {
             world.standard_provider()
         } else {
@@ -591,15 +595,19 @@ pub(crate) async fn preflight(
     )
 }
 
-fn model_spec(model: &str, effort: crate::ReasoningEffort) -> Result<lash::ModelSpec> {
-    use lash::provider::{ModelCapability, ReasoningCapability, ReasoningSelection};
-    let variant = match effort {
+fn reasoning(effort: crate::ReasoningEffort) -> lash::provider::ReasoningSelection {
+    use lash::provider::ReasoningSelection;
+    match effort {
         crate::ReasoningEffort::None => ReasoningSelection::ProviderDefault,
         _ => ReasoningSelection::Effort(effort.name().into()),
-    };
-    lash::ModelSpec::builder(model)
+    }
+}
+
+fn model_metadata(model: &str) -> Result<lash::ModelMetadata> {
+    use lash::provider::{ModelCapability, ReasoningCapability};
+    lash::ModelMetadata::builder(model)
         .context_window_tokens(200_000)
-        .variant(variant)
+        .expose_thinking(true)
         .capability(ModelCapability {
             reasoning: Some(ReasoningCapability {
                 efforts: vec!["low".into(), "medium".into(), "high".into()],
@@ -754,13 +762,14 @@ mod tests {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
         ] {
-            let spec = super::model_spec("route/model", effort).unwrap();
             assert_eq!(
-                spec.variant,
+                super::reasoning(effort),
                 ReasoningSelection::Effort(effort.name().into())
             );
             assert!(
-                spec.capability
+                super::model_metadata("route/model")
+                    .unwrap()
+                    .capability
                     .reasoning
                     .unwrap()
                     .efforts
@@ -768,9 +777,7 @@ mod tests {
             );
         }
         assert_eq!(
-            super::model_spec("route/model", ReasoningEffort::None)
-                .unwrap()
-                .variant,
+            super::reasoning(ReasoningEffort::None),
             ReasoningSelection::ProviderDefault
         );
     }

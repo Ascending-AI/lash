@@ -94,6 +94,13 @@ pub struct RemoteLlmRequest {
     pub request_id: String,
     pub scope: RemoteLlmRequestScope,
     pub model_intent: RemoteModelIntent,
+    /// The session's recorded attachment-acceptance rules the request
+    /// renders its attachments under (mirrors `LlmRequest`).
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteAttachmentCapabilitySnapshot::is_empty"
+    )]
+    pub attachment_acceptance: RemoteAttachmentCapabilitySnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<RemoteLlmMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -497,10 +504,52 @@ pub struct RemoteModelIntent {
     /// `ModelCapability` contract).
     #[serde(default, skip_serializing_if = "RemoteModelCapability::is_empty")]
     pub capability: RemoteModelCapability,
+    /// The recorded model's request defaults (mirrors the core
+    /// `LlmRequest::request_defaults`).
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteModelRequestDefaults::is_default"
+    )]
+    pub request_defaults: RemoteModelRequestDefaults,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, String>,
+}
+
+/// Mirror of the core `ModelRequestDefaults`: what a model's requests do
+/// where a request states nothing, recorded with the model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteModelRequestDefaults {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expose_thinking: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "RemoteCacheRetention::is_short")]
+    pub cache_retention: RemoteCacheRetention,
+}
+
+impl RemoteModelRequestDefaults {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Mirror of the core `CacheRetention` prompt-cache lifetime hint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteCacheRetention {
+    None,
+    #[default]
+    Short,
+    Long,
+}
+
+impl RemoteCacheRetention {
+    pub fn is_short(&self) -> bool {
+        matches!(self, Self::Short)
+    }
 }
 
 /// Mirror of the core `ModelCapability`: host-supplied model capability
@@ -512,11 +561,6 @@ pub struct RemoteModelCapability {
     pub instruction_role: RemoteInstructionRole,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mid_conversation_system: bool,
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteAttachmentCapabilitySnapshot::is_empty"
-    )]
-    pub attachment_acceptance: RemoteAttachmentCapabilitySnapshot,
     #[serde(default, skip_serializing_if = "RemoteGoogleDialect::is_legacy")]
     pub google_dialect: RemoteGoogleDialect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -539,7 +583,6 @@ impl RemoteModelCapability {
     pub fn is_empty(&self) -> bool {
         self.instruction_role.is_system()
             && !self.native_mid_conversation_system
-            && self.attachment_acceptance.is_empty()
             && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
@@ -702,6 +745,7 @@ impl RemoteModelIntent {
         Self {
             model: model.into(),
             extra_body: serde_json::Map::new(),
+            request_defaults: Default::default(),
             variant: RemoteReasoningSelection::ProviderDefault,
             capability: RemoteModelCapability::default(),
             provider: None,

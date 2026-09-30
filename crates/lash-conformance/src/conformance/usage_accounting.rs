@@ -439,9 +439,7 @@ impl World {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-            self.model().into_handle(),
-        ));
+        config.providers.models = crate::testing::standard_test_models(self.model().into_handle());
         let probe: Arc<dyn crate::ToolProvider> = Arc::new(Probe {
             world: self.clone(),
         });
@@ -1073,7 +1071,10 @@ pub async fn committed_turn_totals_are_preserved(tier: &UsageAccountingTier) {
         );
         let _turn = world.run().await;
         let usage = world.settled().await;
-        let model = crate::testing::mock_session_policy().model.id;
+        let model = crate::testing::mock_session_policy()
+            .wire_model()
+            .unwrap_or_default()
+            .to_string();
         let report = usage.report();
         let row = report
             .by_source_model

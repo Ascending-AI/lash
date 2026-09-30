@@ -309,14 +309,22 @@ impl World {
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
             .plugin(lash_core::testing::process_engine_plugin_fixture())
-            .model(
-                lash_core::ModelSpec::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("a model spec"),
-            )
+            .models(std::sync::Arc::new(
+                lash::ModelRegistry::new()
+                    .register(
+                        "mock-model",
+                        lash::RegisteredModel::new(
+                            lash::ModelMetadata::builder("mock-model")
+                                .context_window_tokens(200_000)
+                                .build()
+                                .expect("model metadata"),
+                            provider,
+                        ),
+                    )
+                    .expect("one key registers"),
+            ))
+            .model("mock-model")
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 "replay-after-advance",
                 "facade",

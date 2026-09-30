@@ -64,10 +64,10 @@ impl E2eLoadWorkflow for DeleteProbe {
             load: LoadContext::named("smoke-v1").unwrap(),
             restate_ingress_url: self.connection.ingress_url().to_owned(),
             restate_authority_id: services.authority.clone(),
-            model: lash_core::ModelSpec::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
+            model: lash::ModelConfig::new(lash::RecordedModel::mint(
+                lash::ModelKey::new("mock-model"),
+                mock_model_metadata(),
+            )),
             active: ActiveOperations::default(),
         });
         // Preserve the double's transport as well as the live connection.
@@ -127,6 +127,14 @@ impl LoadBehaviorReplayProbe for Probe {
         ctx.resolve_promise(&promise, "released".to_owned());
         Ok(promise)
     }
+}
+
+/// The one model the probe's core serves and its load worker records.
+fn mock_model_metadata() -> lash::ModelMetadata {
+    lash::ModelMetadata::builder("mock-model")
+        .context_window_tokens(200_000)
+        .build()
+        .unwrap()
 }
 
 fn session_of(run: &str) -> String {
@@ -237,13 +245,7 @@ fn services(
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(
-            lash_core::ModelSpec::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
-        )
+        .serve_test_model(provider, mock_model_metadata())
         .plugin(Arc::new(LoadSurfaceFactory))
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "load-behavior-replay",

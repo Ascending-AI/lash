@@ -80,7 +80,6 @@ fn host_model_capability_validates_reasoning_effort_selections() {
     assert!(required.message.contains("requires an explicit effort"));
 
     let malformed_capability = lash::provider::ModelCapability {
-        attachment_acceptance: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["low".to_string(), "high".to_string()],
             encoding: ReasoningEncoding::Budget(BTreeMap::from([("low".to_string(), 1_024)])),
@@ -129,14 +128,13 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .complete_error("config patch test should not call the provider")
             .build()
             .into_handle();
-        let initial_model = lash::ModelSpec::builder("workbench-model-before")
+        let initial_model = lash::ModelMetadata::builder("workbench-model-before")
             .context_window_tokens(4_096)
             .build()
             .expect("initial config change model");
         let double = test_double_backend(SEED).await;
         let core = explicit_durable_test_facets_on(double.lash_backend())
-            .provider(provider)
-            .model(initial_model)
+            .serve_workbench_model(provider, initial_model)
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
@@ -145,7 +143,7 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .open()
             .await
             .expect("open config change session");
-        let patched_model = lash::ModelSpec::builder("workbench-model-after")
+        let patched_model = lash::ModelMetadata::builder("workbench-model-after")
             .context_window_tokens(8_192)
             .build()
             .expect("patched config change model");
@@ -154,7 +152,7 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .config()
             .configure(lash::config::ConfigTransaction::of(
                 lash::config::SetModel {
-                    model: patched_model,
+                    model: lash::ModelKey::new(patched_model.wire_model.clone()),
                 },
             ))
             .await
@@ -170,8 +168,11 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             })
         );
         assert_eq!(
-            session.policy_snapshot().model_id(),
-            "workbench-model-after"
+            session
+                .policy_snapshot()
+                .model_key()
+                .map(ToString::to_string),
+            Some("workbench-model-after".to_string())
         );
         session.close().await.expect("close config change session");
         drop(core);
@@ -214,9 +215,9 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .into_handle();
         let double = test_double_backend(SEED).await;
         let core = explicit_durable_test_facets_on(double.lash_backend())
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("workbench-context-transform-model")
+            .serve_test_model(
+                provider,
+                lash::ModelMetadata::builder("workbench-context-transform-model")
                     .context_window_tokens(4_096)
                     .build()
                     .expect("context transform model"),

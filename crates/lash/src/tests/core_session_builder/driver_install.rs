@@ -51,12 +51,10 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(tagged_provider(
-        "v1",
-        Arc::clone(&calls),
-        Some(held.clone()),
-    ))
-    .model(mock_model_spec())
+    .serve_test_model(
+        tagged_provider("v1", Arc::clone(&calls), Some(held.clone())),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     // No session stays open on V1, so nothing but V1 itself and its
     // in-flight drive holds V1's driver.
@@ -87,8 +85,10 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(tagged_provider("v2", Arc::clone(&calls), None))
-    .model(mock_model_spec())
+    .serve_test_model(
+        tagged_provider("v2", Arc::clone(&calls), None),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core_v2
         .session("second-core-session")

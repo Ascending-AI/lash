@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use async_trait::async_trait;
 use lash_core::facade_support::{
     LashRuntime, LlmTransportError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
-    SingleProviderResolver, TurnFinish, TurnOutcome,
+    TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, PluginSpec,
@@ -24,7 +24,7 @@ use lash_core::sansio::{
 use lash_core::{
     AdmittedScope, AwaitEventResolver, CheckpointKind, DriverAction, DriverContextView,
     GenerationOptions, HostTurnProtocol, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    ModelSpec, ProtocolBuildInput, RuntimeEffectController, RuntimeEffectControllerError,
+    ProtocolBuildInput, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     ScopedEffectController, SessionPolicy, ToolAttemptOutcome, ToolCall, ToolCallOutcome,
     ToolContract, ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, ToolRetryStatus,
@@ -627,9 +627,11 @@ fn request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: GenerationOptions::default(),
         scope: LlmRequestScope::new("panic-test", "panic-test:frame", "panic-test:request"),
         output_spec: None,
@@ -638,13 +640,15 @@ fn request() -> LlmRequest {
     }
 }
 
-fn policy(provider_id: &str) -> SessionPolicy {
+fn policy() -> SessionPolicy {
     SessionPolicy {
-        provider_id: provider_id.to_string(),
-        model: ModelSpec::builder("panic-test-model")
-            .context_window_tokens(32_000)
-            .build()
-            .expect("valid model"),
+        model: Some(lash_core::testing::test_model_config(
+            "panic-test-model",
+            lash_core::ModelMetadata::builder("panic-test-model")
+                .context_window_tokens(32_000)
+                .build()
+                .expect("valid model"),
+        )),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     }
 }
@@ -747,7 +751,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
+    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
     let plugin = Arc::new(StaticPluginFactory::new(
         "panic-tool-test",
         PluginSpec::new().with_tool_provider(Arc::new(PanicTool)),
@@ -755,7 +759,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id("tool-panic-session")
-            .with_policy(policy("scripted-panic-containment"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory(), plugin])
             .build(),
     )
@@ -830,11 +834,11 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
+    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id("provider-panic-session")
-            .with_policy(policy("panic-once-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )
@@ -928,11 +932,11 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    quiet_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(quiet_provider));
+    quiet_host.providers.models = lash_core::testing::models_serving(&policy(), quiet_provider);
     let mut quiet_runtime = Box::pin(
         LashRuntime::builder(quiet_host, test_runtime_owner())
             .with_session_id("quiet-provider-record-session")
-            .with_policy(policy("panic-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )
@@ -970,11 +974,11 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    loud_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(loud_provider));
+    loud_host.providers.models = lash_core::testing::models_serving(&policy(), loud_provider);
     let mut loud_runtime = Box::pin(
         LashRuntime::builder(loud_host, test_runtime_owner())
             .with_session_id("loud-provider-record-session")
-            .with_policy(policy("panic-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )
@@ -1029,11 +1033,11 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
+    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id("loud-provider-panic-session")
-            .with_policy(policy("panic-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )
@@ -1195,13 +1199,16 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(ProviderHandle::new(
-        ProviderComponents::new(Box::new(AuxiliaryPanicProvider { reconcile })),
-    )));
+    host.providers.models = lash_core::testing::models_serving(
+        &policy(),
+        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {
+            reconcile,
+        }))),
+    );
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id(session_id.to_string())
-            .with_policy(policy("panic-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )
@@ -1489,13 +1496,16 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(ProviderHandle::new(
-        ProviderComponents::new(Box::new(DesugaredPanicProvider { callback })),
-    )));
+    host.providers.models = lash_core::testing::models_serving(
+        &policy(),
+        ProviderHandle::new(ProviderComponents::new(Box::new(DesugaredPanicProvider {
+            callback,
+        }))),
+    );
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id(session_id.to_string())
-            .with_policy(policy("desugared-panic-provider"))
+            .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
     )

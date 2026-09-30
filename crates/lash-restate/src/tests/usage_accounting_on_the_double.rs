@@ -92,14 +92,14 @@ pub(super) async fn read_parked_usage_from_second_core(
     let core = lash::LashCore::standard_builder(reader.lash_backend(), lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(
+        .serve_test_model(
             lash_core::testing::TestProvider::builder()
                 .kind("read-only-usage")
                 .complete(|_| async { panic!("the second core reads without driving") })
                 .build()
                 .into_handle(),
+            lash_core::testing::test_model_metadata("mock-model"),
         )
-        .model(lash_core::testing::mock_session_policy().model)
         .build(lash_core::testing::runtime_lease_owner())
         .expect("second core");
     let usage = tokio::time::timeout(std::time::Duration::from_secs(5), core.owner_usage(&owner))

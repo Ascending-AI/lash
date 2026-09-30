@@ -727,9 +727,9 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("test-model")
+            .serve_test_model(
+                provider,
+                lash::ModelMetadata::builder("test-model")
                     .context_window_tokens(4096)
                     .build()
                     .expect("model spec"),

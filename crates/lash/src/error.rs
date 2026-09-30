@@ -30,9 +30,14 @@ pub enum EmbedError {
     /// relay: its store set arms every kind, and a kind nothing delivers
     /// stays owed forever (ADR 0109 §1.4).
     ObligationRelayUnavailable(#[from] lash_core::drive::ObligationRelayUnavailable),
-    #[error("model spec is required; hosts must supply explicit model metadata")]
-    /// Returned when the session has no explicit model specification.
-    MissingModelSpec,
+    #[error("a default model key is required; hosts must select a registered model")]
+    /// Returned when the core names no default model key.
+    MissingModel,
+    #[error(transparent)]
+    /// Returned when a selected model key has no binding in the host's
+    /// models: at build for the core's default key, at creation for the
+    /// session's key. Nothing is created.
+    ModelUnknown(lash_core::ModelUnavailable),
     #[error(
         "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
     )]
@@ -299,7 +304,8 @@ impl EmbedError {
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
-            | Self::MissingModelSpec
+            | Self::MissingModel
+            | Self::ModelUnknown(_)
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -327,14 +333,14 @@ impl EmbedError {
     /// The terminal set includes:
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
-    ///   model spec, turn budget, commit budget, queued-work composition,
+    ///   default model key or an unknown one, turn budget, commit budget, queued-work composition,
     ///   handler context, an obligation kind no relay can deliver, and
     ///   store/session mismatches) — the same call fails
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
-    /// - session provider-configuration errors (`ProviderMismatch`,
-    ///   `ProviderUnconfigured`, `ProviderUnavailable`,
+    /// - session model errors (`ModelUnconfigured`, `ModelUnavailable`,
+    ///   `ModelUnknown`,
     ///   `CodeExecutionUnavailable`);
     /// - direct or session-wrapped
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
@@ -353,7 +359,8 @@ impl EmbedError {
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
             | Self::ObligationRelayUnavailable(_)
-            | Self::MissingModelSpec
+            | Self::MissingModel
+            | Self::ModelUnknown(_)
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -375,9 +382,9 @@ impl EmbedError {
                 lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },
             ) => false,
             Self::Reconfigure(_) => false,
-            Self::Session(SessionError::ProviderMismatch { .. })
-            | Self::Session(SessionError::ProviderUnconfigured { .. })
-            | Self::Session(SessionError::ProviderUnavailable { .. })
+            Self::Session(SessionError::ModelUnconfigured { .. })
+            | Self::Session(SessionError::ModelUnavailable { .. })
+            | Self::Session(SessionError::ModelUnknown { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
             Self::SessionDeleteStorage { .. }

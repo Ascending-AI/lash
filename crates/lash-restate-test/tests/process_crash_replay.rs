@@ -82,8 +82,8 @@ impl lash_core::ToolProvider for CountingTool {
     }
 }
 
-fn model_spec() -> lash_core::ModelSpec {
-    lash_core::ModelSpec::builder("mock-model")
+fn model_spec() -> lash_core::ModelMetadata {
+    lash_core::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("model spec")
@@ -112,8 +112,7 @@ fn build_core(restate: &RestateTestBackend, executions: &Arc<AtomicUsize>) -> la
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
         }) as Arc<dyn lash_core::ToolProvider>)
@@ -226,7 +225,10 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: model_spec(),
+                    model: Some(lash_core::testing::test_model_config(
+                        model_spec().wire_model,
+                        model_spec(),
+                    )),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
             )),

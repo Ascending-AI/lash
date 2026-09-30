@@ -46,17 +46,13 @@ fn runtime_feedback_leading_never_becomes_responses_instructions() {
 
 #[test]
 fn runtime_feedback_chat_cache_distinguishes_instructions_and_explicit_fences() {
-    let provider = OpenAiCompatibleProvider::new("key", "https://provider.test").with_options(
-        ProviderOptions {
-            cache_retention: CacheRetention::Short,
-            ..Default::default()
-        },
-    );
+    let provider = OpenAiCompatibleProvider::new("key", "https://provider.test");
     let mut req = request(vec![
         LlmMessage::text(LlmRole::User, "U"),
         LlmMessage::text(LlmRole::System, "F"),
         LlmMessage::text(LlmRole::User, "tail"),
     ]);
+    req.request_defaults.cache_retention = CacheRetention::Short;
     req.model_capability.cache_control = Some(CacheControlDialect::Anthropic);
     let body = provider.build_chat_request_body(&req, false).unwrap();
     assert!(
@@ -123,7 +119,7 @@ fn runtime_feedback_unencodable_chat_attachment_names_message_index() {
             }],
         ),
     ]);
-    Arc::make_mut(&mut req.model_capability.attachment_acceptance)
+    Arc::make_mut(&mut req.attachment_acceptance)
         .acceptors
         .push(lash_core::provider::AttachmentAcceptor {
             provider: "OpenAI Chat Completions".into(),

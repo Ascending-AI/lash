@@ -2154,10 +2154,13 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("TypeScript signal test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript signal test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
@@ -2287,10 +2290,13 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("TypeScript cross-turn test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript cross-turn test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
@@ -2422,10 +2428,13 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("TypeScript process handle id test model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript process handle id test model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {

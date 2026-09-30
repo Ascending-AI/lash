@@ -32,12 +32,6 @@ pub struct ModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "SamplingCapability::is_default")]
     pub sampling: SamplingCapability,
-    /// Host acceptance revision retained with the session policy.
-    #[serde(
-        default,
-        skip_serializing_if = "AttachmentCapabilitySnapshot::is_empty"
-    )]
-    pub attachment_acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningCapability>,
     /// Host-selected reasoning-history retention, independent of reasoning
@@ -293,9 +287,59 @@ pub enum ReasoningEncoding {
     Budget(BTreeMap<String, u32>),
 }
 
+/// Prompt-cache lifetime hint. Providers translate this into their own
+/// wire dialect (Anthropic and OpenRouter Claude/Gemini `cache_control`,
+/// OpenAI Responses and Codex `prompt_cache_key`, and OpenAI
+/// `prompt_cache_retention`). Providers without a cache-control concept,
+/// such as direct Google, read the value but emit nothing for it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheRetention {
+    /// Do not emit any prompt-cache hints.
+    None,
+    /// Default Anthropic ephemeral window (5 minutes).
+    #[default]
+    Short,
+    /// Extend to a 1-hour TTL where the API supports it.
+    Long,
+}
+
+impl CacheRetention {
+    pub fn is_default(&self) -> bool {
+        matches!(self, CacheRetention::Short)
+    }
+}
+
+/// How a model's requests behave where a request states nothing (FIG-4374):
+/// host intent recorded with the model's metadata when a registry mints its
+/// binding, and carried on every request that model serves. A transport
+/// keeps only live concerns: its client, credentials, endpoint and limits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ModelRequestDefaults {
+    /// Surface the reasoning the provider streams in responses.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expose_thinking: bool,
+    /// Output-token cap for calls whose request sets none. `None` sends no
+    /// cap; a wire that requires one (Anthropic Messages) then refuses the
+    /// call. Providers translate it to their wire-specific field
+    /// (`max_tokens`, `max_output_tokens`, `maxOutputTokens`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    /// Prompt-cache lifetime hint; see [`CacheRetention`].
+    #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
+    pub cache_retention: CacheRetention,
+}
+
+impl ModelRequestDefaults {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Deterministic taxonomy of effort-validation failures. The serde snake_case
 /// codes are a stable contract: downstream consumers match on them.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelEffortValidationCategory {
     UnsupportedEffort,
@@ -337,7 +381,6 @@ impl ModelCapability {
     pub fn is_empty(&self) -> bool {
         self.instruction_role.is_system()
             && !self.native_mid_conversation_system
-            && self.attachment_acceptance.is_empty()
             && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
@@ -564,7 +607,6 @@ mod tests {
         ModelCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
-            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning,
             cache_control: None,
@@ -580,7 +622,6 @@ mod tests {
         assert!(!capability(Some(reasoning())).is_empty());
         assert!(
             !ModelCapability {
-                attachment_acceptance: Default::default(),
                 cache_control: Some(CacheControlDialect::Anthropic),
                 ..ModelCapability::default()
             }
@@ -588,7 +629,6 @@ mod tests {
         );
         assert!(
             !ModelCapability {
-                attachment_acceptance: Default::default(),
                 stream_termination: Some(StreamTermination::RequireTerminalEvidence),
                 ..ModelCapability::default()
             }
@@ -597,7 +637,6 @@ mod tests {
         // A capability whose only statement is "this model pins its own
         // sampling" must still reach the wire.
         let pinned = ModelCapability {
-            attachment_acceptance: Default::default(),
             sampling: SamplingCapability::Pinned,
             ..ModelCapability::default()
         };
@@ -829,7 +868,6 @@ mod tests {
         assert_eq!(back, cap);
 
         let cap = ModelCapability {
-            attachment_acceptance: Default::default(),
             cache_control: Some(CacheControlDialect::Gemini),
             ..ModelCapability::default()
         };
@@ -882,6 +920,12 @@ pub struct AttachmentCapabilitySnapshot {
 impl AttachmentCapabilitySnapshot {
     pub fn is_empty(&self) -> bool {
         self.revision.is_empty() && self.acceptors.is_empty()
+    }
+
+    /// [`Self::is_empty`] for the shared snapshot a request or a session
+    /// carries, as serde's `skip_serializing_if` hands it over.
+    pub fn is_empty_arc(snapshot: &std::sync::Arc<Self>) -> bool {
+        snapshot.is_empty()
     }
 
     /// Provider labels whose host-supplied rules accept this exact source.

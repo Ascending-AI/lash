@@ -15,32 +15,38 @@ fn process_execution_env_identity_golden_corpus() {
     let plugin_config = crate::AdmittedPluginConfig::new(plugin_config, 3);
     let policy = crate::SessionPolicy {
         charge_safety: Default::default(),
-        model: crate::ModelSpec::builder("model:rich")
-            .variant(crate::ReasoningSelection::Effort("high".to_string()))
-            .context_window_tokens(8192)
-            .output_token_capacity(2048)
-            .build()
-            .expect("valid rich model limits")
-            .with_capability(crate::ModelCapability {
-                instruction_role: crate::InstructionRole::Developer,
-                native_mid_conversation_system: true,
-                attachment_acceptance: Default::default(),
-                google_dialect: Default::default(),
-                reasoning: Some(crate::ReasoningCapability {
-                    efforts: vec!["low".to_string(), "high".to_string()],
-                    encoding: crate::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
-                        ("low".to_string(), 256),
-                        ("high".to_string(), 1024),
-                    ])),
-                    disable: true,
-                    mandatory: true,
-                }),
-                cache_control: Some(crate::CacheControlDialect::Anthropic),
-                stream_termination: Some(crate::StreamTermination::EofTolerated),
-                sampling: crate::SamplingCapability::Pinned,
-                reasoning_retention: Default::default(),
-            }),
-        provider_id: "provider".to_string(),
+        model: Some(
+            crate::ModelConfig::new(crate::RecordedModel::mint(
+                crate::ModelKey::new("rich-key"),
+                crate::ModelMetadata::builder("model:rich")
+                    .context_window_tokens(8192)
+                    .output_token_capacity(2048)
+                    .build()
+                    .expect("valid rich model limits")
+                    .with_capability(crate::ModelCapability {
+                        instruction_role: crate::InstructionRole::Developer,
+                        native_mid_conversation_system: true,
+                        google_dialect: Default::default(),
+                        reasoning: Some(crate::ReasoningCapability {
+                            efforts: vec!["low".to_string(), "high".to_string()],
+                            encoding: crate::ReasoningEncoding::Budget(
+                                std::collections::BTreeMap::from([
+                                    ("low".to_string(), 256),
+                                    ("high".to_string(), 1024),
+                                ]),
+                            ),
+                            disable: true,
+                            mandatory: true,
+                        }),
+                        cache_control: Some(crate::CacheControlDialect::Anthropic),
+                        stream_termination: Some(crate::StreamTermination::EofTolerated),
+                        sampling: crate::SamplingCapability::Pinned,
+                        reasoning_retention: Default::default(),
+                    }),
+            ))
+            .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
+        ),
+        attachment_acceptance: Default::default(),
         session_id: Some(SessionId::from("session")),
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
@@ -75,12 +81,12 @@ fn process_execution_env_identity_golden_corpus() {
         actual,
         [
             (
-                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v6:blake3:103b23b28fe9d918bc3f5f2e34fa8996cb4cc49772552d35040d132cd55724e0".to_string(),
+                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
+                "process-env:v6:blake3:20e2a0daf5845a51a6c44a39fe5e21e4994fd741514edd2cd1dd322d3c2b319a".to_string(),
             ),
             (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:b7dd02a275a640b803e6ced78e5f555a91aba0fb958240c4c0cf7fcacb3ad1c9".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:288cb44aeb2e0c20578a9a2f77e438eee339312cac28ae8b2085800109126d24".to_string(),
             ),
         ]
     );

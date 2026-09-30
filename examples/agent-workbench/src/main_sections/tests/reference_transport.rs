@@ -462,14 +462,13 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         .with_trigger_store(Arc::clone(&trigger_store));
     let backend: lash::Backend = decorated.into();
     let model = with_workbench_model_capability(
-        lash::ModelSpec::builder("test-model")
+        lash::ModelMetadata::builder("test-model")
             .context_window_tokens(context_window_tokens)
             .build()
             .expect("model spec"),
     );
-    let mut core_builder = explicit_durable_test_facets_on(backend)
-        .provider(provider)
-        .model(model);
+    let mut core_builder =
+        explicit_durable_test_facets_on(backend).serve_workbench_model(provider, model);
     if let Some(live_replay_store) = live_replay_store {
         core_builder = core_builder.live_replay_store(live_replay_store);
     }

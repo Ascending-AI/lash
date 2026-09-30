@@ -20,16 +20,14 @@ fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::Lash
     LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
 }
 
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
         LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
-            .provider(mock_provider())
-            .model(mock_model_spec())
+            .serve_test_model(mock_provider(), mock_model_spec())
             .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing commit budget",
     );
@@ -46,8 +44,7 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
         LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
-            .provider(mock_provider())
-            .model(mock_model_spec())
+            .serve_test_model(mock_provider(), mock_model_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing queued-work action reserve",
@@ -87,8 +84,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
             crate::TurnBudget::Unbounded,
             rlm_factory(factory_backend),
         )
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())
@@ -129,12 +125,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     )
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-    .model(
-        lash_core::ModelSpec::builder("clock-wiring-model")
-            .context_window_tokens(4_096)
-            .build()
-            .expect("valid test model"),
-    )
+    .model("clock-wiring-model")
     .build(crate::testing::runtime_lease_owner())
     .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
@@ -406,8 +397,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let collected_error = core
@@ -428,10 +418,12 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
             if node_id == "collected-fork-point"
     ));
 
-    let mut source_model = mock_model_spec();
-    source_model.id = "orphaned-source-model".to_string();
+    let source_model = Some(recorded_model(model_spec(
+        "orphaned-source-model",
+        None,
+        200_000,
+    )));
     let source_policy = lash_core::SessionPolicy {
-        provider_id: "orphaned-source-provider".to_string(),
         model: source_model,
         session_id: Some(SessionId::from("orphaned-fork-source")),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -500,11 +492,11 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .expect("orphaned-source fork head")
         .config;
     assert_eq!(
-        branch_config.provider_id, "orphaned-source-provider",
-        "the retained frame carries provider identity after source deletion"
-    );
-    assert_eq!(
-        branch_config.model.id, "orphaned-source-model",
+        branch_config
+            .model
+            .as_ref()
+            .map(|model| model.model.wire_model()),
+        Some("orphaned-source-model"),
         "the retained frame carries model identity after source deletion"
     );
     Ok(())
@@ -532,16 +524,17 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let mut source_model = mock_model_spec();
-    source_model.id = "fork-source-model".to_string();
+    let source_model = Some(recorded_model(model_spec(
+        "fork-source-model",
+        None,
+        200_000,
+    )));
     let policy = lash_core::SessionPolicy {
         // The host and the branch point agree on the provider: a durable
         // pin is a fact, so a host naming a different one is refused at
         // open rather than silently discarded (FIG-1558).
-        provider_id: "embed-test".to_string(),
         model: source_model,
         session_id: Some(SessionId::from("fork-observer-source")),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -642,8 +635,14 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .await
         .expect("load branch config")
         .expect("branch head exists");
-    assert_eq!(branch_read.config.provider_id, "embed-test");
-    assert_eq!(branch_read.config.model.id, "fork-source-model");
+    assert_eq!(
+        branch_read
+            .config
+            .model
+            .as_ref()
+            .map(|model| model.model.wire_model()),
+        Some("fork-source-model")
+    );
 
     let inherited = registry
         .list_observed_by(
@@ -778,9 +777,10 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .await
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: SessionId::from("fork-observer-branch"),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy {
+                model: branch_read.config.model.clone(),
+                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            })
         })
         .await?;
     assert_eq!(
@@ -959,8 +959,7 @@ async fn duplicate_only_fork_intents_are_canonical(
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
         session_id: Some(source_session_id.clone()),
@@ -1093,7 +1092,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             ],
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy {
+                model: Some(recorded_model(mock_model_spec())),
+                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            }
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
@@ -1102,8 +1105,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     assert!(
@@ -1175,8 +1177,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
@@ -1214,7 +1215,11 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     source_session_id: SessionId::from(format!("nested-source-{case}")),
                     source_node_id: format!("nested-source-node-{case}").into(),
                 },
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy {
+                    model: Some(recorded_model(mock_model_spec())),
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                }
+                .into(),
                 head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
@@ -1337,9 +1342,9 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     // Forking creates a session head at a retained point; it does not create a
     // second authority over configuration. The branch resolves the host's spec
     // when it opens, exactly as a reopen of the source would, so the sampling a
-    // benchmark pinned on the core reaches the branch too. Only `provider_id`
-    // comes from the record, because it names which provider produced the
-    // history the branch continues.
+    // benchmark pinned on the core reaches the branch too. Only the recorded
+    // model comes from the record, because it names the model that produced
+    // the history the branch continues.
     let host_generation = lash_core::GenerationOptions {
         output_token_cap: std::num::NonZeroUsize::new(4_096),
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
@@ -1354,18 +1359,19 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .generation(host_generation.clone())
     .build(crate::testing::runtime_lease_owner())?;
 
-    let mut source_model = mock_model_spec();
-    source_model.id = "fork-source-model".to_string();
+    let source_model = Some(recorded_model(model_spec(
+        "fork-source-model",
+        None,
+        200_000,
+    )));
     let source_policy = lash_core::SessionPolicy {
         // The host and the branch point agree on the provider: a durable
         // pin is a fact, so a host naming a different one is refused at
         // open rather than silently discarded (FIG-1558).
-        provider_id: "embed-test".to_string(),
         model: source_model,
         session_id: Some(SessionId::from("generation-fork-source")),
         // The branch point ran with sampling of its own. It is not a second
@@ -1433,7 +1439,8 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         "a branch resolves the host's generation intent, like every other reopen"
     );
     assert_eq!(
-        branch_state.policy.model.id, "fork-source-model",
+        branch_state.policy.wire_model(),
+        Some("fork-source-model"),
         "the branch still records the model that produced the history it continues"
     );
     Ok(())

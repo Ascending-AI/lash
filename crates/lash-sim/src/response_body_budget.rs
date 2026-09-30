@@ -87,9 +87,9 @@ async fn witness(
                     double.lash_backend(),
                     lash::TurnBudget::Unbounded,
                 )
-                .provider(ProviderHandle::new(provider.into_components()))
-                .model(
-                    lash::ModelSpec::builder("budget-model")
+                .serve_test_model(
+                    ProviderHandle::new(provider.into_components()),
+                    lash::ModelMetadata::builder("budget-model")
                         .context_window_tokens(16_000)
                         .build()
                         .unwrap(),

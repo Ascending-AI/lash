@@ -99,11 +99,13 @@ macro_rules! turn_config_tests {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (one_config_resolution_per_root, "turn-config-one-resolution"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (an_unbindable_route_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
+            (an_unbindable_model_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_bad_route_is_refused_typed_and_publishes_nothing, "turn-config-bad-route"));
+            (an_unknown_model_key_is_refused_typed_and_publishes_nothing, "turn-config-unknown-key"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_route_refused_at_apply_leaves_the_route_unchanged, "turn-config-refused-at-apply"));
+            (a_model_change_records_the_binding_minted_where_it_resolves, "turn-config-minted-at-resolution"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_reasoning_change_is_judged_against_the_final_recorded_model, "turn-config-reasoning"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (run_specs_split_roots_in_admission_order, "run-spec-selector"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;

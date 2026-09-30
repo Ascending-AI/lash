@@ -616,9 +616,9 @@ async fn facade_final_value_execution_inner(
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(fixed_texts_provider(provider_kind, provider_responses))
-        .model(
-            lash_core::ModelSpec::builder(provider_kind)
+        .serve_test_model(
+            fixed_texts_provider(provider_kind, provider_responses),
+            lash_core::ModelMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
@@ -974,13 +974,10 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(fixed_texts_provider(provider_kind, provider_responses))
-        .model(
-            lash_core::ModelSpec::builder(provider_kind)
+        .serve_test_model(fixed_texts_provider(provider_kind, provider_responses), lash_core::ModelMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
-                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
-        );
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);
     if let Some(tools) = tools {
         builder = builder.tools(tools);
     }

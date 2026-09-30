@@ -53,9 +53,8 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::ModelLimits| {
         let _ = &value.context_window_tokens;
     });
-    // W0013: lash::ModelLimits::from_token_limits [function]
-    let _: fn(usize, Option<usize>) -> Result<lash::ModelLimits, lash::ModelLimitsError> =
-        lash::ModelLimits::from_token_limits;
+    // W0013: lash::RecordedModel::metadata [function]
+    let _ = lash::RecordedModel::metadata;
     // W0014: lash::ModelLimits::output_token_capacity [field]
     field_witness(|value: &lash::ModelLimits| {
         let _ = &value.output_token_capacity;
@@ -74,42 +73,36 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::ModelLimitsError| {
         matches!(value, lash::ModelLimitsError::ZeroOutputTokenCapacity)
     });
-    // W0019: lash::ModelSpec::capability [field]
-    field_witness(|value: &lash::ModelSpec| {
+    // W0019: lash::ModelMetadata::capability [field]
+    field_witness(|value: &lash::ModelMetadata| {
         let _ = &value.capability;
     });
-    // W0020: lash::ModelSpec::context_window_tokens [function]
-    let _ = lash::ModelSpec::context_window_tokens;
-    // W0021: lash::ModelSpec::from_token_limits [function]
-    let _: fn(
-        String,
-        lash::provider::ReasoningSelection,
-        usize,
-        Option<usize>,
-    ) -> Result<lash::ModelSpec, lash::ModelLimitsError> = lash::ModelSpec::from_token_limits;
-    // W0022: lash::ModelSpec::id [field]
-    field_witness(|value: &lash::ModelSpec| {
-        let _ = &value.id;
+    // W0020: lash::ModelMetadata::context_window_tokens [function]
+    let _ = lash::ModelMetadata::context_window_tokens;
+    // W0021: lash::RecordedModel::key [function]
+    let _ = lash::RecordedModel::key;
+    // W0022: lash::ModelMetadata::wire_model [field]
+    field_witness(|value: &lash::ModelMetadata| {
+        let _ = &value.wire_model;
     });
-    // W0023: lash::ModelSpec::limits [field]
-    field_witness(|value: &lash::ModelSpec| {
+    // W0023: lash::ModelMetadata::limits [field]
+    field_witness(|value: &lash::ModelMetadata| {
         let _ = &value.limits;
     });
-    // W0024: lash::ModelSpec::new [function]
-    let _: fn(String, std::num::NonZeroUsize) -> lash::ModelSpec = lash::ModelSpec::new;
-    // W0025: lash::ModelSpec::variant [field]
-    field_witness(|value: &lash::ModelSpec| {
-        let _ = &value.variant;
+    // W0024: lash::ModelMetadata::new [function]
+    let _: fn(String, std::num::NonZeroUsize) -> lash::ModelMetadata = lash::ModelMetadata::new;
+    // W0025: lash::ModelConfig::reasoning [field]
+    field_witness(|value: &lash::ModelConfig| {
+        let _ = &value.reasoning;
     });
-    // W0026: lash::ModelSpec::with_limits [function]
-    let _: fn(String, lash::provider::ReasoningSelection, lash::ModelLimits) -> lash::ModelSpec =
-        lash::ModelSpec::with_limits;
-    // W0027: lash::ModelSpec::with_variant [function]
-    let _ = lash::ModelSpec::with_variant;
-    // W0028: lash::ModelSpecBuilder::output_token_capacity [function]
-    let _ = lash::ModelSpecBuilder::output_token_capacity;
-    // W0029: lash::ModelSpecBuilder::variant [function]
-    let _ = lash::ModelSpecBuilder::variant;
+    // W0026: lash::ModelMetadata::with_limits [function]
+    let _: fn(String, lash::ModelLimits) -> lash::ModelMetadata = lash::ModelMetadata::with_limits;
+    // W0027: lash::ModelConfig::with_reasoning [function]
+    let _ = lash::ModelConfig::with_reasoning;
+    // W0028: lash::ModelMetadataBuilder::output_token_capacity [function]
+    let _ = lash::ModelMetadataBuilder::output_token_capacity;
+    // W0029: lash::RuntimeModels::snapshot [function]
+    let _ = <lash::ModelRegistry as lash::RuntimeModels>::snapshot;
     // W0030: lash::SessionError::Protocol [variant]
     variant_witness(|value: &lash::SessionError| matches!(value, lash::SessionError::Protocol(..)));
     // W0031: lash::SessionError::Protocol::0 [field]
@@ -856,10 +849,10 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::SessionPolicy| {
         let _ = &value.model;
     });
-    // W0227: lash::runtime::SessionPolicy::model_id [function]
-    let _ = lash::runtime::SessionPolicy::model_id;
-    // W0228: lash::runtime::SessionPolicy::model_variant [function]
-    let _ = lash::runtime::SessionPolicy::model_variant;
+    // W0227: lash::runtime::SessionPolicy::model_key [function]
+    let _ = lash::runtime::SessionPolicy::model_key;
+    // W0228: lash::runtime::SessionPolicy::wire_model [function]
+    let _ = lash::runtime::SessionPolicy::wire_model;
     // W0230: lash::plugins::AgentFrameRecord::protocol_turn_options [function]
     let _ = lash::plugins::AgentFrameRecord::protocol_turn_options;
     // W0231: lash_core::AttemptRecord::generation_disposition [field]

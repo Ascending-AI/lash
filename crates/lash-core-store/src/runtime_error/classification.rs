@@ -195,12 +195,10 @@ impl RuntimeErrorCode {
             Self::LiveReplay => Redrivable,
             // the provider's failure is the recorded model-call result.
             Self::LlmProvider => Terminal,
-            // a refusal of the config command that named the route; the same route is refused again.
-            Self::ProviderRouteUnknown => Terminal,
-            // a refusal of the config command that named the route; the same route is refused again.
-            Self::ProviderCredentialsMissing => Terminal,
-            // the route was validated when it was set; this worker's deployment cannot bind it now.
-            Self::ProviderBindingUnavailable => Retryable,
+            // a refusal of the command that named the key; the same key is refused again.
+            Self::ModelUnknown => Terminal,
+            // the model was adopted when it was set; this worker's deployment cannot bind it now.
+            Self::ModelUnavailable => Retryable,
             // the spec names an exact revision this worker's deployment does not register yet.
             Self::RunDefinitionUnavailable => Retryable,
             Self::RecordedRendererUnavailable => Retryable,

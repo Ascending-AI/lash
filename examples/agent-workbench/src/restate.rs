@@ -33,7 +33,7 @@ use crate::{
     AppError, AppErrorVerdict, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE,
     ChannelTurnEvents, ModelSelection, TurnStreamState, apply_model_selection_to_session,
     assistant_text_for_display, commit_assistant_transcript, enqueue_button_trigger_command,
-    enqueue_mail_received_trigger_command, model_spec_from_selection,
+    enqueue_mail_received_trigger_command,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
     workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
 };

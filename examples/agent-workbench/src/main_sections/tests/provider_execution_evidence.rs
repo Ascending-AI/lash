@@ -207,12 +207,25 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .open()
             .await
             .expect("open provider evidence session");
+        // The workbench catalog serves every id; the fixture's wire model is
+        // the key the session moves to. The catalog mints the workbench's
+        // metadata for it, so a cap the fixture's model records by default
+        // (Messages requires one) is stated as the session's generation.
+        let mut transaction = lash::config::ConfigTransaction::of(lash::config::SetModel {
+            model: lash::ModelKey::new(model.wire_model.clone()),
+        });
+        if let Some(cap) = model.request_defaults.max_output_tokens {
+            transaction = transaction.then(lash::config::SetGeneration {
+                generation: lash::GenerationOverlay::Merge(lash::direct::GenerationOptions {
+                    output_token_cap: std::num::NonZeroUsize::new(cap as usize),
+                    ..Default::default()
+                }),
+            });
+        }
         session
             .admin()
             .config()
-            .configure(lash::config::ConfigTransaction::of(
-                lash::config::SetModel { model },
-            ))
+            .configure(transaction)
             .await
             .expect("configure provider-specific model");
 

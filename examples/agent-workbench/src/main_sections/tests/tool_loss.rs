@@ -50,14 +50,14 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // Seed a checkpoint that records the tool, on a core that has its source.
     let seeding_core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(
+        .serve_workbench_model(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")
                 .complete_error("the seed never calls the provider")
                 .build()
                 .into_handle(),
+            test_model(),
         )
-        .model(test_model())
         .tools(Arc::new(SeedTools))
         .build(crate::test_core_owner())
         .expect("build the seeding core");
@@ -79,14 +79,14 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // The workbench's own core has no such source.
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(
+        .serve_workbench_model(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")
                 .complete_error("this test never calls the provider")
                 .build()
                 .into_handle(),
+            test_model(),
         )
-        .model(test_model())
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core

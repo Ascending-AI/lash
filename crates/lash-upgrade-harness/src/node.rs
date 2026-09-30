@@ -502,12 +502,24 @@ fn restate_args(restate: &RestateArgs) -> Vec<String> {
     ]
 }
 
-/// The model every node's sessions and processes name.
-fn model() -> Result<lash::ModelSpec> {
-    lash::ModelSpec::builder("upgrade-harness-model")
+/// The key every node registers its one model under.
+const MODEL_KEY: &str = "upgrade-harness-model";
+
+/// The metadata every node registers under [`MODEL_KEY`].
+fn model() -> Result<lash::ModelMetadata> {
+    lash::ModelMetadata::builder("upgrade-harness-model")
         .context_window_tokens(200_000)
         .build()
-        .map_err(|error| anyhow!("model spec: {error}"))
+        .map_err(|error| anyhow!("model metadata: {error}"))
+}
+
+/// The binding every node's registry mints for [`MODEL_KEY`], as a process
+/// environment records it.
+fn model_config() -> Result<lash::ModelConfig> {
+    Ok(lash::ModelConfig::new(lash::RecordedModel::mint(
+        lash::ModelKey::new(MODEL_KEY),
+        model()?,
+    )))
 }
 
 /// Each build's recovery lease: N+1 outranks N, so the newest build leads
@@ -569,8 +581,15 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     let worker_recovery = backend.worker_recovery();
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider.into_handle())
-        .model(model()?)
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    MODEL_KEY,
+                    lash::RegisteredModel::new(model()?, provider.into_handle()),
+                )
+                .map_err(|error| anyhow!("register the model: {error}"))?,
+        ))
+        .model(MODEL_KEY)
         .plugin(Arc::new(process::ProcessEnginePlugin(
             artifacts,
             worker_recovery,
@@ -651,7 +670,7 @@ impl Serving {
                     .map_err(|error| anyhow!("authority id: {error}"))?,
                 namespace: lash::restate::RestateNamespace::new(&restate.namespace)
                     .map_err(|error| anyhow!("namespace: {error}"))?,
-                model: model()?,
+                model: model_config()?,
             },
         )?
         .build();

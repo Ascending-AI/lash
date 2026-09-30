@@ -1,9 +1,15 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolSessionModel {
+    /// The key the session selected its model by.
+    pub model_key: crate::ModelKey,
+    /// The recorded wire model.
     pub model: String,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::provider::ModelCapability,
+    /// The session's recorded attachment-acceptance rules.
+    pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
     pub extra_body: serde_json::Map<String, serde_json::Value>,
+    pub request_defaults: crate::provider::ModelRequestDefaults,
     /// The session's generation options, so a tool making its own LLM call on
     /// the session's behalf runs under the same sampling intent as the turn
     /// that invoked it rather than at provider defaults.

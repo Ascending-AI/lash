@@ -141,8 +141,7 @@ fn redelivery_of(first: &LashCore) -> Result<LashCore> {
         ),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())
 }

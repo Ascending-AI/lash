@@ -749,9 +749,7 @@ impl World {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-            self.model().into_handle(),
-        ));
+        config.providers.models = crate::testing::standard_test_models(self.model().into_handle());
         let probes: Arc<dyn crate::ToolProvider> = Arc::new(IdentityProbes {
             witness: Arc::clone(&self.witness),
             effect_host: Arc::clone(&self.tier.effect_host),

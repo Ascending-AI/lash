@@ -116,11 +116,21 @@ const RUN_JOURNAL_CUTS: u64 = 14;
 /// resolved: the window S-14 names.
 const AFTER_TERMINAL_WRITE: &str = "lash.process.parent-end";
 
-pub(crate) fn model_spec() -> Result<lash_core::ModelSpec, String> {
-    lash_core::ModelSpec::builder("crash-matrix-model")
+pub(crate) fn model_spec() -> Result<lash_core::ModelMetadata, String> {
+    lash_core::ModelMetadata::builder("crash-matrix-model")
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| format!("model spec: {error}"))
+}
+
+/// [`model_spec`] as the matrix core's catalog records it: the core serves
+/// the model under its wire model.
+pub(crate) fn recorded_model() -> Result<lash_core::ModelConfig, String> {
+    let metadata = model_spec()?;
+    Ok(lash_core::testing::test_model_config(
+        metadata.wire_model.clone(),
+        metadata,
+    ))
 }
 
 /// An RLM core: the process runs no model; the provider only has to exist.
@@ -146,8 +156,7 @@ pub(super) fn rlm_core() -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .recovery_lease(super::recovery_lease())
-            .provider(provider)
-            .model(model_spec()?)
+            .serve_test_model(provider, model_spec()?)
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))
     })
@@ -218,7 +227,7 @@ pub(crate) async fn publish_process(
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: model_spec()?,
+                    model: Some(recorded_model()?),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
             )),

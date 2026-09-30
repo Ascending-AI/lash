@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-A session records its config with its head: the core route, prompt,
+A session records its config with its head: the core model, prompt,
 generation, attachment acceptance, tool access, the execution controls
 (turn budget, autonomy, no-progress budget and charge safety; FIG-4376), and
 one namespace per installed plugin, the protocol's included (FIG-4379,
@@ -36,12 +36,21 @@ the namespace registered.
 A reducer is a pure function from the recorded namespace and the command to
 the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
-by the reserved `core` owner, whose commands include `SetProvider`,
-`SetModel`, `SetAttachmentAcceptance`, the prompt commands, `SetGeneration`,
-`SetToolAccess`, `SetTurnBudget`, `SetAutonomy`, `SetNoProgressBudget` and
-`SetChargeSafety`. `SetChargeSafety` refuses a policy accepting more unsafe
-retries than the provider handle ever buys. The RLM and standard protocols register
-one render command each (`SetRlmRender`, `SetStandardRender`).
+by the reserved `core` owner, whose commands include `SetModel`,
+`SetReasoning`, `SetAttachmentAcceptance`, the prompt commands,
+`SetGeneration`, `SetToolAccess`, `SetTurnBudget`, `SetAutonomy`,
+`SetNoProgressBudget` and `SetChargeSafety`. `SetChargeSafety` refuses a
+policy accepting more unsafe retries than the provider handle ever buys. The
+RLM and standard protocols register one render command each
+(`SetRlmRender`, `SetStandardRender`).
+
+`SetModel` carries an opaque `ModelKey` (FIG-4374). Its reducer is the one
+core reducer that reads more than the recorded namespace: it asks the host's
+`RuntimeModels` catalog to mint a `RecordedModel` (the key and its metadata)
+for the key, even when the key is the one already recorded. The resolution
+records that binding, so a redrive or replay reuses it and never re-derives it
+from a catalog that may since have changed. `SetReasoning` changes the
+reasoning selection on the recorded model and keeps the key.
 
 Each protocol namespace also records the session's behaviour at creation
 (FIG-4398), from the creating deployment's factory configuration:
@@ -76,8 +85,9 @@ the transaction in one journaled `ResolveConfigTransaction` effect:
 2. If the config revision moved past the expected revision, the transaction
    resolves `Stale` without running a reducer.
 3. Otherwise the entries reduce in order over a private candidate. Every
-   owner with a recorded namespace then validates the final candidate; core
-   validates its route only when core changed.
+   owner with a recorded namespace then validates the final candidate; when
+   core changed, core validates the reasoning selection against the final
+   recorded model.
 4. The result is `Applied`, with the replacement namespaces and the outputs,
    or `Refused`, with the refusing entry, the owner and the owner's typed
    refusal.
@@ -120,8 +130,10 @@ recorded namespace or a caller-minted replacement.
 - `SessionConfigPatch`, `ApplyConfigPatch`, `SessionConfigAdmin::update`, the
   prompt and tool-access setters, the raw protocol-options setters and
   `PluginFactory::{resolve_session_config, patch_session_config}` are gone.
-- Route validation for a changed core route happens at resolution and
-  settles as a `Refused` outcome, not as a send-time error.
+- An unknown model key and a reasoning selection the recorded model does not
+  support are refused at resolution and settle as a typed `Refused` outcome
+  (`CoreConfigRefusal::UnknownModel`, `ReasoningRefused`), not as a send-time
+  error.
 - A config command added later, such as a new core execution control,
   registers on its owner and joins the same resolver, catalog and envelope.
 

@@ -98,13 +98,19 @@ impl Harness {
             std::env::var_os("LASH_OPERATOR_VM_WORKER").context("VM worker executable")?,
         ));
         let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, protocol)
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("session-operator-mock")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .map_err(anyhow::Error::msg)?,
-            )
+            .models(Arc::new(
+                lash::ModelRegistry::new().register(
+                    "session-operator-mock",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("session-operator-mock")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .map_err(anyhow::Error::msg)?,
+                        provider,
+                    ),
+                )?,
+            ))
+            .model("session-operator-mock")
             .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))

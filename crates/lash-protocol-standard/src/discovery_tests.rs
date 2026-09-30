@@ -255,9 +255,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     // group opens issued by the turn and the tool-child resolver
     // `RuntimeHostConfig::new` installs meet on that scope.
     let (double, mut host) = super::tests::test_host().await;
-    host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider_handle),
-    );
+    host.providers.models = lash_core::testing::standard_test_models(provider_handle);
     host.tracing.trace_sink = Some(Arc::new(lash_core::facade_support::JsonlTraceSink::new(
         trace_path.clone(),
     )));
@@ -280,11 +278,13 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         )),
     ];
     let policy = lash_core::SessionPolicy {
-        provider_id: "stub".to_string(),
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model"),
+        ))),
         // Bounded, not unbounded: these fixtures drive a live runtime loop
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of

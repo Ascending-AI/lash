@@ -51,12 +51,21 @@ impl AttemptSessionReads {
             }
             crate::RuntimeOwner::Process(_) => self.policy.clone(),
         };
-        let generation = policy.model.clamped_generation(&policy.generation);
+        let Some(config) = policy.model else {
+            return Err(PluginError::Session(
+                "the attempt owner has selected no model".to_string(),
+            ));
+        };
+        let metadata = config.model.metadata();
+        let generation = metadata.clamped_generation(&policy.generation);
         Ok(session::ToolSessionModel {
-            model: policy.model.id,
-            model_variant: policy.model.variant,
-            model_capability: policy.model.capability,
-            extra_body: policy.model.extra_body,
+            model_key: config.model.key().clone(),
+            model: metadata.wire_model.clone(),
+            model_variant: config.reasoning,
+            model_capability: metadata.capability.clone(),
+            attachment_acceptance: policy.attachment_acceptance,
+            extra_body: metadata.extra_body.clone(),
+            request_defaults: metadata.request_defaults,
             generation,
         })
     }

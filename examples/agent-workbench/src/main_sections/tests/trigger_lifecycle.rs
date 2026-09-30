@@ -23,15 +23,14 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let process_registry = double.engine_stores().process_registry();
     let trigger_store = double.stores().trigger_store();
     let provider = trigger_registration_provider();
-    let model = lash::ModelSpec::builder("test-model")
+    let model = lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let sessions = WorkbenchSessions::fresh();
     let session_id = sessions.current();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");

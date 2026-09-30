@@ -1152,10 +1152,13 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
 
 pub(super) fn recovery_session_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("mock-model"),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     }
 }
@@ -1460,10 +1463,13 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
             config: lash_core::SessionPolicy {
-                model: lash_core::ModelSpec::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
+                model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                    lash_core::ModelKey::from("mock-model"),
+                    lash_core::ModelMetadata::builder("mock-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("model spec"),
+                ))),
                 ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             }
             .into(),

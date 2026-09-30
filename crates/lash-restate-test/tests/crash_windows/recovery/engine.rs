@@ -61,8 +61,7 @@ fn deployment_core(
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
             output: json!({"result": "counted"}),

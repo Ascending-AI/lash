@@ -25,8 +25,7 @@ async fn done_stream_items_are_transient_and_not_snapshotted() {
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -95,8 +94,7 @@ async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core

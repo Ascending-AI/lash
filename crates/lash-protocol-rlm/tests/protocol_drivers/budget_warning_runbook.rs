@@ -4,15 +4,14 @@ use std::sync::{Arc, Mutex};
 use lash_core::facade_support::SessionStreamEvent;
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
-    SingleProviderResolver,
 };
 use lash_core::plugin::PluginFactory;
 use lash_core::testing::TestTurnDrive as _;
 use lash_core::testing::runtime_helpers::RecordingSink;
 use lash_core::{
-    CommitBudget, LlmOutputPart, LlmResponse, ModelSpec, PluginRuntimeEvent,
-    QueuedWorkBatchingConfig, RuntimeSessionState, SessionCreationHead, SessionNodePayload,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
+    CommitBudget, LlmOutputPart, LlmResponse, PluginRuntimeEvent, QueuedWorkBatchingConfig,
+    RuntimeSessionState, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginFactory,
@@ -46,11 +45,11 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
             let backend = double.lash_backend();
             let session_id = SessionId::from("context-budget-runbook");
             let policy = SessionPolicy {
-                provider_id: "scripted-budget-provider".into(),
-                model: ModelSpec::builder("scripted-budget-model")
-                    .context_window_tokens(41_000)
-                    .build()
-                    .expect("model spec"),
+                model: Some(lash_core::testing::test_model_config(
+            "scripted-budget-model",
+            lash_core::ModelMetadata::builder("scripted-budget-model")
+                    .context_window_tokens(41_000).build().expect("model spec"),
+        )),
                 ..SessionPolicy::new(TurnBudget::Unbounded)
             };
             let store = lash_core::runtime::admit_session_view(
@@ -135,8 +134,8 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 CommitBudget::bounded(8 * 1024 * 1024, 1024),
                 QueuedWorkBatchingConfig::new(1),
             );
-            host_config.providers.provider_resolver =
-                Arc::new(SingleProviderResolver::new(provider));
+            host_config.providers.models =
+                lash_core::testing::models_serving(&policy, provider);
             let host = EmbeddedRuntimeHost::new(host_config);
             let services = PersistentRuntimeServices::new(
                 plugins,

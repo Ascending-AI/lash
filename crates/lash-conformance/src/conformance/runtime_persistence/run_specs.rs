@@ -19,9 +19,9 @@ fn spec_with_prompt(guidance: &str) -> crate::RunSpec {
     })
 }
 
-fn spec_with_provider(provider_id: &str) -> crate::RunSpec {
+fn spec_with_model(model_key: &str) -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        provider_id: Some(provider_id.to_string()),
+        model: Some(crate::ModelKey::new(model_key)),
         ..crate::RunOverrides::default()
     })
 }
@@ -95,7 +95,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
             "a different spec changes the submission",
         ),
         (
-            draft("plain", "host:plain").with_run_spec(spec_with_provider("other-route")),
+            draft("plain", "host:plain").with_run_spec(spec_with_model("other-route")),
             "adding a spec changes the submission",
         ),
     ] {
@@ -233,7 +233,7 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
     };
 
     let refused = store
-        .enqueue_pending_turn_input(steer("other shape", spec_with_provider("elsewhere")))
+        .enqueue_pending_turn_input(steer("other shape", spec_with_model("elsewhere")))
         .await;
     assert!(
         matches!(
@@ -270,7 +270,7 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
     )
     .await;
     store
-        .enqueue_pending_turn_input(steer("after the turn", spec_with_provider("elsewhere")))
+        .enqueue_pending_turn_input(steer("after the turn", spec_with_model("elsewhere")))
         .await
         .expect("an input addressed to an ended turn runs under its own spec");
 }

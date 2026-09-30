@@ -270,20 +270,24 @@ pub enum SessionError {
     CodeExecutionUnavailable,
     #[error("code execution runtime exited unexpectedly")]
     CodeExecutionRuntimeStopped,
-    #[error(
-        "provider mismatch for session `{session_id}`: persisted provider `{expected}` does not match live provider `{actual}`"
-    )]
-    ProviderMismatch {
-        expected: String,
-        actual: String,
+    /// The session has selected no model, so it has nothing to run a turn
+    /// with.
+    #[error("session `{session_id}` has selected no model")]
+    ModelUnconfigured { session_id: SessionId },
+    /// The session's recorded model has no binding on this deployment.
+    #[error("session `{session_id}` cannot run its model: {source}")]
+    ModelUnavailable {
         session_id: SessionId,
+        #[source]
+        source: crate::ModelUnavailable,
     },
-    #[error("provider is not configured for session `{session_id}`")]
-    ProviderUnconfigured { session_id: SessionId },
-    #[error("provider `{provider_id}` is not registered for session `{session_id}`")]
-    ProviderUnavailable {
-        provider_id: String,
+    /// A model change named a key the host's registry does not register. It
+    /// is refused before anything is written.
+    #[error("model change refused for session `{session_id}`: {source}")]
+    ModelUnknown {
         session_id: SessionId,
+        #[source]
+        source: crate::ModelUnavailable,
     },
     #[error("{context}: {source}")]
     Store {
@@ -358,16 +362,6 @@ impl std::fmt::Display for SessionConfigRefusal {
 impl std::error::Error for SessionConfigRefusal {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(self.0.as_ref())
-    }
-}
-
-impl From<lash_core_store::session_policy::ProviderPinMismatch> for SessionError {
-    fn from(value: lash_core_store::session_policy::ProviderPinMismatch) -> Self {
-        Self::ProviderMismatch {
-            expected: value.expected,
-            actual: value.actual,
-            session_id: value.session_id,
-        }
     }
 }
 

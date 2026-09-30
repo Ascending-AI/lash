@@ -6,8 +6,8 @@ use crate::recovery::*;
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
+use lash_core::SessionGraph;
 use lash_core::plugin::{PluginTraceEmitter, SessionStateService};
-use lash_core::{SessionGraph, SessionPolicy};
 use serde_json::json;
 
 fn prompt_usage(used_tokens: usize) -> TokenUsage {
@@ -510,8 +510,8 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        policy: lash_core::testing::mock_session_policy(),
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
@@ -557,8 +557,8 @@ async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_p
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        policy: lash_core::testing::mock_session_policy(),
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
@@ -593,9 +593,9 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
     ];
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let compaction_scope =
         lash_core::ExecutionScope::runtime_operation("standard-compaction-compact-test");
@@ -738,7 +738,7 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
 
 #[test]
 fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
-    let mut state = SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded));
+    let mut state = SessionSnapshot::new(lash_core::testing::mock_session_policy());
     state.session_id = SessionId::from("retry-map-parent");
     for slot in [
         lash_core::PromptSlot::Intro,
@@ -776,8 +776,8 @@ async fn standard_compactor_records_zero_node_completion_for_none() {
     let trace = Arc::new(RecordingTraces::default());
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        policy: lash_core::testing::mock_session_policy(),
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let captured = Arc::new(RecordingLlmCompletions::default());
     let ctx = build_compaction_ctx(
@@ -809,9 +809,9 @@ async fn standard_compactor_records_zero_node_completion_before_error() {
     ];
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let captured = Arc::new(RecordingLlmCompletions {
         error: Some("scripted compaction-session failure".to_string()),
@@ -947,9 +947,9 @@ fn recovery_history(big_part: bool) -> (Vec<Message>, SessionSnapshot) {
     }
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     (messages, state)
 }
@@ -1193,9 +1193,9 @@ async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_fr
 fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
     SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(messages),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     }
 }
 
@@ -1358,9 +1358,9 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
 fn compactable_state(messages: Vec<Message>) -> SessionSnapshot {
     SessionSnapshot {
         session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     }
 }
 

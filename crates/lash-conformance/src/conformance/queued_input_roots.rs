@@ -178,8 +178,7 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_roots_and_a_c
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let first = store
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(

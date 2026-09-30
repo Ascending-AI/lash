@@ -172,8 +172,8 @@ fn text_response(text: &str) -> LlmResponse {
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-fn model() -> lash_core::ModelSpec {
-    lash_core::ModelSpec::builder("logical-turn-sim")
+fn model() -> lash_core::ModelMetadata {
+    lash_core::ModelMetadata::builder("logical-turn-sim")
         .context_window_tokens(200_000)
         .build()
         .expect("valid sim model")
@@ -242,15 +242,9 @@ fn standard_core_on(
     trace: Arc<RecordingTraceSink>,
     max_attachment_bytes: Option<u64>,
 ) -> (lash::LashCore, lash_sim::backend::SimEngine) {
-    let provider_id = provider.kind().to_string();
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .session_spec(
-            lash::SessionSpec::new()
-                .provider_id(provider_id)
-                .turn_budget(lash::TurnBudget::Unbounded),
-        )
-        .provider(provider)
-        .model(model())
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
+        .serve_test_model(provider, model())
         .tools(tools)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
@@ -352,8 +346,7 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model())
+        .serve_test_model(provider, model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -811,8 +804,7 @@ finish({ baton: baton });
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model())
+        .serve_test_model(provider, model())
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
@@ -927,8 +919,7 @@ await control.continue_as({
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model())
+        .serve_test_model(provider, model())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -1049,8 +1040,7 @@ async fn terminal_checkpoint_withheld_admission_is_traced_once() {
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model())
+        .serve_test_model(provider, model())
         .tools(Arc::new(NoTools))
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

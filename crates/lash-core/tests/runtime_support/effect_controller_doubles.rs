@@ -508,18 +508,12 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             ));
         }
         let outcome = match envelope.command {
-            RuntimeEffectCommand::LlmCall {
-                provider_id,
-                request,
-            } => {
+            RuntimeEffectCommand::LlmCall { model_key, request } => {
                 if self.execute_llm_locally {
                     local_executor
                         .execute(RuntimeEffectEnvelope::new(
                             envelope.invocation,
-                            RuntimeEffectCommand::LlmCall {
-                                provider_id,
-                                request,
-                            },
+                            RuntimeEffectCommand::LlmCall { model_key, request },
                         ))
                         .await
                 } else {

@@ -976,7 +976,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         &rebuilt_state,
         fixture_record_config_operation(),
     );
-    changed_retry.config.provider_id = "durable-read-changed-provider".to_string();
+    changed_retry.config.model = Some(lash_core::testing::test_model_config(
+        "durable-read-changed-model",
+        lash_core::testing::test_model_metadata("durable-read-changed-model"),
+    ));
     changed_retry
         .stamp_semantic_boundary()
         .expect("stamp changed fixture semantic-boundary identity");
@@ -1283,9 +1286,8 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
                     .expect("non-empty initial frame material")
             );
             assert_eq!(reason.as_str(), "initial");
-            assert_eq!(assignment.policy.model.id, "");
-            assert_eq!(assignment.policy.recorded_provider_id(), "");
-            assert_eq!(assignment.policy.context_window_tokens(), 1);
+            assert_eq!(assignment.policy.model, None);
+            assert_eq!(assignment.policy.context_window_tokens(), None);
             assert_eq!(assignment.policy.session_id, None);
             assert!(!assignment.policy.autonomous);
             assert_eq!(

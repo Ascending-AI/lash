@@ -95,9 +95,9 @@ pub struct DurableSession {
     work: Arc<ResolvedQueuedWork>,
     effect_host: Arc<dyn EffectHost>,
     live_replay_store: Arc<dyn LiveReplayStore>,
-    /// The resolver a [`send`](Self::send) judges a spec's route against
-    /// before the input is accepted (FIG-3877).
-    provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+    /// The host's models a [`send`](Self::send) checks a per-run model key
+    /// against before the input is accepted (FIG-3877).
+    models: Arc<dyn lash_core::RuntimeModels>,
     /// The deployment's usage ledger, read by [`usage`](Self::usage).
     usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
 }
@@ -114,7 +114,7 @@ impl DurableSession {
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
-        provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+        models: Arc<dyn lash_core::RuntimeModels>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {
@@ -130,7 +130,7 @@ impl DurableSession {
             work,
             effect_host,
             live_replay_store,
-            provider_resolver,
+            models,
             usage_accounting,
         }
     }
@@ -149,7 +149,7 @@ impl DurableSession {
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
-        provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+        models: Arc<dyn lash_core::RuntimeModels>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {
@@ -165,7 +165,7 @@ impl DurableSession {
             work,
             effect_host,
             live_replay_store,
-            provider_resolver,
+            models,
             usage_accounting,
         }
     }
@@ -190,7 +190,7 @@ impl DurableSession {
             work: self.work.clone(),
             effect_host: Arc::clone(&self.effect_host),
             live_replay_store: Arc::clone(&self.live_replay_store),
-            provider_resolver: Arc::clone(&self.provider_resolver),
+            models: Arc::clone(&self.models),
         })
     }
 

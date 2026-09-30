@@ -486,9 +486,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
         .plugins(Vec::new())
         .host(test_host_config(&backend))
         .store(store.clone())
-        .attachment_acceptance(
-            lash_core::attachments::attachment_test_capability().attachment_acceptance,
-        )
+        .attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
         .build()
         .await;
     steer.bind(&store);

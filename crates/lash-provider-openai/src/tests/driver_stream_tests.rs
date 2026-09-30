@@ -75,23 +75,28 @@ async fn reasoning_visibility_core(
     expose_thinking: bool,
 ) -> (lash::LashCore, lash_restate_test::RestateTestBackend) {
     let provider = openrouter_provider()
-        .with_options(ProviderOptions {
-            expose_thinking,
-            ..ProviderOptions::default()
-        })
         .with_transport(single_stream_transport(CHAT_REASONING_AND_TEXT_STREAM));
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
     let backend = double.lash_backend();
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(ProviderHandle::new(provider.into_components()))
-        .model(
-            lash::ModelSpec::builder("provider/model")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "provider/model",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("provider/model")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(expose_thinking)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("provider/model")
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -145,23 +150,27 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         )])),
         calls: std::sync::atomic::AtomicUsize::new(0),
     });
-    let provider = OpenAiProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let provider = OpenAiProvider::new("key").with_transport(transport);
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(ProviderHandle::new(provider.into_components()))
-        .model(
-            lash::ModelSpec::builder("gpt-5.4")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gpt-5.4",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gpt-5.4")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(true)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gpt-5.4")
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1081,16 +1090,11 @@ async fn completed_responses_stream_seals_every_open_block() {
         "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"item_id\":\"msg_seal\",\"delta\":\"open text\"}\n\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_seal\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_seal\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"open reasoning\"}]},{\"type\":\"message\",\"id\":\"msg_seal\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"open text\"}]}]}}\n\n",
     );
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
-        .with_transport(single_stream_transport(body));
+    let mut provider = OpenAiProvider::new("key").with_transport(single_stream_transport(body));
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
 
     provider
-        .complete(streamed_request(Arc::clone(&events)))
+        .complete(thinking_exposed(streamed_request(Arc::clone(&events))))
         .await
         .expect("completed response");
 
@@ -1134,15 +1138,10 @@ async fn aborted_responses_stream_seals_the_open_reasoning_block() {
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ),
     ]);
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     provider
-        .complete(streamed_request(Arc::clone(&events)))
+        .complete(thinking_exposed(streamed_request(Arc::clone(&events))))
         .await
         .expect_err("the scripted abort fails the call");
 
@@ -1178,15 +1177,10 @@ async fn aborted_chat_stream_seals_the_open_reasoning_block() {
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ),
     ]);
-    let mut provider = openrouter_provider()
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider = openrouter_provider().with_transport(transport);
 
     provider
-        .complete(streamed_request(Arc::clone(&events)))
+        .complete(thinking_exposed(streamed_request(Arc::clone(&events))))
         .await
         .expect_err("the scripted abort fails the call");
 
@@ -1202,4 +1196,9 @@ async fn aborted_chat_stream_seals_the_open_reasoning_block() {
 
     assert_eq!(starts, 1);
     assert_eq!(ends, 1, "the open reasoning block seals on abort");
+}
+
+fn thinking_exposed(mut request: LlmRequest) -> LlmRequest {
+    request.request_defaults.expose_thinking = true;
+    request
 }

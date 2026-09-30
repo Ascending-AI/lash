@@ -1263,44 +1263,44 @@ pub struct RemoteProcessPluginConfig {
     pub namespaces: BTreeMap<String, serde_json::Value>,
 }
 
-fn default_remote_context_window_tokens() -> usize {
-    1
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessModelLimits {
-    #[serde(default = "default_remote_context_window_tokens")]
     pub context_window_tokens: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_token_capacity: Option<usize>,
 }
 
-impl Default for RemoteProcessModelLimits {
-    fn default() -> Self {
-        Self {
-            context_window_tokens: default_remote_context_window_tokens(),
-            output_token_capacity: None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Mirror of the core `ModelMetadata`: the recorded facts of one registered
+/// model.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteProcessModelSpec {
-    #[serde(default)]
-    pub id: String,
+pub struct RemoteModelMetadata {
+    pub wire_model: String,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    #[serde(default)]
-    pub variant: crate::llm::RemoteReasoningSelection,
     #[serde(
         default,
         skip_serializing_if = "crate::llm::RemoteModelCapability::is_empty"
     )]
     pub capability: crate::llm::RemoteModelCapability,
-    #[serde(default)]
     pub limits: RemoteProcessModelLimits,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::llm::RemoteModelRequestDefaults::is_default"
+    )]
+    pub request_defaults: crate::llm::RemoteModelRequestDefaults,
+}
+
+/// Mirror of the core `ModelConfig`: the registry-minted binding a session
+/// recorded for its key, and the reasoning it runs that model with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteModelConfig {
+    pub key: String,
+    pub metadata: RemoteModelMetadata,
+    #[serde(default)]
+    pub reasoning: crate::llm::RemoteReasoningSelection,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

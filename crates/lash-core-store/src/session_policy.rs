@@ -1,11 +1,20 @@
 //! Durable and host-reconciled session policy.
 
-use crate::{ChargeSafetyPolicy, ModelSpec, NoProgressBudget, SessionId, TurnBudget};
+use std::sync::Arc;
+
+use crate::provider::AttachmentCapabilitySnapshot;
+use crate::{ChargeSafetyPolicy, ModelConfig, NoProgressBudget, SessionId, TurnBudget};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
-    pub model: ModelSpec,
-    pub provider_id: String,
+    /// The session's model selection: the binding the host's registry minted
+    /// when the session adopted its key, and the reasoning it runs with.
+    /// `None` until a model is selected; such a session cannot run a turn.
+    pub model: Option<ModelConfig>,
+    /// The attachment-acceptance rules the session renders attachments
+    /// against (ADR 0026). Session config of its own: a model change keeps
+    /// them, and only an explicit change replaces them.
+    pub attachment_acceptance: Arc<AttachmentCapabilitySnapshot>,
     pub session_id: Option<SessionId>,
     pub autonomous: bool,
     /// Required turn-budget decision. A host must choose either a non-zero
@@ -30,24 +39,18 @@ pub struct SessionPolicy {
     ///
     /// The durable session-head copy restores this intent on a cold load. Per
     /// ADR 0030, a live facade host may still reconcile its current spec over
-    /// loaded state at open time, exactly as it does for the model and prompt.
+    /// loaded state at open time, exactly as it does for the prompt.
     /// The process/remote policy carrier mirrors the same field.
     pub generation: crate::GenerationOptions,
 }
+
 impl SessionPolicy {
-    pub fn replace_model_retaining_attachment_acceptance(&mut self, mut model: ModelSpec) {
-        model.capability.attachment_acceptance =
-            self.model.capability.attachment_acceptance.clone();
-        self.model = model;
-    }
-}
-impl SessionPolicy {
-    /// Construct a policy with an explicit turn budget and otherwise neutral
-    /// settings.
+    /// Construct a policy with an explicit turn budget, no model selected
+    /// and otherwise neutral settings.
     pub fn new(turn_budget: TurnBudget) -> Self {
         Self {
-            model: ModelSpec::default(),
-            provider_id: String::new(),
+            model: None,
+            attachment_acceptance: Arc::default(),
             session_id: None,
             autonomous: false,
             turn_budget,
@@ -58,67 +61,20 @@ impl SessionPolicy {
         }
     }
 
-    /// Exposes the provider ID captured in policy for protocol implementors restoring the same
-    /// provider/model assignment on replay.
-    pub fn recorded_provider_id(&self) -> &str {
-        self.provider_id.trim()
+    /// The recorded model key, when the session has selected a model.
+    pub fn model_key(&self) -> Option<&crate::ModelKey> {
+        self.model.as_ref().map(ModelConfig::key)
     }
 
-    /// Settle the durable provider pin against the id a host names at this open.
-    ///
-    /// The recorded id is a durable fact: it is read and guarded, never
-    /// smoothed over (ADR 0066). A session with no recorded pin adopts the
-    /// host's id; an open that names nothing inherits the recorded pin; an
-    /// open naming the recorded provider keeps it; an open naming a
-    /// *different* provider is refused with
-    /// [`ProviderPinMismatch`] (widened to `SessionError::ProviderMismatch` by
-    /// `lash-core`) rather than having its request silently discarded and the
-    /// conflict deferred to the first turn.
-    pub fn settle_provider_pin(
-        session_id: &SessionId,
-        recorded: &str,
-        requested: &str,
-    ) -> Result<String, ProviderPinMismatch> {
-        let recorded = recorded.trim();
-        let requested = requested.trim();
-        if recorded.is_empty() {
-            return Ok(requested.to_string());
-        }
-        if requested.is_empty() || requested == recorded {
-            return Ok(recorded.to_string());
-        }
-        Err(ProviderPinMismatch {
-            expected: recorded.to_string(),
-            actual: requested.to_string(),
-            session_id: session_id.clone(),
-        })
+    /// The recorded wire model, when the session has selected a model.
+    pub fn wire_model(&self) -> Option<&str> {
+        self.model.as_ref().map(|model| model.model.wire_model())
     }
 
-    pub fn model_id(&self) -> &str {
-        &self.model.id
+    /// The recorded prompt budget, when the session has selected a model.
+    pub fn context_window_tokens(&self) -> Option<usize> {
+        self.model.as_ref().map(ModelConfig::context_window_tokens)
     }
-
-    pub fn model_variant(&self) -> &crate::ReasoningSelection {
-        &self.model.variant
-    }
-
-    pub fn context_window_tokens(&self) -> usize {
-        self.model.context_window_tokens()
-    }
-}
-
-/// A recorded provider pin that does not match the live request.
-///
-/// `lash-core` widens this into `SessionError::ProviderMismatch`; the pin rule
-/// itself is durable policy, so it settles here.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "provider mismatch for session `{session_id}`: persisted provider `{expected}` does not match live provider `{actual}`"
-)]
-pub struct ProviderPinMismatch {
-    pub expected: String,
-    pub actual: String,
-    pub session_id: crate::SessionId,
 }
 
 /// How a [`SessionSpec`] layers generation intent over the policy it resolves

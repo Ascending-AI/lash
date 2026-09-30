@@ -23,22 +23,21 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         test_restate_authority_id(),
         crate::tests::test_build_generation(),
     ));
-    runtime_host.providers.provider_resolver =
-        Arc::new(lash_core::facade_support::SingleProviderResolver::new(
-            lash_core::testing::runtime_helpers::mock_provider(vec![
-                lash_core::testing::runtime_helpers::MockCall {
-                    stream_events: Vec::new(),
-                    response: Ok(lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text: "child answered".to_string(),
-                            response_meta: None,
-                        }],
-                        ..Default::default()
-                    }),
-                },
-            ])
-            .into_handle(),
-        ));
+    runtime_host.providers.models = lash_core::testing::standard_test_models(
+        lash_core::testing::runtime_helpers::mock_provider(vec![
+            lash_core::testing::runtime_helpers::MockCall {
+                stream_events: Vec::new(),
+                response: Ok(lash_core::LlmResponse {
+                    parts: vec![lash_core::LlmOutputPart::Text {
+                        text: "child answered".to_string(),
+                        response_meta: None,
+                    }],
+                    ..Default::default()
+                }),
+            },
+        ])
+        .into_handle(),
+    );
     let session_store_factory = runtime_host.session_store_factory();
     let registration = session_turn_registration(
         persist_session_turn_env_ref(runtime_host.durability.process_env_store.as_ref()).await,

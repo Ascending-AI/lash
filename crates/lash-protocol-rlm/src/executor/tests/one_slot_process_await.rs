@@ -29,10 +29,13 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes() {
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("one-slot process await test model"),
+        model: Some(lash_core::testing::test_model_config(
+            "mock-model",
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("one-slot process await test model"),
+        )),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let engine = || {

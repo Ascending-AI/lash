@@ -89,9 +89,15 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        // Messages requires a cap, and lash invents none.
+        request_defaults: lash_core::provider::ModelRequestDefaults {
+            max_output_tokens: model.starts_with("claude").then_some(4_096),
+            ..Default::default()
+        },
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "recorded-session",
@@ -205,10 +211,6 @@ async fn openai_insufficient_quota_is_non_retryable() {
 #[tokio::test]
 async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths() {
     let mut rate_limited = AnthropicProvider::new("test-key")
-        .with_options(lash_core::provider::ProviderOptions {
-            max_output_tokens: Some(4_096),
-            ..lash_core::provider::ProviderOptions::default()
-        })
         .with_base_url(Some("https://provider.test".to_string()))
         .with_transport(transport(ANTHROPIC_RATE_LIMIT));
     let rate_failure = classify(
@@ -222,10 +224,6 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
     assert_eq!(rate_failure.retry_after(), None);
 
     let mut exhausted = AnthropicProvider::new("test-key")
-        .with_options(lash_core::provider::ProviderOptions {
-            max_output_tokens: Some(4_096),
-            ..lash_core::provider::ProviderOptions::default()
-        })
         .with_base_url(Some("https://provider.test".to_string()))
         .with_transport(transport(ANTHROPIC_HARD_QUOTA));
     let quota_failure = classify(

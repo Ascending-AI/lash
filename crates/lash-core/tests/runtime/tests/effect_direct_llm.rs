@@ -68,9 +68,11 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "direct-llm-test",
             "direct-llm-test:frame",

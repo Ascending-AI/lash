@@ -351,8 +351,8 @@ fn run_tag(label: &str) -> String {
     format!("{label}-{nanos:x}")
 }
 
-fn model_spec() -> lash_core::ModelSpec {
-    lash_core::ModelSpec::builder("mock-model")
+fn model_spec() -> lash_core::ModelMetadata {
+    lash_core::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("model spec")
@@ -476,8 +476,7 @@ fn process_core(engine: &Engine, executions: &Arc<AtomicUsize>) -> lash::LashCor
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
             output: json!({"result": "counted"}),
@@ -523,7 +522,10 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            model: model_spec(),
+            model: Some(lash_core::testing::test_model_config(
+                model_spec().wire_model,
+                model_spec(),
+            )),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     )
@@ -841,8 +843,7 @@ fn presentation_core(
     lash::LashCore::standard_builder(engine.lash_backend(), lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
             output: json!({ "text": tool_output() }),
@@ -1562,8 +1563,7 @@ async fn cell_parity(
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(model_spec())
+        .serve_test_model(provider, model_spec())
         .tools(Arc::new(CellIsolationTool(Arc::clone(&tools))) as Arc<dyn lash_core::ToolProvider>)
         .build(lash_core::LeaseOwnerIdentity::opaque("cell-parity", "test"))
         .expect("cell runtime");

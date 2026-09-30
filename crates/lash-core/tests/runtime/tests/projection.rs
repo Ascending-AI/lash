@@ -644,7 +644,10 @@ async fn completed_turns_are_persisted_in_session_graph() {
     let ledger = settled_runtime_usage(&runtime).await.rows;
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "turn");
-    assert_eq!(ledger[0].model, standard_test_policy().model.id);
+    assert_eq!(
+        Some(ledger[0].model.as_str()),
+        standard_test_policy().wire_model()
+    );
     assert_eq!(ledger[0].usage.input_tokens, 12);
     assert_eq!(ledger[0].usage.output_tokens, 4);
     assert_eq!(ledger[0].usage.cache_read_input_tokens, 1);

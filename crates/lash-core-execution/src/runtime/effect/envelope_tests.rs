@@ -7,11 +7,13 @@ use super::*;
 #[test]
 fn a_recorded_turn_config_round_trips_whole() {
     let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
-    config.provider_id = "stub".to_string();
-    config.model = crate::ModelSpec::builder("recorded-model")
-        .context_window_tokens(32_000)
-        .build()
-        .expect("a literal model spec builds");
+    config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
+        crate::ModelKey::from("recorded-model"),
+        crate::ModelMetadata::builder("recorded-model")
+            .context_window_tokens(32_000)
+            .build()
+            .expect("a literal model spec builds"),
+    )));
     config.prompt = Some(crate::PromptLayer::default());
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
     config

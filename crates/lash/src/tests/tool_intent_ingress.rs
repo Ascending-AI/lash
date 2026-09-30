@@ -61,8 +61,7 @@ async fn ingress_core_over(
         ingress_backend(backend, effect_host, process_env_store),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -71,7 +70,7 @@ async fn ingress_core_over(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ),
@@ -134,8 +133,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
         ),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -144,7 +142,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ),
@@ -219,8 +217,7 @@ async fn ingress_core_with_trigger_store(
         ingress_backend(backend, Some(effect_host), None),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -229,7 +226,7 @@ async fn ingress_core_with_trigger_store(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ),
@@ -510,8 +507,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         ),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -520,7 +516,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ),
@@ -1178,7 +1174,7 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             (lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ))
@@ -1987,8 +1983,7 @@ fn admit_ingress_engine(
         INGRESS_ENGINE_KIND,
         serde_json::json!({
             "payload": payload,
-            "model": env.policy.model.id,
-            "provider": env.policy.provider_id,
+            "model": env.policy.model_key().map(ToString::to_string),
         }),
         [],
     )
@@ -2051,8 +2046,7 @@ async fn ingress_engine_core(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(IngressAdmissionEngineFactory))
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -2061,7 +2055,7 @@ async fn ingress_engine_core(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ),
@@ -2086,7 +2080,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             (lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: mock_model_spec(),
+                    model: Some(recorded_model(mock_model_spec())),
                     ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 },
             ))
@@ -2100,7 +2094,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
     )
@@ -2263,8 +2257,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         INGRESS_ENGINE_KIND,
         serde_json::json!({
             "payload": {"program": "environment-sensitive"},
-            "model": mock_model_spec().id,
-            "provider": "",
+            "model": "mock-model",
         }),
         [],
     )

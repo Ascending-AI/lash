@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, PluginSession,
-    PluginSpec, RuntimeHostConfig, SingleProviderResolver, TurnFinish, TurnOutcome,
+    PluginSpec, RuntimeHostConfig, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginFactory, PromptHookContext, RuntimeServices, SessionAuthorityContext,
@@ -42,7 +42,7 @@ use lash_core::plugin::{
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
     AppendSessionNodesRequest, CommitBudget, DeploymentStore, LlmOutputPart, LlmResponse,
-    ModelSpec, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit, RuntimeSessionState,
+    ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit, RuntimeSessionState,
     RuntimeStore, SessionAppendNode, SessionCreationHead, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, StoreError, TurnBudget, TurnInput,
 };
@@ -126,11 +126,13 @@ impl SessionStateService for NoSessions {}
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        provider_id: "fig2521-rlm".to_string(),
-        model: ModelSpec::builder("fig2521-model")
-            .context_window_tokens(100_000)
-            .build()
-            .expect("model spec"),
+        model: Some(lash_core::testing::test_model_config(
+            "fig2521-model",
+            lash_core::ModelMetadata::builder("fig2521-model")
+                .context_window_tokens(100_000)
+                .build()
+                .expect("model spec"),
+        )),
         ..SessionPolicy::new(TurnBudget::Unbounded)
     }
 }
@@ -368,10 +370,8 @@ async fn open_with_plugins(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    config.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider(
-        script,
-        Arc::clone(&store),
-    )));
+    config.providers.models =
+        lash_core::testing::models_serving(&policy(), provider(script, Arc::clone(&store)));
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = PersistentRuntimeServices::new(
         plugins.clone(),
@@ -1070,8 +1070,8 @@ async fn storeless_runtime(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    config.providers.provider_resolver =
-        Arc::new(SingleProviderResolver::new(provider(script, detached)));
+    config.providers.models =
+        lash_core::testing::models_serving(&policy(), provider(script, detached));
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = RuntimeServices::new(
         plugins,

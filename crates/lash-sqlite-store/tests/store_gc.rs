@@ -6,10 +6,9 @@
 use lash_core_execution::store::GraphAppend;
 use lash_core_execution::store::WindowSelector;
 use lash_core_execution::{
-    FleetFormatStore, ModelSpec, PluginState, RuntimeCommit, RuntimeSessionState,
-    SessionCatalogStore, SessionCommitStore, SessionCreationHead, SessionHistoryStore,
-    SessionLookup, SessionPolicy, SessionStoreCreateRequest, StoreError, StoreMaintenance,
-    ToolState, TurnInputStore,
+    FleetFormatStore, PluginState, RuntimeCommit, RuntimeSessionState, SessionCatalogStore,
+    SessionCommitStore, SessionCreationHead, SessionHistoryStore, SessionLookup, SessionPolicy,
+    SessionStoreCreateRequest, StoreError, StoreMaintenance, ToolState, TurnInputStore,
 };
 use lash_sansio::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
@@ -28,11 +27,11 @@ async fn admit_store(
     Ok(Arc::clone(catalog))
 }
 
-fn model_spec(id: &str) -> ModelSpec {
-    ModelSpec::builder(id)
-        .context_window_tokens(200_000)
-        .build()
-        .expect("valid test model spec")
+fn recorded_model(id: &str) -> Option<lash_core::ModelConfig> {
+    Some(lash_core::testing::test_model_config(
+        id,
+        lash_core::testing::test_model_metadata(id),
+    ))
 }
 
 fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
@@ -197,7 +196,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             caused_by: None,
         },
         config: SessionPolicy {
-            model: model_spec("first-model"),
+            model: recorded_model("first-model"),
             ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         }
         .into(),
@@ -220,7 +219,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             pending_observer_intents: Vec::new(),
             relation: lash_core_execution::SessionRelation::Root,
             config: SessionPolicy {
-                model: model_spec("second-model"),
+                model: recorded_model("second-model"),
                 ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
             }
             .into(),
@@ -247,7 +246,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy {
-            model: model_spec("model"),
+            model: recorded_model("model"),
             ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         }
         .into(),

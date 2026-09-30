@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::log_out;
 use async_trait::async_trait;
-use lash::ModelSpec;
+use lash::ModelMetadata;
 use lash::direct::{
     DirectLlmClient, DirectMessage, DirectPart, DirectRequest, DirectRole, LlmTerminalReason,
     NonNegativeFiniteF64,
@@ -25,11 +25,11 @@ use tokio::sync::RwLock;
 /// The bot's direct provider-backed implementation of MCP sampling.
 pub struct DemoSamplingHandler {
     provider: ProviderHandle,
-    model: ModelSpec,
+    model: ModelMetadata,
 }
 
 impl DemoSamplingHandler {
-    pub fn new(provider: ProviderHandle, model: ModelSpec) -> Self {
+    pub fn new(provider: ProviderHandle, model: ModelMetadata) -> Self {
         Self { provider, model }
     }
 }
@@ -83,8 +83,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
             messages.push(DirectMessage { role, parts });
         }
 
-        let mut direct = DirectRequest::text(&self.model.id, "");
-        direct.model_variant = self.model.variant.clone();
+        let mut direct = DirectRequest::text(&self.model.wire_model, "");
         direct.model_capability = self.model.capability.clone();
         direct.instructions = params.system_prompt.as_deref().map(Arc::from);
         direct.messages = messages;
@@ -115,7 +114,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
         };
         Ok(CreateMessageOutcome::new(
             SamplingMessage::assistant_text(LlmResponse::full_text(&result)),
-            self.model.id.clone(),
+            self.model.wire_model.clone(),
         )
         .with_stop_reason(stop_reason))
     }

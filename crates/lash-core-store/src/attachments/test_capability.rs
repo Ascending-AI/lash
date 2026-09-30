@@ -1,8 +1,9 @@
 #[cfg(any(test, feature = "testing"))]
-pub fn attachment_test_capability() -> crate::provider::ModelCapability {
+pub fn attachment_test_acceptance() -> std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>
+{
     use crate::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource, ModelCapability,
+        AttachmentMimeSource,
     };
     let types_0 = [
         "image/jpeg",
@@ -114,29 +115,25 @@ pub fn attachment_test_capability() -> crate::provider::ModelCapability {
             },
         ])
         .collect();
-    ModelCapability {
-        attachment_acceptance: AttachmentCapabilitySnapshot {
-            revision: "test-host-revision-1".into(),
-            acceptors: vec![
-                AttachmentAcceptor {
-                    provider: "OpenAI Responses".into(),
-                    rules: rules_0,
-                },
-                AttachmentAcceptor {
-                    provider: "OpenAI Chat Completions".into(),
-                    rules: rules_1,
-                },
-                AttachmentAcceptor {
-                    provider: "Anthropic Messages".into(),
-                    rules: rules_2,
-                },
-                AttachmentAcceptor {
-                    provider: "Google Gemini".into(),
-                    rules: rules_3,
-                },
-            ],
-        }
-        .into(),
-        ..Default::default()
-    }
+    std::sync::Arc::new(AttachmentCapabilitySnapshot {
+        revision: "test-host-revision-1".into(),
+        acceptors: vec![
+            AttachmentAcceptor {
+                provider: "OpenAI Responses".into(),
+                rules: rules_0,
+            },
+            AttachmentAcceptor {
+                provider: "OpenAI Chat Completions".into(),
+                rules: rules_1,
+            },
+            AttachmentAcceptor {
+                provider: "Anthropic Messages".into(),
+                rules: rules_2,
+            },
+            AttachmentAcceptor {
+                provider: "Google Gemini".into(),
+                rules: rules_3,
+            },
+        ],
+    })
 }

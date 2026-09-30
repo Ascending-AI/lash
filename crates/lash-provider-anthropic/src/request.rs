@@ -492,14 +492,11 @@ impl AnthropicProvider {
                 .with_lash_code(TurnFailureCode::ProviderFileMediaTypeRequired));
                     }
                     let supported = req
-                        .model_capability
                         .attachment_acceptance
                         .accepts("Anthropic Messages", source);
                     if !supported {
-                        let accepted_by = known_attachment_acceptors(
-                            &req.model_capability.attachment_acceptance,
-                            source,
-                        );
+                        let accepted_by =
+                            known_attachment_acceptors(&req.attachment_acceptance, source);
                         return Err(unsupported_attachment_capability(
                             "Anthropic Messages",
                             source,
@@ -525,12 +522,7 @@ impl AnthropicProvider {
                 })?;
             }
         }
-        let policy = resolve_generation_policy(
-            req,
-            &self.options,
-            self.kind(),
-            &Self::generation_wire(req),
-        )?;
+        let policy = resolve_generation_policy(req, self.kind(), &Self::generation_wire(req))?;
         // Resolution refuses a call with no effective cap on this wire.
         let max_tokens = policy.max_output_tokens.ok_or_else(|| {
             LlmTransportError::new("Anthropic Messages requires an output-token cap.")

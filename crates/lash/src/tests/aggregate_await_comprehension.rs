@@ -95,8 +95,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .tools(Arc::new(RetailTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core

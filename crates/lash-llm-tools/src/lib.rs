@@ -100,17 +100,20 @@ impl LlmToolsProvider {
             .await
             .map_err(|err| format!("failed to read current session model: {err}"))?;
         // An override model carries the override capability (empty when the
-        // host supplied none); the session model carries the session's.
-        let (model, model_capability, extra_body) = match self.model.clone() {
+        // host supplied none) and no request defaults; the session model
+        // carries the session's recorded ones.
+        let (model, model_capability, extra_body, request_defaults) = match self.model.clone() {
             Some(model) => (
                 model,
                 self.model_capability.clone().unwrap_or_default(),
+                Default::default(),
                 Default::default(),
             ),
             None => (
                 session_model.model,
                 session_model.model_capability,
                 session_model.extra_body,
+                session_model.request_defaults,
             ),
         };
         let model_variant = self
@@ -137,7 +140,9 @@ impl LlmToolsProvider {
                     model,
                     model_variant,
                     model_capability,
+                    attachment_acceptance: session_model.attachment_acceptance.clone(),
                     extra_body,
+                    request_defaults,
                     messages: vec![
                         DirectMessage {
                             role: DirectRole::User,
@@ -366,16 +371,17 @@ mod tests {
     }
     use lash_sansio::sync::MutexExt;
 
-    fn model_spec(model: &str, variant: Option<&str>) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::builder(model)
-            .variant(
-                variant
-                    .map(|effort| lash_core::ReasoningSelection::Effort(effort.to_string()))
-                    .unwrap_or_default(),
-            )
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid test model spec")
+    fn model_spec(model: &str, variant: Option<&str>) -> Option<lash_core::ModelConfig> {
+        let config = lash_core::testing::test_model_config(
+            model,
+            lash_core::testing::test_model_metadata(model),
+        );
+        Some(match variant {
+            Some(effort) => {
+                config.with_reasoning(lash_core::ReasoningSelection::Effort(effort.to_string()))
+            }
+            None => config,
+        })
     }
 
     struct DirectCompletionManager {
@@ -610,7 +616,10 @@ mod tests {
     async fn llm_query_error_result_fails_tool_call() {
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                policy: lash_core::SessionPolicy {
+                    model: model_spec("root-model", None),
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 ))

@@ -112,6 +112,9 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
         policy,
         plugin_config: recorded_plugin_config,
     } = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
+    // The child records the minted binding in its policy; the request's key
+    // has done its work.
+    request.model = None;
     request.policy = Some(policy.clone());
     let initial_runtime_state = build_runtime_state(
         session_id.clone(),
@@ -151,7 +154,8 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
 }
 
 /// The recorded facts a session is created from: its starter's recorded
-/// policy and plugin config, and the plugin set the deployment installs.
+/// policy and plugin config, and the plugin set and models the deployment
+/// installs.
 ///
 /// On a session's own runtime the starter is that session; on a process
 /// runtime it is the environment the process's start captured. Either way
@@ -161,6 +165,8 @@ pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
     pub(in crate::runtime::session_manager) plugin_config: crate::AdmittedPluginConfig,
     pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
     pub(in crate::runtime::session_manager) protocol_plugin_id: &'a str,
+    /// Mints the binding of a model key the create request names.
+    pub(in crate::runtime::session_manager) models: &'a dyn crate::RuntimeModels,
 }
 
 impl<'a> StarterFacts<'a> {
@@ -171,6 +177,7 @@ impl<'a> StarterFacts<'a> {
             plugin_config: current.plugins.admitted_plugin_config(),
             plugin_host: current.plugins.host(),
             protocol_plugin_id: current.plugins.protocol_plugin_id(),
+            models: current.host.core.providers.models.as_ref(),
         }
     }
 }
@@ -183,15 +190,16 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
 }
 
 /// Resolve the complete facts `request` creates `session_id` with against
-/// its starter's recorded facts: the policy, honoring the recorded provider
-/// pin, and the plugin configuration every installed owner creates — a
-/// child's from its starter's recorded namespaces.
+/// its starter's recorded facts: the policy, and the plugin configuration
+/// every installed owner creates — a child's from its starter's recorded
+/// namespaces.
 ///
-/// The recorded provider id is a durable fact (ADR 0066), so a create request
-/// that carries no policy inherits it and a request whose policy names a
-/// *different* provider is refused with
-/// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
-/// rather than silently overwriting the pin the root open established. A
+/// The policy is the request's, or the starter's when the request carries
+/// none. The child copies that policy's recorded model binding, never
+/// re-resolving its key; only a request that names a model key of its own
+/// mints one, here, through the deployment's models, and the child records
+/// it. A key they do not register is refused with
+/// [`SessionError::ModelUnknown`](crate::SessionError::ModelUnknown). A
 /// namespace no installed owner registers, or a value its owner refuses, is
 /// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused):
 /// this deployment's plugin set cannot run the session, on any attempt.
@@ -204,12 +212,26 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         .policy
         .clone()
         .unwrap_or_else(|| starter.policy.clone());
-    policy.provider_id = SessionPolicy::settle_provider_pin(
-        session_id,
-        starter.policy.recorded_provider_id(),
-        policy.recorded_provider_id(),
-    )
-    .map_err(|error| crate::PluginError::Session(crate::SessionError::from(error).to_string()))?;
+    if let Some(key) = request.model.as_ref() {
+        let recorded = starter.models.snapshot(key).map_err(|source| {
+            crate::PluginError::Session(
+                crate::SessionError::ModelUnknown {
+                    session_id: session_id.clone(),
+                    source,
+                }
+                .to_string(),
+            )
+        })?;
+        let reasoning = policy
+            .model
+            .as_ref()
+            .map(|model| model.reasoning.clone())
+            .unwrap_or_default();
+        policy.model = Some(crate::ModelConfig {
+            model: recorded,
+            reasoning,
+        });
+    }
     let is_child = request.relation.parent_session_id().is_some();
     if is_child {
         policy.session_id = Some(SessionId::from(session_id.to_string()));
@@ -254,6 +276,7 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
         plugin_config: environment.plugin_config.clone(),
         plugin_host: current.plugins.host(),
         protocol_plugin_id: current.plugins.protocol_plugin_id(),
+        models: current.host.core.providers.models.as_ref(),
     };
     // A child whose request names no session takes the id the worker
     // derives from the minted process id (ADR 0107); before registration it

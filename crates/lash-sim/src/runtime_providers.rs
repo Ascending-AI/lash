@@ -610,7 +610,7 @@ pub fn suspend_roundtrip_scripts(
 pub fn runtime_provider_components<T>(
     provider_kind: &str,
     transport: &Arc<T>,
-) -> Result<(ProviderHandle, lash::ModelSpec, String), RuntimeProviderError>
+) -> Result<(ProviderHandle, lash::ModelMetadata, String), RuntimeProviderError>
 where
     T: LlmHttpTransport + 'static,
 {
@@ -630,10 +630,6 @@ where
         }
         ANTHROPIC => {
             let provider = AnthropicProvider::new("test-key")
-                .with_options(lash_core::provider::ProviderOptions {
-                    max_output_tokens: Some(4_096),
-                    ..lash_core::provider::ProviderOptions::default()
-                })
                 .with_base_url(Some("https://anthropic.test".to_string()))
                 .with_transport(transport);
             (
@@ -664,8 +660,12 @@ where
             )));
         }
     };
-    let model = lash::ModelSpec::builder(model_name)
-        .context_window_tokens(200_000)
+    let mut model = lash::ModelMetadata::builder(model_name).context_window_tokens(200_000);
+    if provider_kind == ANTHROPIC {
+        // Messages requires a cap, and lash invents none.
+        model = model.max_output_tokens(4_096);
+    }
+    let model = model
         .build()
         .map_err(|err| RuntimeProviderError::new(err.to_string()))?;
     Ok((provider, model, provider_kind.to_string()))

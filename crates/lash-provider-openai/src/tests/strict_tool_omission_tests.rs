@@ -208,13 +208,21 @@ async fn core(
         .await
         .expect("Restate server double");
     let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("gpt-5.4")
-                .context_window_tokens(16_000)
-                .build()
-                .expect("valid model spec"),
-        )
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gpt-5.4",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gpt-5.4")
+                            .context_window_tokens(16_000)
+                            .build()
+                            .expect("valid model spec"),
+                        provider,
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("gpt-5.4")
         .tools(Arc::new(StaticToolProvider::new(
             vec![tool_definition()],
             OmissionProbe { seen },
@@ -624,9 +632,11 @@ fn effect_request_spec(request: &LlmRequest) -> LlmRequestSpec {
         messages: request.messages.clone(),
         tools: Arc::clone(&request.tools),
         tool_choice: request.tool_choice.clone(),
+        attachment_acceptance: Arc::clone(&request.attachment_acceptance),
         model_variant: request.model_variant.clone(),
         model_capability: request.model_capability.clone(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: request.generation.clone(),
         scope: request.scope.clone(),
         output_spec: request.output_spec.clone(),
@@ -677,7 +687,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
             "strict-tool-call",
         ),
         RuntimeEffectCommand::LlmCall {
-            provider_id: "test".to_string(),
+            model_key: lash_core::ModelKey::new("strict-tool-model"),
             request: Box::new(effect_request_spec(&request)),
         },
     );

@@ -553,16 +553,21 @@ async fn summarize_compaction_prefix(
     directive.starts_user_segment = true;
     rendered.messages.push(directive);
 
+    let model = snapshot.policy.model.as_ref().ok_or_else(|| {
+        ContextError::Session("compaction needs the session's model, and it selects none".into())
+    })?;
     let request = lash_core::LlmRequest {
         instructions: system_prompt,
-        model: snapshot.policy.model.id.clone(),
+        model: model.model.wire_model().to_string(),
         messages: rendered.messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
-        model_variant: snapshot.policy.model.variant.clone(),
-        model_capability: snapshot.policy.model.capability.clone(),
+        attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),
+        model_variant: model.reasoning.clone(),
+        model_capability: model.metadata().capability.clone(),
         extra_body: Default::default(),
+        request_defaults: model.metadata().request_defaults,
         generation: snapshot.policy.generation.clone(),
         scope: lash_core::LlmRequestScope::new(
             session_id.clone(),

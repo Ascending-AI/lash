@@ -49,7 +49,6 @@ fn reasoning_capability() -> ModelCapability {
     ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -71,9 +70,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: crate::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -471,11 +472,8 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
         .build_request_body(&req, true)
         .unwrap();
     assert_eq!(hidden["reasoning"], json!({ "effort": "medium" }));
+    req.request_defaults.expose_thinking = true;
     let exposed = CodexProvider::new("access", "refresh", 0)
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
         .build_request_body(&req, true)
         .unwrap();
     assert_eq!(exposed["reasoning"]["summary"], "auto");
@@ -483,16 +481,11 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 
 #[test]
 fn codex_request_refuses_an_output_token_cap_from_either_source() {
-    let provider = CodexProvider::new("access", "refresh", 0).with_options(ProviderOptions {
-        max_output_tokens: Some(9_999),
-        ..ProviderOptions::default()
-    });
-    provider
-        .build_request_body(
-            &request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            false,
-        )
-        .expect_err("a provider cap is refused on Codex");
+    let mut defaulted = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    defaulted.request_defaults.max_output_tokens = Some(9_999);
+    CodexProvider::new("access", "refresh", 0)
+        .build_request_body(&defaulted, false)
+        .expect_err("a recorded model cap is refused on Codex");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.generation.output_token_cap = NonZeroUsize::new(2_048);
     let error = CodexProvider::new("access", "refresh", 0)

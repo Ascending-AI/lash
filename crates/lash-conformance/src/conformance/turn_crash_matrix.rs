@@ -944,11 +944,13 @@ fn nominal_recovery_timings() -> crate::LeaseTimings {
 )]
 fn runtime_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
-        provider_id: "turn-crash-script".to_string(),
-        model: crate::ModelSpec::builder("turn-crash-model")
-            .context_window_tokens(16_000)
-            .build()
-            .expect("valid conformance model"),
+        model: Some(crate::testing::test_model_config(
+            "turn-crash-model",
+            crate::ModelMetadata::builder("turn-crash-model")
+                .context_window_tokens(16_000)
+                .build()
+                .expect("valid test model"),
+        )),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
@@ -1137,8 +1139,8 @@ async fn try_build_runtime_over_host_with_delivery_failure(
         .with_lease_timings(lease_timings);
     let mut trace_tool = tools.trace_tool;
     trace_tool.control = control.clone();
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(provider_handle(control)));
+    host.providers.models =
+        crate::testing::models_serving(&runtime_policy(), provider_handle(control));
     let mut plugin_factories = crate::testing::test_standard_protocol_factories();
     plugin_factories.push(Arc::new(StaticPluginFactory::new(
         "turn_crash_trace_tool",

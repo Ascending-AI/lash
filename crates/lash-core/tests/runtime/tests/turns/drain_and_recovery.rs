@@ -155,9 +155,8 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
     );
-    config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(transport.clone().into_handle()),
-    );
+    config.providers.models =
+        lash_core::testing::standard_test_models(transport.clone().into_handle());
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -557,7 +556,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
         .await
         .expect("close the child turn's handler");
     assert_eq!(handle.session_id, "child");
-    assert_eq!(handle.policy.model.id, "mock-model");
+    assert_eq!(handle.policy.wire_model(), Some("mock-model"));
     assert_eq!(assembled.state.session_id, "child");
 }
 
@@ -803,7 +802,6 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
     let capability = lash_core::ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash_core::ReasoningCapability {
             efforts: ["low", "medium", "high", "max"]
@@ -817,21 +815,28 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
         sampling: lash_core::SamplingCapability::Configurable,
         reasoning_retention: Default::default(),
     };
-    let model = lash_core::ModelSpec::builder("mock-model")
-        .variant(lash_core::ReasoningSelection::Effort("max".to_string()))
+    let model = lash_core::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_providers(&mut runtime, [provider.clone()]);
+    serve_runtime_models(
+        &mut runtime,
+        [(
+            lash_core::ModelKey::new("served-model"),
+            lash_core::RegisteredModel::new(model, provider.clone()),
+        )],
+    );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: provider.kind().to_string(),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelKey::new("served-model"),
         })
-        .then(lash_core::plugin::config::core::SetModel { model }),
+        .then(lash_core::plugin::config::core::SetReasoning {
+            reasoning: lash_core::ReasoningSelection::Effort("max".to_string()),
+        }),
     )
     .await;
 
@@ -887,7 +892,6 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
     let capability = lash_core::ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash_core::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -901,23 +905,32 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         sampling: lash_core::SamplingCapability::Configurable,
         reasoning_retention: Default::default(),
     };
-    let model = lash_core::ModelSpec::builder("mock-model")
-        .variant(lash_core::ReasoningSelection::Effort("turbo".to_string()))
+    let model = lash_core::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_providers(&mut runtime, [provider.clone()]);
-    crate::runtime_support::configure_storeless(
+    serve_runtime_models(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: provider.kind().to_string(),
-        })
-        .then(lash_core::plugin::config::core::SetModel { model }),
-    )
-    .await;
+        [(
+            lash_core::ModelKey::new("served-model"),
+            lash_core::RegisteredModel::new(model.clone(), provider.clone()),
+        )],
+    );
+    // A config command judges a reasoning against the model it records, so
+    // this session records the unsupported effort the way creation records
+    // a spec's: unjudged, leaving the turn driver's check as the gate.
+    runtime.edit_resident_state_for_test(|state| {
+        state.policy.model = Some(
+            lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                lash_core::ModelKey::new("served-model"),
+                model,
+            ))
+            .with_reasoning(lash_core::ReasoningSelection::Effort("turbo".to_string())),
+        );
+    });
 
     let handler = open_turn(&double, sid("root"), tid("unsupported-effort-turn")).await;
     let turn = runtime
@@ -958,21 +971,18 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
 
-    let captured: Arc<Mutex<Vec<lash_core::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    type Captured = (lash_core::GenerationOptions, Option<u64>);
+    let captured: Arc<Mutex<Vec<Captured>>> = Arc::new(Mutex::new(Vec::new()));
     let captured_for_provider = Arc::clone(&captured);
     let provider = TestProvider::builder()
         .kind("generation-capture")
-        // A provider-level output cap is provider configuration, not request
-        // intent: it must not appear on the request the turn driver builds.
-        // The adapter layers it under the request in `resolve_generation_policy`.
-        .options(lash_core::facade_support::ProviderOptions {
-            max_output_tokens: Some(1_024),
-            ..Default::default()
-        })
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                captured.lock_recover().push(req.generation.clone());
+                captured.lock_recover().push((
+                    req.generation.clone(),
+                    req.request_defaults.max_output_tokens,
+                ));
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
@@ -986,11 +996,29 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_providers(&mut runtime, [provider.clone()]);
+    serve_runtime_models(
+        &mut runtime,
+        [(
+            lash_core::ModelKey::new("served-model"),
+            // A recorded model's output-cap default is model configuration,
+            // not request intent: it rides the request's defaults, never its
+            // generation options, and the adapter layers it under them in
+            // `resolve_generation_policy`.
+            lash_core::RegisteredModel::new(
+                lash_core::testing::test_model_metadata("mock-model").with_request_defaults(
+                    lash_core::provider::ModelRequestDefaults {
+                        max_output_tokens: Some(1_024),
+                        ..Default::default()
+                    },
+                ),
+                provider.clone(),
+            ),
+        )],
+    );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: provider.kind().to_string(),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelKey::new("served-model"),
         }),
     )
     .await;
@@ -1038,11 +1066,12 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
     assert_eq!(seen.len(), 2, "each turn issues one provider call");
     assert_eq!(
         seen[0],
-        lash_core::GenerationOptions::default(),
-        "a session that requested nothing must not have provider config echoed back as request intent"
+        (lash_core::GenerationOptions::default(), Some(1_024)),
+        "a session that requested nothing must not have its model's defaults echoed back as request intent"
     );
     assert_eq!(
-        seen[1], requested,
+        seen[1],
+        (requested.clone(), Some(1_024)),
         "the session's generation options must reach the provider request verbatim"
     );
     assert_eq!(
@@ -1085,11 +1114,20 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_providers(&mut runtime, [provider.clone()]);
+    serve_runtime_models(
+        &mut runtime,
+        [(
+            lash_core::ModelKey::new("served-model"),
+            lash_core::RegisteredModel::new(
+                lash_core::testing::test_model_metadata("mock-model"),
+                provider.clone(),
+            ),
+        )],
+    );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: provider.kind().to_string(),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelKey::new("served-model"),
         })
         .then(lash_core::plugin::config::core::SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(
@@ -1182,18 +1220,24 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_providers(&mut runtime, [provider.clone()]);
+    serve_runtime_models(
+        &mut runtime,
+        [(
+            lash_core::ModelKey::new("served-model"),
+            lash_core::RegisteredModel::new(
+                lash_core::ModelMetadata::builder("small-output-model")
+                    .context_window_tokens(200_000)
+                    .output_token_capacity(2_048)
+                    .build()
+                    .expect("valid test model"),
+                provider.clone(),
+            ),
+        )],
+    );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: provider.kind().to_string(),
-        })
-        .then(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelSpec::builder("small-output-model")
-                .context_window_tokens(200_000)
-                .output_token_capacity(2_048)
-                .build()
-                .expect("valid test model"),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+            model: lash_core::ModelKey::new("served-model"),
         })
         .then(lash_core::plugin::config::core::SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(

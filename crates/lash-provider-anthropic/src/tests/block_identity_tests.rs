@@ -5,7 +5,7 @@ use lash_core::llm::types::{
     LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole, LlmStreamEvent, LlmToolChoice,
     LlmToolSpec,
 };
-use lash_core::provider::{Provider, ProviderOptions};
+use lash_core::provider::Provider;
 use lash_core::sync::MutexExt;
 use std::sync::Arc;
 
@@ -36,9 +36,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: crate::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -82,12 +84,9 @@ fn capture() -> (Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>, LlmEventSender) {
 async fn hidden_thinking_stream_emits_no_reasoning_events() {
     let (events, sender) = capture();
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
+    req.request_defaults.expose_thinking = false;
     req.stream_events = Some(sender);
     let mut provider = AnthropicProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: false,
-            ..ProviderOptions::default()
-        })
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
 
     provider
@@ -122,12 +121,9 @@ async fn hidden_thinking_stream_emits_no_reasoning_events() {
 async fn unsigned_thinking_part_carries_content_block_item_id() {
     let (events, sender) = capture();
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
+    req.request_defaults.expose_thinking = true;
     req.stream_events = Some(sender);
     let mut provider = AnthropicProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
 
     let response = provider
@@ -172,15 +168,12 @@ async fn streamed_reasoning_parts_are_stamped_at_the_anthropic_boundary() {
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.expose_thinking = true;
     req.stream_events = Some(LlmEventSender::new(move |event| {
         event_sink.lock_recover().push(event);
     }));
-    let mut provider = AnthropicProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
-        .with_transport(Arc::new(StaticSseTransport(body)));
+    let mut provider =
+        AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
     let expected_route = provider.route_identity("claude-sonnet-4-6");
 
     let response = provider

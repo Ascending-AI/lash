@@ -184,7 +184,7 @@ impl LashRuntime {
         next.authority.root_snapshot = None;
         let base = crate::store::persisted_session_config_from_state(&next);
         let registry = self.config_registry()?;
-        let resolution = registry.resolve(&base, &record, &self.core_route_validator());
+        let resolution = registry.resolve(&base, &record, self.host.core.providers.models.as_ref());
         let outcome = publish_config_resolution(&resolution, &mut next);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next);
@@ -195,16 +195,6 @@ impl LashRuntime {
                 })?;
         }
         Ok(outcome)
-    }
-
-    /// The core owner's candidate check: a candidate that changes the route
-    /// is refused when no provider of this host serves it (D3 §3.3).
-    fn core_route_validator(
-        &self,
-    ) -> impl Fn(&crate::CoreConfig, &crate::CoreConfig) -> Result<(), crate::ConfigRefusal> + '_
-    {
-        let resolver = Arc::clone(&self.host.core.providers.provider_resolver);
-        move |base, candidate| core_route_check(resolver.as_ref(), base, candidate)
     }
 
     /// Apply the config transaction the command run `completion` names,
@@ -325,7 +315,7 @@ impl LashRuntime {
             base: crate::store::persisted_session_config_from_state(&base_state),
             transaction: transaction.clone(),
             mismatch: mismatch.clone(),
-            resolver: Arc::clone(&self.host.core.providers.provider_resolver),
+            models: Arc::clone(&self.host.core.providers.models),
         };
         controller
             .execute_effect(
@@ -382,35 +372,6 @@ fn publish_config_resolution(
     outcome
 }
 
-/// The core owner's route check: a candidate that changes the provider or
-/// the model must name a route `resolver` serves.
-fn core_route_check(
-    resolver: &dyn crate::provider::RuntimeProviderResolver,
-    base: &crate::CoreConfig,
-    candidate: &crate::CoreConfig,
-) -> Result<(), crate::ConfigRefusal> {
-    if base.provider_id == candidate.provider_id && base.model == candidate.model {
-        return Ok(());
-    }
-    let Err(code) =
-        super::drive::validate_route(resolver, &candidate.provider_id, &candidate.model)
-    else {
-        return Ok(());
-    };
-    let refusal = crate::CoreConfigRefusal::UnservableRoute {
-        code,
-        provider_id: candidate.provider_id.clone(),
-        model: candidate.model.id.clone(),
-    };
-    Err(crate::ConfigRefusal {
-        index: None,
-        owner: crate::CORE_CONFIG_OWNER.to_string(),
-        command: None,
-        message: refusal.to_string(),
-        refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
-    })
-}
-
 /// The first execution of one `ResolveConfigTransaction` step: it resolves
 /// the transaction over the base config captured at the boundary and
 /// records the result. None of it enters the envelope, which names only the
@@ -422,7 +383,8 @@ struct ResolveConfigTransactionRunner {
     /// The owner whose installed reducer is not the one the transaction was
     /// admitted under, when one is not.
     mismatch: Option<crate::ConfigImplementationMismatch>,
-    resolver: Arc<dyn crate::provider::RuntimeProviderResolver>,
+    /// The host's models a model command mints its key's binding through.
+    models: Arc<dyn crate::RuntimeModels>,
 }
 
 #[async_trait::async_trait]
@@ -464,14 +426,9 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
             )
             .retryable_uncommitted_derivation());
         }
-        let resolver = Arc::clone(&self.resolver);
-        let resolution = self.registry.resolve(
-            &self.base,
-            &self.transaction,
-            &move |base: &crate::CoreConfig, candidate: &crate::CoreConfig| {
-                core_route_check(resolver.as_ref(), base, candidate)
-            },
-        );
+        let resolution = self
+            .registry
+            .resolve(&self.base, &self.transaction, self.models.as_ref());
         Ok(crate::RuntimeEffectOutcome::ResolveConfigTransaction {
             resolution: Box::new(resolution),
         })

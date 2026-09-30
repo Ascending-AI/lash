@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::routing::get;
 use lash::{
-    provider::{ProviderHandle, ProviderOptions},
+    provider::ProviderHandle,
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
@@ -37,7 +37,6 @@ fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: service_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -54,8 +53,62 @@ fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
     }
 }
 
-fn default_openrouter_model_capability_for(model: lash::ModelSpec) -> lash::ModelSpec {
-    model.with_capability(default_openrouter_model_capability())
+/// The context window every OpenRouter model id runs with in this service.
+const OPENROUTER_CONTEXT_WINDOW_TOKENS: usize = 200_000;
+
+/// OpenRouter's catalog is open: a chat may name any model id, and every id
+/// runs through the same OpenRouter transport with the same metadata. The
+/// service keys each model by its OpenRouter id, so a chat's recorded key is
+/// the id it asked for, and a recorded model always binds back to the one
+/// transport.
+struct OpenRouterModels {
+    provider: lash::provider::ProviderHandle,
+}
+
+impl OpenRouterModels {
+    fn metadata(key: &lash::ModelKey) -> Result<lash::ModelMetadata, lash::ModelUnavailable> {
+        lash::ModelMetadata::builder(key.as_str())
+            .context_window_tokens(OPENROUTER_CONTEXT_WINDOW_TOKENS)
+            .expose_thinking(true)
+            .capability(default_openrouter_model_capability())
+            .build()
+            .map_err(|_| {
+                lash::ModelUnavailable::new(key.clone(), lash::ModelUnavailableReason::UnknownKey)
+            })
+    }
+}
+
+impl lash::RuntimeModels for OpenRouterModels {
+    fn snapshot(
+        &self,
+        key: &lash::ModelKey,
+    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+        if key.as_str().trim().is_empty() {
+            return Err(lash::ModelUnavailable::new(
+                key.clone(),
+                lash::ModelUnavailableReason::UnknownKey,
+            ));
+        }
+        Ok(lash::RecordedModel::mint(key.clone(), Self::metadata(key)?))
+    }
+
+    fn bind(
+        &self,
+        recorded: &lash::RecordedModel,
+    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
+        // The service serves each id as its own wire model; a recording that
+        // names another wire model under the id was never this catalog's.
+        if recorded.wire_model() != recorded.key().as_str() {
+            return Err(lash::ModelUnavailable::new(
+                recorded.key().clone(),
+                lash::ModelUnavailableReason::WireModelChanged {
+                    recorded: recorded.wire_model().to_string(),
+                    served: recorded.key().to_string(),
+                },
+            ));
+        }
+        Ok(self.provider.clone())
+    }
 }
 
 use crate::chat_discard::{AgentServiceChatDiscard, AgentServiceChatDiscardImpl};
@@ -193,10 +246,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     let provider = ProviderHandle::new(
         OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
-            .with_options(ProviderOptions {
-                expose_thinking: true,
-                ..ProviderOptions::default()
-            })
             .into_components(),
     );
     // Retain a clone for the shutdown drain: the core owns the working copy, but
@@ -270,14 +319,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     );
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));
-    let model_spec = lash::ModelSpec::builder(model.clone())
-        .variant(lash::provider::ReasoningSelection::Effort(
-            model_variant.clone(),
-        ))
-        .context_window_tokens(200_000)
-        .build()
-        .map_err(|err| format!("invalid OPENROUTER_MODEL metadata: {err}"))?
-        .with_capability(default_openrouter_model_capability());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -292,8 +333,12 @@ async fn async_main() -> anyhow_like::Result<()> {
         lash::TurnBudget::Unbounded,
         factory,
     )
-    .provider(provider)
-    .model(model_spec)
+    .models(Arc::new(OpenRouterModels { provider }))
+    .model(model.as_str())
+    .reasoning(lash::provider::ReasoningSelection::Effort(
+        model_variant.clone(),
+    ))
+    .attachment_acceptance(Arc::new(service_attachment_acceptance()))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::new(TeeTraceSink::new([

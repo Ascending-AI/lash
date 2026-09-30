@@ -1386,7 +1386,7 @@ pub(super) fn apply_persisted_session_config(
     config: &crate::PersistedSessionConfig,
 ) {
     state.policy.model = config.model.clone();
-    state.policy.provider_id = config.provider_id.clone();
+    state.policy.attachment_acceptance = config.attachment_acceptance.clone();
     state.policy.turn_budget = config.turn_budget;
     state.policy.autonomous = config.autonomous;
     state.policy.no_progress_budget = config.no_progress_budget;

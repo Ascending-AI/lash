@@ -3,10 +3,7 @@ use lash_core::llm::types::LlmContentBlock;
 
 #[test]
 fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
-    let provider = CodexProvider::new("access", "refresh", 0).with_options(ProviderOptions {
-        cache_retention: CacheRetention::None,
-        ..ProviderOptions::default()
-    });
+    let provider = CodexProvider::new("access", "refresh", 0);
     let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![LlmContentBlock::Text {
@@ -15,6 +12,7 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
             cache_breakpoint: true,
         }],
     )]);
+    req.request_defaults.cache_retention = CacheRetention::None;
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "cache-shaped-input".to_string(),
         description: "Host tool with a provider-looking property".to_string(),
@@ -35,8 +33,8 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
-    let enabled = CodexProvider::new("access", "refresh", 0);
-    let built = enabled.build_request(&req, false).unwrap();
+    req.request_defaults.cache_retention = CacheRetention::Short;
+    let built = provider.build_request(&req, false).unwrap();
     assert!(built.body.get("prompt_cache_key").is_some());
     assert_eq!(
         built.receipt.cache,

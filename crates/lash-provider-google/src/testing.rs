@@ -1,7 +1,7 @@
 //! Pure request serializer used by cross-provider regression tests.
 
 use lash_core::LlmRequest;
-use lash_core::provider::{CacheRetention, ProviderOptions};
+use lash_core::provider::CacheRetention;
 use serde_json::Value;
 
 use crate::GoogleOAuthProvider;
@@ -18,12 +18,10 @@ pub fn serialize_request(
             id: "oauth-client-id".into(),
             secret: "oauth-client-secret".into(),
         },
-    )
-    .with_options(ProviderOptions {
-        cache_retention: retention,
-        ..ProviderOptions::default()
-    });
-    GoogleOAuthProvider::validate_attachments(request)?;
-    let contents = provider.build_contents_with_attachment_parts(request, &[])?;
-    GoogleOAuthProvider::build_request(&provider, request, contents, None)
+    );
+    let mut request = request.clone();
+    request.request_defaults.cache_retention = retention;
+    GoogleOAuthProvider::validate_attachments(&request)?;
+    let contents = provider.build_contents_with_attachment_parts(&request, &[])?;
+    GoogleOAuthProvider::build_request(&provider, &request, contents, None)
 }

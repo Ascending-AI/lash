@@ -4,8 +4,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(retrying_visible_stream_provider())
-    .model(mock_model_spec())
+    .serve_test_model(retrying_visible_stream_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("retry-visible-observation")
         .create(crate::SessionCreation {

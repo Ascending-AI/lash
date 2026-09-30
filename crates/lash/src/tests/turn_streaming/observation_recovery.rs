@@ -23,8 +23,7 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay.clone())
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("invalidated-live-observation");

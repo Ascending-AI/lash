@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::{
-    CausalRef, ModelSpec, PluginOptions, SessionCreateRequest, SessionPluginSource, SessionPolicy,
+    CausalRef, ModelKey, PluginOptions, SessionCreateRequest, SessionPluginSource, SessionPolicy,
     SessionSnapshot, SessionStartPoint, SessionToolAccess, SubagentSessionContext,
     facade_support::SessionSpec,
 };
@@ -68,9 +68,12 @@ pub struct SubagentSpawnContext<'a> {
 }
 
 impl SubagentSpawnContext<'_> {
-    pub fn base_policy(&self) -> SessionPolicy {
-        self.session_spec
-            .resolve_against(&self.parent_snapshot.policy)
+    /// The factory's spec over the parent's recorded policy. The child copies
+    /// the parent's recorded model; a model key the spec names is not minted
+    /// here but carried by the request ([`Self::rlm_request`]) and minted when
+    /// the child is created.
+    pub fn base_policy(&self) -> Result<SessionPolicy, String> {
+        resolve_recorded(self.session_spec, &self.parent_snapshot.policy)
     }
 
     /// Policy is resolved against the parent snapshot, while tool access is
@@ -87,8 +90,11 @@ impl SubagentSpawnContext<'_> {
         spec: &SessionSpec,
         plugin_source: SessionPluginSource,
     ) -> Result<SessionCreateRequest, String> {
-        let mut policy = self.base_policy();
-        policy = spec.resolve_against(&policy);
+        let policy = resolve_recorded(spec, &self.base_policy()?)?;
+        let model = spec
+            .model
+            .clone()
+            .or_else(|| self.session_spec.model.clone());
         let termination = match self.output_schema.clone() {
             Some(schema) => RlmTermination::FinishRequired {
                 schema: Some(schema),
@@ -121,6 +127,10 @@ impl SubagentSpawnContext<'_> {
         .with_plugin_source(plugin_source)
         .with_tool_access(self.base_tool_access.clone())
         .with_initial_nodes(initial_nodes);
+        let request = match model {
+            Some(key) => request.with_model(key),
+            None => request,
+        };
         self.finalize_request(request, capability_name)
     }
 
@@ -202,19 +212,19 @@ pub enum TierPluginSource {
 }
 
 /// Built-in capability that maps a tier name to: an optional explicit
-/// model, plugin-source policy, and the conventional `explore` / `peer`
+/// model key, plugin-source policy, and the conventional `explore` / `peer`
 /// authority split. Reproduces the historic tiered model behaviour when
 /// registered through [`default_registry`].
 pub struct TierCapability {
     name: String,
-    model: Option<ModelSpec>,
+    model: Option<ModelKey>,
     plugin_source: TierPluginSource,
 }
 
 impl TierCapability {
     pub fn new(
         name: impl Into<String>,
-        model: Option<ModelSpec>,
+        model: Option<ModelKey>,
         plugin_source: TierPluginSource,
     ) -> Self {
         Self {
@@ -234,9 +244,12 @@ impl Capability for TierCapability {
         &self,
         ctx: SubagentSpawnContext<'_>,
     ) -> Result<SessionCreateRequest, String> {
-        let policy = ctx.base_policy();
-        let model = pick_tier_model(self, &policy);
-        let spec = SessionSpec::inherit().model(model);
+        // A tier without a key of its own inherits the parent's recorded
+        // model; one with a key has it minted when the child is created.
+        let spec = match &self.model {
+            Some(key) => SessionSpec::inherit().model(key.clone()),
+            None => SessionSpec::inherit(),
+        };
         ctx.rlm_request(&self.name, &spec, self.plugin_source.into())
     }
 }
@@ -250,11 +263,13 @@ impl From<TierPluginSource> for SessionPluginSource {
     }
 }
 
-fn pick_tier_model(tier: &TierCapability, policy: &SessionPolicy) -> ModelSpec {
-    if let Some(model) = &tier.model {
-        return model.clone();
-    }
-    policy.model.clone()
+/// `spec` over `base` with its model key left out: the key is minted when
+/// the child is created, so nothing here consults a catalog.
+fn resolve_recorded(spec: &SessionSpec, base: &SessionPolicy) -> Result<SessionPolicy, String> {
+    let mut spec = spec.clone();
+    spec.model = None;
+    spec.resolve_against(base, &lash_core::EmptyModels)
+        .map_err(|error| format!("subagent session spec does not resolve: {error}"))
 }
 
 /// Registry of named capabilities. Order is preserved so that the JSON
@@ -307,8 +322,8 @@ impl CapabilityRegistry {
     }
 }
 
-/// `tier_models` supplies optional explicit model overrides keyed by tier name; absent tiers
-/// fall back to the provider's default agent model and then to the parent session's model.
+/// `tier_models` supplies optional explicit model keys by tier name; an absent tier runs the
+/// parent session's recorded model.
 /// The built-in `explore` tier uses [`default_explore_plugin_source`] while `peer` forks the
 /// current session's plugin instances.
 ///
@@ -316,7 +331,7 @@ impl CapabilityRegistry {
 /// subagents that scan, summarise, or verify without mutating state. The
 /// `peer` tier is a parallel-self with the parent's full affordances:
 /// edits, recursion, anything the parent can do, in a fresh window.
-pub fn default_registry(tier_models: &BTreeMap<String, ModelSpec>) -> CapabilityRegistry {
+pub fn default_registry(tier_models: &BTreeMap<String, ModelKey>) -> CapabilityRegistry {
     let model_for = |name: &str| tier_models.get(name).cloned();
     let mut registry = CapabilityRegistry::new();
     registry.add(Arc::new(TierCapability::new(

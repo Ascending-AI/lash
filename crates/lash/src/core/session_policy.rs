@@ -10,8 +10,29 @@ use super::*;
 /// (FIG-4376): state them per session in its creation spec. The core's
 /// default turn budget is the one [`LashCore::builder`] takes.
 impl LashCoreBuilder {
-    pub fn model(mut self, model: lash_core::ModelSpec) -> Self {
-        self.session_spec = self.session_spec.model(model);
+    /// The model a session is created with when its creation names none, by
+    /// the host's key. Required: [`build`](Self::build) refuses a core with
+    /// no default key, and one its [`models`](Self::models) do not register.
+    pub fn model(mut self, key: impl Into<lash_core::ModelKey>) -> Self {
+        self.session_spec = self.session_spec.model(key);
+        self
+    }
+
+    /// The reasoning a session runs its model with when its creation names
+    /// none.
+    pub fn reasoning(mut self, reasoning: lash_core::ReasoningSelection) -> Self {
+        self.session_spec = self.session_spec.reasoning(reasoning);
+        self
+    }
+
+    /// The attachment-acceptance rules a session renders attachments against
+    /// when its creation names none (ADR 0026). They are recorded apart from
+    /// the model, so a model change keeps them.
+    pub fn attachment_acceptance(
+        mut self,
+        acceptance: Arc<lash_core::AttachmentCapabilitySnapshot>,
+    ) -> Self {
+        self.session_spec = self.session_spec.attachment_acceptance(acceptance);
         self
     }
 

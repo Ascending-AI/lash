@@ -52,8 +52,7 @@ fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
             double.lash_backend(),
             crate::TurnBudget::Unbounded,
         ))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
         .build(crate::testing::runtime_lease_owner())?;
         let session = core
@@ -123,8 +122,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             backend,
             crate::TurnBudget::Unbounded,
         ))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("plugin-accept").created().await.open().await?;

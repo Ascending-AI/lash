@@ -1358,10 +1358,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     let pinned = factory.pin(&root_node_id).await.expect("pin fork root");
     assert_eq!(pinned.node_id, root_node_id);
     assert_eq!(pinned.source_session_id, source_request.session_id);
-    assert_eq!(
-        pinned.config.provider_id,
-        state.policy.recorded_provider_id()
-    );
     assert_eq!(pinned.config.model, state.policy.model);
     assert!(pinned.pinned);
 
@@ -1563,10 +1559,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .into_iter()
         .find(|point| point.node_id == root_node_id)
         .expect("pin must outlive its deleted source session");
-    assert_eq!(
-        orphaned_source_point.config.provider_id,
-        state.policy.recorded_provider_id()
-    );
     assert_eq!(orphaned_source_point.config.model, state.policy.model);
     assert!(
         crate::conformance::helpers::node_readable(&branch, &root_node_id)

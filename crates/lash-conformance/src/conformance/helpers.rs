@@ -16,6 +16,14 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
 /// directly, so this stands in for the admission authority's answer — a
 /// process scope pins the fabricated first-registration incarnation the
 /// fixture fabricates for it.
+/// The key of a recorded model selection, or `"<no model>"` when the
+/// session records none; laws compare it against the key they selected.
+pub(crate) fn recorded_model_key(model: &Option<crate::ModelConfig>) -> &str {
+    model
+        .as_ref()
+        .map_or("<no model>", |model| model.key().as_str())
+}
+
 pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
     match &scope {
         crate::ExecutionScope::Process { process_id } => {

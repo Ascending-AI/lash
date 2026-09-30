@@ -34,9 +34,11 @@ mod tests {
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
+            attachment_acceptance: Default::default(),
             model_variant: crate::ReasoningSelection::Effort("fast".to_string()),
             model_capability: crate::ModelCapability::default(),
             extra_body: Default::default(),
+            request_defaults: Default::default(),
             scope: crate::LlmRequestScope::new(
                 "session",
                 "session:frame:test",

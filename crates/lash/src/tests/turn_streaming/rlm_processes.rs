@@ -10,8 +10,10 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
             "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
         );
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .provider(queued_text_provider(vec![typescript_block(&source)]))
-            .model(mock_model_spec())
+            .serve_test_model(
+                queued_text_provider(vec![typescript_block(&source)]),
+                mock_model_spec(),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
@@ -213,8 +215,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         crate::TurnBudget::Unbounded,
         first_factory,
     ))
-    .provider(first_provider)
-    .model(mock_model_spec())
+    .serve_test_model(first_provider, mock_model_spec())
     .tools(Arc::new(FrameStateDeferredTools))
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core
@@ -305,8 +306,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(first_core);
 
     let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core
         .session(session_id)
@@ -428,12 +428,14 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
     let append_count = Arc::new(AtomicUsize::new(0));
     let double = restate_double(0x0036_68c3).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .provider(queued_text_provider(vec![
-            typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
-            typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
-            typescript_block(r#"finish("done after chained handoffs");"#),
-        ]))
-        .model(mock_model_spec())
+        .serve_test_model(
+            queued_text_provider(vec![
+                typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
+                typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
+                typescript_block(r#"finish("done after chained handoffs");"#),
+            ]),
+            mock_model_spec(),
+        )
         .plugin(Arc::new(TurnPersistedGraphAppendFactory {
             append_count: Arc::clone(&append_count),
             max_appends: 2,
@@ -470,8 +472,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let root_turn_id = "agent-frame-root-turn";
     let double = restate_double(0x0a9e_f5a1).await;
     let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
-        .provider(agent_frame_switch_provider())
-        .model(mock_model_spec())
+        .serve_test_model(agent_frame_switch_provider(), mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
@@ -570,7 +571,7 @@ pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-    .provider(queued_text_provider(vec![typescript_block(
+    .serve_test_model(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
     const value = await tools.app_lookup({});
@@ -579,8 +580,7 @@ const lookup = async () => {
 const h = await processes.start({ definition: lookup });
 const value = await h;
 finish(value);"#,
-    )]))
-    .model(mock_model_spec())
+    )]), mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
     // A started (`start lookup(...)`) process runs in the lease-protected
     // worker's rebuilt runtime, which needs a session store factory; the
@@ -659,7 +659,7 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
     ))
-    .provider(queued_text_provider(vec![typescript_block(
+    .serve_test_model(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
     const value = await tools.app_lookup({});
@@ -668,8 +668,7 @@ const lookup = async () => {
 const h = await processes.start({ definition: lookup });
 const value = await h;
 finish(value);"#,
-    )]))
-    .model(mock_model_spec())
+    )]), mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
@@ -777,8 +776,10 @@ finish(value);"#,
 #[tokio::test]
 pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .provider(queued_text_provider(vec!["done in prose"]))
-        .model(mock_model_spec())
+        .serve_test_model(
+            queued_text_provider(vec!["done in prose"]),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
@@ -820,10 +821,10 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
 #[tokio::test]
 pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .provider(queued_text_provider(vec![typescript_block(
-            r#"finish("done via finish");"#,
-        )]))
-        .model(mock_model_spec())
+        .serve_test_model(
+            queued_text_provider(vec![typescript_block(r#"finish("done via finish");"#)]),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
@@ -865,11 +866,13 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
 pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()>
 {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .provider(queued_text_provider(vec![
-            typescript_block("this is not valid typescript"),
-            typescript_block(r#"finish("recovered");"#),
-        ]))
-        .model(mock_model_spec())
+        .serve_test_model(
+            queued_text_provider(vec![
+                typescript_block("this is not valid typescript"),
+                typescript_block(r#"finish("recovered");"#),
+            ]),
+            mock_model_spec(),
+        )
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -966,13 +969,15 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(gated_app_lookup_provider(
-        Arc::clone(&started),
-        Arc::clone(&release),
-        Arc::clone(&released),
-        Arc::clone(&provider_calls),
-    ))
-    .model(mock_model_spec())
+    .serve_test_model(
+        gated_app_lookup_provider(
+            Arc::clone(&started),
+            Arc::clone(&release),
+            Arc::clone(&released),
+            Arc::clone(&provider_calls),
+        ),
+        mock_model_spec(),
+    )
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1037,13 +1042,15 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(gated_app_lookup_provider(
-        Arc::clone(&started),
-        Arc::new(tokio::sync::Notify::new()),
-        Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        Arc::clone(&provider_calls),
-    ))
-    .model(mock_model_spec())
+    .serve_test_model(
+        gated_app_lookup_provider(
+            Arc::clone(&started),
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::clone(&provider_calls),
+        ),
+        mock_model_spec(),
+    )
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1115,11 +1122,13 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .provider(queued_text_provider(vec![format!(
-            "<typescript>\n{}\n</typescript>",
-            cell.trim()
-        )]))
-        .model(mock_model_spec())
+        .serve_test_model(
+            queued_text_provider(vec![format!(
+                "<typescript>\n{}\n</typescript>",
+                cell.trim()
+            )]),
+            mock_model_spec(),
+        )
         .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(

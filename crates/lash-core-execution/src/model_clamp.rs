@@ -1,6 +1,6 @@
-use crate::{GenerationOptions, ModelSpec};
+use crate::{GenerationOptions, ModelMetadata};
 
-/// `ModelSpec` lives in `lash-core-llm`; these two methods stay here because
+/// `ModelMetadata` lives in `lash-core-llm`; these two methods stay here because
 /// every caller is in `lash-core` and neither belongs on the type's public
 /// surface. The trait is crate-internal, so the published API is unchanged.
 pub trait ModelGenerationClamp {
@@ -8,7 +8,7 @@ pub trait ModelGenerationClamp {
     fn clamped_generation(&self, generation: &GenerationOptions) -> GenerationOptions;
 }
 
-impl ModelGenerationClamp for ModelSpec {
+impl ModelGenerationClamp for ModelMetadata {
     /// Reduce a requested output-token cap to what this model can produce, and
     /// report whether it had to.
     ///
@@ -32,7 +32,7 @@ impl ModelGenerationClamp for ModelSpec {
             return false;
         }
         tracing::debug!(
-            model = %self.id,
+            model = %self.wire_model,
             requested = requested.get(),
             capacity = capacity.get(),
             "clamping requested output_token_cap to the model's output_token_capacity"
@@ -68,7 +68,7 @@ mod tests {
             projection_provenance: Default::default(),
         };
 
-        let bounded = ModelSpec::builder("small")
+        let bounded = ModelMetadata::builder("small")
             .context_window_tokens(200_000)
             .output_token_capacity(2_048)
             .build()
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(clamped.temperature, requested.temperature);
         assert_eq!(clamped.seed, requested.seed);
 
-        let roomy = ModelSpec::builder("roomy")
+        let roomy = ModelMetadata::builder("roomy")
             .context_window_tokens(200_000)
             .output_token_capacity(64_000)
             .build()
@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(roomy.clamped_generation(&requested), requested);
 
         // An unknown ceiling is not a ceiling of zero.
-        let unbounded = ModelSpec::builder("unknown")
+        let unbounded = ModelMetadata::builder("unknown")
             .context_window_tokens(200_000)
             .build()
             .expect("valid model");

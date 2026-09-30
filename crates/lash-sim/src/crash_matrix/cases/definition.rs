@@ -134,7 +134,7 @@ async fn start_request(
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: super::process::model_spec()?,
+                    model: Some(super::process::recorded_model()?),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
             )),

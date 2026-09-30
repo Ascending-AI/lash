@@ -178,7 +178,7 @@ pub struct LoadWorker {
     load: LoadContext,
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
-    model: lash::ModelSpec,
+    model: lash::ModelConfig,
     active: ActiveOperations,
     administration: Arc<tokio::sync::OnceCell<lash_restate::RestateSessionAdministration>>,
 }
@@ -190,7 +190,7 @@ pub struct LoadWorkerConfig {
     pub load: LoadContext,
     pub restate_ingress_url: String,
     pub restate_authority_id: lash_restate::RestateAuthorityId,
-    pub model: lash::ModelSpec,
+    pub model: lash::ModelConfig,
     /// Where each handler counts itself while it runs.
     pub active: ActiveOperations,
 }
@@ -494,7 +494,7 @@ impl LoadWorker {
         let environment = lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy {
-                model: self.model.clone(),
+                model: Some(self.model.clone()),
                 ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
             },
         );

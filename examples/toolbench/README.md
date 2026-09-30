@@ -21,8 +21,10 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
   interleaved, so cohorts run concurrently.
 - `--reasoning-effort none|low|medium|high` applies to every model/cohort.
   `none` preserves provider-default behavior (it does not disable reasoning).
-  Other values use the facade's `ModelSpec` variant/capability and the
-  OpenAI-compatible provider's OpenRouter reasoning-effort encoding.
+  Other values record that effort as the session's reasoning selection
+  (`SessionSpec::model(key).reasoning(effort)`), validated against the
+  registered `ModelMetadata` capability, and use the OpenAI-compatible
+  provider's OpenRouter reasoning-effort encoding.
 - `--repetitions N` and `--runs N` are aliases in both paired and single modes.
 - `--concurrency N` bounds active tasks and preflight probes (default: 1).
   Every run starts a private local `restate-server` as its engine (ADR 0104)

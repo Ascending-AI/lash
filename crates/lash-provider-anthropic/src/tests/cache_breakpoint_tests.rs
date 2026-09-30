@@ -4,10 +4,7 @@ use crate::request::BreakpointAddress;
 
 #[test]
 fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
-    let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-        cache_retention: CacheRetention::None,
-        ..ProviderOptions::default()
-    });
+    let provider = AnthropicProvider::new("key");
     let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![LlmContentBlock::Text {
@@ -16,6 +13,7 @@ fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
             cache_breakpoint: true,
         }],
     )]);
+    req.request_defaults.cache_retention = CacheRetention::None;
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "cache-shaped-input".to_string(),
         description: "Host tool with a provider-looking property".to_string(),
@@ -157,11 +155,8 @@ fn marked_leading_feedback_keeps_its_wire_block_address() {
 
 #[test]
 fn no_retention_omits_cache_control_and_wire_marker_for_marked_block() {
-    let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
-        cache_retention: CacheRetention::None,
-        ..ProviderOptions::default()
-    });
-    let req = request(vec![LlmMessage::new(
+    let provider = AnthropicProvider::new("key");
+    let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![LlmContentBlock::Text {
             text: "stable history".into(),
@@ -169,6 +164,7 @@ fn no_retention_omits_cache_control_and_wire_marker_for_marked_block() {
             cache_breakpoint: true,
         }],
     )]);
+    req.request_defaults.cache_retention = CacheRetention::None;
 
     let body = provider.build_request_body(&req).expect("body");
 

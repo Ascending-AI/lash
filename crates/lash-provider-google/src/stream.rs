@@ -407,7 +407,7 @@ pub(crate) struct GoogleStreamState {
     /// visible response for the completed parts.
     open_text_run: String,
     next_block_ordinal: u64,
-    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
     pub expose_thinking: bool,

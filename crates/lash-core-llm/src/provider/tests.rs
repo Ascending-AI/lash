@@ -7,7 +7,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmOutputPart, LlmRole, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay,
 };
-use crate::provider::ReasoningSelection;
+use crate::provider::{CacheRetention, ModelRequestDefaults, ReasoningSelection};
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 /// Every test double that completes with an empty `Stop` response shares
@@ -35,7 +35,7 @@ fn code_of(error: &LlmTransportError) -> String {
 /// Marker `max_output_tokens` value `MutatingProvider` writes into its own
 /// options while completing, so a test can prove the handle kept the mutated
 /// provider instead of a pre-call clone.
-const MUTATED_MAX_OUTPUT_TOKENS: u64 = 4_321;
+const MUTATED_RESPONSE_BODY_BYTES: u64 = 4_321;
 
 #[derive(Clone, Debug, Default)]
 struct MutatingProvider {
@@ -489,7 +489,7 @@ impl Provider for MutatingProvider {
     }
 
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        self.options.max_output_tokens = Some(MUTATED_MAX_OUTPUT_TOKENS);
+        self.options.response_body_bytes = Some(MUTATED_RESPONSE_BODY_BYTES);
         Ok(bare_ok_response())
     }
 
@@ -719,9 +719,11 @@ pub(super) fn empty_request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: crate::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: crate::LlmRequestScope::new(
             "provider-test",
             "provider-test:frame",
@@ -1095,19 +1097,39 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
 }
 
 #[test]
-fn provider_options_roundtrip_output_limit_and_cache_retention() {
-    let options = ProviderOptions {
+fn model_request_defaults_roundtrip_output_limit_retention_and_thinking() {
+    let defaults = ModelRequestDefaults {
+        expose_thinking: true,
         max_output_tokens: Some(16_384),
         cache_retention: CacheRetention::Long,
-        ..ProviderOptions::default()
     };
 
-    let value = serde_json::to_value(&options).expect("serialize");
+    let value = serde_json::to_value(defaults).expect("serialize");
+    assert_eq!(value["expose_thinking"], serde_json::json!(true));
     assert_eq!(value["max_output_tokens"], serde_json::json!(16_384));
     assert_eq!(value["cache_retention"], serde_json::json!("long"));
 
-    let roundtripped: ProviderOptions = serde_json::from_value(value).expect("deserialize");
-    assert_eq!(roundtripped, options);
+    let roundtripped: ModelRequestDefaults = serde_json::from_value(value).expect("deserialize");
+    assert_eq!(roundtripped, defaults);
+}
+
+/// Request behaviour is recorded with the model (FIG-4374): provider options
+/// hold only a transport's live concerns and refuse the retired fields.
+#[test]
+fn provider_options_refuse_request_behaviour() {
+    for field in ["expose_thinking", "max_output_tokens", "cache_retention"] {
+        let value = match field {
+            "expose_thinking" => serde_json::json!(true),
+            "max_output_tokens" => serde_json::json!(1_024),
+            _ => serde_json::json!("long"),
+        };
+        let mut options = serde_json::Map::new();
+        options.insert(field.to_string(), value);
+        assert!(
+            serde_json::from_value::<ProviderOptions>(serde_json::Value::Object(options)).is_err(),
+            "provider options no longer carry `{field}`"
+        );
+    }
 }
 
 #[test]
@@ -1138,12 +1160,13 @@ fn provider_options_roundtrip_sse_buffer_caps() {
 }
 
 #[test]
-fn provider_options_default_omits_and_restores_shared_output_fields() {
-    let value = serde_json::to_value(ProviderOptions::default()).expect("serialize");
-    assert!(value.get("max_output_tokens").is_none());
-    assert!(value.get("cache_retention").is_none());
+fn model_request_defaults_default_omits_and_restores_every_field() {
+    let value = serde_json::to_value(ModelRequestDefaults::default()).expect("serialize");
+    assert_eq!(value, serde_json::json!({}));
 
-    let restored: ProviderOptions = serde_json::from_value(serde_json::json!({})).expect("default");
+    let restored: ModelRequestDefaults =
+        serde_json::from_value(serde_json::json!({})).expect("default");
+    assert!(!restored.expose_thinking);
     assert_eq!(restored.max_output_tokens, None);
     assert_eq!(restored.cache_retention, CacheRetention::Short);
     assert!(restored.is_default());
@@ -1316,8 +1339,8 @@ async fn transport_mutations_are_visible_after_completion_returns() {
         .expect("complete");
 
     assert_eq!(
-        handle.options().max_output_tokens,
-        Some(MUTATED_MAX_OUTPUT_TOKENS)
+        handle.options().response_body_bytes,
+        Some(MUTATED_RESPONSE_BODY_BYTES)
     );
     assert_eq!(completion.call_record.attempts.len(), 1);
     assert_eq!(

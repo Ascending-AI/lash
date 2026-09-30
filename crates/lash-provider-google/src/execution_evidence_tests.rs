@@ -75,7 +75,10 @@ async fn google_non_streaming_response_carries_provider_execution_evidence() {
             json!({ "model": "gemini-requested" }),
             None,
             None,
-            StreamTermination::RequireTerminalEvidence,
+            crate::provider::ResponseReading {
+                stream_termination: StreamTermination::RequireTerminalEvidence,
+                expose_thinking: false,
+            },
             None,
         )
         .await
@@ -109,7 +112,10 @@ async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
             json!({ "model": "gemini-test" }),
             Some(LlmEventSender::new(|_| {})),
             None,
-            StreamTermination::RequireTerminalEvidence,
+            crate::provider::ResponseReading {
+                stream_termination: StreamTermination::RequireTerminalEvidence,
+                expose_thinking: false,
+            },
             None,
         )
         .await
@@ -134,7 +140,10 @@ async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
             json!({ "model": "gemini-test" }),
             Some(LlmEventSender::new(|_| {})),
             None,
-            StreamTermination::RequireTerminalEvidence,
+            crate::provider::ResponseReading {
+                stream_termination: StreamTermination::RequireTerminalEvidence,
+                expose_thinking: false,
+            },
             None,
         )
         .await

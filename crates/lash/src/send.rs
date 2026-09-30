@@ -41,7 +41,7 @@ use crate::support::{
     TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
-use lash_core::{GenerationOptions, ModelSpec, PromptLayer, RunSpec};
+use lash_core::{GenerationOptions, ModelKey, PromptLayer, ReasoningSelection, RunSpec};
 
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
@@ -74,9 +74,9 @@ pub(crate) struct SendParts {
     pub(crate) work: Arc<ResolvedQueuedWork>,
     pub(crate) effect_host: Arc<dyn EffectHost>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
-    /// The resolver a spec's provider route is judged against before the
-    /// input is accepted (FIG-3877).
-    pub(crate) provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+    /// The models a spec's model key is judged against before the input is
+    /// accepted.
+    pub(crate) models: Arc<dyn lash_core::RuntimeModels>,
 }
 
 /// A target's parts, with the open session's runtime when there is one.
@@ -172,50 +172,25 @@ impl SendTarget {
     }
 }
 
-/// Refuse a spec whose provider route this host cannot serve before the
-/// input is accepted: the same verdict a config command meets at its drain
-/// (D3 §3.3, FIG-3877). A spec that touches neither `provider_id` nor
-/// `model` keeps the session's recorded route and is not judged.
-async fn refuse_unservable_route(context: &SendContext, spec: &RunSpec) -> Result<()> {
-    if spec.overrides.provider_id.is_none() && spec.overrides.model.is_none() {
+/// Refuse a spec whose model key this host's models do not register before
+/// the input is accepted. Nothing is minted here: the root mints the key's
+/// binding once, when it records its shape. A spec that names no key keeps
+/// the session's recorded binding and is not judged.
+fn refuse_unknown_model(context: &SendContext, spec: &RunSpec) -> Result<()> {
+    let Some(key) = spec.overrides.model.as_ref() else {
         return Ok(());
-    }
-    let policy = context.session_snapshot().await?.policy;
-    let provider_id = spec
-        .overrides
-        .provider_id
-        .as_deref()
-        .unwrap_or_else(|| policy.recorded_provider_id());
-    let model = spec.overrides.model.as_ref().unwrap_or(&policy.model);
-    lash_core::runtime::drive::validate_route(
-        context.parts.provider_resolver.as_ref(),
-        provider_id,
-        model,
-    )
-    .map_err(|code| EmbedError::Runtime(route_refusal(code, provider_id, model)))
-}
-
-/// The typed refusal of a spec whose route `code` refused at send.
-fn route_refusal(
-    code: lash_core::provider::ConfigRefusalCode,
-    provider_id: &str,
-    model: &ModelSpec,
-) -> lash_core::RuntimeError {
-    let runtime_code = match code {
-        lash_core::provider::ConfigRefusalCode::ProviderRouteUnknown => {
-            lash_core::RuntimeErrorCode::ProviderRouteUnknown
-        }
-        lash_core::provider::ConfigRefusalCode::ProviderCredentialsMissing => {
-            lash_core::RuntimeErrorCode::ProviderCredentialsMissing
-        }
     };
-    lash_core::RuntimeError::new(
-        runtime_code,
-        format!(
-            "send refused: {code} (provider `{provider_id}`, model `{}`)",
-            model.id
-        ),
-    )
+    context
+        .parts
+        .models
+        .snapshot(key)
+        .map(drop)
+        .map_err(|error| {
+            EmbedError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::ModelUnknown,
+                format!("send refused: {error}"),
+            ))
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -298,16 +273,19 @@ impl SendBuilder {
         self
     }
 
-    /// The provider route this input's root runs on. The session's model and
-    /// variant stay unless [`model`](Self::model) is set too.
-    pub fn provider_id(mut self, provider_id: impl Into<String>) -> Self {
-        self.run_spec.overrides.provider_id = Some(provider_id.into());
+    /// The model this input's root runs on, by the host's key. The root
+    /// mints the key's binding once, when it records its shape, and runs the
+    /// session's reasoning unless [`reasoning`](Self::reasoning) is set too.
+    /// A key the host's models do not register is refused before the input
+    /// is accepted.
+    pub fn model(mut self, key: impl Into<ModelKey>) -> Self {
+        self.run_spec.overrides.model = Some(key.into());
         self
     }
 
-    /// The model this input's root runs on.
-    pub fn model(mut self, model: ModelSpec) -> Self {
-        self.run_spec.overrides.model = Some(model);
+    /// The reasoning this input's root runs its model with.
+    pub fn reasoning(mut self, reasoning: ReasoningSelection) -> Self {
+        self.run_spec.overrides.reasoning = Some(reasoning);
         self
     }
 
@@ -363,7 +341,7 @@ impl SendBuilder {
         input.trace_turn_id = None;
         let id = Some(host_id.unwrap_or_else(crate::turn::fresh_turn_id));
         let cursor = target.current_cursor();
-        refuse_unservable_route(&context, &run_spec).await?;
+        refuse_unknown_model(&context, &run_spec)?;
         let enqueued = context
             .parts
             .ops
@@ -919,38 +897,4 @@ pub enum CancelReceipt {
         root: TurnId,
     },
     NotFound,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every route refusal a send can meet maps to its typed code (FIG-3877):
-    /// the facade's resolver only produces `ProviderRouteUnknown`, so the
-    /// credentials arm is pinned here.
-    #[test]
-    fn a_send_route_refusal_names_its_typed_code() {
-        let model = ModelSpec::builder("m")
-            .context_window_tokens(1)
-            .build()
-            .expect("model spec");
-        assert_eq!(
-            route_refusal(
-                lash_core::provider::ConfigRefusalCode::ProviderRouteUnknown,
-                "p",
-                &model,
-            )
-            .code,
-            lash_core::RuntimeErrorCode::ProviderRouteUnknown
-        );
-        assert_eq!(
-            route_refusal(
-                lash_core::provider::ConfigRefusalCode::ProviderCredentialsMissing,
-                "p",
-                &model,
-            )
-            .code,
-            lash_core::RuntimeErrorCode::ProviderCredentialsMissing
-        );
-    }
 }

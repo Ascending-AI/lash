@@ -16,6 +16,9 @@ struct ResponseContext {
     responses_resume: Option<ResponsesResumeCheckpoint>,
     request_key: ResponsesRequestKey,
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
+    /// The request's recorded `expose_thinking` default: whether reasoning
+    /// the provider streams is published.
+    expose_thinking: bool,
 }
 
 pub(crate) type ResponsesRequestFingerprint = [u8; 32];
@@ -253,6 +256,7 @@ pub(crate) async fn complete(
         })
     });
     let provider_trace = req.provider_trace.clone();
+    let expose_thinking = req.request_defaults.expose_thinking;
     let timeouts = provider.options.llm_timeouts();
     let stream = stream_events.is_some();
     let compat = provider.resolved_compat(endpoint);
@@ -548,6 +552,7 @@ pub(crate) async fn complete(
         responses_resume,
         request_key,
         tool_argument_decoder,
+        expose_thinking,
     };
     let response = if is_sse {
         drive_streaming_response(
@@ -669,6 +674,7 @@ async fn complete_buffered_response(
         http_summary,
         stream_termination,
         tool_argument_decoder,
+        expose_thinking,
         ..
     } = context;
     let stream_termination = stream_events.is_some().then_some(stream_termination);
@@ -683,34 +689,34 @@ async fn complete_buffered_response(
     emit_provider_trace(provider_trace.as_ref(), "openai_compatible", &text);
     match endpoint {
         CompletionEndpoint::Responses => complete_buffered_responses(
-            provider,
             text,
             stream_events,
             http_summary,
             stream_termination,
             tool_argument_decoder,
+            expose_thinking,
         ),
         CompletionEndpoint::ChatCompletions => complete_buffered_chat(
-            provider,
             text,
             stream_events,
             url,
             stream_termination,
             tool_argument_decoder,
+            expose_thinking,
         ),
     }
 }
 
 fn complete_buffered_responses(
-    provider: &OpenAiCompatibleProvider,
     text: String,
     stream_events: Option<LlmEventSender>,
     http_summary: String,
     stream_termination: Option<StreamTermination>,
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
+    expose_thinking: bool,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
-    state.expose_thinking = provider.options.expose_thinking;
+    state.expose_thinking = expose_thinking;
     let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
     if body_was_sse {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
@@ -773,12 +779,12 @@ fn complete_buffered_responses(
             // The body was itself an SSE payload: the stream events were
             // already minted while folding it.
             for event in state.take_block_events() {
-                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                if !expose_thinking && is_reasoning_block_event(&event) {
                     continue;
                 }
                 tx.send(event);
             }
-            if provider.options.expose_thinking {
+            if expose_thinking {
                 for part in &parts {
                     if matches!(part, LlmOutputPart::Reasoning { .. }) {
                         tx.send(LlmStreamEvent::Part(part.clone()));
@@ -787,7 +793,7 @@ fn complete_buffered_responses(
             }
         } else {
             let mut next_ordinal = 0u64;
-            if provider.options.expose_thinking {
+            if expose_thinking {
                 for part in &parts {
                     if let LlmOutputPart::Reasoning { .. } = part {
                         for (block, text) in reasoning_part_block_texts(part, &mut next_ordinal) {
@@ -854,15 +860,15 @@ fn complete_buffered_responses(
 }
 
 fn complete_buffered_chat(
-    provider: &OpenAiCompatibleProvider,
     text: String,
     stream_events: Option<LlmEventSender>,
     url: String,
     stream_termination: Option<StreamTermination>,
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
+    expose_thinking: bool,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
-    state.expose_thinking = provider.options.expose_thinking;
+    state.expose_thinking = expose_thinking;
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
@@ -921,12 +927,12 @@ fn complete_buffered_chat(
             // The body was itself an SSE payload: the stream events were
             // already minted while folding it.
             for event in state.finish_blocks() {
-                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                if !expose_thinking && is_reasoning_block_event(&event) {
                     continue;
                 }
                 tx.send(event);
             }
-            if provider.options.expose_thinking {
+            if expose_thinking {
                 for part in &parts {
                     if matches!(part, LlmOutputPart::Reasoning { .. }) {
                         tx.send(LlmStreamEvent::Part(part.clone()));
@@ -935,7 +941,7 @@ fn complete_buffered_chat(
             }
         } else {
             let mut next_ordinal = 0u64;
-            if provider.options.expose_thinking {
+            if expose_thinking {
                 for part in parts
                     .iter()
                     .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
@@ -1021,15 +1027,7 @@ async fn drive_streaming_response(
             .await
         }
         CompletionEndpoint::ChatCompletions => {
-            drive_streaming_chat(
-                provider,
-                body,
-                chunk_timeout,
-                stream_bounds,
-                context,
-                capture,
-            )
-            .await
+            drive_streaming_chat(body, chunk_timeout, stream_bounds, context, capture).await
         }
     }
 }
@@ -1051,6 +1049,7 @@ async fn drive_streaming_responses(
         responses_resume,
         request_key,
         tool_argument_decoder,
+        expose_thinking,
     } = context;
     let resume_after = responses_resume
         .as_ref()
@@ -1061,9 +1060,8 @@ async fn drive_streaming_responses(
         || ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder),
         |resume| resume.state,
     );
-    state.expose_thinking = provider.options.expose_thinking;
+    state.expose_thinking = expose_thinking;
     let mut emitted_parts = Vec::new();
-    let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
         body,
         chunk_timeout,
@@ -1207,7 +1205,6 @@ async fn drive_streaming_responses(
 }
 
 async fn drive_streaming_chat(
-    provider: &OpenAiCompatibleProvider,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
     stream_bounds: SseStreamBounds,
@@ -1221,11 +1218,11 @@ async fn drive_streaming_chat(
         http_summary: _,
         stream_termination,
         tool_argument_decoder,
+        expose_thinking,
         ..
     } = context;
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
-    state.expose_thinking = provider.options.expose_thinking;
-    let expose_thinking = provider.options.expose_thinking;
+    state.expose_thinking = expose_thinking;
     let stream_result = drive_sse_response(
         body,
         chunk_timeout,

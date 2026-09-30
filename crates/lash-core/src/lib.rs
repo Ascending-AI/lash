@@ -251,8 +251,6 @@ pub mod facade_support {
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
     pub use crate::provider::ReconciledUsage;
-    pub use crate::provider::SingleProviderResolver;
-    pub use crate::provider::{ConfigRefusalCode, ProviderRegistry};
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;
@@ -386,6 +384,7 @@ pub mod facade_support {
     pub use crate::session_model::ConversationRecord;
     pub use crate::session_model::GenerationOverlay;
     pub use crate::session_model::SessionSpec;
+    pub use crate::session_model::SpecResolveError;
     pub use crate::session_model::context::PreparedContext;
     pub use crate::store::LeaseTimings;
     pub use crate::store::LeaseTimingsError;
@@ -626,7 +625,10 @@ pub use lash_trace::{
     TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
-pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
+pub use model::{
+    ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
+    RecordedModel,
+};
 pub(crate) use plugin::PluginRuntimeDirective;
 pub use plugin::{
     AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
@@ -656,7 +658,11 @@ pub use provider::{
     ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
-pub(crate) use provider::{ProviderCompletion, ProviderCompletionError, RuntimeProviderResolver};
+pub use provider::{
+    EmptyModels, ModelRegistry, ModelUnavailable, ModelUnavailableReason, RegisteredModel,
+    RegistrationError, RuntimeModels,
+};
+pub(crate) use provider::{ProviderCompletion, ProviderCompletionError};
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
@@ -742,22 +748,22 @@ pub use runtime::{
     RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
     RecordedRender, RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome,
     ResolvedProcessDefinition, ResolvedRun, RunDefinition, RunDefinitions, RunOverrides,
-    RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
-    RuntimeReplayAttribution, RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION,
-    ScopeBoundController, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, ScopedEffectController,
-    SegmentHandover, SegmentProgress, SegmentStartMarker, ServedOnly, ServedOnlyRange,
-    SessionAdministration, SessionCreationHead, SessionCursor, SessionCursorError,
-    SessionDeleteContext, SessionDeleteExecution, SessionDriver, SessionId, SessionListFilter,
-    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
-    SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
-    SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SessionWorkEngine,
-    SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization, ToolAttemptLaunch,
-    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    RunResolveError, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
+    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
+    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionAdministration, SessionCreationHead,
+    SessionCursor, SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDriver,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
+    SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization,
+    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelRequestRecord, TurnCancelUndeliveredInputPolicy, TurnCancelWait,

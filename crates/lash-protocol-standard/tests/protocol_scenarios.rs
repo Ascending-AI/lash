@@ -573,8 +573,10 @@ fn standard_config() -> TurnMachineConfig {
         turn_budget: lash_core::TurnBudget::Unbounded,
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
+        attachment_acceptance: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
         tool_specs: Vec::new().into(),
@@ -954,11 +956,13 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
     )));
     let policy = lash_core::SessionPolicy {
-        provider_id: "standard-scenario".into(),
-        model: lash_core::ModelSpec::builder("standard-scenario-model")
-            .context_window_tokens(100_000)
-            .build()
-            .expect("Standard scenario model"),
+        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+            lash_core::ModelKey::from("standard-scenario-model"),
+            lash_core::ModelMetadata::builder("standard-scenario-model")
+                .context_window_tokens(100_000)
+                .build()
+                .expect("Standard scenario model"),
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     // The cancel intent executes inside the engine's process workflow, which
@@ -992,8 +996,13 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .with_session_id("standard-protocol-scenario")
         .with_policy(policy)
         .with_plugin_factories(factories)
-        .with_provider_resolver(Arc::new(
-            lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
+        .with_models(lash_core::testing::single_model_registry(
+            "standard-scenario-model",
+            lash_core::ModelMetadata::builder("standard-scenario-model")
+                .context_window_tokens(100_000)
+                .build()
+                .expect("Standard scenario model"),
+            provider.into_handle(),
         ))
         .with_process_work(process_wiring)
         .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))

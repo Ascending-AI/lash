@@ -105,7 +105,7 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
         .build()
         .into_handle();
     let core = process_test_builder(backend.clone())
-        .provider(provider)
+        .serve_test_model(provider, mock_model_spec())
         .tools(Arc::new(CompletionTool) as Arc<dyn lash_core::ToolProvider>)
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -147,8 +147,7 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
     let env = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            provider_id: "mock".into(),
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     );

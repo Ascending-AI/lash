@@ -209,17 +209,15 @@ pub enum RuntimeErrorCode {
     InvalidTurnCancelRequest,
     LiveReplay,
     LlmProvider,
-    /// A config command named a route the host's provider resolver does not
-    /// serve (FIG-3600 S6): refused at send, or at apply, typed.
-    ProviderRouteUnknown,
-    /// A config command named a route the host's resolver knows but holds no
-    /// credentials for (FIG-3600 S6): refused typed, like an unknown route.
-    ProviderCredentialsMissing,
-    /// The route a turn recorded at its start cannot be bound to a provider
-    /// on this worker (FIG-3600 S6, D3 Q3). The route was validated when it
-    /// was set, so this is the worker's deployment, not the session's intent:
-    /// the engine retries the root, and its retry budget parks it.
-    ProviderBindingUnavailable,
+    /// A config command or a send named a model key the host's registry does
+    /// not register: refused typed before anything is enqueued, and nothing
+    /// changes.
+    ModelUnknown,
+    /// A model a root recorded, or an admitted root's per-run key, has no
+    /// binding on this worker. The model was adopted when it was set, so this
+    /// is the worker's deployment, not the session's intent: the engine
+    /// retries the root, and its retry budget parks it.
+    ModelUnavailable,
     /// A root's run spec names a definition revision this worker does not
     /// register (FIG-3838). It is the deployment, not the input: the root
     /// retries, its retry budget parks it, and a redeploy that registers the
@@ -717,9 +715,8 @@ impl RuntimeErrorCode {
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
             Self::LiveReplay => "live_replay",
             Self::LlmProvider => "llm_provider",
-            Self::ProviderRouteUnknown => "provider_route_unknown",
-            Self::ProviderCredentialsMissing => "provider_credentials_missing",
-            Self::ProviderBindingUnavailable => "provider_binding_unavailable",
+            Self::ModelUnknown => "model_unknown",
+            Self::ModelUnavailable => "model_unavailable",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::OutputRetentionFailed => "output_retention_failed",
@@ -980,9 +977,8 @@ impl RuntimeErrorCode {
         Self::InvalidTurnCancelRequest,
         Self::LiveReplay,
         Self::LlmProvider,
-        Self::ProviderRouteUnknown,
-        Self::ProviderCredentialsMissing,
-        Self::ProviderBindingUnavailable,
+        Self::ModelUnknown,
+        Self::ModelUnavailable,
         Self::RunDefinitionUnavailable,
         Self::RecordedRendererUnavailable,
         Self::OutputRetentionFailed,
@@ -1185,9 +1181,8 @@ impl RuntimeErrorCode {
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
             "live_replay" => Self::LiveReplay,
             "llm_provider" => Self::LlmProvider,
-            "provider_route_unknown" => Self::ProviderRouteUnknown,
-            "provider_credentials_missing" => Self::ProviderCredentialsMissing,
-            "provider_binding_unavailable" => Self::ProviderBindingUnavailable,
+            "model_unknown" => Self::ModelUnknown,
+            "model_unavailable" => Self::ModelUnavailable,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "output_retention_failed" => Self::OutputRetentionFailed,

@@ -37,7 +37,11 @@ impl RuntimeSessionServices {
         }
         // The child is resolved against the environment this process's start
         // captured — its starter's recorded policy and plugin config — the
-        // facts the start admitted before its handoff (FIG-4396).
+        // facts the start admitted before its handoff (FIG-4396). A
+        // `create_request` policy that selects no model runs that
+        // environment's recorded one, copied as recorded rather than
+        // re-resolved.
+        self.inherit_session_turn_model(&mut create_request);
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
         // The process worker admitted this controller under the process id.
@@ -128,6 +132,15 @@ impl RuntimeSessionServices {
                     }
                 }
             }
+        }
+    }
+
+    fn inherit_session_turn_model(&self, create_request: &mut crate::SessionCreateRequest) {
+        let Some(policy) = create_request.policy.as_mut() else {
+            return;
+        };
+        if policy.model.is_none() {
+            policy.model = self.current.policy.model.clone();
         }
     }
 }

@@ -451,9 +451,9 @@ fn core(harness: &Harness) -> lash::LashCore {
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("attachment-delivery")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("attachment-delivery")
                 .context_window_tokens(100_000)
                 .build()
                 .unwrap(),

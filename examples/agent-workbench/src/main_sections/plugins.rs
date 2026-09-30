@@ -270,6 +270,14 @@ pub(crate) struct WorkbenchConfigChange {
     pub(crate) service_model_id: String,
 }
 
+/// The model key a policy records, or empty for one that selects none.
+fn recorded_model_id(policy: &lash::runtime::SessionPolicy) -> String {
+    policy
+        .model_key()
+        .map(ToString::to_string)
+        .unwrap_or_default()
+}
+
 impl WorkbenchConfigChanges {
     pub(crate) async fn observe(
         &self,
@@ -278,9 +286,9 @@ impl WorkbenchConfigChanges {
         let snapshot = ctx.sessions.snapshot_current().await?;
         *self.latest.lock_recover() = Some(WorkbenchConfigChange {
             session_id: ctx.session_id.clone(),
-            previous_model_id: ctx.previous.model_id().to_string(),
-            current_model_id: ctx.current.model_id().to_string(),
-            service_model_id: snapshot.policy.model_id().to_string(),
+            previous_model_id: recorded_model_id(&ctx.previous),
+            current_model_id: recorded_model_id(&ctx.current),
+            service_model_id: recorded_model_id(&snapshot.policy),
         });
         Ok(())
     }

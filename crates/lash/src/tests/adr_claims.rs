@@ -9,8 +9,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     let backend = double.lash_backend();
     let build = || {
         explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-            .provider(mock_provider())
-            .model(mock_model_spec())
+            .serve_test_model(mock_provider(), mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
     };
     let core = build()?;
@@ -88,8 +87,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         );
     }
     let duplicate = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .plugin(Arc::new(rlm_factory(&backend)))
         .build(crate::testing::runtime_lease_owner());
     assert!(
@@ -166,8 +164,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -294,8 +291,10 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
             backend,
             crate::TurnBudget::Unbounded,
         ))
-        .provider(text_provider("owner-matrix", "owner-model", answer))
-        .model(model_spec("owner-model", None, 200_000))
+        .serve_test_model(
+            text_provider("owner-matrix", "owner-model", answer),
+            model_spec("owner-model", None, 200_000),
+        )
         .build(owner.clone())
     };
     let source = build(source_backend.clone(), "source-answer")?;

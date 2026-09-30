@@ -225,8 +225,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let echo: Arc<dyn crate::ToolProvider> = Arc::new(crate::testing::FixtureTools);
     let factories = plugins
         .into_iter()

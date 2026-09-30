@@ -237,9 +237,9 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
         lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(
-                lash_core::ModelSpec::builder("mock-model")
+            .serve_test_model(
+                provider,
+                lash_core::ModelMetadata::builder("mock-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),

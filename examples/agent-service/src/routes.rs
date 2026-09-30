@@ -40,8 +40,6 @@ use crate::remote_protocol::test_remote_headers;
 use crate::state::{AppError, AppResult, AppStateData};
 use crate::ui::INDEX_HTML;
 
-const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
-
 /// How many extra turns the host will spend re-prompting an agent that
 /// finished a turn owing an O move (FIG-3181). One: a nudge, then a forfeit.
 pub(crate) const ZERO_MOVE_RETRIES: usize = 1;
@@ -291,7 +289,7 @@ pub(crate) async fn pin_chat_branch_point(
         })
         .await?;
     let session = state
-        .open_session(&chat_id, model_spec_for_chat_selection(&selection)?)
+        .open_session(&chat_id, model_choice_for_chat_selection(&selection))
         .await?;
     let snapshot = session.admin().state().export().await;
     let node_id = snapshot
@@ -425,7 +423,7 @@ pub(crate) async fn send_message(
     // One path in every durability mode: the chat's session takes the input
     // through `send()`, and the session's engine drives the turn -- in process
     // for the local store, in a Restate handler for the Restate deployment.
-    let turn_model = model_spec_for_chat_selection(&model_selection)?;
+    let turn_model = model_choice_for_chat_selection(&model_selection);
     let session = state.open_session(&chat_id, turn_model).await?;
     let replay_cursor = session.observe().current_observation().cursor;
     let turn_id = TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4()));
@@ -915,21 +913,24 @@ fn normalize_optional_model_selection(
     }))
 }
 
-pub(crate) fn model_spec_for_chat_selection(
-    selection: &ChatModelSelection,
-) -> AppResult<lash::ModelSpec> {
-    lash::ModelSpec::builder(selection.model.clone())
-        .variant(
-            selection
-                .model_variant
-                .clone()
-                .map(lash::provider::ReasoningSelection::Effort)
-                .unwrap_or_default(),
-        )
-        .context_window_tokens(DEFAULT_CONTEXT_WINDOW_TOKENS)
-        .build()
-        .map(crate::default_openrouter_model_capability_for)
-        .map_err(|error| AppError::bad_request(error.to_string()))
+/// The model key and reasoning a chat's selection runs with: the service's
+/// catalog keys every OpenRouter model by its id.
+pub(crate) fn model_choice_for_chat_selection(selection: &ChatModelSelection) -> ModelChoice {
+    ModelChoice {
+        key: lash::ModelKey::new(selection.model.clone()),
+        reasoning: selection
+            .model_variant
+            .clone()
+            .map(lash::provider::ReasoningSelection::Effort)
+            .unwrap_or_default(),
+    }
+}
+
+/// A chat's model selection as the session records it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ModelChoice {
+    pub(crate) key: lash::ModelKey,
+    pub(crate) reasoning: lash::provider::ReasoningSelection,
 }
 
 fn normalize_model_variant(model_variant: Option<&str>) -> Option<String> {
@@ -1457,9 +1458,9 @@ finish("done through route");
             &backend,
         );
         let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("mock-model")
+            .serve_test_model(
+                provider,
+                lash::ModelMetadata::builder("mock-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),

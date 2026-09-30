@@ -92,11 +92,14 @@ pub fn session_store_request(
         session_id: SessionId::from(session_id.to_string()),
         relation,
         config: crate::SessionPolicy {
-            model: crate::ModelSpec::builder(model_id)
-                .context_window_tokens(200_000)
-                .build()
-                .expect("valid conformance model"),
-            provider_id: "conformance-provider".to_string(),
+            model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
+                crate::ModelKey::new(model_id),
+                lash_core_llm::model::ModelMetadata::builder(model_id)
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("valid conformance model"),
+            ))),
+            attachment_acceptance: Default::default(),
             session_id: Some(SessionId::from(session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,

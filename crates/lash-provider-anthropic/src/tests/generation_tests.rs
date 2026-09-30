@@ -90,13 +90,10 @@ fn an_uncapped_call_is_refused_with_output_token_cap_required() {
     );
     assert!(!error.is_retryable());
 
+    req.request_defaults.max_output_tokens = Some(8_000);
     let (body, receipt) = AnthropicProvider::new("key")
-        .with_options(ProviderOptions {
-            max_output_tokens: Some(8_000),
-            ..ProviderOptions::default()
-        })
         .build_request(&req)
-        .expect("the provider cap is the fallback");
+        .expect("the model's recorded cap is the fallback");
     assert_eq!(body["max_tokens"], 8_000);
     assert_eq!(
         receipt.output_token_cap,
@@ -156,12 +153,9 @@ fn parallel_tool_calls_rides_tool_choice_and_needs_tools() {
 
 #[test]
 fn expose_thinking_without_active_thinking_is_local_visibility_only() {
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.expose_thinking = true;
     let (body, receipt) = AnthropicProvider::new("key")
-        .with_options(ProviderOptions {
-            expose_thinking: true,
-            ..ProviderOptions::default()
-        })
         .build_request(&req)
         .expect("expose_thinking is never refused");
     assert!(body.get("thinking").is_none());

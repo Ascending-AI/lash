@@ -4,6 +4,69 @@ use lash::SessionId;
 use lash::TurnId;
 
 #[cfg(test)]
+/// Workbench test cores serve the workbench's own open catalog, with the
+/// test's model pinned under its wire model so its window and capability
+/// hold; any other id a route selects mints through the open catalog.
+pub(crate) trait ServeWorkbenchTestModel {
+    fn serve_workbench_model(
+        self,
+        provider: lash::provider::ProviderHandle,
+        model: lash::ModelMetadata,
+    ) -> Self;
+}
+
+impl ServeWorkbenchTestModel for lash::LashCoreBuilder {
+    fn serve_workbench_model(
+        self,
+        provider: lash::provider::ProviderHandle,
+        model: lash::ModelMetadata,
+    ) -> Self {
+        let key = lash::ModelKey::new(model.wire_model.clone());
+        let pinned = lash::ModelRegistry::new()
+            .register(
+                key.clone(),
+                lash::RegisteredModel::new(model, provider.clone()),
+            )
+            .expect("a test model registers under its wire model");
+        // The workbench records the same attachment acceptance production
+        // bootstrap states for every session it creates.
+        self.models(Arc::new(WorkbenchTestModels {
+            pinned,
+            open: WorkbenchModels { provider },
+        }))
+        .model(key)
+        .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
+    }
+}
+
+struct WorkbenchTestModels {
+    pinned: lash::ModelRegistry,
+    open: WorkbenchModels,
+}
+
+impl lash::RuntimeModels for WorkbenchTestModels {
+    fn snapshot(
+        &self,
+        key: &lash::ModelKey,
+    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+        lash::RuntimeModels::snapshot(&self.pinned, key)
+            .or_else(|_| lash::RuntimeModels::snapshot(&self.open, key))
+    }
+
+    fn bind(
+        &self,
+        recorded: &lash::RecordedModel,
+    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
+        match lash::RuntimeModels::bind(&self.pinned, recorded) {
+            Err(lash::ModelUnavailable {
+                reason: lash::ModelUnavailableReason::UnknownKey,
+                ..
+            }) => lash::RuntimeModels::bind(&self.open, recorded),
+            other => other,
+        }
+    }
+}
+
 #[path = "tests/session_delete_workflow.rs"]
 mod session_delete_workflow;
 #[cfg(test)]
@@ -35,8 +98,8 @@ where
     .join()
     .expect("runtime thread")
 }
-fn test_model() -> lash::ModelSpec {
-    lash::ModelSpec::builder("test-model")
+fn test_model() -> lash::ModelMetadata {
+    lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec")
@@ -333,8 +396,7 @@ finish("observed through live replay");
         .into_handle();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model.clone())
+        .serve_workbench_model(provider, model.clone())
         .build(crate::test_core_owner())
         .expect("build core");
     let session = crate::created_session(&core, "workbench-observation-stream")
@@ -422,8 +484,7 @@ finish("gap source");
         .into_handle();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model.clone())
+        .serve_workbench_model(provider, model.clone())
         .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
@@ -516,8 +577,7 @@ finish("snapshot cursor");
         .build()
         .into_handle();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(test_model())
+        .serve_test_model(provider, test_model())
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -661,8 +721,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     let model = test_model();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -789,8 +848,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let session_id = WorkbenchSessions::fresh().current();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -863,8 +921,7 @@ finish({ test: boxes[0], test2: boxes[1] });
     let session_id = WorkbenchSessions::fresh().current();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -923,8 +980,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
     let model = test_model();
     let sessions = WorkbenchSessions::fresh();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -1092,9 +1148,9 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
+
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
-        .model(model)
+        .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
@@ -1706,10 +1762,7 @@ async fn live_workbench_restate_state_over_stores(
         Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
         Arc::new(JsonlTraceSink::new(lashlang_execution_path)) as Arc<dyn TraceSink>,
     ])) as Arc<dyn TraceSink>;
-    let model = lash::ModelSpec::builder("mock-model")
-        .variant(lash::provider::ReasoningSelection::Effort(
-            "high".to_string(),
-        ))
+    let model = lash::ModelMetadata::builder("mock-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
@@ -1747,8 +1800,7 @@ async fn live_workbench_restate_state_over_stores(
         lash::TurnBudget::Unbounded,
         factory,
     )
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(Arc::clone(&trace_sink))
@@ -1984,9 +2036,9 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
     LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .provider(provider)
+
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
-        .model(model)
+        .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.

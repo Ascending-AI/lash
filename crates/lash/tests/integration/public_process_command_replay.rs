@@ -297,13 +297,21 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(
-            lash_core::ModelSpec::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
-        )
+        .models(std::sync::Arc::new(
+            lash_core::ModelRegistry::new()
+                .register(
+                    "mock-model",
+                    lash_core::RegisteredModel::new(
+                        lash_core::ModelMetadata::builder("mock-model")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .unwrap(),
+                        provider,
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .model("mock-model")
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "receipt-law",
             "facade",

@@ -44,8 +44,7 @@ fn core(backend: lash_core::Backend) -> LashCore {
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("core")
 }
@@ -274,8 +273,7 @@ async fn state_law(postgres: bool) -> Result<()> {
                 backend.clone(),
                 crate::TurnBudget::Unbounded,
             ))
-            .provider(mock_provider())
-            .model(mock_model_spec())
+            .serve_test_model(mock_provider(), mock_model_spec())
             .plugin(Arc::new(StateHook {
                 mode: Arc::clone(&mode_control),
                 handle: Arc::default(),

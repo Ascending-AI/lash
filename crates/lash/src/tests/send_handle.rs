@@ -79,8 +79,10 @@ async fn fixture_over_with_batching(
     let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
-        .provider(scripted_provider(Arc::clone(&release), Arc::clone(&calls)))
-        .model(mock_model_spec())
+        .serve_test_model(
+            scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
@@ -825,7 +827,7 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
 async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .provider(
+        .serve_test_model(
             crate::testing::TestProvider::builder()
                 .kind("engine-first-open")
                 .complete(|_| async {
@@ -835,8 +837,8 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
                 })
                 .build()
                 .into_handle(),
+            mock_model_spec(),
         )
-        .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let durable = core
         .session("engine-first")
@@ -871,9 +873,10 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .provider({
-            let calls = Arc::clone(&calls);
-            crate::testing::TestProvider::builder()
+        .serve_test_model(
+            {
+                let calls = Arc::clone(&calls);
+                crate::testing::TestProvider::builder()
                 .kind("cancel-past-frame-switch")
                 .complete(move |_| {
                     let call = calls.fetch_add(1, Ordering::SeqCst);
@@ -889,8 +892,9 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
                 })
                 .build()
                 .into_handle()
-        })
-        .model(mock_model_spec())
+            },
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("cancel-past-switch")
@@ -1361,10 +1365,9 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     Ok(())
 }
 
-/// A send whose spec names a route this host cannot serve is refused before
-/// the input is accepted — the same verdict a config command meets at its
-/// drain (FIG-3877) — and nothing is enqueued.
-async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Result<()> {
+/// A send whose spec names a model key this host does not serve is refused
+/// before the input is accepted, and nothing is enqueued (FIG-4374).
+async fn a_send_under_an_unserved_model_key_is_refused_before_acceptance() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
@@ -1375,14 +1378,14 @@ async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Resu
         .await?;
     let error = session
         .send(TurnInput::text("route me nowhere"))
-        .provider_id("no-such-provider")
+        .model("no-such-model")
         .await
         .map(|_handle| ())
-        .expect_err("a route no provider serves is refused at send");
+        .expect_err("a key no registration serves is refused at send");
     assert!(
         matches!(&error, EmbedError::Runtime(runtime)
-            if runtime.code == lash_core::RuntimeErrorCode::ProviderRouteUnknown),
-        "the refusal is the typed route refusal: {error:?}"
+            if runtime.code == lash_core::RuntimeErrorCode::ModelUnknown),
+        "the refusal is the typed unknown-model refusal: {error:?}"
     );
     let store = lash_core::runtime::live_session_view(
         &fixture.core.store_factory,
@@ -1441,30 +1444,32 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
     let release = Arc::new(Notify::new());
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .provider({
-            let calls = Arc::clone(&calls);
-            let release = Arc::clone(&release);
-            crate::testing::TestProvider::builder()
-                .kind("exact-host-frame-switch")
-                .complete(move |_| {
-                    let call = calls.fetch_add(1, Ordering::SeqCst);
-                    let release = Arc::clone(&release);
-                    async move {
-                        if call == 0 {
-                            return Ok(text_response(&typescript_block(
-                                r#"await control.continue_as({ task: "follow on" });"#,
-                            )));
+        .serve_test_model(
+            {
+                let calls = Arc::clone(&calls);
+                let release = Arc::clone(&release);
+                crate::testing::TestProvider::builder()
+                    .kind("exact-host-frame-switch")
+                    .complete(move |_| {
+                        let call = calls.fetch_add(1, Ordering::SeqCst);
+                        let release = Arc::clone(&release);
+                        async move {
+                            if call == 0 {
+                                return Ok(text_response(&typescript_block(
+                                    r#"await control.continue_as({ task: "follow on" });"#,
+                                )));
+                            }
+                            release.notified().await;
+                            Ok(text_response(&typescript_block(
+                                r#"finish("finished follow on");"#,
+                            )))
                         }
-                        release.notified().await;
-                        Ok(text_response(&typescript_block(
-                            r#"finish("finished follow on");"#,
-                        )))
-                    }
-                })
-                .build()
-                .into_handle()
-        })
-        .model(mock_model_spec())
+                    })
+                    .build()
+                    .into_handle()
+            },
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("exact-host-switch")
@@ -1693,8 +1698,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Result<()> {
-                super::a_send_under_an_unservable_route_is_refused_before_acceptance().await
+            async fn a_send_under_an_unserved_model_key_is_refused_before_acceptance() -> Result<()> {
+                super::a_send_under_an_unserved_model_key_is_refused_before_acceptance().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -82,9 +82,8 @@ impl LashCoreBuilder {
         // recovery pass's relays and every immediate `deliver_now` derive
         // theirs from it (FIG-4246).
         core.control.recovery_pass = self.recovery_pass;
-        if let Some(provider) = self.provider.clone() {
-            core.providers.provider_resolver =
-                Arc::new(facade_support::SingleProviderResolver::new(provider));
+        if let Some(models) = self.models.clone() {
+            core.providers.models = models;
         }
         core.providers.run_definitions = self.run_definitions.clone();
         if let Some(filter) = self.process_tool_visibility_filter.take() {

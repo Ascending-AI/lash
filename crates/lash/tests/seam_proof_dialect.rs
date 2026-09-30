@@ -245,9 +245,9 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
         &backend,
     );
     LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("seam-proof-dialect")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("seam-proof-dialect")
                 .context_window_tokens(64_000)
                 .build()
                 .expect("model spec"),

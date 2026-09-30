@@ -38,14 +38,11 @@ impl OpenAiCompatibleProvider {
             {
                 let validation = (|| {
                     let supported = req
-                        .model_capability
                         .attachment_acceptance
                         .accepts("OpenAI Chat Completions", source);
                     if !supported {
-                        let accepted_by = known_attachment_acceptors(
-                            &req.model_capability.attachment_acceptance,
-                            source,
-                        );
+                        let accepted_by =
+                            known_attachment_acceptors(&req.attachment_acceptance, source);
                         return Err(unsupported_attachment_capability(
                             "OpenAI Chat Completions",
                             source,
@@ -463,12 +460,8 @@ impl OpenAiCompatibleProvider {
         let req = safe_request.as_ref();
         Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);
-        let policy = resolve_generation_policy(
-            req,
-            &self.options,
-            self.kind(),
-            &Self::chat_generation_wire(&compat, req),
-        )?;
+        let policy =
+            resolve_generation_policy(req, self.kind(), &Self::chat_generation_wire(&compat, req))?;
         let mut emission = GenerationEmission {
             reasoning_retention: matches!(
                 req.model_capability.reasoning_retention.selection,
@@ -899,7 +892,7 @@ pub(crate) struct ChatStreamState {
     pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
     pub(crate) tool_argument_decoder: shared::ToolArgumentDecoder,
-    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
     pub(crate) expose_thinking: bool,

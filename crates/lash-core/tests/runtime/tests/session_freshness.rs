@@ -205,20 +205,28 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     };
     assert!(opened.opened, "the second frame must be newly opened");
 
-    let changed_model = lash_core::ModelSpec::builder("changed-frame-model")
+    let changed_model = lash_core::ModelMetadata::builder("changed-frame-model")
         .context_window_tokens(123_456)
         .build()
         .expect("changed model");
+    let changed_key =
+        serve_model_beside(&mut runtime, "changed-frame-model", changed_model.clone());
     crate::runtime_support::configure(
         &mut runtime,
         &double,
         lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: changed_model.clone(),
+            model: changed_key,
         }),
         "changed-frame-model",
     )
     .await;
-    assert_eq!(runtime.state().effective_policy().model, changed_model);
+    assert_eq!(
+        runtime.state().effective_policy().model,
+        Some(lash_core::testing::test_model_config(
+            "changed-frame-model",
+            changed_model
+        ))
+    );
 
     let resident_policy_before_refusal = runtime.state().effective_policy().clone();
     let resident_plugin_config_before_refusal = runtime.state().authority.plugin_config.clone();
@@ -445,26 +453,30 @@ async fn resident_refresh_adopts_the_durable_head_model() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let settled_model = lash_core::ModelSpec::builder("settled-live-model")
+    let settled_model = lash_core::ModelMetadata::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
         .expect("settled model");
+    let settled_key = serve_model_beside(&mut runtime, "settled-live-model", settled_model.clone());
     crate::runtime_support::configure(
         &mut runtime,
         &double,
         lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: settled_model.clone(),
+            model: settled_key,
         }),
         "settled-model",
     )
     .await;
 
-    let head_model = lash_core::ModelSpec::builder("advanced-durable-model")
+    let head_model = lash_core::ModelMetadata::builder("advanced-durable-model")
         .context_window_tokens(65_536)
         .build()
         .expect("advanced durable model");
     advance_session_head(store.as_ref(), |state| {
-        state.policy.model = head_model.clone();
+        state.policy.model = Some(lash_core::testing::test_model_config(
+            head_model.wire_model.clone(),
+            head_model.clone(),
+        ));
     })
     .await;
 
@@ -475,7 +487,10 @@ async fn resident_refresh_adopts_the_durable_head_model() {
 
     assert_eq!(
         runtime.state().effective_policy().model,
-        head_model,
+        Some(lash_core::testing::test_model_config(
+            head_model.wire_model.clone(),
+            head_model
+        )),
         "adoption is head-authoritative: the durable head's model wins"
     );
 }
@@ -521,48 +536,6 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
         live_subagent(&runtime),
         Some(head_subagent),
         "the live plugin session must see the adopted subagent context"
-    );
-}
-
-/// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
-/// durable head's provider id. The provider *resolver* stays live-owned — it
-/// is not part of the durable head — but the recorded provider id is a
-/// durable fact and the head wins on it.
-#[tokio::test(flavor = "multi_thread")]
-async fn resident_refresh_adopts_the_durable_head_provider_id() {
-    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let settled_provider = TestProvider::builder()
-        .kind("settled-live-provider")
-        .complete_error("provider must not be called by refresh")
-        .build()
-        .into_handle();
-    serve_runtime_providers(&mut runtime, [settled_provider.clone()]);
-    crate::runtime_support::configure(
-        &mut runtime,
-        &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetProvider {
-            provider_id: settled_provider.kind().to_string(),
-        }),
-        "settled-provider",
-    )
-    .await;
-
-    advance_session_head(store.as_ref(), |state| {
-        state.policy.provider_id = "advanced-durable-provider".to_string();
-    })
-    .await;
-
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("refresh resident graph");
-
-    assert_eq!(
-        runtime.state().effective_policy().provider_id,
-        "advanced-durable-provider",
-        "adoption is head-authoritative: the durable head's provider id wins"
     );
 }
 
@@ -747,15 +720,16 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let overridden_model = lash_core::ModelSpec::builder("live-override-model")
+    let overridden_model = lash_core::ModelMetadata::builder("live-override-model")
         .context_window_tokens(123_456)
         .build()
         .expect("override model");
+    let overridden_key = serve_model_beside(&mut runtime, "live-override-model", overridden_model);
     crate::runtime_support::configure(
         &mut runtime,
         &double,
         lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: overridden_model,
+            model: overridden_key,
         }),
         "model-override",
     )
@@ -773,7 +747,7 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     )
     .await;
 
-    let head_model = lash_core::ModelSpec::builder("advanced-head-model")
+    let head_model = lash_core::ModelMetadata::builder("advanced-head-model")
         .context_window_tokens(65_536)
         .build()
         .expect("advanced head model");
@@ -781,7 +755,10 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
     );
     advance_session_head(store.as_ref(), |state| {
-        state.policy.model = head_model.clone();
+        state.policy.model = Some(lash_core::testing::test_model_config(
+            head_model.wire_model.clone(),
+            head_model.clone(),
+        ));
         state.policy.prompt = head_prompt.clone();
     })
     .await;
@@ -794,7 +771,10 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
 
     assert_eq!(
         runtime.state().effective_policy().model,
-        head_model,
+        Some(lash_core::testing::test_model_config(
+            head_model.wire_model.clone(),
+            head_model
+        )),
         "the invalidation reload must adopt the head's model"
     );
     assert_eq!(

@@ -98,9 +98,7 @@ async fn worker_for(
         lash_core::facade_support::LeaseTimings::from_ttl(Duration::from_millis(120))
             .expect("short child lease timings"),
     );
-    runtime_host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
+    runtime_host.providers.models = lash_core::testing::standard_test_models(provider);
     DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(plugin_host),
         runtime_host,
@@ -138,7 +136,6 @@ async fn parent_runtime(
     let parent = SessionId::from("test-parent");
     let policy = lash_core::SessionPolicy {
         session_id: Some(parent.clone()),
-        provider_id: "mock".to_string(),
         ..recovery_session_policy()
     };
     let store = lash_core::runtime::admit_session_view(
@@ -171,9 +168,8 @@ async fn parent_runtime(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(answering_provider("parent lives")),
-    );
+    host.providers.models =
+        lash_core::testing::standard_test_models(answering_provider("parent lives"));
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,

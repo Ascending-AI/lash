@@ -10,11 +10,15 @@ const LEGACY_PROMPTLESS_HEAD_JSON: &str = r#"{
   "schema_version": 3,
   "session_id": "legacy-promptless",
   "config": {
-    "provider_id": "embed-test",
     "model": {
-      "id": "",
-      "variant": "provider_default",
-      "limits": { "context_window_tokens": 1 }
+      "model": {
+        "key": "mock-model",
+        "metadata": {
+          "wire_model": "mock-model",
+          "limits": { "context_window_tokens": 200000 }
+        }
+      },
+      "reasoning": "provider_default"
     },
     "turn_budget": "unbounded",
     "autonomous": false,
@@ -33,8 +37,7 @@ fn prompt_probe_state(
     RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: lash_core::SessionPolicy {
-            provider_id: "embed-test".to_string(),
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             prompt,
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
@@ -91,8 +94,10 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
         crate::TurnBudget::Unbounded,
     ))
     .instructions("CORE PROMPT V1")
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core_v1
         .session("core-prompt-redeploy")
@@ -114,8 +119,10 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
         crate::TurnBudget::Unbounded,
     ))
     .instructions("CORE PROMPT V2")
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     core_v2
         .session("core-prompt-redeploy")
@@ -147,8 +154,10 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("open-with-state-supplied-prompt")
@@ -183,8 +192,10 @@ async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_created_one()
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("open-with-state-created-prompt")
@@ -216,8 +227,10 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_on_sqli
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
 
     let fresh = core
@@ -231,8 +244,10 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_on_sqli
         backend_from_literal_head(LEGACY_PROMPTLESS_HEAD_JSON).await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let legacy = legacy_core
         .session("legacy-promptless")
@@ -271,8 +286,10 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_on_sqlite
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -304,8 +321,10 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_on_s
         crate::TurnBudget::Unbounded,
     ))
     .instructions("INHERITED CORE DEFAULT")
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -343,8 +362,10 @@ async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_on_sqlite_memor
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .trace_jsonl_path(trace.path())
     .build(crate::testing::runtime_lease_owner())?;
 
@@ -440,8 +461,7 @@ async fn sqlite_prompt_probe_store(
     );
     let catalog: Arc<dyn lash_core::DeploymentStore> = stores.session_store_factory();
     let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
-    policy.provider_id = "embed-test".to_string();
-    policy.model = mock_model_spec();
+    policy.model = Some(recorded_model(mock_model_spec()));
     policy.prompt = prompt;
     let store = lash_core::runtime::admit_session_view(
         &catalog,
@@ -514,8 +534,10 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     core.session("fresh-sqlite-baseline")
         .created()
@@ -553,8 +575,10 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-committed")
         .created()
@@ -585,8 +609,10 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
         crate::TurnBudget::Unbounded,
     ))
     .instructions("SQLITE INHERITED DEFAULT")
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-explicit-empty")
         .created()
@@ -614,8 +640,10 @@ async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_sqlite() -> Res
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(prompt_capture_provider(Arc::clone(&captures)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        prompt_capture_provider(Arc::clone(&captures)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let before = store
         .load_session_head_meta()

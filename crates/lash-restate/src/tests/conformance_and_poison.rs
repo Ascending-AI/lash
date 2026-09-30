@@ -2208,9 +2208,11 @@ pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
         messages: Vec::new(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session".to_string(),
@@ -2287,7 +2289,7 @@ pub(super) fn executed_registration() -> ProcessRegistration {
 
 /// The environment a test's session-turn start captures, published to
 /// `store`: the starter's recorded policy the child session is created
-/// under, which names the mock provider the test workers serve (FIG-4396).
+/// under, which records the model the test workers serve (FIG-4396).
 pub(super) async fn persist_session_turn_env_ref(
     store: &dyn ProcessExecutionEnvStore,
 ) -> lash_core::ProcessExecutionEnvRef {
@@ -2296,10 +2298,7 @@ pub(super) async fn persist_session_turn_env_ref(
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy {
-                provider_id: "mock".to_string(),
-                ..super::process_workflow::recovery_session_policy()
-            },
+            super::process_workflow::recovery_session_policy(),
         ),
     )
     .await

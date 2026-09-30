@@ -99,8 +99,7 @@ impl Fixture {
             backend,
             crate::TurnBudget::Unbounded,
         ))
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())
         .expect("build the core");
         Self {
@@ -191,7 +190,7 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
         fixture.double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(
+    .serve_test_model(
         crate::testing::TestProvider::builder()
             .kind("commit-superseded")
             .complete(|_request| async {
@@ -199,8 +198,8 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
             })
             .build()
             .into_handle(),
+        mock_model_spec(),
     )
-    .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     .expect("build the second host's core");
     let owner = lash_core::RuntimeOwner::Session(SessionId::from(SESSION));

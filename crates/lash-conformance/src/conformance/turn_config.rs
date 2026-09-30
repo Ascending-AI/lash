@@ -66,15 +66,33 @@ async fn build_runtime_under(
     .expect("build the turn-config conformance runtime")
 }
 
+/// The host's models for these laws: [`FIRST_MODEL`] and [`SECOND_MODEL`],
+/// both served by `provider`.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: a literal model spec always builds"
+    reason = "conformance-law fixture: two distinct literal keys always register"
 )]
-fn second_model() -> crate::ModelSpec {
-    crate::ModelSpec::builder(SECOND_MODEL)
-        .context_window_tokens(200_000)
-        .build()
-        .expect("the second model spec builds")
+fn turn_config_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegistry> {
+    Arc::new(
+        crate::ModelRegistry::new()
+            .register(
+                FIRST_MODEL,
+                crate::RegisteredModel::new(
+                    crate::testing::test_model_metadata(FIRST_MODEL),
+                    provider.clone(),
+                ),
+            )
+            .and_then(|registry| {
+                registry.register(
+                    SECOND_MODEL,
+                    crate::RegisteredModel::new(
+                        crate::testing::test_model_metadata(SECOND_MODEL),
+                        provider,
+                    ),
+                )
+            })
+            .expect("two distinct keys register"),
+    )
 }
 
 /// Move the session to [`SECOND_MODEL`] through the command lane.
@@ -89,23 +107,34 @@ async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, pa
 
 /// Submit a config transaction moving the session to [`SECOND_MODEL`] under
 /// `id`, from a runtime of its own, and return once it is durable.
+async fn submit_second_model(parts: &ConfigParts, id: &str) -> crate::SessionCommandReceipt {
+    submit_transaction(
+        parts,
+        id,
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+            model: crate::ModelKey::new(SECOND_MODEL),
+        }),
+    )
+    .await
+}
+
+/// Submit `transaction` under `id` against the session's current revision,
+/// from a runtime of its own, and return once it is durable.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the transaction is admitted on a live store"
 )]
-async fn submit_second_model(parts: &ConfigParts, id: &str) -> crate::SessionCommandReceipt {
+async fn submit_transaction(
+    parts: &ConfigParts,
+    id: &str,
+    transaction: &crate::ConfigTransaction,
+) -> crate::SessionCommandReceipt {
     let mut runtime = build_runtime(parts.clone()).await;
     let revision = runtime.config_revision();
     runtime
-        .submit_config_transaction(
-            id,
-            revision,
-            &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-                model: second_model(),
-            }),
-        )
+        .submit_config_transaction(id, revision, transaction)
         .await
-        .expect("the model change enters the command lane")
+        .expect("the transaction enters the command lane")
 }
 
 /// Drive the command root that applies the config transaction `receipt`
@@ -282,9 +311,7 @@ impl CommittedRootUnderAModelChange {
             name,
             effect_host,
             stores,
-            Arc::new(crate::SingleProviderResolver::new(recording_model(
-                &calls, &models,
-            ))),
+            turn_config_models(recording_model(&calls, &models)),
         )
         .await;
         let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
@@ -361,7 +388,8 @@ impl CommittedRootUnderAModelChange {
             .expect("read the head after the model change")
             .expect("root A's commit and the model change are durable");
         assert_eq!(
-            committed.config.model.id, SECOND_MODEL,
+            crate::conformance::helpers::recorded_model_key(&committed.config.model),
+            SECOND_MODEL,
             "precondition: the model change landed on the durable head"
         );
         let epoch = parts
@@ -419,7 +447,8 @@ impl CommittedRootUnderAModelChange {
             "{what} writes no head"
         );
         assert_eq!(
-            head.config.model.id, SECOND_MODEL,
+            crate::conformance::helpers::recorded_model_key(&head.config.model),
+            SECOND_MODEL,
             "{what} leaves the model change on the durable head"
         );
     }
@@ -505,7 +534,8 @@ pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_rec
         "the redrive answers with what root A committed"
     );
     assert_eq!(
-        turn.state.policy.model.id, FIRST_MODEL,
+        crate::conformance::helpers::recorded_model_key(&turn.state.policy.model),
+        FIRST_MODEL,
         "the redrive answers under the config root A recorded"
     );
     law.assert_nothing_moved("the redrive of a committed root")
@@ -580,14 +610,14 @@ pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
         .await;
 }
 
-/// The parts of a turn-config law's session: a host whose resolver serves
-/// the recording model, and the session's store.
+/// The parts of a turn-config law's session: a host whose models serve the
+/// recording model, and the session's store.
 async fn law_session(
     prefix: &str,
     name: &str,
     effect_host: &Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn crate::StoreSet>,
-    resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
+    models: Arc<dyn crate::RuntimeModels>,
 ) -> ConfigParts {
     let session_id = SessionId::from(format!("{prefix}-turn-config-{name}-session"));
     let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
@@ -595,7 +625,7 @@ async fn law_session(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-    host.providers.provider_resolver = resolver;
+    host.providers.models = models;
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     ConfigParts {
         session_id,
@@ -693,9 +723,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
         "after-command",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(recording_model(
-            &calls, &models,
-        ))),
+        turn_config_models(recording_model(&calls, &models)),
     )
     .await;
     let first = TurnId::from(format!("{prefix}-turn-config-after-command-first"));
@@ -733,7 +761,10 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
         .await
         .expect("read the head")
         .expect("the session committed");
-    assert_eq!(head.config.model.id, SECOND_MODEL);
+    assert_eq!(
+        crate::conformance::helpers::recorded_model_key(&head.config.model),
+        SECOND_MODEL
+    );
 }
 
 /// A config transaction submitted while a root owns the session head waits
@@ -761,9 +792,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         "pending-while-root",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(gated_recording_model(
-            &calls, &models, &entered, &release,
-        ))),
+        turn_config_models(gated_recording_model(&calls, &models, &entered, &release)),
     )
     .await;
     let root = TurnId::from(format!("{prefix}-turn-config-pending-while-root"));
@@ -780,8 +809,8 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
             .expect("read the head while the root runs");
         if let Some(head) = head {
             assert_eq!(
-                (head.config.model.id.as_str(), head.config.config_revision),
-                (FIRST_MODEL, 0),
+                (head.config.wire_model(), head.config.config_revision),
+                (Some(FIRST_MODEL), 0),
                 "nothing is published while the root owns the head"
             );
         }
@@ -822,8 +851,8 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         .expect("read the head after the root")
         .expect("the root committed");
     assert_eq!(
-        (head.config.model.id.as_str(), head.config.config_revision),
-        (FIRST_MODEL, 0),
+        (head.config.wire_model(), head.config.config_revision),
+        (Some(FIRST_MODEL), 0),
         "the root's commit does not publish the pending transaction"
     );
 
@@ -949,7 +978,7 @@ pub async fn one_config_resolution_per_root(
         "one-resolution",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(model)),
+        turn_config_models(model),
     )
     .await;
     parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
@@ -998,14 +1027,14 @@ pub async fn one_config_resolution_per_root(
     }
 }
 
-/// A route this worker cannot bind retries and never fails the turn (D3
-/// Q3): the root aborts retryably with nothing recorded as its outcome, and
-/// once the provider is back its redrive completes it once.
+/// A recorded model this worker cannot bind retries and never fails the turn
+/// (D3 Q3): the root aborts retryably with nothing recorded as its outcome,
+/// and once the key is served again its redrive completes it once.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
+pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1018,27 +1047,24 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
         "unbindable",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(recording_model(
-            &calls, &models,
-        ))),
+        turn_config_models(recording_model(&calls, &models)),
     )
     .await;
-    // The same session on a worker whose resolver lacks the recorded
-    // provider.
+    // The same session on a worker whose models lack the recorded key.
     let mut unserved = served.clone();
-    unserved.host.providers.provider_resolver = Arc::new(crate::ProviderRegistry::new());
+    unserved.host.providers.models = Arc::new(crate::ModelRegistry::new());
     let root = TurnId::from(format!("{prefix}-turn-config-unbindable-root"));
     let aborted = run_text_turn(&runner, &unserved, &root, "hello", BeforeSend::Nothing)
         .await
-        .expect_err("a root whose recorded route cannot be bound aborts");
+        .expect_err("a root whose recorded model cannot be bound aborts");
     assert_eq!(
         aborted.code,
-        crate::RuntimeErrorCode::ProviderBindingUnavailable,
-        "the abort names the unbindable route: {aborted:?}"
+        crate::RuntimeErrorCode::ModelUnavailable,
+        "the abort names the unbindable model: {aborted:?}"
     );
     assert!(
         aborted.is_retryable(),
-        "an unbindable route is retried, never the turn's outcome: {aborted:?}"
+        "an unbindable model is retried, never the turn's outcome: {aborted:?}"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
     assert!(
@@ -1061,7 +1087,7 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
 
     let turn = run_text_turn(&runner, &served, &root, "hello", BeforeSend::Nothing)
         .await
-        .unwrap_or_else(|error| panic!("the redrive with the provider back runs: {error:?}"));
+        .unwrap_or_else(|error| panic!("the redrive with the model back runs: {error:?}"));
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
         "the redrive completes the root: {:?}",
@@ -1078,15 +1104,15 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
     );
 }
 
-/// A config transaction whose route no provider of this host serves is
-/// refused typed by the core owner when it resolves, and publishes nothing
-/// (D3 §3.3, FIG-4379): its command settles with the refusal, and the
-/// session keeps its route and its config revision.
+/// A model change naming a key this host's models do not register is
+/// refused typed by the core owner when the transaction resolves, and
+/// publishes nothing (FIG-4374): its command settles with the refusal, and
+/// the session keeps its recorded model and its config revision.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_bad_route_is_refused_typed_and_publishes_nothing(
+pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1096,82 +1122,32 @@ pub async fn a_bad_route_is_refused_typed_and_publishes_nothing(
     let models = Arc::new(std::sync::Mutex::new(Vec::new()));
     let parts = law_session(
         prefix,
-        "bad-route",
+        "unknown-key",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(recording_model(
-            &calls, &models,
-        ))),
+        turn_config_models(recording_model(&calls, &models)),
     )
     .await;
     let store = Arc::clone(&parts.store);
     let session_id = parts.session_id.clone();
-    let scope = format!("{prefix}-turn-config-bad-route");
-    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
-    runner
-        .run_turn(
-            admit(crate::ExecutionScope::session_operation(
-                &session_id,
-                &scope,
-            )),
-            Arc::new(move |controller| {
-                let parts = parts.clone();
-                let settled_tx = settled_tx.clone();
-                Box::pin(async move {
-                    let mut runtime = build_runtime(parts).await;
-                    let revision = runtime.config_revision();
-                    let receipt = runtime
-                        .submit_config_transaction(
-                            "turn-config-bad-route",
-                            revision,
-                            &crate::ConfigTransaction::of(
-                                crate::plugin::config::core::SetProvider {
-                                    provider_id: "turn-config-unknown-provider".to_string(),
-                                },
-                            ),
-                        )
-                        .await
-                        .expect("a transaction naming a registered command is admitted");
-                    runtime
-                        .drive_next_root(
-                            "turn-config-bad-route",
-                            crate::TurnOptions::new(
-                                tokio_util::sync::CancellationToken::new(),
-                                controller,
-                            ),
-                        )
-                        .await
-                        .expect("engine drives the refused transaction");
-                    let settled = runtime.settle_session_command(receipt).await;
-                    let _ = settled_tx.send(settled);
-                    crate::ConformanceTurnEnd::Settled
-                })
-            }),
-        )
-        .await;
-    let settled = settled_rx
-        .recv()
-        .await
-        .expect("the tier's runner ran the send and the apply")
-        .expect("the transaction settles");
-    let crate::SessionCommandSettlement::Applied {
-        outcome:
-            crate::runtime::SessionCommandOutcome::ConfigTransaction {
-                outcome: crate::ConfigTransactionOutcome::Refused { refusal },
-            },
-        ..
-    } = settled
-    else {
-        panic!("a route no provider serves settles refused: {settled:?}");
+    let receipt = submit_transaction(
+        &parts,
+        "turn-config-unknown-key",
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+            model: crate::ModelKey::new("turn-config-unknown-model"),
+        }),
+    )
+    .await;
+    let outcome = drive_config_command(&runner, &parts, receipt, "turn-config-unknown-key").await;
+    let crate::ConfigTransactionOutcome::Refused { refusal } = outcome else {
+        panic!("a key the host's models do not register settles refused: {outcome:?}");
     };
     assert_eq!(refusal.owner, crate::CORE_CONFIG_OWNER);
     assert_eq!(
         serde_json::from_value::<crate::CoreConfigRefusal>(refusal.refusal)
             .expect("the core owner's typed refusal"),
-        crate::CoreConfigRefusal::UnservableRoute {
-            code: crate::provider::ConfigRefusalCode::ProviderRouteUnknown,
-            provider_id: "turn-config-unknown-provider".to_string(),
-            model: FIRST_MODEL.to_string(),
+        crate::CoreConfigRefusal::UnknownModel {
+            key: crate::ModelKey::new("turn-config-unknown-model"),
         }
     );
     let head = store
@@ -1179,18 +1155,24 @@ pub async fn a_bad_route_is_refused_typed_and_publishes_nothing(
         .await
         .expect("read the head")
         .expect("the drain committed the session's head");
-    assert_eq!(head.config.provider_id, "stub", "nothing was published");
+    assert_eq!(
+        head.config.model_key().map(crate::ModelKey::as_str),
+        Some(FIRST_MODEL),
+        "nothing was published"
+    );
     assert_eq!(head.config.config_revision, 0, "the revision did not move");
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
 }
 
-/// A route the sending worker serves but the applying worker does not is
-/// refused where the transaction resolves (D3 §3.3): its command settles
-/// refused and changes nothing, and the session keeps its provider.
+/// A model change records the binding the host's models minted where the
+/// transaction resolved (FIG-4374): the worker that submitted it need not
+/// serve the key, and the session records exactly the metadata the resolving
+/// worker's registry held, never re-deriving it from a later catalog.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
+pub async fn a_model_change_records_the_binding_minted_where_it_resolves(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1198,103 +1180,203 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
 ) {
     let calls = Arc::new(AtomicUsize::new(0));
     let models = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let alternate = crate::testing::TestProvider::builder()
-        .kind("turn-config-alternate")
-        .complete_error("the alternate provider is never asked")
-        .build()
-        .into_handle();
     let session = recording_model(&calls, &models);
-    // The worker that sends the command serves the alternate route.
+    // The worker that submits the change serves only the session's model.
     let sender = law_session(
         prefix,
-        "refused-at-apply",
+        "minted-at-resolution",
         &effect_host,
         &stores,
-        Arc::new(
-            crate::ProviderRegistry::new()
-                .with(session.clone())
-                .and_then(|registry| registry.with(alternate))
-                .expect("two distinct providers"),
-        ),
+        crate::testing::standard_test_models(session.clone()),
     )
     .await;
-    // The worker that applies it no longer does.
+    // The worker that resolves it serves the second model, with metadata of
+    // its own.
+    let resolving_metadata = crate::ModelMetadata::builder(SECOND_MODEL)
+        .context_window_tokens(77_777)
+        .build()
+        .expect("the resolving worker's metadata");
     let mut applier = sender.clone();
-    applier.host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(session));
-    let store = Arc::clone(&sender.store);
-    let session_id = sender.session_id.clone();
-    let scope = format!("{prefix}-turn-config-refused-at-apply");
-    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
-    runner
-        .run_turn(
-            admit(crate::ExecutionScope::session_operation(
-                &session_id,
-                &scope,
-            )),
-            Arc::new(move |controller| {
-                let sender = sender.clone();
-                let applier = applier.clone();
-                let settled_tx = settled_tx.clone();
-                Box::pin(async move {
-                    let mut sending = build_runtime(sender).await;
-                    let revision = sending.config_revision();
-                    let receipt = sending
-                        .submit_config_transaction(
-                            "turn-config-refused-at-apply",
-                            revision,
-                            &crate::ConfigTransaction::of(
-                                crate::plugin::config::core::SetProvider {
-                                    provider_id: "turn-config-alternate".to_string(),
-                                },
-                            ),
-                        )
-                        .await
-                        .expect("the transaction is accepted at send");
-                    let mut applying = build_runtime(applier).await;
-                    applying
-                        .drive_next_root(
-                            "turn-config-refused-at-apply",
-                            crate::TurnOptions::new(
-                                tokio_util::sync::CancellationToken::new(),
-                                controller,
-                            ),
-                        )
-                        .await
-                        .expect("engine drives the refused command");
-                    let settled = applying.settle_session_command(receipt).await;
-                    let _ = settled_tx.send(settled);
-                    crate::ConformanceTurnEnd::Settled
-                })
-            }),
-        )
-        .await;
-    let settled = settled_rx
-        .recv()
-        .await
-        .expect("the tier's runner ran the send and the apply")
-        .expect("the command settles");
-    assert!(
-        matches!(
-            settled,
-            crate::SessionCommandSettlement::Applied {
-                outcome: crate::runtime::SessionCommandOutcome::ConfigTransaction {
-                    outcome: crate::ConfigTransactionOutcome::Refused { .. },
-                },
-                ..
-            }
-        ),
-        "the refused transaction settles refused and is not retried: {settled:?}"
+    applier.host.providers.models = Arc::new(
+        crate::ModelRegistry::new()
+            .register(
+                FIRST_MODEL,
+                crate::RegisteredModel::new(
+                    crate::testing::test_model_metadata(FIRST_MODEL),
+                    session.clone(),
+                ),
+            )
+            .and_then(|registry| {
+                registry.register(
+                    SECOND_MODEL,
+                    crate::RegisteredModel::new(resolving_metadata.clone(), session),
+                )
+            })
+            .expect("two distinct keys register"),
     );
-    let head = store
-        .load_session_head_meta(&session_id)
+    let receipt = submit_transaction(
+        &sender,
+        "turn-config-minted-at-resolution",
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+            model: crate::ModelKey::new(SECOND_MODEL),
+        }),
+    )
+    .await;
+    let outcome = drive_config_command(
+        &runner,
+        &applier,
+        receipt,
+        "turn-config-minted-at-resolution",
+    )
+    .await;
+    assert!(
+        matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }),
+        "the resolving worker mints and applies the change: {outcome:?}"
+    );
+    let head = sender
+        .store
+        .load_session_head_meta(&sender.session_id)
         .await
         .expect("read the head")
         .expect("the drain committed the session's head");
     assert_eq!(
-        head.config.provider_id, "stub",
-        "a route refused at apply leaves the session on its provider"
+        head.config.model,
+        Some(crate::ModelConfig::new(crate::RecordedModel::mint(
+            crate::ModelKey::new(SECOND_MODEL),
+            resolving_metadata,
+        ))),
+        "the session records the binding the resolving worker minted"
     );
+    assert_eq!(head.config.config_revision, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
+}
+
+/// A model that declares one configurable effort, `deep`.
+const REASONING_MODEL: &str = "turn-config-reasoning-model";
+
+/// A reasoning change is judged against the model the transaction's final
+/// candidate records (FIG-4374): an effort the session's model does not
+/// declare is refused typed and publishes nothing, and the same effort
+/// applies in one transaction that also moves the session to a model that
+/// declares it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let provider = recording_model(&calls, &models);
+    let reasoning_metadata = crate::testing::test_model_metadata(REASONING_MODEL).with_capability(
+        crate::ModelCapability {
+            reasoning: Some(crate::ReasoningCapability {
+                efforts: vec!["deep".to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    let registry = crate::ModelRegistry::new()
+        .register(
+            FIRST_MODEL,
+            crate::RegisteredModel::new(
+                crate::testing::test_model_metadata(FIRST_MODEL),
+                provider.clone(),
+            ),
+        )
+        .and_then(|registry| {
+            registry.register(
+                REASONING_MODEL,
+                crate::RegisteredModel::new(reasoning_metadata.clone(), provider),
+            )
+        })
+        .expect("two distinct keys register");
+    let parts = law_session(
+        prefix,
+        "reasoning",
+        &effect_host,
+        &stores,
+        Arc::new(registry),
+    )
+    .await;
+    let deep = crate::ReasoningSelection::Effort("deep".to_string());
+
+    let receipt = submit_transaction(
+        &parts,
+        "turn-config-reasoning-alone",
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetReasoning {
+            reasoning: deep.clone(),
+        }),
+    )
+    .await;
+    let outcome =
+        drive_config_command(&runner, &parts, receipt, "turn-config-reasoning-alone").await;
+    let crate::ConfigTransactionOutcome::Refused { refusal } = outcome else {
+        panic!("an effort the session's model does not declare is refused: {outcome:?}");
+    };
+    assert_eq!(refusal.owner, crate::CORE_CONFIG_OWNER);
+    let refusal = serde_json::from_value::<crate::CoreConfigRefusal>(refusal.refusal)
+        .expect("the core owner's typed refusal");
+    assert!(
+        matches!(
+            &refusal,
+            crate::CoreConfigRefusal::ReasoningRefused { key, reasoning, .. }
+                if key.as_str() == FIRST_MODEL && *reasoning == deep
+        ),
+        "the refusal names the recorded model and the effort: {refusal:?}"
+    );
+    let head = parts
+        .store
+        .load_session_head_meta(&parts.session_id)
+        .await
+        .expect("read the head")
+        .expect("the drain committed the session's head");
+    assert_eq!(
+        head.config.config_revision, 0,
+        "the refusal published nothing"
+    );
+
+    let receipt = submit_transaction(
+        &parts,
+        "turn-config-reasoning-with-model",
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetReasoning {
+            reasoning: deep.clone(),
+        })
+        .then(crate::plugin::config::core::SetModel {
+            model: crate::ModelKey::new(REASONING_MODEL),
+        }),
+    )
+    .await;
+    let outcome =
+        drive_config_command(&runner, &parts, receipt, "turn-config-reasoning-with-model").await;
+    assert!(
+        matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }),
+        "the effort applies with a model that declares it: {outcome:?}"
+    );
+    let head = parts
+        .store
+        .load_session_head_meta(&parts.session_id)
+        .await
+        .expect("read the head")
+        .expect("the drain committed the session's head");
+    assert_eq!(
+        head.config.model,
+        Some(
+            crate::ModelConfig::new(crate::RecordedModel::mint(
+                crate::ModelKey::new(REASONING_MODEL),
+                reasoning_metadata,
+            ))
+            .with_reasoning(deep)
+        ),
+        "one revision step records the new model with the effort"
+    );
+    assert_eq!(head.config.config_revision, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
 }
 
 mod command_settlement;
@@ -1370,7 +1452,7 @@ async fn looping_session(
         name,
         effect_host,
         stores,
-        Arc::new(crate::SingleProviderResolver::new(looping_model(calls))),
+        turn_config_models(looping_model(calls)),
     )
     .await;
     parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
@@ -1537,9 +1619,7 @@ pub async fn a_missing_recorded_termination_is_a_typed_terminal_refusal(
         "missing-recorded-termination",
         &effect_host,
         &stores,
-        Arc::new(crate::SingleProviderResolver::new(recording_model(
-            &calls, &models,
-        ))),
+        turn_config_models(recording_model(&calls, &models)),
     )
     .await;
     let root = TurnId::from(format!("{prefix}-missing-recorded-termination-root"));
@@ -1683,9 +1763,7 @@ pub async fn a_redrive_assembles_the_terminal_its_root_recorded_termination_deci
             name,
             &effect_host,
             &stores,
-            Arc::new(crate::SingleProviderResolver::new(recording_model(
-                &calls, &models,
-            ))),
+            turn_config_models(recording_model(&calls, &models)),
         )
         .await;
         parts.protocol = crate::testing::test_protocol_factories_ending_without_done();

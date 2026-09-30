@@ -326,11 +326,11 @@ pub enum RuntimeEffectCommand {
         request: Box<CoreLlmRequest>,
     },
     LlmCall {
-        /// The provider the turn's policy names for this call. With the
-        /// request's model it is the recorded policy the call runs under, so a
-        /// replay whose live policy names another provider diverges instead of
-        /// continuing on it.
-        provider_id: String,
+        /// The model key the turn's recorded policy names for this call. With
+        /// the request's wire model it is the recorded selection the call runs
+        /// under, so a replay whose policy names another key diverges instead
+        /// of continuing on it.
+        model_key: crate::ModelKey,
         request: Box<LlmRequestSpec>,
     },
     /// Run host assistant-response hooks over the raw provider completion that
@@ -1384,8 +1384,20 @@ pub struct LlmRequestSpec {
     pub model_variant: crate::ReasoningSelection,
     #[serde(default)]
     pub model_capability: crate::ModelCapability,
+    /// The session's recorded attachment-acceptance rules the request
+    /// renders its attachments under.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::ModelRequestDefaults::is_default"
+    )]
+    pub request_defaults: crate::provider::ModelRequestDefaults,
     #[serde(default)]
     pub generation: crate::GenerationOptions,
     pub scope: crate::LlmRequestScope,
@@ -1442,7 +1454,9 @@ impl LlmRequestSpec {
             tool_choice: request.tool_choice.clone(),
             model_variant: request.model_variant.clone(),
             model_capability: request.model_capability.clone(),
+            attachment_acceptance: Arc::clone(&request.attachment_acceptance),
             extra_body: request.extra_body.clone(),
+            request_defaults: request.request_defaults,
             generation: request.generation.clone(),
             scope: request.scope.clone(),
             output_spec: request.output_spec.clone(),
@@ -1463,7 +1477,9 @@ impl LlmRequestSpec {
             tool_choice: self.tool_choice,
             model_variant: self.model_variant,
             model_capability: self.model_capability,
+            attachment_acceptance: self.attachment_acceptance,
             extra_body: self.extra_body,
+            request_defaults: self.request_defaults,
             generation: self.generation,
             scope: self.scope,
             output_spec: self.output_spec,

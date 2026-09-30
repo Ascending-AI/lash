@@ -7,22 +7,41 @@ pub(crate) fn model_spec(
     model: impl Into<String>,
     variant: Option<String>,
     context_window_tokens: usize,
-) -> lash_core::ModelSpec {
+) -> lash_core::ModelMetadata {
     let capability = capability_for_variant(variant.as_deref());
-    lash_core::ModelSpec::builder(model)
-        .variant(
-            variant
-                .map(lash_core::ReasoningSelection::Effort)
-                .unwrap_or_default(),
-        )
+    lash_core::ModelMetadata::builder(model)
         .context_window_tokens(context_window_tokens)
         .build()
         .expect("valid model spec")
         .with_capability(capability)
 }
 
-pub(crate) fn mock_model_spec() -> lash_core::ModelSpec {
+pub(crate) fn mock_model_spec() -> lash_core::ModelMetadata {
     model_spec("mock-model", None, 200_000)
+}
+
+/// A catalog serving every one of `models` through `provider`, each keyed by
+/// its wire model.
+pub(crate) fn test_catalog(
+    provider: lash_core::facade_support::ProviderHandle,
+    models: impl IntoIterator<Item = lash_core::ModelMetadata>,
+) -> Arc<lash_core::ModelRegistry> {
+    let registry = models
+        .into_iter()
+        .try_fold(lash_core::ModelRegistry::new(), |registry, metadata| {
+            registry.register(
+                metadata.wire_model.clone(),
+                lash_core::RegisteredModel::new(metadata, provider.clone()),
+            )
+        })
+        .expect("a test catalog registers each wire model once");
+    Arc::new(registry)
+}
+
+/// `metadata` as [`test_catalog`] records it, run with the provider's default
+/// reasoning.
+pub(crate) fn recorded_model(metadata: lash_core::ModelMetadata) -> lash_core::ModelConfig {
+    lash_core::testing::test_model_config(metadata.wire_model.clone(), metadata)
 }
 
 std::thread_local! {
@@ -395,7 +414,6 @@ fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {
     lash_core::ModelCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
-        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash_core::ReasoningCapability {
             efforts: vec![variant.to_string()],

@@ -27,7 +27,11 @@ use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetry
 use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::TokenUsage;
-use lash::{ModelLimits, ModelSpec};
+use lash::{
+    EmptyModels, ModelConfig, ModelKey, ModelLimits, ModelMetadata, ModelRegistry,
+    ModelUnavailable, ModelUnavailableReason, RecordedModel, RegisteredModel, RegistrationError,
+    RunResolveError, RuntimeModels, SpecResolveError,
+};
 
 fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
     let operation = OperationId::turn("facade", "turn", "final");
@@ -184,8 +188,28 @@ fn provider_reliability_types_are_nameable(
     let _ = (reliability, retry, rate_limits);
 }
 
-fn model_spec_types_are_nameable(spec: ModelSpec, limits: ModelLimits) {
-    let _ = (spec, limits);
+fn model_types_are_nameable(
+    metadata: ModelMetadata,
+    limits: ModelLimits,
+    key: ModelKey,
+    recorded: RecordedModel,
+    config: ModelConfig,
+    registry: ModelRegistry,
+    entry: RegisteredModel,
+) {
+    let _: &dyn RuntimeModels = &registry;
+    let _: &dyn RuntimeModels = &EmptyModels;
+    let _ = (metadata, limits, key, recorded, config, entry);
+}
+
+fn model_errors_are_nameable(
+    unavailable: ModelUnavailable,
+    reason: ModelUnavailableReason,
+    registration: RegistrationError,
+    spec_error: SpecResolveError,
+    run_error: RunResolveError,
+) {
+    let _ = (unavailable, reason, registration, spec_error, run_error);
 }
 
 fn cancellation_token_is_at_root(token: lash::CancellationToken, session: &lash::LashSession) {
@@ -347,7 +371,8 @@ fn main() {
     let _ = message_role_type_is_nameable;
     let _ = turn_result_detail_types_are_nameable;
     let _ = provider_reliability_types_are_nameable;
-    let _ = model_spec_types_are_nameable;
+    let _ = model_types_are_nameable;
+    let _ = model_errors_are_nameable;
     let _ = persistence_load_helpers_are_nameable;
     let _ = verified_commit_chokepoint_is_nameable;
     let _ = wrapped_session_store_refusal_is_nameable;

@@ -1,6 +1,8 @@
 use lash::ProcessId;
 use lash::SessionId;
 mod batch_journal;
+mod e2e_model;
+pub use e2e_model::{E2E_MODEL_KEY, e2e_model_metadata};
 pub mod load;
 pub mod local_restate;
 mod schema;
@@ -474,14 +476,6 @@ pub struct E2eCoreConfig {
     pub load: Option<load::LoadContext>,
 }
 
-/// The model every e2e core and its host-started processes run.
-pub fn e2e_model_spec() -> Result<lash::ModelSpec> {
-    lash::ModelSpec::builder("e2e-mock")
-        .context_window_tokens(200_000)
-        .build()
-        .map_err(|err| anyhow::anyhow!(err))
-}
-
 pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     let session_execution_owner = LeaseOwnerIdentity::opaque(
         config.worker_id.clone(),
@@ -515,8 +509,11 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         lash::TurnBudget::Unbounded,
         factory,
     )
-        .provider(provider)
-        .model(e2e_model_spec()?)
+        .models(Arc::new(lash::ModelRegistry::new().register(
+            E2E_MODEL_KEY,
+            lash::RegisteredModel::new(e2e_model_metadata()?, provider),
+        )?))
+        .model(E2E_MODEL_KEY)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))

@@ -20,9 +20,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// The owner id of the session's core config: provider, model, prompt,
-/// generation, the execution controls and tool access. No plugin may
-/// register it.
+/// The owner id of the session's core config: model, reasoning, attachment
+/// acceptance, prompt, generation, the execution controls and tool access.
+/// No plugin may register it.
 pub const CORE_CONFIG_OWNER: &str = "core";
 
 /// The core owner's share of a session's recorded config: every config head
@@ -32,8 +32,15 @@ pub const CORE_CONFIG_OWNER: &str = "core";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CoreConfig {
-    pub provider_id: String,
-    pub model: crate::ModelSpec,
+    /// The recorded model and the reasoning it runs with. A model command
+    /// records the binding the host's registry minted when it resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::ModelConfig>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+    )]
+    pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
     pub turn_budget: crate::TurnBudget,
     pub autonomous: bool,
     pub no_progress_budget: crate::NoProgressBudget,
@@ -50,8 +57,8 @@ impl CoreConfig {
     /// The core share of `config`.
     pub fn of(config: &crate::PersistedSessionConfig) -> Self {
         Self {
-            provider_id: config.provider_id.clone(),
             model: config.model.clone(),
+            attachment_acceptance: std::sync::Arc::clone(&config.attachment_acceptance),
             turn_budget: config.turn_budget,
             autonomous: config.autonomous,
             no_progress_budget: config.no_progress_budget,
@@ -64,8 +71,8 @@ impl CoreConfig {
 
     /// Write this core share into `config`, leaving every other field alone.
     pub fn apply_to(&self, config: &mut crate::PersistedSessionConfig) {
-        config.provider_id = self.provider_id.clone();
         config.model = self.model.clone();
+        config.attachment_acceptance = std::sync::Arc::clone(&self.attachment_acceptance);
         config.turn_budget = self.turn_budget;
         config.autonomous = self.autonomous;
         config.no_progress_budget = self.no_progress_budget;

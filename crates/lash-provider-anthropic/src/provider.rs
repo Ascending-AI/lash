@@ -196,10 +196,10 @@ impl Provider for AnthropicProvider {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             }),
-            expose_thinking: self.options.expose_thinking,
+            expose_thinking: req.request_defaults.expose_thinking,
             ..StreamState::default()
         };
-        let expose_thinking = self.options.expose_thinking;
+        let expose_thinking = req.request_defaults.expose_thinking;
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,

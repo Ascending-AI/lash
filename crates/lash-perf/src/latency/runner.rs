@@ -410,8 +410,7 @@ fn build_core(
         )),
     )));
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(latency_model_spec()?)
+        .serve_test_model(provider, latency_model_spec()?)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -446,8 +445,8 @@ async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<las
     )
 }
 
-fn latency_model_spec() -> Result<lash::ModelSpec> {
-    lash::ModelSpec::builder("latency-model")
+fn latency_model_spec() -> Result<lash::ModelMetadata> {
+    lash::ModelMetadata::builder("latency-model")
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))

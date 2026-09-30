@@ -124,8 +124,8 @@ impl std::fmt::Display for SessionCommandReceipt {
 /// completion and session head committed together. `Pending` preserves an
 /// accepted receipt when the configured settlement deadline expires, while
 /// `Cancelled` reports a queued command withdrawn before that commit.
-/// `Stale` and `Refused` are the config patch's typed non-applications
-/// (FIG-3541): the command settled — durably — without changing the config.
+/// `Stale` is the config patch's typed non-application (FIG-3541): the
+/// command settled — durably — without changing the config.
 #[derive(Clone, Debug)]
 pub enum SessionCommandSettlement {
     Rejected(crate::RuntimeError),

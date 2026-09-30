@@ -29,15 +29,31 @@ const REDEPLOYED_MODEL: &str = "run-spec-redeployed-model";
 /// Guidance only a spec's prompt layer carries.
 const PINNED_GUIDANCE: &str = "run-spec pinned guidance";
 
+fn model(id: &str) -> crate::ModelKey {
+    crate::ModelKey::new(id)
+}
+
+/// The law's models: every model it names, all served by `provider`.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: a literal model spec always builds"
+    reason = "conformance-law fixture: the law's distinct literal keys always register"
 )]
-fn model(id: &str) -> crate::ModelSpec {
-    crate::ModelSpec::builder(id)
-        .context_window_tokens(200_000)
-        .build()
-        .expect("the law's model spec builds")
+fn law_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegistry> {
+    let registry = [
+        SESSION_MODEL,
+        COMMANDED_MODEL,
+        PINNED_MODEL,
+        REDEPLOYED_MODEL,
+    ]
+    .into_iter()
+    .try_fold(crate::ModelRegistry::new(), |registry, id| {
+        registry.register(
+            id,
+            crate::RegisteredModel::new(crate::testing::test_model_metadata(id), provider.clone()),
+        )
+    })
+    .expect("every law model registers once");
+    Arc::new(registry)
 }
 
 /// A spec pinning its root to [`PINNED_MODEL`] with [`PINNED_GUIDANCE`].
@@ -118,8 +134,7 @@ fn record_models(parts: &mut DriveParts) -> Arc<std::sync::Mutex<Vec<String>>> {
             }
         })
         .build();
-    parts.host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(provider.into_handle()));
+    parts.host.providers.models = law_models(provider.into_handle());
     models
 }
 
@@ -253,7 +268,7 @@ pub async fn run_specs_split_roots_in_admission_order(
         "each root ran on its own spec's shape"
     );
     assert_eq!(
-        head_config(&parts).await.model.id,
+        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
         SESSION_MODEL,
         "the pinned roots left the session's model alone"
     );
@@ -351,7 +366,8 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     );
     let head = head_config(&parts).await;
     assert_eq!(
-        head.model.id, COMMANDED_MODEL,
+        crate::conformance::helpers::recorded_model_key(&head.model),
+        COMMANDED_MODEL,
         "the sticky model is the command's"
     );
     assert!(
@@ -467,7 +483,10 @@ pub async fn a_root_resolves_its_spec_once_across_a_crash(
         vec![(input, TurnId::from("once-root"))],
         "the root commits once"
     );
-    assert_eq!(head_config(&parts).await.model.id, SESSION_MODEL);
+    assert_eq!(
+        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
+        SESSION_MODEL
+    );
 }
 
 /// A definition revision this worker does not register ends the root's
@@ -694,7 +713,10 @@ pub async fn a_batch_shares_one_spec_that_each_root_resolves_once(
         "the shared spec resolved once per root"
     );
     assert_eq!(recorded(&models), vec![PINNED_MODEL, PINNED_MODEL]);
-    assert_eq!(head_config(&parts).await.model.id, SESSION_MODEL);
+    assert_eq!(
+        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
+        SESSION_MODEL
+    );
 }
 
 /// A batch keeps its place in the turn lane, and the command lane still
@@ -805,7 +827,10 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
         vec![COMMANDED_MODEL, PINNED_MODEL, COMMANDED_MODEL],
         "the command applied before the first turn-lane claim; the batch ran on its own shape"
     );
-    assert_eq!(head_config(&parts).await.model.id, COMMANDED_MODEL);
+    assert_eq!(
+        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
+        COMMANDED_MODEL
+    );
 }
 
 /// The tool whose call closes the first frame with a switch.
@@ -952,8 +977,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
             }
         })
         .build();
-    parts.host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(provider.into_handle()));
+    parts.host.providers.models = law_models(provider.into_handle());
     let executed = Arc::new(AtomicUsize::new(0));
     let tool: Arc<dyn crate::plugin::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(

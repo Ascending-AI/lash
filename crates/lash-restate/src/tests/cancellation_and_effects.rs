@@ -1061,11 +1061,13 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         ),
     ));
     let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(lash_core::ModelSpec::new(
-            "fig-430-model",
-            std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
-        ))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::new(
+                "fig-430-model",
+                std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
+            ),
+        )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

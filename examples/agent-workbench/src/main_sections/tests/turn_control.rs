@@ -1,3 +1,4 @@
+use super::tests::ServeWorkbenchTestModel as _;
 use super::tests::{
     detached_trigger_store, explicit_durable_test_facets_on, run_async_test_on_stack_budget,
     spawn_restate_ingress_capture, text_response,
@@ -121,14 +122,13 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         })
         .build()
         .into_handle();
-    let model = lash::ModelSpec::builder("test-model")
+    let model = lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -415,14 +415,13 @@ async fn turn_cancel_test_state_with_ingress(
         .complete_error("turn cancellation routing test should not call the provider")
         .build()
         .into_handle();
-    let model = lash::ModelSpec::builder("test-model")
+    let model = lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -720,13 +719,12 @@ finish(await handle);
         })
         .build()
         .into_handle();
-    let model = lash::ModelSpec::builder("test-model")
+    let model = lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(provider)
-        .model(model)
+        .serve_workbench_model(provider, model)
         .build(crate::test_core_owner())
         .expect("build Stop-over-process core");
     crate::tests::install_test_process_worker(&double, &core);

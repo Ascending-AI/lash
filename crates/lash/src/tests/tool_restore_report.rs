@@ -78,8 +78,7 @@ async fn seed_session_with_a_persisted_tool(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core
@@ -121,8 +120,7 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let opened = grantless_core
         .session(session_id.clone())
@@ -161,8 +159,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(OpenLifecycleProbeFactory {
         counters: Arc::clone(&counters),
     }))
@@ -210,8 +207,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let reopened = tolerant_core
         .session(session_id.clone())
@@ -236,8 +232,7 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match tolerant_core
@@ -292,8 +287,7 @@ async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()>
         strict.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)
     .build(crate::testing::runtime_lease_owner())?;
 

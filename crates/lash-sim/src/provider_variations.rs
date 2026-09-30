@@ -395,7 +395,7 @@ mod tests {
                 let response = provider
                     .complete(
                         provider_request(
-                            &model.id,
+                            &model,
                             variation,
                             LlmProviderTraceSender::new(move |event| {
                                 trace_sink.lock_recover().push(event);
@@ -482,8 +482,7 @@ mod tests {
             })
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(model)
+            .serve_test_model(provider, model)
             .build(crate::sim_process_owner())
             .expect("RLM core");
         let session = crate::open_created_session(&core, "rlm-stop-honoring-boundary")
@@ -609,20 +608,22 @@ mod tests {
     }
 
     fn provider_request(
-        model: &str,
+        model: &lash_core::ModelMetadata,
         variation: ProviderStopVariation,
         provider_trace: LlmProviderTraceSender,
     ) -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: model.to_string(),
+            model: model.wire_model.clone(),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
+            attachment_acceptance: Default::default(),
             model_variant: Default::default(),
             model_capability: Default::default(),
             extra_body: Default::default(),
+            request_defaults: model.request_defaults,
             generation: GenerationOptions {
                 stop_sequences: (variation == ProviderStopVariation::StopConsumed)
                     .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())

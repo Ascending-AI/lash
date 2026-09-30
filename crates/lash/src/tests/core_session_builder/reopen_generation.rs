@@ -15,8 +15,7 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("generation-merge")
         .create(crate::SessionCreation {

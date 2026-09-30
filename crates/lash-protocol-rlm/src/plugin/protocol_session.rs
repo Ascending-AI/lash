@@ -62,7 +62,7 @@ impl RlmProtocolSession {
             None => self.config.continue_as_soft_warn_tokens,
         };
         let threshold =
-            effective_budget_tokens(configured, Some(ctx.state.policy().context_window_tokens()));
+            effective_budget_tokens(configured, ctx.state.policy().context_window_tokens());
         let Some(threshold) = threshold else {
             return Ok(Vec::new());
         };
@@ -296,10 +296,13 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: lash_core::ModelSpec::builder("budget-unit-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("model limits"),
+            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                lash_core::ModelKey::from("budget-unit-model"),
+                lash_core::ModelMetadata::builder("budget-unit-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model limits"),
+            ))),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let state = lash_core::SessionSnapshot {
@@ -352,10 +355,13 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: lash_core::ModelSpec::builder("budget-unit-model")
-                .context_window_tokens(41_000)
-                .build()
-                .expect("model limits"),
+            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                lash_core::ModelKey::from("budget-unit-model"),
+                lash_core::ModelMetadata::builder("budget-unit-model")
+                    .context_window_tokens(41_000)
+                    .build()
+                    .expect("model limits"),
+            ))),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let state = lash_core::SessionSnapshot {
@@ -394,10 +400,13 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: lash_core::ModelSpec::builder("realistic-41k-model")
-                .context_window_tokens(41_000)
-                .build()
-                .expect("model limits"),
+            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                lash_core::ModelKey::from("realistic-41k-model"),
+                lash_core::ModelMetadata::builder("realistic-41k-model")
+                    .context_window_tokens(41_000)
+                    .build()
+                    .expect("model limits"),
+            ))),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let state = lash_core::SessionSnapshot {
@@ -443,10 +452,13 @@ mod tests {
         plugin_config: lash_core::AdmittedPluginConfig,
     ) -> lash_core::plugin::CheckpointHookContext {
         let policy = lash_core::SessionPolicy {
-            model: lash_core::ModelSpec::builder("budget-unit-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("model limits"),
+            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
+                lash_core::ModelKey::from("budget-unit-model"),
+                lash_core::ModelMetadata::builder("budget-unit-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model limits"),
+            ))),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let state = lash_core::SessionSnapshot {

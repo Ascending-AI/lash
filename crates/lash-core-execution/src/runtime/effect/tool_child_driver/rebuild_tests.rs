@@ -225,13 +225,6 @@ fn every_unrecorded_source_is_a_typed_rebuild_refusal() {
         ),
         (
             UnrecordedSessionSources {
-                open_provider: true,
-                ..Default::default()
-            },
-            ToolChildRebuildRefusal::OpenProvider,
-        ),
-        (
-            UnrecordedSessionSources {
                 open_tool_policy: true,
                 ..Default::default()
             },

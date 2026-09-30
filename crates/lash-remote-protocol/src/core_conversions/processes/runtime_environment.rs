@@ -325,38 +325,37 @@ impl From<lash_core::ModelLimits> for RemoteProcessModelLimits {
     }
 }
 
-impl From<lash_core::ModelSpec> for RemoteProcessModelSpec {
-    fn from(value: lash_core::ModelSpec) -> Self {
-        let lash_core::ModelSpec {
-            id,
+impl From<lash_core::ModelMetadata> for RemoteModelMetadata {
+    fn from(value: lash_core::ModelMetadata) -> Self {
+        let lash_core::ModelMetadata {
+            wire_model,
             extra_body,
-            variant,
             capability,
             limits,
+            request_defaults,
         } = value;
         Self {
-            id,
+            wire_model,
             extra_body,
-            variant: variant.into(),
             capability: capability.into(),
             limits: limits.into(),
+            request_defaults: request_defaults.into(),
         }
     }
 }
 
-impl TryFrom<RemoteProcessModelSpec> for lash_core::ModelSpec {
+impl TryFrom<RemoteModelMetadata> for lash_core::ModelMetadata {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessModelSpec) -> Result<Self, Self::Error> {
-        let RemoteProcessModelSpec {
-            id,
+    fn try_from(value: RemoteModelMetadata) -> Result<Self, Self::Error> {
+        let RemoteModelMetadata {
+            wire_model,
             extra_body,
-            variant,
             capability,
             limits,
+            request_defaults,
         } = value;
-        let model = lash_core::ModelSpec::builder(id)
-            .variant(variant.into())
+        let model = lash_core::ModelMetadata::builder(wire_model)
             .context_window_tokens(limits.context_window_tokens);
         let model = match limits.output_token_capacity {
             Some(capacity) => model.output_token_capacity(capacity),
@@ -369,8 +368,41 @@ impl TryFrom<RemoteProcessModelSpec> for lash_core::ModelSpec {
                 message: err.to_string(),
             })?
             .with_capability(capability.into())
-            .with_extra_body(extra_body);
+            .with_extra_body(extra_body)
+            .with_request_defaults(request_defaults.into());
         Ok(model)
+    }
+}
+
+impl From<lash_core::ModelConfig> for RemoteModelConfig {
+    fn from(value: lash_core::ModelConfig) -> Self {
+        let lash_core::ModelConfig { model, reasoning } = value;
+        Self {
+            key: model.key().as_str().to_string(),
+            metadata: model.metadata().clone().into(),
+            reasoning: reasoning.into(),
+        }
+    }
+}
+
+impl TryFrom<RemoteModelConfig> for lash_core::ModelConfig {
+    type Error = RemoteProtocolError;
+
+    /// The remote carrier conveys a binding the session already recorded;
+    /// decoding it restores that recorded value, never a fresh lookup.
+    fn try_from(value: RemoteModelConfig) -> Result<Self, Self::Error> {
+        let RemoteModelConfig {
+            key,
+            metadata,
+            reasoning,
+        } = value;
+        Ok(Self {
+            model: lash_core::RecordedModel::mint(
+                lash_core::ModelKey::new(key),
+                metadata.try_into()?,
+            ),
+            reasoning: reasoning.into(),
+        })
     }
 }
 
@@ -378,7 +410,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
     fn from(value: lash_core::SessionPolicy) -> Self {
         let lash_core::SessionPolicy {
             model,
-            provider_id,
+            attachment_acceptance,
             session_id,
             autonomous,
             turn_budget,
@@ -388,8 +420,8 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             generation,
         } = value;
         Self {
-            model: model.into(),
-            provider_id,
+            model: model.map(Into::into),
+            attachment_acceptance: std::sync::Arc::unwrap_or_clone(attachment_acceptance).into(),
             session_id,
             autonomous,
             turn_budget: turn_budget.into(),
@@ -473,7 +505,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
     fn try_from(value: RemoteProcessExecutionPolicy) -> Result<Self, Self::Error> {
         let RemoteProcessExecutionPolicy {
             model,
-            provider_id,
+            attachment_acceptance,
             session_id,
             autonomous,
             turn_budget,
@@ -483,8 +515,8 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             generation,
         } = value;
         Ok(Self {
-            model: model.try_into()?,
-            provider_id,
+            model: model.map(TryInto::try_into).transpose()?,
+            attachment_acceptance: std::sync::Arc::new(attachment_acceptance.into()),
             session_id,
             autonomous,
             turn_budget: turn_budget.into(),

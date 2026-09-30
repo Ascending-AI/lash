@@ -488,10 +488,6 @@ async fn run_mutation_script(
         }
         MutationRequestKind::Anthropic => {
             let mut provider = AnthropicProvider::new("test-key")
-                .with_options(lash_core::provider::ProviderOptions {
-                    max_output_tokens: Some(4_096),
-                    ..lash_core::provider::ProviderOptions::default()
-                })
                 .with_base_url(Some("https://anthropic.test".to_string()))
                 .with_transport(provider_transport(&transport));
             provider.complete(anthropic_messages_request()).await
@@ -586,9 +582,11 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
             output_schema: json!({}).into(),
         }]),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -609,9 +607,11 @@ fn openai_responses_request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -632,9 +632,15 @@ fn anthropic_messages_request() -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        // Messages requires a cap, and lash invents none.
+        request_defaults: lash_core::provider::ModelRequestDefaults {
+            max_output_tokens: Some(4_096),
+            ..Default::default()
+        },
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -655,9 +661,11 @@ fn google_request(stream: bool) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",

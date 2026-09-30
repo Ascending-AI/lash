@@ -18,8 +18,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),
         ),
     )
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("commit-graph-only-budget-surface")

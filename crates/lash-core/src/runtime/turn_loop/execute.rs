@@ -427,13 +427,13 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        // The route is the turn's recorded config (D3 §2.1); it was validated
-        // when it was set, so a route this worker cannot bind is its
-        // deployment, retried and never the turn's outcome (Q3).
+        // The model binding is the turn's recorded config (D3 §2.1); it was
+        // adopted when it was set, so a binding this worker cannot serve is
+        // its deployment, retried and never the turn's outcome (Q3).
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-            .map_err(crate::runtime::drive::provider_binding_unavailable)?;
+            .map_err(crate::runtime::drive::model_unavailable)?;
         let manager = self
             .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {

@@ -1,12 +1,72 @@
 use super::*;
-use crate::{PromptContribution, PromptSlot};
+use crate::{ModelConfig, PromptContribution, PromptSlot, RecordedModel};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::provider::{ModelUnavailable, ModelUnavailableReason, RuntimeModels};
+
+/// A catalog the resolver reads through `snapshot` only: it mints each listed
+/// key with a 200k window and counts the mints.
+struct Catalog {
+    keys: &'static [&'static str],
+    snapshots: AtomicUsize,
+}
+
+impl Catalog {
+    fn serving(keys: &'static [&'static str]) -> Self {
+        Self {
+            keys,
+            snapshots: AtomicUsize::new(0),
+        }
+    }
+
+    fn snapshots(&self) -> usize {
+        self.snapshots.load(Ordering::SeqCst)
+    }
+}
+
+impl RuntimeModels for Catalog {
+    fn snapshot(&self, key: &ModelKey) -> Result<RecordedModel, ModelUnavailable> {
+        self.snapshots.fetch_add(1, Ordering::SeqCst);
+        if self.keys.contains(&key.as_str()) {
+            Ok(recorded(key.as_str()))
+        } else {
+            Err(ModelUnavailable::new(
+                key.clone(),
+                ModelUnavailableReason::UnknownKey,
+            ))
+        }
+    }
+
+    fn bind(
+        &self,
+        recorded: &RecordedModel,
+    ) -> Result<crate::provider::ProviderHandle, ModelUnavailable> {
+        panic!(
+            "resolving a spec never binds a transport: {}",
+            recorded.key()
+        )
+    }
+}
+
+fn recorded(key: &str) -> RecordedModel {
+    RecordedModel::mint(
+        ModelKey::new(key),
+        lash_core_llm::model::ModelMetadata::new(
+            format!("{key}-wire"),
+            std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
+        ),
+    )
+}
+
+fn catalog() -> Catalog {
+    Catalog::serving(&["session-model", "root-model", "definition-model"])
+}
 
 fn snapshot() -> PersistedSessionConfig {
     let mut config = PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
-    config.provider_id = "session-provider".to_string();
-    config.model = ModelSpec::new(
-        "session-model",
-        std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
+    config.model = Some(
+        ModelConfig::new(recorded("session-model"))
+            .with_reasoning(ReasoningSelection::Effort("low".to_string())),
     );
     config.prompt = Some(
         PromptLayer::new().with_contribution(PromptContribution::guidance("Session", "session")),
@@ -30,7 +90,7 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
         serde_json::json!({})
     );
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
         .expect("resolve");
     assert_eq!(
         resolved,
@@ -48,7 +108,7 @@ fn a_resolved_run_records_its_termination_policy() {
         treat_missing_done_as_failure: false,
     };
     let resolved = RunSpec::default()
-        .resolve(&snapshot(), None, finishes.clone())
+        .resolve(&snapshot(), None, finishes.clone(), &catalog())
         .expect("resolve");
     assert_eq!(resolved.termination, finishes);
 
@@ -152,7 +212,7 @@ fn a_spec_hash_is_canonical_over_prompt_slot_order() {
         spec(forward).canonical_json().expect("json")
     );
     let other = RunSpec::overrides(RunOverrides {
-        provider_id: Some("other".to_string()),
+        model: Some(ModelKey::new("other")),
         ..RunOverrides::default()
     });
     assert_ne!(Some(hash), other.hash().expect("hash"));
@@ -164,7 +224,8 @@ fn a_canonical_spec_decodes_back_to_itself() {
         definition: Some(DefinitionRef::new("review", 3)),
         context: serde_json::json!({ "repo": "lash" }),
         overrides: Box::new(RunOverrides {
-            provider_id: Some("route".to_string()),
+            model: Some(ModelKey::new("route")),
+            reasoning: Some(ReasoningSelection::Effort("high".to_string())),
             ..RunOverrides::default()
         }),
         capabilities: [(
@@ -205,7 +266,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     );
     assert!(spec.hash().expect("hash").is_some());
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
         .expect("resolve");
     assert_eq!(resolved.capabilities, spec.capabilities);
     assert_eq!(
@@ -240,18 +301,72 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
 }
 
 #[test]
-fn a_provider_only_override_keeps_the_snapshot_model_and_variant() {
+fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     let spec = RunSpec::overrides(RunOverrides {
-        provider_id: Some("root-provider".to_string()),
+        model: Some(ModelKey::new("root-model")),
         ..RunOverrides::default()
     });
+    let catalog = catalog();
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog)
         .expect("resolve");
-    assert_eq!(resolved.config().provider_id, "root-provider");
-    assert_eq!(resolved.config().model, snapshot().model);
+    assert_eq!(catalog.snapshots(), 1, "the key is minted exactly once");
+    let model = resolved.config().model.clone().expect("model");
+    assert_eq!(model.model, recorded("root-model"));
+    assert_eq!(
+        model.reasoning,
+        ReasoningSelection::Effort("low".to_string()),
+        "a key alone keeps the snapshot's reasoning"
+    );
     assert_eq!(resolved.spec, spec.hash().expect("hash"));
     assert_eq!(resolved.base.config_revision, 7);
+}
+
+#[test]
+fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
+    let spec = RunSpec::overrides(RunOverrides {
+        reasoning: Some(ReasoningSelection::Effort("high".to_string())),
+        ..RunOverrides::default()
+    });
+    let catalog = catalog();
+    let resolved = spec
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog)
+        .expect("resolve");
+    assert_eq!(catalog.snapshots(), 0, "no key, no mint");
+    let model = resolved.config().model.clone().expect("model");
+    assert_eq!(model.model, recorded("session-model"));
+    assert_eq!(
+        model.reasoning,
+        ReasoningSelection::Effort("high".to_string())
+    );
+}
+
+#[test]
+fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
+    let spec = RunSpec::overrides(RunOverrides {
+        model: Some(ModelKey::new("retired-model")),
+        ..RunOverrides::default()
+    });
+    match spec.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+        Err(RunResolveError::Model(unavailable)) => {
+            assert_eq!(unavailable.key, ModelKey::new("retired-model"));
+            assert_eq!(unavailable.reason, ModelUnavailableReason::UnknownKey);
+        }
+        other => panic!("an unserved key must fail typed, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
+    let spec = RunSpec::overrides(RunOverrides {
+        reasoning: Some(ReasoningSelection::Effort("high".to_string())),
+        ..RunOverrides::default()
+    });
+    let bare = PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    assert!(matches!(
+        spec.resolve(&bare, None, TerminationPolicy::default(), &catalog()),
+        Err(RunResolveError::ReasoningWithoutModel)
+    ));
 }
 
 #[test]
@@ -272,7 +387,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         ..RunSpec::default()
     };
     let definition = RunOverrides {
-        provider_id: Some("definition-provider".to_string()),
+        model: Some(ModelKey::new("definition-model")),
         protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
             serde_json::json!({ "replace": "definition", "added": true }),
         )),
@@ -283,9 +398,18 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         ..RunOverrides::default()
     };
     let resolved = spec
-        .resolve(&snapshot(), Some(definition), TerminationPolicy::default())
+        .resolve(
+            &snapshot(),
+            Some(definition),
+            TerminationPolicy::default(),
+            &catalog(),
+        )
         .expect("resolve");
-    assert_eq!(resolved.config().provider_id, "definition-provider");
+    assert_eq!(
+        resolved.config().model.clone().expect("model").model,
+        recorded("definition-model"),
+        "the definition's key wins over the snapshot's model"
+    );
     assert_eq!(
         resolved
             .config()
@@ -317,7 +441,7 @@ fn a_reset_slot_in_an_override_replaces_the_snapshot_slot() {
         ..RunOverrides::default()
     });
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
         .expect("resolve");
     let prompt = lash_sansio::session_model::prompt::resolve_prompt_layers([resolved
         .config()

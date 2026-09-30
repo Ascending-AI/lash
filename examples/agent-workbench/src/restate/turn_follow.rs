@@ -105,7 +105,7 @@ pub(crate) async fn start_user_turn(
     request: UserTurnRequest,
 ) -> Result<tokio::task::JoinHandle<TurnSettlement>, AppError> {
     let input = workbench_turn_input(state, &request).await?;
-    let turn_model = model_spec_from_selection(request.model.clone());
+    let turn_model = request.model.clone();
     let session = state
         .create_or_open_session(&request.session_id, "api.turn")
         .await

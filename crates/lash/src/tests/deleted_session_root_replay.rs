@@ -360,8 +360,7 @@ fn core_over(
                 crate::QueuedWorkBatchingConfig::new(1)
                     .with_max_follow_on_recoveries(max_recoveries),
             )
-            .provider(provider)
-            .model(mock_model_spec());
+            .serve_test_model(provider, mock_model_spec());
     if work == Work::FollowOn {
         builder = builder
             .tools(Arc::new(AgentFrameSwitchTools))

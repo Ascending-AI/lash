@@ -131,9 +131,9 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let double = test_double_backend(SEED).await;
         let core = explicit_durable_test_facets_on(double.lash_backend())
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("workbench-tool-control-model")
+            .serve_test_model(
+                provider,
+                lash::ModelMetadata::builder("workbench-tool-control-model")
                     .context_window_tokens(4_096)
                     .build()
                     .expect("tool control model"),

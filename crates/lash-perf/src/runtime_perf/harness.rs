@@ -57,8 +57,8 @@ const BENCHMARK_MAIL_EVENT: &str = "received";
     clippy::expect_used,
     reason = "the mock model spec is built from fixed constants with no validation to fail"
 )]
-fn benchmark_model_spec() -> lash::ModelSpec {
-    lash::ModelSpec::builder("mock-model")
+fn benchmark_model_spec() -> lash::ModelMetadata {
+    lash::ModelMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid benchmark model spec")
@@ -763,8 +763,7 @@ fn benchmark_standard_builder(
     provider: ProviderHandle,
 ) -> lash::LashCoreBuilder {
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .provider(provider)
-        .model(benchmark_model_spec())
+        .serve_test_model(provider, benchmark_model_spec())
 }
 
 fn benchmark_rlm_builder(
@@ -777,8 +776,7 @@ fn benchmark_rlm_builder(
         lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
         factory,
     )
-    .provider(provider)
-    .model(benchmark_model_spec())
+    .serve_test_model(provider, benchmark_model_spec())
 }
 
 // The benchmark plugin list, in push order. Every conditional reads the

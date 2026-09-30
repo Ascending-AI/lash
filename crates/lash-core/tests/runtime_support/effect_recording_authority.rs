@@ -65,10 +65,8 @@ pub fn host_with_effect_recorder(
     recorder: RecordingEffectController,
 ) -> EmbeddedRuntimeHost {
     let mut config = runtime_host_config_with_effect_layer(backend, Arc::new(recorder));
-    config.providers.provider_resolver =
-        Arc::new(lash_core::facade_support::SingleProviderResolver::new(
-            mock_provider(Vec::new()).into_handle(),
-        ));
+    config.providers.models =
+        lash_core::testing::standard_test_models(mock_provider(Vec::new()).into_handle());
     EmbeddedRuntimeHost::new(config)
 }
 

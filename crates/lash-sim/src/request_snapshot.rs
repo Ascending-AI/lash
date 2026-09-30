@@ -32,8 +32,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model)
+        .serve_test_model(provider, model)
         .prompt_template(PromptTemplate::new(vec![PromptTemplateSection::untitled(
             vec![PromptTemplateEntry::text("System snapshot instruction.")],
         )]))

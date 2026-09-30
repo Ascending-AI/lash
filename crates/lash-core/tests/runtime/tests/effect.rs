@@ -818,11 +818,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
-        provider_id: "mock".to_string(),
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model spec"),
+        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let plugin_session =
@@ -879,11 +875,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let policy = SessionPolicy {
-        provider_id: "mock".to_string(),
-        model: lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model spec"),
+        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let plugin_session =
@@ -1356,9 +1348,11 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
+        attachment_acceptance: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "direct-attachment-test",
             "direct-attachment-test:frame",

@@ -170,9 +170,9 @@ fn rlm_core_with_plugins(
         .into_iter()
         .fold(builder, |builder, plugin| builder.plugin(plugin));
     builder
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("artifact-referrers")
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("artifact-referrers")
                 .context_window_tokens(16_000)
                 .build()
                 .expect("model spec"),

@@ -1653,13 +1653,7 @@ async fn resolve_model_return(
                         Arc::clone(&dispatch.plugins),
                         settlement,
                         Arc::clone(&dispatch.attachment_store),
-                        (*dispatch
-                            .execution_env_spec
-                            .policy
-                            .model
-                            .capability
-                            .attachment_acceptance)
-                            .clone(),
+                        (*dispatch.execution_env_spec.policy.attachment_acceptance).clone(),
                         duration_ms,
                     ),
                 )

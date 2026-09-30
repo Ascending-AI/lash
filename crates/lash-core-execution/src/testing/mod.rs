@@ -234,7 +234,7 @@ use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSna
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{
-    AssembledTurn, AssistantOutput, ModelSpec, OutputState, ProviderOptions, RuntimeSessionState,
+    AssembledTurn, AssistantOutput, OutputState, ProviderOptions, RuntimeSessionState,
     SessionPolicy, TokenUsage, TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
 };
 
@@ -512,28 +512,74 @@ impl Provider for TestProvider {
     }
 }
 
+/// Metadata for a test model: `wire_model` with a 200k prompt budget and no
+/// other facts.
+pub fn test_model_metadata(wire_model: &str) -> crate::ModelMetadata {
+    crate::ModelMetadata::builder(wire_model)
+        .context_window_tokens(200_000)
+        .build()
+        .expect("valid test model metadata")
+}
+
+/// A recorded test model selection: `metadata` as a registry would mint it
+/// under `key`, run with the provider's default reasoning.
+pub fn test_model_config(
+    key: impl Into<crate::ModelKey>,
+    metadata: crate::ModelMetadata,
+) -> crate::ModelConfig {
+    crate::ModelConfig::new(crate::RecordedModel::mint(key.into(), metadata))
+}
+
+/// A registry serving one model: `provider` executes `metadata` under `key`.
+pub fn single_model_registry(
+    key: impl Into<crate::ModelKey>,
+    metadata: crate::ModelMetadata,
+    provider: ProviderHandle,
+) -> std::sync::Arc<crate::ModelRegistry> {
+    std::sync::Arc::new(
+        crate::ModelRegistry::new()
+            .register(key, crate::RegisteredModel::new(metadata, provider))
+            .expect("a one-model registry registers its model"),
+    )
+}
+
+/// A registry serving exactly the model `policy` records, executed by
+/// `provider`: the recorded key bound to the recorded metadata.
+pub fn models_serving(
+    policy: &crate::SessionPolicy,
+    provider: ProviderHandle,
+) -> std::sync::Arc<crate::ModelRegistry> {
+    let recorded = &policy
+        .model
+        .as_ref()
+        .expect("a policy served by a registry records a model")
+        .model;
+    single_model_registry(
+        recorded.key().clone(),
+        recorded.metadata().clone(),
+        provider,
+    )
+}
+
+/// A registry serving [`standard_test_policy`]'s model with `provider`.
+pub fn standard_test_models(provider: ProviderHandle) -> std::sync::Arc<crate::ModelRegistry> {
+    single_model_registry("mock-model", test_model_metadata("mock-model"), provider)
+}
+
 pub fn standard_test_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
-        provider_id: "mock".to_string(),
-        model: crate::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model spec"),
+        model: Some(test_model_config(
+            "mock-model",
+            test_model_metadata("mock-model"),
+        )),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
 
-/// Build a `SessionPolicy` populated with the canonical stub provider
-/// + model used by lash's in-tree tests.
+/// Build a `SessionPolicy` populated with the canonical test model used by
+/// lash's in-tree tests.
 pub fn mock_session_policy() -> SessionPolicy {
-    SessionPolicy {
-        provider_id: "stub".to_string(),
-        model: ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid mock model spec"),
-        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
-    }
+    standard_test_policy()
 }
 
 /// The runtime's per-call dispatch state for one tool call, built for a test.
@@ -1413,12 +1459,7 @@ pub async fn coordinate_tool_provider_with_services(
                 ),
             },
             std::sync::Arc::new(settlement),
-            &dispatch
-                .execution_env_spec
-                .policy
-                .model
-                .capability
-                .attachment_acceptance,
+            &dispatch.execution_env_spec.policy.attachment_acceptance,
         )
         .await
         .map_err(|error| error.to_string())?
@@ -2138,10 +2179,7 @@ pub struct MockSessionManager {
 impl Default for MockSessionManager {
     fn default() -> Self {
         Self {
-            snapshot: RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-            .to_snapshot(),
+            snapshot: RuntimeSessionState::new(mock_session_policy()).to_snapshot(),
             tool_catalog: Vec::new(),
             turn: mock_assembled_turn(&SessionId::from("root"), ""),
             tool_registry: None,

@@ -81,15 +81,10 @@ impl GoogleOAuthProvider {
                 .flat_map(LlmContentBlock::attachment_sources)
             {
                 let validation = (|| {
-                    let supported = req
-                        .model_capability
-                        .attachment_acceptance
-                        .accepts("Google Gemini", source);
+                    let supported = req.attachment_acceptance.accepts("Google Gemini", source);
                     if !supported {
-                        let accepted_by = known_attachment_acceptors(
-                            &req.model_capability.attachment_acceptance,
-                            source,
-                        );
+                        let accepted_by =
+                            known_attachment_acceptors(&req.attachment_acceptance, source);
                         return Err(unsupported_attachment_capability(
                             "Google Gemini",
                             source,
@@ -449,15 +444,10 @@ impl GoogleOAuthProvider {
     /// refusing what Cloud Code cannot send. Pure, so `complete` runs it
     /// before the project lookup and any upload, and the builder agrees.
     pub(crate) fn resolve_generation(
-        provider: &GoogleOAuthProvider,
         req: &LlmRequest,
     ) -> Result<(ResolvedGenerationPolicy, Option<Value>), LlmTransportError> {
-        let policy = resolve_generation_policy(
-            req,
-            &provider.options,
-            Self::PROVIDER_KIND,
-            &Self::generation_wire(req),
-        )?;
+        let policy =
+            resolve_generation_policy(req, Self::PROVIDER_KIND, &Self::generation_wire(req))?;
         let thinking_config = Self::thinking_config(
             req.model_capability.google_dialect,
             policy.reasoning.as_ref(),
@@ -484,7 +474,7 @@ impl GoogleOAuthProvider {
         contents: Vec<Value>,
         project_id: Option<&str>,
     ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
-        let (policy, thinking_config) = Self::resolve_generation(provider, req)?;
+        let (policy, thinking_config) = Self::resolve_generation(req)?;
         let mut emission = GenerationEmission {
             reasoning_retention: matches!(
                 req.model_capability.reasoning_retention.selection,

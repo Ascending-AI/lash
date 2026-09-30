@@ -115,8 +115,7 @@ async fn build_runtime(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let protocol = match shape {
         Shape::Native => crate::testing::test_standard_protocol_factories(),
         Shape::Aggregate => world.rlm.clone(),

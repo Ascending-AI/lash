@@ -11,8 +11,6 @@ mod commit_budget;
 
 #[path = "session_lifecycle/journal_retirement.rs"]
 mod journal_retirement;
-#[path = "session_lifecycle/provider_pin.rs"]
-mod provider_pin;
 #[path = "session_lifecycle/session_binding.rs"]
 mod session_binding;
 
@@ -100,7 +98,12 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
             .lock_recover()
             .push(ReconciliationTransformObservation {
                 max_context_tokens: ctx.max_context_tokens,
-                session_model: ctx.state.policy().model.id.clone(),
+                session_model: ctx
+                    .state
+                    .policy()
+                    .wire_model()
+                    .unwrap_or_default()
+                    .to_string(),
             });
         Ok(input)
     }
@@ -108,13 +111,15 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
 
 fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     let historical_policy = lash_core::SessionPolicy {
-        provider_id: "embed-test".to_string(),
-        model: model_spec("historical-model", None, 11_111),
+        model: Some(recorded_model(model_spec("historical-model", None, 11_111))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let current_policy = lash_core::SessionPolicy {
-        provider_id: "embed-test".to_string(),
-        model: model_spec("current-frame-model", None, 22_222),
+        model: Some(recorded_model(model_spec(
+            "current-frame-model",
+            None,
+            22_222,
+        ))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
@@ -148,8 +153,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
-        provider_id: "embed-test".to_string(),
-        model: model_spec("top-level-model", None, 33_333),
+        model: Some(recorded_model(model_spec("top-level-model", None, 33_333))),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     state
@@ -305,8 +309,7 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
 async fn typed_core_builders_require_explicit_runtime_settings() {
     let err = match LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("the standard preset must not default a commit budget"),
@@ -321,8 +324,7 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("generic LashCore must require an explicit protocol plugin"),
@@ -339,8 +341,10 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(recording_prompt_provider(Arc::clone(&seen)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        recording_prompt_provider(Arc::clone(&seen)),
+        mock_model_spec(),
+    )
     .instructions("Zulu core instruction.")
     .instructions("Repeated instruction.")
     .instructions("Repeated instruction.")
@@ -413,8 +417,10 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(recording_prompt_provider(Arc::clone(&seen)))
-    .model(mock_model_spec())
+    .serve_test_model(
+        recording_prompt_provider(Arc::clone(&seen)),
+        mock_model_spec(),
+    )
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("per-turn-prompt")
@@ -441,55 +447,63 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     Ok(())
 }
 
+/// A session created with its own key runs that key's transport, and a
+/// model change naming a key the host does not serve is refused typed and
+/// changes nothing (FIG-4374).
 #[tokio::test]
-async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_must_be_served()
--> Result<()> {
+async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_typed() -> Result<()> {
+    let core_provider = text_provider("core-provider", "core-model", "core");
+    let session_provider = text_provider("session-provider", "session-model", "session");
+    let models = test_catalog(core_provider, [model_spec("core-model", None, 200_000)]);
+    let registry = Arc::try_unwrap(models)
+        .unwrap_or_else(|_| unreachable!("a fresh catalog has one owner"))
+        .register(
+            "session-model",
+            lash_core::RegisteredModel::new(
+                model_spec("session-model", None, 200_000),
+                session_provider,
+            ),
+        )
+        .expect("a second key registers");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(text_provider("core-provider", "core-model", "core"))
-    .model(model_spec("core-model", None, 200_000))
+    .models(Arc::new(registry))
+    .model("core-model")
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
-    let session = core
-        .session("main")
-        .provider(text_provider(
-            "session-provider",
-            "session-model",
-            "session",
-        ))
-        .created()
-        .await
-        .open()
+    core.session("main")
+        .create(crate::SessionCreation {
+            spec: crate::SessionSpec::inherit().model("session-model"),
+            ..Default::default()
+        })
         .await?;
+    let session = core.session("main").open().await?;
 
     let session_result = session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(assistant_prose(&session_result.activities), "session");
 
-    // A config route is a provider id the host must already serve
-    // (FIG-3600 S6): an unserved one is refused typed by the core owner when
-    // the transaction resolves, and the session keeps its provider.
+    // A model change names a key: one the host does not serve is refused
+    // typed by the core owner when the transaction resolves, and the session
+    // keeps its recorded model.
     let config = session.admin().config();
     let revision = config.revision().await?;
     let refused = config
         .apply(
-            crate::config::ConfigWrite::new("unserved-route", revision),
-            crate::config::ConfigTransaction::of(crate::config::SetProvider {
-                provider_id: "updated-provider".to_string(),
-            })
-            .then(crate::config::SetModel {
-                model: model_spec("updated-model", None, 200_000),
+            crate::config::ConfigWrite::new("unserved-key", revision),
+            crate::config::ConfigTransaction::of(crate::config::SetModel {
+                model: lash_core::ModelKey::new("updated-model"),
             }),
         )
         .await?;
     let crate::config::ConfigTransactionOutcome::Refused { refusal } = refused else {
-        panic!("a route no provider serves is refused: {refused:?}");
+        panic!("a key the host does not serve is refused: {refused:?}");
     };
     assert_eq!(refusal.owner, crate::config::CORE_CONFIG_OWNER);
-    assert!(
-        refusal.message.contains("no provider serves the route"),
-        "the refusal names the unserved route: {refusal:?}"
+    assert_eq!(
+        refusal.refusal["kind"], "unknown_model",
+        "the refusal is the core owner's typed unknown-model refusal: {refusal:?}"
     );
 
     let after_refusal = session.send(TurnInput::text("hello")).output().await?;
@@ -497,40 +511,37 @@ async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_
     Ok(())
 }
 
+/// The core's default reasoning is recorded with the session's model and
+/// reaches the request unchanged.
 #[tokio::test]
-async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> {
+async fn the_core_reasoning_is_recorded_and_reaches_the_request() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(recording_text_provider(
-        "core-provider",
-        "core-model",
-        Some("core-variant"),
-        "core",
-        Arc::clone(&seen),
-    ))
-    .model(model_spec(
-        "core-model",
-        Some("core-variant".to_string()),
-        200_000,
+    .serve_test_model(
+        recording_text_provider(
+            "core-provider",
+            "core-model",
+            Some("core-variant"),
+            "core",
+            Arc::clone(&seen),
+        ),
+        model_spec("core-model", Some("core-variant".to_string()), 200_000),
+    )
+    .reasoning(lash_core::ReasoningSelection::Effort(
+        "core-variant".to_string(),
     ))
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core");
-    let session = core
-        .session("main")
-        .provider(recording_text_provider(
-            "session-provider",
-            "session-model",
-            Some("session-variant"),
-            "session",
-            Arc::clone(&seen),
+    let session = core.session("main").created().await.open().await?;
+    assert_eq!(
+        session.policy_snapshot().model.map(|model| model.reasoning),
+        Some(lash_core::ReasoningSelection::Effort(
+            "core-variant".to_string()
         ))
-        .created()
-        .await
-        .open()
-        .await?;
+    );
 
     session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(
@@ -547,8 +558,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
 #[tokio::test]
 async fn rlm_core_opens_rlm_session() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     core.session("rlm").created().await.open().await?;
@@ -587,8 +597,7 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         &backend.clone(),
     );
     let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
@@ -660,8 +669,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .trace_jsonl_path(trace_path.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -766,8 +774,7 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(provider)
-        .model(mock_model_spec())
+        .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-multi-turn-history-shape")
@@ -898,8 +905,10 @@ finish(value);
 async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(recording_request_provider(Arc::clone(&seen)))
-        .model(mock_model_spec())
+        .serve_test_model(
+            recording_request_provider(Arc::clone(&seen)),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
 
     let markdown = core
@@ -944,8 +953,10 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
 async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(recording_request_provider(Arc::clone(&seen)))
-        .model(mock_model_spec())
+        .serve_test_model(
+            recording_request_provider(Arc::clone(&seen)),
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
 
     core.session("rlm-format-survives-reopen")
@@ -992,8 +1003,7 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
 #[tokio::test]
 async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let _parent = core.session("rlm-root").created().await.open().await?;
     let mut plugin_options = lash_core::PluginOptions {
@@ -1066,8 +1076,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     .concat();
     let session_id = "rlm-v5-cold-open";
     let policy = lash_core::SessionPolicy {
-        provider_id: mock_provider().kind().to_string(),
-        model: mock_model_spec(),
+        model: Some(recorded_model(mock_model_spec())),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
@@ -1080,8 +1089,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
     let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let error = match core.session(session_id).created().await.open().await {
@@ -1107,8 +1115,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("persisted"),
         policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -1124,8 +1131,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core.session("persisted").created().await.open().await?;
@@ -1143,8 +1149,7 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
             "Continue with the committed prompt configuration.",
         ));
     let mut persisted_policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
-    persisted_policy.provider_id = mock_provider().kind().to_string();
-    persisted_policy.model = mock_model_spec();
+    persisted_policy.model = Some(recorded_model(mock_model_spec()));
     persisted_policy.prompt = expected_prompt.clone();
     let persisted = RuntimeSessionState {
         session_id: SessionId::from("committed-session"),
@@ -1158,8 +1163,7 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core
@@ -1179,8 +1183,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked").created().await.open().await?;
@@ -1235,8 +1238,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
         double_backend_explicit_reconcile().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -1283,8 +1285,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("busy").created().await.open().await?;
@@ -1305,265 +1306,6 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn session_policy_serializes_provider_id_without_provider_config() -> Result<()> {
-    let provider = crate::testing::TestProvider::builder()
-        .kind("secret-provider")
-        .serialize_config(|| serde_json::json!({ "api_key": "should-not-persist" }))
-        .build()
-        .into_handle();
-    let policy = lash_core::SessionPolicy {
-        provider_id: provider.kind().to_string(),
-        model: mock_model_spec(),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-    };
-
-    let value = serde_json::to_value(&policy)?;
-    assert_eq!(value["provider_id"], "secret-provider");
-    assert!(value.get("provider").is_none());
-    assert!(!value.to_string().contains("should-not-persist"));
-
-    let decoded: lash_core::SessionPolicy = serde_json::from_value(value)?;
-    assert_eq!(decoded.recorded_provider_id(), "secret-provider");
-    Ok(())
-}
-
-#[tokio::test]
-async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("provider-rebind"),
-        policy: lash_core::SessionPolicy {
-            provider_id: "embed-test".to_string(),
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-        current_frame_node_id: None,
-        agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "stored",
-    )]);
-    let (backend, _) = backend_seeded(state).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    let reopened = core
-        .session("provider-rebind")
-        .created()
-        .await
-        .open()
-        .await?;
-    let persisted = reopened.admin().state().persist_current().await?;
-
-    assert_eq!(persisted.policy.recorded_provider_id(), "embed-test");
-    assert!(
-        persisted
-            .agent_frames
-            .iter()
-            .all(|frame| frame.assignment.policy.recorded_provider_id() == "embed-test")
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn persisted_provider_id_mismatch_is_refused_at_open_not_deferred_to_a_turn() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("provider-mismatch"),
-        policy: lash_core::SessionPolicy {
-            provider_id: "other-provider".to_string(),
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-        current_frame_node_id: None,
-        agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    let (backend, _) = backend_seeded(state).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    // The durable pin disagrees with the provider this host names, so the
-    // open answers the conflict instead of discarding the request and letting
-    // the first turn fail on a provider nobody asked for.
-    let error = match core
-        .session("provider-mismatch")
-        .created()
-        .await
-        .open()
-        .await
-    {
-        Ok(_) => panic!("a recorded provider mismatch must be refused at open"),
-        Err(error) => error,
-    };
-    match &error {
-        EmbedError::Session(lash_core::SessionError::ProviderMismatch {
-            expected,
-            actual,
-            session_id,
-        }) => {
-            assert_eq!(expected, "other-provider");
-            assert_eq!(actual, "embed-test");
-            assert_eq!(session_id.as_str(), "provider-mismatch");
-        }
-        other => panic!("expected a typed provider-pin refusal, got: {other:?}"),
-    }
-    assert!(error.is_terminal());
-    Ok(())
-}
-
-#[tokio::test]
-async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("frame-provider-mismatch"),
-        policy: lash_core::SessionPolicy {
-            provider_id: "embed-test".to_string(),
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-        current_frame_node_id: None,
-        agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    let leaf_node_id = state.session_graph.leaf_node_id.clone();
-    let mut nodes = state.session_graph.nodes.to_vec();
-    let frame = nodes
-        .iter_mut()
-        .find(|node| Some(node.node_id.as_str()) == state.current_frame_node_id.as_deref())
-        .expect("initial frame node");
-    let lash_core::SessionNodePayload::FrameOpen { assignment, .. } =
-        &mut std::sync::Arc::make_mut(frame).payload
-    else {
-        panic!("current frame must be a FrameOpen node");
-    };
-    assignment.policy.provider_id = "other-provider".to_string();
-    state.session_graph = lash_core::SessionGraph::from_shared_nodes(nodes, leaf_node_id)
-        .expect("session lifecycle fixture graph is valid");
-    state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-    let (backend, _) = backend_seeded(state).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    let session = core
-        .session("frame-provider-mismatch")
-        .created()
-        .await
-        .open()
-        .await?;
-    assert_eq!(
-        session.policy_snapshot().recorded_provider_id(),
-        "embed-test"
-    );
-    session
-        .send(TurnInput::text("runs with reconciled provider"))
-        .output()
-        .await?;
-    Ok(())
-}
-
-/// FIG-1875 (head-authoritative adoption): when a competing writer advances
-/// the durable head's provider id, the next turn's refresh adopts it — the
-/// recorded provider id is a durable fact and the head wins. A host that has
-/// not registered the adopted provider gets an explicit typed refusal naming
-/// it (retryable: FIG-3600 S6, D3 Q3), instead of silently running on a
-/// resident copy that masks the
-/// stale-head race. (The adoption mapping itself is pinned by
-/// `resident_refresh_adopts_the_durable_head_provider_id` in lash-core; the
-/// failed turn does not commit, so this surface asserts the refusal.)
-#[tokio::test]
-async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("refresh-provider-mismatch"),
-        policy: lash_core::SessionPolicy {
-            provider_id: "embed-test".to_string(),
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-        current_frame_node_id: None,
-        agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    let (backend, store) = backend_seeded(state).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("refresh-provider-mismatch")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    set_head_provider_id(&store, "other-provider").await;
-    let waiter = tokio::spawn({
-        let session = session.clone();
-        async move {
-            session
-                .send(TurnInput::text("runs against the adopted head provider"))
-                .output()
-                .await
-        }
-    });
-    // The refusal is the typed, retryable provider-binding error: the engine
-    // retries the drive, and each attempt fails naming the adopted provider
-    // this host has not registered.
-    let double = held_double(&core).expect("the core runs on its held double");
-    let (_, failure) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        loop {
-            if let Some(failure) = double
-                .server()
-                .invocations()
-                .into_iter()
-                .filter_map(|invocation| invocation.last_failure)
-                .find(|(_, message)| message.contains("other-provider"))
-            {
-                break failure;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the drive's attempt fails on the adopted head's provider");
-    waiter.abort();
-    assert!(
-        failure.contains("ProviderBindingUnavailable") && failure.contains("retryable"),
-        "the refusal is the typed provider-binding error: {failure}"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()> {
     let backend = double_backend().await;
@@ -1571,8 +1313,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let first = core
@@ -1594,8 +1335,11 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
 
     assert_eq!(assistant_prose(&second.activities), "echo: second");
     assert_eq!(
-        reopened.policy_snapshot().recorded_provider_id(),
-        "embed-test"
+        reopened
+            .policy_snapshot()
+            .model_key()
+            .map(ToString::to_string),
+        Some("mock-model".to_string())
     );
     Ok(())
 }
@@ -1606,8 +1350,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
         double_backend_explicit_reconcile().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("delete-session")
@@ -1673,8 +1416,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
         backend,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     for (session_id, append_plugin_body) in [
@@ -1739,8 +1481,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("manual-state"),
         policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
+            model: Some(recorded_model(mock_model_spec())),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -1756,8 +1497,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
         backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
 
@@ -1858,14 +1598,22 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     });
     let probe_factory = Arc::new(ReconciliationProbeFactory { transform });
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .provider(provider)
-        .model(builder_model.clone())
+        .models(test_catalog(
+            provider,
+            [
+                builder_model.clone(),
+                model_spec("top-level-model", None, 33_333),
+                model_spec("current-frame-model", None, 22_222),
+                model_spec("historical-model", None, 11_111),
+            ],
+        ))
+        .model("builder-model")
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
     assert_eq!(
-        session.policy_snapshot().model.id,
-        "top-level-model",
+        session.policy_snapshot().wire_model(),
+        Some("top-level-model"),
         "the reopen runs the recorded model"
     );
     session
@@ -1873,17 +1621,17 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         .config()
         .configure(crate::config::ConfigTransaction::of(
             crate::config::SetModel {
-                model: builder_model.clone(),
+                model: lash_core::ModelKey::new("builder-model"),
             },
         ))
         .await?;
 
     let policy = session.policy_snapshot();
-    assert_eq!(policy.model, builder_model);
+    assert_eq!(policy.model, Some(recorded_model(builder_model.clone())));
     println!(
         "consumer 1 policy_snapshot: model={} context_window_tokens={}",
-        policy.model.id,
-        policy.model.context_window_tokens()
+        policy.wire_model().unwrap_or_default(),
+        policy.context_window_tokens().unwrap_or_default()
     );
 
     session
@@ -1928,9 +1676,15 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         .iter()
         .find(|frame| frame.frame_node_id == historical_frame_id)
         .expect("historical frame remains");
-    assert_eq!(historical.assignment.policy.model.id, "historical-model");
+    assert_eq!(
+        historical.assignment.policy.wire_model(),
+        Some("historical-model")
+    );
     let current = state.current_agent_frame().expect("current follow frame");
-    assert_eq!(current.assignment.policy.model, builder_model);
+    assert_eq!(
+        current.assignment.policy.model,
+        Some(recorded_model(builder_model.clone()))
+    );
 
     let tier = lash_subagents::TierCapability::new(
         "inherited",
@@ -1954,25 +1708,42 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         })
         .expect("inherited child request");
     let child_policy = child.policy.expect("child policy");
-    assert_eq!(child_policy.model, builder_model);
+    assert_eq!(
+        child_policy.model,
+        Some(recorded_model(builder_model.clone()))
+    );
     println!(
         "consumer 5 child tier inheritance: model={} context_window_tokens={}",
-        child_policy.model.id,
-        child_policy.model.context_window_tokens()
+        child_policy.wire_model().unwrap_or_default(),
+        child_policy.context_window_tokens().unwrap_or_default()
     );
 
     let execution_env = state.process_execution_env_spec(&policy);
-    assert_eq!(execution_env.policy.model, builder_model);
+    assert_eq!(
+        execution_env.policy.model,
+        Some(recorded_model(builder_model.clone()))
+    );
     println!(
         "consumer 6 ProcessExecutionEnvSpec.policy: model={} context_window_tokens={}",
-        execution_env.policy.model.id,
-        execution_env.policy.model.context_window_tokens()
+        execution_env.policy.wire_model().unwrap_or_default(),
+        execution_env
+            .policy
+            .context_window_tokens()
+            .unwrap_or_default()
     );
     println!(
         "consumer 7 continue_as follow frame: model={} context_window_tokens={}; historical_frame_model={}",
-        current.assignment.policy.model.id,
-        current.assignment.policy.model.context_window_tokens(),
-        historical.assignment.policy.model.id
+        current.assignment.policy.wire_model().unwrap_or_default(),
+        current
+            .assignment
+            .policy
+            .context_window_tokens()
+            .unwrap_or_default(),
+        historical
+            .assignment
+            .policy
+            .wire_model()
+            .unwrap_or_default()
     );
     Ok(())
 }
@@ -1988,8 +1759,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(builder_model.clone())
+    .serve_test_model(mock_provider(), builder_model.clone())
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -2014,8 +1784,8 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
             .expect("current frame")
             .assignment
             .policy
-            .model
-            .id,
+            .wire_model()
+            .unwrap_or_default(),
         "current-frame-model"
     );
     assert_eq!(
@@ -2026,8 +1796,8 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
             .expect("historical frame")
             .assignment
             .policy
-            .model
-            .id,
+            .wire_model()
+            .unwrap_or_default(),
         "historical-model"
     );
     Ok(())
@@ -2041,15 +1811,24 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let (_backend, store) = backend_seeded(persisted).await;
     let policy = lash_core::SessionPolicy {
-        provider_id: "embed-test".to_string(),
-        model: model_spec("builder-model", None, 77_777),
+        model: Some(recorded_model(model_spec("builder-model", None, 77_777))),
         session_id: Some(SessionId::from(session_id)),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
-    let state =
-        crate::session::load_state_from_store(&SessionId::from(session_id), &policy, &store)
-            .await?;
+    // The head exists, so the fallback selection is never minted.
+    let defaults = crate::session::DefaultSelection {
+        model: lash_core::ModelKey::new("builder-model"),
+        reasoning: None,
+    };
+    let state = crate::session::load_state_from_store(
+        &SessionId::from(session_id),
+        &policy,
+        &defaults,
+        &lash_core::EmptyModels,
+        &store,
+    )
+    .await?;
     // A stateless worker's load carries no host spec at all: the durable
     // head's recorded model is authoritative over the resolved fallback.
     assert_eq!(state.policy.model, durable_model);
@@ -2059,8 +1838,8 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
             .expect("current frame")
             .assignment
             .policy
-            .model
-            .id,
+            .wire_model()
+            .unwrap_or_default(),
         "current-frame-model"
     );
     // The load does not rewrite history: the historical frame's durable
@@ -2075,8 +1854,8 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
         .expect("historical frame")
         .assignment
         .policy
-        .model
-        .id,
+        .wire_model()
+        .unwrap_or_default(),
         "historical-model"
     );
     Ok(())
@@ -2088,8 +1867,7 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let _session = core
         .session("root-with-child-store")

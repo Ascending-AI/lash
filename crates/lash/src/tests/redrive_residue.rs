@@ -51,22 +51,24 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
     .expect("build the always-replay Restate double");
     let calls = Arc::new(AtomicUsize::new(0));
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .provider({
-            let calls = Arc::clone(&calls);
-            crate::testing::TestProvider::builder()
-                .kind("redrive-residue")
-                .complete(move |_| {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    async {
-                        Ok(text_response(&typescript_block(
-                            "await sleep(60000);\nfinish(\"unreachable\");",
-                        )))
-                    }
-                })
-                .build()
-                .into_handle()
-        })
-        .model(mock_model_spec())
+        .serve_test_model(
+            {
+                let calls = Arc::clone(&calls);
+                crate::testing::TestProvider::builder()
+                    .kind("redrive-residue")
+                    .complete(move |_| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        async {
+                            Ok(text_response(&typescript_block(
+                                "await sleep(60000);\nfinish(\"unreachable\");",
+                            )))
+                        }
+                    })
+                    .build()
+                    .into_handle()
+            },
+            mock_model_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     let handle = session

@@ -11,8 +11,7 @@ pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> 
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("configured-effect-host")
@@ -47,8 +46,7 @@ pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> R
     let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .provider(mock_provider())
-        .model(mock_model_spec())
+        .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("durable-default-effect-host")
@@ -117,8 +115,7 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("stable-turn-id")
@@ -158,8 +155,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(provider)
-    .model(mock_model_spec())
+    .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("turn-started-cancel-target")
@@ -218,8 +214,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("idle-input-application")
@@ -305,8 +300,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -372,14 +366,14 @@ async fn answering_core(answer: &'static str) -> Result<LashCore> {
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .provider(
+    .serve_test_model(
         crate::testing::TestProvider::builder()
             .kind("mailbox-binding")
             .complete(move |_| async move { Ok(text_response(answer)) })
             .build()
             .into_handle(),
+        mock_model_spec(),
     )
-    .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -457,8 +451,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
+    .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("request-digest")

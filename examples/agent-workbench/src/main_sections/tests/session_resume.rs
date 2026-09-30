@@ -43,13 +43,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         })
         .build()
         .into_handle();
-    let model = lash::ModelSpec::builder("test-model")
+    let model = lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let first_core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(first_provider)
-        .model(model.clone())
+        .serve_workbench_model(first_provider, model.clone())
         .build(crate::test_core_owner())
         .expect("build first workbench core");
     let first_session = crate::created_session(&first_core, session_id.clone())
@@ -214,8 +213,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let resumed_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let resumed_core = explicit_durable_test_facets_on(double.lash_backend())
-        .provider(resumed_provider)
-        .model(model)
+        .serve_workbench_model(resumed_provider, model)
         .build(crate::test_core_owner())
         .expect("build reconstructed workbench core");
     let resumed_session_ids =

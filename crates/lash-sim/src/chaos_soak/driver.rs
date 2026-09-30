@@ -142,8 +142,7 @@ pub(super) fn soak_core(
                 generation_rank: rank.load(Ordering::SeqCst),
                 timings: soak_lease_timings(),
             })
-            .provider(soak_provider(Arc::clone(&reached)))
-            .model(model)
+            .serve_test_model(soak_provider(Arc::clone(&reached)), model)
             .plugin(Arc::new(processes))
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))

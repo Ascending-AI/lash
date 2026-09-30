@@ -10,7 +10,7 @@
 //! runtime-only field by construction.
 
 use crate::SessionId;
-use crate::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
+use crate::{ModelConfig, NoProgressBudget, SessionPolicy, TurnBudget};
 
 impl serde::Serialize for SessionPolicy {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -19,7 +19,13 @@ impl serde::Serialize for SessionPolicy {
     {
         use serde::ser::SerializeStruct;
 
-        let mut fields = 5;
+        let mut fields = 3;
+        if self.model.is_some() {
+            fields += 1;
+        }
+        if !self.attachment_acceptance.is_empty() {
+            fields += 1;
+        }
         if self.no_progress_budget != NoProgressBudget::default() {
             fields += 1;
         }
@@ -33,8 +39,12 @@ impl serde::Serialize for SessionPolicy {
             fields += 1;
         }
         let mut state = serializer.serialize_struct("SessionPolicy", fields)?;
-        state.serialize_field("model", &self.model)?;
-        state.serialize_field("provider_id", self.recorded_provider_id())?;
+        if let Some(model) = &self.model {
+            state.serialize_field("model", model)?;
+        }
+        if !self.attachment_acceptance.is_empty() {
+            state.serialize_field("attachment_acceptance", &self.attachment_acceptance)?;
+        }
         state.serialize_field("session_id", &self.session_id)?;
         state.serialize_field("autonomous", &self.autonomous)?;
         state.serialize_field("turn_budget", &self.turn_budget)?;
@@ -63,9 +73,9 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
         #[serde(deny_unknown_fields)]
         struct Wire {
             #[serde(default)]
-            model: ModelSpec,
+            model: Option<ModelConfig>,
             #[serde(default)]
-            provider_id: String,
+            attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
             #[serde(default)]
             session_id: Option<SessionId>,
             #[serde(default)]
@@ -81,19 +91,10 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             generation: crate::GenerationOptions,
         }
 
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if value
-            .as_object()
-            .is_some_and(|object| object.contains_key("provider"))
-        {
-            return Err(serde::de::Error::custom(
-                "legacy serialized provider config is not supported in session state; persist provider_id only",
-            ));
-        }
-        let wire = Wire::deserialize(value).map_err(serde::de::Error::custom)?;
+        let wire = Wire::deserialize(deserializer)?;
         Ok(Self {
             model: wire.model,
-            provider_id: wire.provider_id,
+            attachment_acceptance: wire.attachment_acceptance,
             session_id: wire.session_id,
             autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,

@@ -183,9 +183,11 @@ fn stored_attachment_request() -> LlmRequest {
             .collect(),
         tools: Default::default(),
         tool_choice: LlmToolChoice::Auto,
+        attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: crate::attachment_test_capability(),
+        model_capability: Default::default(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "fig2877-session",
             "fig2877-session:frame",

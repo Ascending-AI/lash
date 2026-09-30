@@ -42,23 +42,23 @@ fn attachment_acceptance_wire_literals_are_pinned() {
         let core: lash_core::provider::AttachmentCapabilitySnapshot = snapshot.clone().into();
         assert_eq!(RemoteAttachmentCapabilitySnapshot::from(core), snapshot);
     }
-    let capability = RemoteModelCapability {
-        attachment_acceptance: snapshot.clone(),
-        ..Default::default()
-    };
-    assert!(!capability.is_empty());
-    #[cfg(feature = "core-conversions")]
-    assert!(!lash_core::provider::ModelCapability::from(capability.clone()).is_empty());
+    // Acceptance is recorded session config beside the model: a model's
+    // capability never carries it, so a model intent serializes none.
+    let capability = RemoteModelCapability::default();
+    assert!(capability.is_empty());
     let intent = RemoteModelIntent {
         model: "fixture".into(),
         extra_body: Default::default(),
+        request_defaults: Default::default(),
         variant: Default::default(),
         capability,
         provider: None,
         metadata: Default::default(),
     };
-    assert_eq!(
-        serde_json::to_value(intent).unwrap()["capability"]["attachment_acceptance"],
-        serde_json::to_value(snapshot).unwrap()
+    assert!(
+        !serde_json::to_string(&intent)
+            .unwrap()
+            .contains("attachment_acceptance"),
+        "a model intent carries no attachment acceptance"
     );
 }

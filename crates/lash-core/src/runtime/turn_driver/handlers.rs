@@ -11,7 +11,7 @@ impl RuntimeTurnDriver<'_> {
             crate::runtime::runtime_error_from_store_commit(
                 crate::StoreError::TokenUsageAccountingOverflow {
                     usage_source: "turn".to_string(),
-                    model: self.policy.model.id.clone(),
+                    model: self.policy.model_config().model.wire_model().to_string(),
                     counter: overflow.counter(),
                 },
             )

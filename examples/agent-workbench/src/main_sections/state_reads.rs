@@ -85,7 +85,10 @@ pub(crate) fn state_store_request(
 ) -> lash::persistence::SessionStoreCreateRequest {
     let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
     policy.session_id = Some(SessionId::from(session_id.to_string()));
-    policy.model = model_spec_from_selection(state.selected_model());
+    let selection = state.selected_model();
+    policy.model = workbench_recorded_model(&selection.key())
+        .ok()
+        .map(|model| lash::ModelConfig::new(model).with_reasoning(selection.reasoning()));
     lash::persistence::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),

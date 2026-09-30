@@ -397,6 +397,37 @@ impl Processes {
         Ok(lash_core::ScopeRef::host_session_lookup(session_id.clone()))
     }
 
+    /// A session-turn start whose create request names no model runs the
+    /// core's default selection. The start records that minted binding in
+    /// its create request, so the worker that later creates the child copies
+    /// it and never falls back to a policy that selects no model.
+    fn record_default_session_turn_model(
+        &self,
+        request: &mut lash_core::ProcessStartRequest,
+    ) -> Result<()> {
+        let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input else {
+            return Ok(());
+        };
+        if create_request.model.is_some()
+            || create_request
+                .policy
+                .as_ref()
+                .is_some_and(|policy| policy.model.is_some())
+        {
+            return Ok(());
+        }
+        let minted = self.core.default_selection.mint(
+            lash_core::facade_support::SessionSpec::new(),
+            &self.core.policy,
+            self.core.env.core.providers.models.as_ref(),
+        )?;
+        match create_request.policy.as_mut() {
+            Some(policy) => policy.model = minted.model,
+            None => create_request.policy = Some(minted),
+        }
+        Ok(())
+    }
+
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
         let live =
             lash_core::runtime::session_is_live(self.core.store_factory.as_ref(), session_id)
@@ -446,9 +477,10 @@ impl Processes {
 
     pub async fn start(
         &self,
-        request: lash_core::ProcessStartRequest,
+        mut request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
+        self.record_default_session_turn_model(&mut request)?;
         // A root start's session grant is the host's lookup, whether it came
         // from `session_scope` or from a remote start's `until_session` data
         // (FIG-3607 R3). The start's recorded admission checks the session is

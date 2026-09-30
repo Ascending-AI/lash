@@ -177,21 +177,16 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         ProviderHandle::new(
             OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
                 .with_compat(OpenAiCompat::openrouter())
-                .with_options(ProviderOptions {
-                    expose_thinking: true,
-                    ..ProviderOptions::default()
-                })
                 .into_components(),
         )
     };
-    let model_spec = lash::ModelSpec::builder(model.clone())
-        .variant(lash::provider::ReasoningSelection::Effort(
-            model_variant.clone(),
-        ))
-        .context_window_tokens(context_window_tokens)
-        .build()
+    let selection = ModelSelection {
+        model: model.clone(),
+        model_variant: Some(model_variant.clone()),
+    };
+    // A bad context window refuses startup rather than the first session.
+    workbench_recorded_model(&selection.key())
         .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
-    let model_spec = with_workbench_model_capability(model_spec);
     let database_url = std::env::var("AGENT_WORKBENCH_DATABASE_URL")
         .ok()
         .filter(|value| !value.trim().is_empty());
@@ -308,7 +303,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::clone(&trace_sink))
     .trace_level(TraceLevel::Extended)
-    .provider(provider)
+    .models(Arc::new(WorkbenchModels {
+        provider: provider.clone(),
+    }))
     .session_spec(
         lash::SessionSpec::new()
             .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
@@ -320,7 +317,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 ..Default::default()
             }),
     )
-    .model(model_spec);
+    .model(selection.key())
+    .reasoning(selection.reasoning())
+    .attachment_acceptance(Arc::new(workbench_attachment_acceptance()));
     let builder = if let Some(tool_provider) =
         dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
     {
@@ -882,7 +881,7 @@ mod startup_tests {
     }
 
     #[test]
-    fn model_spec_for_request_carries_once_lock_context_window_override() {
+    fn a_selected_model_mints_with_the_once_lock_context_window_override() {
         // OnceLock is process-global and can only be initialized once; keep the
         // override in this single test and do not assert an unset state elsewhere.
         let override_tokens = 84_000;
@@ -894,8 +893,10 @@ mod startup_tests {
             model_variant: None,
         };
 
-        let model = model_spec_for_request(&selected, None, None)
-            .expect("the request model should use the configured context window");
+        let selection = model_selection_for_request(&selected, None, None)
+            .expect("the request keeps the selected model");
+        let model = workbench_recorded_model(&selection.key())
+            .expect("the catalog mints the selected model");
 
         assert_eq!(model.context_window_tokens(), override_tokens);
     }
