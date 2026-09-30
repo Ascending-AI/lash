@@ -133,6 +133,10 @@ until docker run --rm --name "lash-process-postgres-probe-${LASH_GATE_WORKTREE_S
   fi
   sleep 1
 done
+# Worker open only verifies the schema. Conformance laws provision isolated
+# databases, so the harness must provision the worker's database itself.
+"${compose[@]}" exec -T postgres psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
+  < "$repo/crates/lash-postgres-store/schema.sql"
 lash_s3_wait "$("${compose[@]}" ps -q s3)" 60
 until curl -fsS --max-time 2 "http://127.0.0.1:${restate_admin_port}/deployments" >"$artifact_dir/restate-deployments.json"; do
   if ((SECONDS >= deadline)); then
