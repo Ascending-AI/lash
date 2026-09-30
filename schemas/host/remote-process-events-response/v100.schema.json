@@ -1494,10 +1494,15 @@
             "null"
           ]
         },
-        "replay_key": {
-          "type": "string"
+        "owner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RuntimeOwner"
+            }
+          ],
+          "description": "Who the intent was declared under: a session, or a process."
         },
-        "session_id": {
+        "replay_key": {
           "type": "string"
         },
         "tool_call_id": {
@@ -1507,11 +1512,40 @@
       "required": [
         "execution_scope_id",
         "intent_index",
+        "owner",
         "replay_key",
-        "session_id",
         "tool_call_id"
       ],
       "type": "object"
+    },
+    "RuntimeOwner": {
+      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the plugin session, the tool catalog, the attachment facade, the authority a tool intent is declared under \u2014 and those interfaces take a `RuntimeOwner`. A process runtime is never handed a session id as a stand-in for its own identity.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "process": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "process"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ToolView": {
       "additionalProperties": false,
