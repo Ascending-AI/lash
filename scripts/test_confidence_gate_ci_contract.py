@@ -2815,6 +2815,7 @@ derive_mutation_jobs() {{
             "repo-gates": (
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
+                "bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py",
             ),
             "feature-lanes": (
                 "//:feature_lanes",

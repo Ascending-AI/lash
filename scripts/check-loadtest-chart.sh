@@ -14,5 +14,4 @@ done
 "$helm_bin" template topology "$chart" -f "$chart/values-local.yaml" \
   --set workers.generation=next --set 'workers.retainedGenerations[0]=initial' \
   --set workers.generationImages.initial=old --set workers.generationImages.next=new > target/loadtest-tools/retained-generations.yaml
-python3 scripts/test_loadtest_topology.py "$@"
 printf 'chart profiles passed: lint=2 template=4\n'
