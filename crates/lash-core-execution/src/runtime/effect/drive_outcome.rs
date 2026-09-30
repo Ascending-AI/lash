@@ -35,7 +35,7 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<crate::store::FollowOnRecoveryAnswer, RuntimeEffectControllerError> {
         match self {
-            Self::RecoverFollowOn { answer } => Ok(answer),
+            Self::RecoverFollowOn { answer } => Ok(*answer),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::RecoverFollowOn,
                 other.kind(),

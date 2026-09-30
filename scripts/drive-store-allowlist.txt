@@ -29,4 +29,6 @@ crates/lash-core/src/runtime/drive/root.rs  |  .load_pending_follow_on()  |  1  
 crates/lash-core/src/runtime/drive/root.rs  |  .load_session_head_meta()  |  1  # RECORDED admitted-head inspection step reads once whether a drive-fenced commit published the live head
 crates/lash-core/src/runtime/drive/root.rs  |  .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)  |  1  # RECORDED follow-on recovery decision step raises the recovery count under the fence (FIG-4361)
 crates/lash-core/src/runtime/drive/root.rs  |  .validate_turn_cancellation_binding(  |  1  # RECORDED root admission step checks the session's turn-cancellation binding under the fence before it admits
+crates/lash-core/src/runtime/drive/root.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED follow-on recovery decision step reads the base generation once (FIG-4380)
 crates/lash-core/src/runtime/drive/root.rs  |  if let Some(admission) = self.store.admit_root(&request).await? {  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED follow-on recovery decision step retains the base its turn runs on under the fence (FIG-4380)

@@ -74,7 +74,10 @@ commands, or fresh turn-lane work. The original run continues its chain inline.
 A recovery root records its decision, `RecoverFollowOn`, between its seal and
 its turn. The step's body raises the recovery count once in a fenced write, and
 records the raised fact, the exhaustion, or that the head does not owe the
-follow-on. Replay drives the recorded answer and cannot raise the count twice.
+follow-on. A raised or exhausted answer also records the head the follow-on's
+turn runs on and its turn index, and the step retains that head as an
+admission retains its base. Replay drives the recorded answer on the recorded
+head and index, and cannot raise the count twice.
 The first frame switch of a logical run freezes the host's
 `max_follow_on_recoveries` (default 3) on the fact, and the chain carries it:
 every recovery decides on the frozen bound, never on the bound of the host
@@ -90,7 +93,7 @@ uses frame retention and journal end evidence under
 
 Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
 `:76`, `crates/lash-core/src/runtime/drive/admission.rs:213`,
-`crates/lash-core/src/runtime/drive/root.rs:622`, and
+`crates/lash-core/src/runtime/drive/root.rs:677`, and
 `crates/lash-sqlite-store/src/persistence/session_commit.rs:14`.
 
 ### 4. Session commands are a lane applied at turn boundaries

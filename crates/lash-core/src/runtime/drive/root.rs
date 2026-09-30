@@ -304,10 +304,16 @@ impl LashRuntime {
     /// and raises the recovery count inside its body (FIG-4361). The rest of
     /// the root drives the recorded answer, never the head a replay finds:
     /// a follow-on the head owed no longer cedes the root, and one it owed
-    /// runs under the recorded fact or commits exhausted. The resident head is
-    /// brought current first, for the turn the answer runs; a refresh that
-    /// failed leaves the drive no head, and the root issues the same step
-    /// headless ([`run_headless_follow_on_root`]).
+    /// runs under the recorded fact or commits exhausted.
+    ///
+    /// The decision records the head the follow-on's turn runs on and that
+    /// turn's index, and its body retains that head (FIG-4380). The root
+    /// adopts the recorded head and pins the recorded index before its turn,
+    /// so a replay after the follow-on's own commit moved the head runs the
+    /// turn its journal holds. The resident head is brought current first,
+    /// for the decision's first execution to record; a refresh that failed
+    /// leaves the drive no head, and the root issues the same step headless
+    /// ([`run_headless_follow_on_root`]).
     pub(super) async fn run_follow_on_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -346,13 +352,22 @@ impl LashRuntime {
                     fence: fence.clone(),
                     follow_on: follow_on.turn.clone(),
                     attempts: follow_on.attempts,
+                    base: crate::store::SessionHeadRef {
+                        // Read by the decision body on its first execution.
+                        generation: 0,
+                        revision: self.state.head_revision,
+                        leaf: self.state.session_graph.leaf_node_id.clone(),
+                        checkpoint: self.state.checkpoint_ref.clone(),
+                    },
+                    // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                    turn_index: self.state.turn_index + 1,
                 }),
                 None,
             ),
         )
         .await?
         .map_err(|error| drive_abort(Some(&root), error))?;
-        let recovery = match answer {
+        let (recovery, base, turn_index) = match answer {
             FollowOnRecoveryAnswer::Ceded => {
                 return Ok(RootRun {
                     outcome: RootOutcome::Ceded { root },
@@ -365,28 +380,47 @@ impl LashRuntime {
                     ),
                 });
             }
-            FollowOnRecoveryAnswer::Run { follow_on } => {
-                crate::store::FollowOnRecovery::Run(follow_on)
-            }
-            FollowOnRecoveryAnswer::Exhausted { follow_on } => {
-                crate::store::FollowOnRecovery::Exhausted(follow_on)
-            }
+            FollowOnRecoveryAnswer::Run {
+                follow_on,
+                base,
+                turn_index,
+            } => (
+                crate::store::FollowOnRecovery::Run(follow_on),
+                base,
+                turn_index,
+            ),
+            FollowOnRecoveryAnswer::Exhausted {
+                follow_on,
+                base,
+                turn_index,
+            } => (
+                crate::store::FollowOnRecovery::Exhausted(follow_on),
+                base,
+                turn_index,
+            ),
         };
-        // The recorded fact is the head's while the head still owes this
-        // follow-on: the first execution's body raised its count after the
-        // refresh read it, and every head write of the turn must carry the
-        // fact the head holds.
-        if let (crate::store::FollowOnRecovery::Run(recorded), Some(owed)) =
-            (&recovery, self.state.pending_follow_on.as_deref())
-            && owed.is_turn(&recorded.follow_on_turn_id)
-        {
-            self.state.pending_follow_on = Some(Box::new(recorded.clone()));
+        // The follow-on's turn runs on the head its decision recorded, at the
+        // index it recorded, whatever head this execution refreshed: a replay
+        // after the follow-on's own commit finds a head that commit moved
+        // (FIG-4380).
+        if let Err(error) = self.adopt_recorded_turn(&base, turn_index).await {
+            self.record_turn_park_after_abort(&error, &root, None).await;
+            return Err(drive_abort(Some(&root), error));
         }
+        // The recorded base is read without its pending fact, and the fact
+        // the turn runs under is the recorded one: the head's while the head
+        // owes the follow-on, since the decision's first execution raised or
+        // read it there, and every head write of the turn must carry the
+        // fact the head holds.
+        let (crate::store::FollowOnRecovery::Run(owed)
+        | crate::store::FollowOnRecovery::Exhausted(owed)) = &recovery;
+        self.state.pending_follow_on = Some(Box::new(owed.clone()));
         let host = Arc::clone(&self.host.core.control.effect_host);
         let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
-        let drain = Box::pin(self.drive_recovered_follow_on(recovery, &options, fence.clone()))
-            .await
-            .map_err(|error| drive_abort(Some(&root), error))?;
+        let drain =
+            Box::pin(self.drive_recovered_follow_on(recovery, &options, fence.clone())).await;
+        self.admitted_turn_index = None;
+        let drain = drain.map_err(|error| drive_abort(Some(&root), error))?;
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
@@ -434,12 +468,6 @@ impl LashRuntime {
         // The root runs only under the executable generation its admission
         // recorded (FIG-3571), checked before anything else of it runs.
         crate::runtime::turn_loop::generation_fence::admit(self, generation)?;
-        let turn_index = usize::try_from(turn_index).map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "admitted turn index exceeds platform range",
-            )
-        })?;
         // The verdict is the one `drive-head` recorded, honoured at every
         // position (FIG-4058). Its live check, a head that moved from the
         // admission's base with no commit of this root behind it, is the
@@ -479,6 +507,26 @@ impl LashRuntime {
                 ));
             }
         };
+        self.adopt_recorded_turn(base, turn_index).await
+    }
+
+    /// Adopt `base`, the head a root's recorded step says its turn runs on,
+    /// as the resident session, and pin the recorded `turn_index` for the
+    /// turn's prepare phase, which then reads no live head (FIG-3682,
+    /// FIG-4380).
+    ///
+    /// A base the store no longer retains parks the root.
+    async fn adopt_recorded_turn(
+        &mut self,
+        base: &crate::store::SessionHeadRef,
+        turn_index: u64,
+    ) -> Result<(), RuntimeError> {
+        let turn_index = usize::try_from(turn_index).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "admitted turn index exceeds platform range",
+            )
+        })?;
         self.adopt_admission_base(base)
             .await
             .map_err(|error| match error {
@@ -616,14 +664,26 @@ async fn execute_follow_on_recovery(
 /// raised by an earlier execution of this step whose answer was not
 /// recorded, which this one continues without raising again. Once the raised
 /// count would pass the recovery bound the fact froze for its logical run,
-/// the answer is `Exhausted` and nothing is written: the bound of the host
-/// driving the root never decides it. The recorded fact carries that bound. A store that did not answer is this attempt's fault and the
-/// step runs again; a retired session is recorded (FIG-3630).
+/// the answer is `Exhausted` and the fact is not raised: the bound of the
+/// host driving the root never decides it. The recorded fact carries that
+/// bound.
+///
+/// A run or an exhaustion records `base`, the resident head the drive
+/// refreshed, and `turn_index`, the next one after it, and retains the base
+/// under the fence before the raise, as a root's admission retains its own
+/// (FIG-3682, FIG-4380): the root's turn runs on that head at that index on
+/// every execution. A store that did not answer is this attempt's fault and
+/// the step runs again; a retired session is recorded (FIG-3630).
 struct RecoverFollowOnRunner {
     store: crate::store::SessionStore,
     fence: crate::store::DriveFence,
     follow_on: TurnId,
     attempts: u32,
+    /// The resident head the follow-on's turn runs on, as the drive
+    /// refreshed it. Its generation is read in the body.
+    base: crate::store::SessionHeadRef,
+    /// The follow-on's turn index: the next one after `base`.
+    turn_index: usize,
 }
 
 impl RecoverFollowOnRunner {
@@ -641,25 +701,32 @@ impl RecoverFollowOnRunner {
             ..owed.clone()
         };
         let recovery = basis.recovery()?;
-        if owed.attempts > basis.attempts {
-            // An earlier execution of this step raised the count.
-            return Ok(match recovery {
-                crate::store::FollowOnRecovery::Run(_) => {
-                    FollowOnRecoveryAnswer::Run { follow_on: owed }
-                }
-                crate::store::FollowOnRecovery::Exhausted(_) => {
-                    FollowOnRecoveryAnswer::Exhausted { follow_on: owed }
-                }
-            });
-        }
+        let base = crate::store::SessionHeadRef {
+            generation: self.store.read_session_state_version().await?,
+            ..self.base.clone()
+        };
+        self.store.retain_admission_base(&self.fence, &base).await?;
+        let turn_index = self.turn_index as u64;
+        let raised_earlier = owed.attempts > basis.attempts;
         Ok(match recovery {
             crate::store::FollowOnRecovery::Run(_) => FollowOnRecoveryAnswer::Run {
-                follow_on: self
-                    .store
-                    .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
-                    .await?,
+                follow_on: if raised_earlier {
+                    owed
+                } else {
+                    self.store
+                        .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
+                        .await?
+                },
+                base,
+                turn_index,
             },
-            exhausted @ crate::store::FollowOnRecovery::Exhausted(_) => exhausted.into(),
+            crate::store::FollowOnRecovery::Exhausted(_) => FollowOnRecoveryAnswer::Exhausted {
+                // The head's fact: an earlier execution of this step may have
+                // raised it past `basis`.
+                follow_on: owed,
+                base,
+                turn_index,
+            },
         })
     }
 }
@@ -694,7 +761,9 @@ impl RuntimeEffectLocalRunner for RecoverFollowOnRunner {
             .decide()
             .await
             .map_err(|error| super::admission::store_fault("follow-on recovery failed", error))?;
-        Ok(crate::RuntimeEffectOutcome::RecoverFollowOn { answer })
+        Ok(crate::RuntimeEffectOutcome::RecoverFollowOn {
+            answer: Box::new(answer),
+        })
     }
 }
 

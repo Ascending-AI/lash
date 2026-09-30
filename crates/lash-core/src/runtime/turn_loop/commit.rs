@@ -843,6 +843,9 @@ impl LashRuntime {
             admissions,
             drive_fence,
         } = context;
+        // A recovered follow-on's terminal commits at the index its root's
+        // decision recorded, on the head it adopted (FIG-4380).
+        let admitted_turn_index = self.admitted_turn_index.take();
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
@@ -907,7 +910,7 @@ impl LashRuntime {
                 recorded_assembly,
                 new_messages: messages,
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                turn_index: self.state.turn_index + 1,
+                turn_index: admitted_turn_index.unwrap_or(self.state.turn_index + 1),
                 trace_turn_id,
             },
             admissions: &admissions,

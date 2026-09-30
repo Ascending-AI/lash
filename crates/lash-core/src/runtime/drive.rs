@@ -20,7 +20,9 @@
 //! a typed refusal. The check cannot select new work or change the admission's
 //! recorded base (ADR 0105 §2). A follow-on recovery root records its
 //! decision instead, `RecoverFollowOn`, whose body raises the recovery count
-//! and whose answer the root drives on every replay (FIG-4361).
+//! and retains the head the follow-on's turn runs on, and whose answer, with
+//! that head and the turn's index, the root drives on every replay (FIG-4361,
+//! FIG-4380).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!

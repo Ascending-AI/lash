@@ -186,26 +186,32 @@ pub enum FollowOnRecovery {
 /// fact the head owed, or that the head owed the follow-on no longer. The
 /// root drives the recorded answer, so a replay never decides from the head
 /// it finds.
+///
+/// A run or an exhaustion also records the head its follow-on's turn runs
+/// on, `base`, and that turn's index, `turn_index` (FIG-4380). The step's
+/// body retains the base as the session's latest admission's, as a root's
+/// admission retains its own (FIG-3682), and the root adopts it and pins the
+/// index before its turn, so a replay after the follow-on's own commit moved
+/// the head runs the turn it recorded.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum FollowOnRecoveryAnswer {
     /// Run the follow-on: `follow_on` carries the raised attempt count.
-    Run { follow_on: PendingFollowOn },
+    Run {
+        follow_on: PendingFollowOn,
+        base: super::SessionHeadRef,
+        turn_index: u64,
+    },
     /// The recovery bound is spent: the follow-on commits as its failed
     /// terminal, carrying `FollowOnRecoveryExhausted`.
-    Exhausted { follow_on: PendingFollowOn },
+    Exhausted {
+        follow_on: PendingFollowOn,
+        base: super::SessionHeadRef,
+        turn_index: u64,
+    },
     /// The head owed the follow-on no longer: another driver answered it,
     /// and the root runs nothing.
     Ceded,
-}
-
-impl From<FollowOnRecovery> for FollowOnRecoveryAnswer {
-    fn from(recovery: FollowOnRecovery) -> Self {
-        match recovery {
-            FollowOnRecovery::Run(follow_on) => Self::Run { follow_on },
-            FollowOnRecovery::Exhausted(follow_on) => Self::Exhausted { follow_on },
-        }
-    }
 }
 
 /// The admission a store is asked to make while it reads the head's fact.

@@ -125,7 +125,7 @@ and grammar stamps do not imply a compatibility reader for arbitrary builds.
 release boundary.
 
 Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:82`,
-`crates/lash-core/src/runtime/drive/root.rs:423`,
+`crates/lash-core/src/runtime/drive/root.rs:457`,
 `crates/lash-core/src/runtime/turn_loop/generation_fence.rs:1`.
 
 ### Laws

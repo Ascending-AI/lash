@@ -120,8 +120,12 @@ fact the head owes, raises the recovery count in a fenced write, and records
 for its logical run, or `Ceded` when the head does not owe the follow-on. The
 recorded fact carries that bound; the recovering host's bound never decides.
 The root drives the recorded answer and never re-decides from the head a replay
-finds. It records no base: a replay past the follow-on's own commit refreshes
-the head that commit moved (FIG-4380).
+finds. `Run` and `Exhausted` also record the head the follow-on's turn runs on
+and that turn's index, and the body retains that head as the session's latest
+admission's base before the raise, as `AdmitRoot` retains its own. The root
+adopts the recorded head and pins the recorded index before its turn, so a
+replay past the follow-on's own commit runs the turn its journal holds on the
+head it was recorded on, never on the head that commit moved (FIG-4380).
 
 A live read outside the recorded steps never decides which steps a root
 journals: not the resident-session refresh before `AdmitRoot`, not the engine's
@@ -172,14 +176,14 @@ Evidence: `crates/lash-core/src/runtime/drive/admission.rs:94`,
 `crates/lash-core-store/src/store/drive_fence.rs:185`,
 `crates/lash-core-store/src/store/head_ownership.rs:1`,
 `crates/lash-core/src/runtime/drive/root.rs:105`,
-`crates/lash-core/src/runtime/drive/root.rs:423`,
-`crates/lash-core/src/runtime/drive/root.rs:1054`,
-`crates/lash-core/src/runtime/drive/root.rs:622`,
-`crates/lash-core/src/runtime/drive/root.rs:758`,
-`crates/lash-core/src/runtime/drive/root.rs:806`,
-`crates/lash-core/src/runtime/drive/root.rs:859`,
-`crates/lash-core/src/runtime/drive.rs:884`,
-`crates/lash-core/src/runtime/drive.rs:920`.
+`crates/lash-core/src/runtime/drive/root.rs:457`,
+`crates/lash-core/src/runtime/drive/root.rs:1125`,
+`crates/lash-core/src/runtime/drive/root.rs:677`,
+`crates/lash-core/src/runtime/drive/root.rs:828`,
+`crates/lash-core/src/runtime/drive/root.rs:876`,
+`crates/lash-core/src/runtime/drive/root.rs:929`,
+`crates/lash-core/src/runtime/drive.rs:886`,
+`crates/lash-core/src/runtime/drive.rs:922`.
 
 ### 3. Cancel races and losing work
 
@@ -319,7 +323,7 @@ store fence cannot retract a request already sent.
 Evidence: `crates/lash-core/src/runtime/turn_boundary.rs:1`,
 `crates/lash-core/src/runtime/turn_loop/commit.rs:1`,
 `crates/lash-core/src/runtime/drive/park.rs:1`,
-`crates/lash-core/src/runtime/drive.rs:920`,
+`crates/lash-core/src/runtime/drive.rs:922`,
 `crates/lash-core-store/src/store/runtime_commit.rs:1`.
 
 ### 10. Commands and executors

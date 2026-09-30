@@ -1227,9 +1227,10 @@ pub enum RuntimeEffectOutcome {
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
     },
-    /// A follow-on recovery root's recorded decision (FIG-4361).
+    /// A follow-on recovery root's recorded decision (FIG-4361), with the
+    /// head its turn runs on (FIG-4380).
     RecoverFollowOn {
-        answer: crate::store::FollowOnRecoveryAnswer,
+        answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
     /// The drive admission's recorded verdict.
     AdmitDrive {

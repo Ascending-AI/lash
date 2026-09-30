@@ -42,7 +42,10 @@
 //! its turn and commits the follow-on. The `changed_bound_*` laws change the
 //! host's follow-on recovery bound between the recovery root's attempts: the
 //! root decides on the bound its chain froze and keeps the decision it
-//! recorded (the config-uniformity audit's D2).
+//! recorded (the config-uniformity audit's D2). Both run with and without
+//! forced replay: a replay after the follow-on's own commit runs its turn on
+//! the head and at the turn index the decision recorded, never on the head
+//! that commit moved (FIG-4380).
 
 use super::*;
 
@@ -595,11 +598,14 @@ async fn a_root_replayed_after_its_session_was_deleted_ends_typed(
 /// The control of the follow-on legs (FIG-4361): with its session live, a
 /// follow-on recovery root records its decision after its seal, raising the
 /// recovery count in its body, and drives the recorded answer to the
-/// follow-on's terminal commit. It runs without forced replay: a replay after
-/// the follow-on's own commit still refreshes the head that commit moved
-/// (FIG-4380).
-async fn a_follow_on_recovery_root_drives_its_recorded_decision(storage: Storage) -> Result<()> {
-    let Some(world) = world(storage, false, Work::FollowOn).await else {
+/// follow-on's terminal commit. Under forced replay the root is replayed
+/// after that commit moved the head: it runs its turn on the head and at the
+/// turn index its decision recorded, so it follows its journal (FIG-4380).
+async fn a_follow_on_recovery_root_drives_its_recorded_decision(
+    storage: Storage,
+    always_replay: bool,
+) -> Result<()> {
+    let Some(world) = world(storage, always_replay, Work::FollowOn).await else {
         eprintln!("skipping the {storage:?} leg: LASH_POSTGRES_DATABASE_URL is not set");
         return Ok(());
     };
@@ -669,6 +675,10 @@ async fn a_follow_on_recovery_root_drives_its_recorded_decision(storage: Storage
         run.attempts, run.last_failure
     );
     assert!(
+        !matches!(&run.last_failure, Some((570, _))),
+        "the replay followed its journal: {evidence}"
+    );
+    assert!(
         matches!(&outcome, Some(Ok(_))),
         "the recovery root's run ends with its answer: {evidence}"
     );
@@ -696,6 +706,21 @@ async fn a_follow_on_recovery_root_drives_its_recorded_decision(storage: Storage
         store.committed_turn_exists(&follow_on).await?,
         "the follow-on committed: {evidence}"
     );
+    let answers = store
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await?
+        .expect("the session has a committed head")
+        .window
+        .read_model()
+        .messages
+        .iter()
+        .filter(|message| {
+            serde_json::to_string(message)
+                .unwrap_or_default()
+                .contains("follow-on done")
+        })
+        .count();
+    assert_eq!(answers, 1, "the follow-on committed once: {evidence}");
     Ok(())
 }
 
@@ -719,18 +744,20 @@ enum BoundChange {
 /// bound its chain froze, and replays the decision it recorded. The first
 /// core, whose bound the switch froze, is dropped as the root's first
 /// attempt dies, so the replay finds no session driver installed until the
-/// second core, with the other bound, installs its own. It runs without
-/// forced replay: a replay after the follow-on's own commit still refreshes
-/// the head that commit moved (FIG-4380).
+/// second core, with the other bound, installs its own. Under forced replay
+/// the root is replayed after the follow-on's terminal commit, run or
+/// exhausted, moved the head: it runs that terminal on the head and at the
+/// turn index its decision recorded (FIG-4380).
 async fn a_changed_host_bound_does_not_change_the_recovery_decision(
     change: BoundChange,
     storage: Storage,
+    always_replay: bool,
 ) -> Result<()> {
     let (frozen, host) = match change {
         BoundChange::BeforeDecision => (0, 3),
         BoundChange::AfterDecision => (3, 0),
     };
-    let Some(world) = world_bounded(storage, false, Work::FollowOn, frozen).await else {
+    let Some(world) = world_bounded(storage, always_replay, Work::FollowOn, frozen).await else {
         eprintln!("skipping the {storage:?} leg: LASH_POSTGRES_DATABASE_URL is not set");
         return Ok(());
     };
@@ -867,6 +894,10 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
         "attempts={} last failure {:?}, outcome {outcome:?}, decisions {decisions:?}",
         run.attempts, run.last_failure
     );
+    assert!(
+        !matches!(&run.last_failure, Some((570, _))),
+        "the replay followed its journal: {evidence}"
+    );
     let [decision] = decisions.as_slice() else {
         panic!("the root recorded one recovery decision: {evidence}");
     };
@@ -914,41 +945,55 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
 }
 
 macro_rules! changed_recovery_bound_laws {
-    ($($name:ident: $change:expr, $storage:expr;)*) => {
+    ($($name:ident: $change:expr, $storage:expr, $always_replay:expr;)*) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
-                a_changed_host_bound_does_not_change_the_recovery_decision($change, $storage)
-                    .await
+                a_changed_host_bound_does_not_change_the_recovery_decision(
+                    $change,
+                    $storage,
+                    $always_replay,
+                )
+                .await
             }
         )*
     };
 }
 
 changed_recovery_bound_laws! {
-    changed_bound_before_decision_sqlite_memory: BoundChange::BeforeDecision, Storage::SqliteMemory;
-    changed_bound_before_decision_sqlite_file: BoundChange::BeforeDecision, Storage::SqliteFile;
-    changed_bound_before_decision_postgres: BoundChange::BeforeDecision, Storage::Postgres;
-    changed_bound_after_decision_sqlite_memory: BoundChange::AfterDecision, Storage::SqliteMemory;
-    changed_bound_after_decision_sqlite_file: BoundChange::AfterDecision, Storage::SqliteFile;
-    changed_bound_after_decision_postgres: BoundChange::AfterDecision, Storage::Postgres;
+    changed_bound_before_decision_sqlite_memory: BoundChange::BeforeDecision, Storage::SqliteMemory, false;
+    changed_bound_before_decision_sqlite_file: BoundChange::BeforeDecision, Storage::SqliteFile, false;
+    changed_bound_before_decision_postgres: BoundChange::BeforeDecision, Storage::Postgres, false;
+    changed_bound_after_decision_sqlite_memory: BoundChange::AfterDecision, Storage::SqliteMemory, false;
+    changed_bound_after_decision_sqlite_file: BoundChange::AfterDecision, Storage::SqliteFile, false;
+    changed_bound_after_decision_postgres: BoundChange::AfterDecision, Storage::Postgres, false;
+    changed_bound_before_decision_sqlite_memory_always_replay: BoundChange::BeforeDecision, Storage::SqliteMemory, true;
+    changed_bound_before_decision_sqlite_file_always_replay: BoundChange::BeforeDecision, Storage::SqliteFile, true;
+    changed_bound_before_decision_postgres_always_replay: BoundChange::BeforeDecision, Storage::Postgres, true;
+    changed_bound_after_decision_sqlite_memory_always_replay: BoundChange::AfterDecision, Storage::SqliteMemory, true;
+    changed_bound_after_decision_sqlite_file_always_replay: BoundChange::AfterDecision, Storage::SqliteFile, true;
+    changed_bound_after_decision_postgres_always_replay: BoundChange::AfterDecision, Storage::Postgres, true;
 }
 
 macro_rules! follow_on_recovery_laws {
-    ($($name:ident: $storage:expr;)*) => {
+    ($($name:ident: $storage:expr, $always_replay:expr;)*) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
-                a_follow_on_recovery_root_drives_its_recorded_decision($storage).await
+                a_follow_on_recovery_root_drives_its_recorded_decision($storage, $always_replay)
+                    .await
             }
         )*
     };
 }
 
 follow_on_recovery_laws! {
-    recovered_follow_on_sqlite_memory: Storage::SqliteMemory;
-    recovered_follow_on_sqlite_file: Storage::SqliteFile;
-    recovered_follow_on_postgres: Storage::Postgres;
+    recovered_follow_on_sqlite_memory: Storage::SqliteMemory, false;
+    recovered_follow_on_sqlite_file: Storage::SqliteFile, false;
+    recovered_follow_on_postgres: Storage::Postgres, false;
+    recovered_follow_on_sqlite_memory_always_replay: Storage::SqliteMemory, true;
+    recovered_follow_on_sqlite_file_always_replay: Storage::SqliteFile, true;
+    recovered_follow_on_postgres_always_replay: Storage::Postgres, true;
 }
 
 macro_rules! deleted_session_root_replay_laws {
