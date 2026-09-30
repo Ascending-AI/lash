@@ -91,15 +91,19 @@ impl LoadProviderProbe<'_> {
                     if let Some(start) = starts.first() {
                         let started_at_ms = start.appended_at.timestamp_millis();
                         self.started_at_ms = Some(started_at_ms);
-                        tracing::info!(
-                            operation = self.operation,
-                            root = root.as_str(),
-                            started_at_ms,
-                            queue_latency_ms = u64::try_from(started_at_ms)
-                                .ok()
-                                .zip(self.enqueued_at_ms)
-                                .map(|(started, enqueued)| started.saturating_sub(enqueued)),
-                            "load provider watchdog observes the root's admission"
+                        let queue_latency_ms = u64::try_from(started_at_ms)
+                            .ok()
+                            .zip(self.enqueued_at_ms)
+                            .map(|(started, enqueued)| started.saturating_sub(enqueued));
+                        println!(
+                            "load provider-start {}",
+                            serde_json::json!({
+                                "operation": self.operation,
+                                "root": root.as_str(),
+                                "enqueued_at_ms": self.enqueued_at_ms,
+                                "started_at_ms": started_at_ms,
+                                "queue_latency_ms": queue_latency_ms,
+                            })
                         );
                         return Ok(self.started_at_ms);
                     }
