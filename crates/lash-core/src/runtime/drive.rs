@@ -40,6 +40,8 @@ mod attempt_drop_tests;
 mod close;
 mod control;
 pub mod ingress;
+mod interval;
+mod lanes;
 mod parent_end_relay;
 mod park;
 mod reconcile;
@@ -51,6 +53,8 @@ mod turn_config;
 
 pub use control::{ControlIntentRelay, intent_drive_request};
 pub use ingress::{FIRST_INGRESS_ATTEMPT, IngressRelay, ingress_drive_request};
+pub use interval::{RECOVERY_TICK, RecoveryInterval};
+pub use lanes::{LanesTick, RelayLanes};
 pub use parent_end_relay::ParentEndRelay;
 pub use park::StoreParkRecovery;
 pub use reconcile::{

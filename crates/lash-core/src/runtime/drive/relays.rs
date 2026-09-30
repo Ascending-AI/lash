@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use super::relay::ObligationRelay;
+use super::relay::{ObligationRelay, RelayPolicy};
 use super::{ControlIntentRelay, IngressRelay, ParentEndRelay, ScopeCloseRelay};
 use crate::engine::ScopeCloseSink;
 use crate::runtime::artifact_cleanup::{
@@ -122,6 +122,9 @@ pub struct RelayParts {
     /// What a physical delete runs through.
     pub administration: Option<SessionAdministration>,
     pub clock: Arc<dyn Clock>,
+    /// The policy every kind's relay runs under: the host's attempt budget
+    /// (ADR 0109 §1.8) on the kinds' shared retry shape.
+    pub policy: RelayPolicy,
 }
 
 impl RelayParts {
@@ -154,47 +157,53 @@ pub fn obligation_relays(
         processes,
         administration,
         clock,
+        policy,
     } = parts;
-    let scope_close: Arc<dyn ObligationRelay> = Arc::new(ScopeCloseRelay::over_backend(
-        &backend,
-        Arc::clone(&sessions),
-        Arc::clone(&scopes),
-    ));
+    let scope_close: Arc<dyn ObligationRelay> = Arc::new(
+        ScopeCloseRelay::over_backend(&backend, Arc::clone(&sessions), Arc::clone(&scopes))
+            .with_policy(policy),
+    );
     let unavailable =
         |kind: ObligationKind, need: RelayNeed| ObligationRelayUnavailable { kind, need };
     let mut relays = Vec::with_capacity(ObligationKind::ALL.len());
     for kind in ObligationKind::ALL {
         let relay: Arc<dyn ObligationRelay> = match kind {
-            ObligationKind::Ingress => Arc::new(IngressRelay::over_backend(
-                &backend,
-                Arc::clone(&work),
-                Arc::clone(&clock),
-            )),
-            ObligationKind::ControlIntent => Arc::new(ControlIntentRelay::new(
-                backend.obligation_ledger(kind),
-                Arc::clone(&sessions),
-                Arc::clone(&work),
-                Arc::clone(&scopes),
-                Arc::clone(&scope_close),
-                Arc::clone(&clock),
-            )),
+            ObligationKind::Ingress => Arc::new(
+                IngressRelay::over_backend(&backend, Arc::clone(&work), Arc::clone(&clock))
+                    .with_policy(policy),
+            ),
+            ObligationKind::ControlIntent => Arc::new(
+                ControlIntentRelay::new(
+                    backend.obligation_ledger(kind),
+                    Arc::clone(&sessions),
+                    Arc::clone(&work),
+                    Arc::clone(&scopes),
+                    Arc::clone(&scope_close),
+                    Arc::clone(&clock),
+                )
+                .with_policy(policy),
+            ),
             ObligationKind::ScopeClose => Arc::clone(&scope_close),
             ObligationKind::ParentEnd => {
                 let wiring = processes
                     .as_ref()
                     .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
-                Arc::new(ParentEndRelay::new(
-                    backend.obligation_ledger(kind),
-                    Arc::clone(wiring.registry()),
-                    Arc::clone(wiring.port()),
-                    Arc::clone(&clock),
-                ))
+                Arc::new(
+                    ParentEndRelay::new(
+                        backend.obligation_ledger(kind),
+                        Arc::clone(wiring.registry()),
+                        Arc::clone(wiring.port()),
+                        Arc::clone(&clock),
+                    )
+                    .with_policy(policy),
+                )
             }
-            ObligationKind::SessionDelete => {
-                Arc::new(SessionDeleteRelay::new(administration.clone().ok_or_else(
-                    || unavailable(kind, RelayNeed::SessionAdministration),
-                )?))
-            }
+            ObligationKind::SessionDelete => Arc::new(SessionDeleteRelay::with_policy(
+                administration
+                    .clone()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?,
+                policy,
+            )),
             ObligationKind::TriggerDelivery => {
                 let wiring = processes
                     .as_ref()
@@ -214,48 +223,57 @@ pub fn obligation_relays(
                         backend.obligation_ledger(ObligationKind::ProcessStart),
                         Arc::clone(&clock),
                     );
-                Arc::new(TriggerDeliveryRelay::new(
-                    backend.obligation_ledger(kind),
-                    router,
-                ))
+                Arc::new(
+                    TriggerDeliveryRelay::new(backend.obligation_ledger(kind), router)
+                        .with_policy(policy),
+                )
             }
             ObligationKind::ProcessStart => {
                 let wiring = processes
                     .as_ref()
                     .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
-                Arc::new(ProcessStartRelay::new(
-                    backend.obligation_ledger(kind),
-                    Arc::clone(wiring.registry()),
-                    Arc::clone(wiring.port()),
-                    Arc::clone(&clock),
-                ))
+                Arc::new(
+                    ProcessStartRelay::new(
+                        backend.obligation_ledger(kind),
+                        Arc::clone(wiring.registry()),
+                        Arc::clone(wiring.port()),
+                        Arc::clone(&clock),
+                    )
+                    .with_policy(policy),
+                )
             }
             ObligationKind::ProcessTerminal => {
                 let wiring = processes
                     .as_ref()
                     .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
-                Arc::new(ProcessTerminalRelay::new(
-                    backend.obligation_ledger(kind),
-                    Arc::clone(wiring.registry()),
-                    Arc::clone(wiring.port()),
-                ))
+                Arc::new(
+                    ProcessTerminalRelay::new(
+                        backend.obligation_ledger(kind),
+                        Arc::clone(wiring.registry()),
+                        Arc::clone(wiring.port()),
+                    )
+                    .with_policy(policy),
+                )
             }
             ObligationKind::ArtifactCleanup => {
                 let administration = administration
                     .as_ref()
                     .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?;
-                Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
-                    ledger: backend.artifact_cleanup(),
-                    authorities: Arc::new(StoreSetAuthorities {
-                        effect_host: backend.effect_host(),
-                        processes: backend.process_registry(),
-                        triggers: backend.trigger_store(),
-                        definitions: backend.process_definition_registry(),
-                    }),
-                    process_env: backend.process_env_store(),
-                    modules: backend.module_artifacts(),
-                    engines: administration.process_engines().clone(),
-                }))
+                Arc::new(
+                    ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+                        ledger: backend.artifact_cleanup(),
+                        authorities: Arc::new(StoreSetAuthorities {
+                            effect_host: backend.effect_host(),
+                            processes: backend.process_registry(),
+                            triggers: backend.trigger_store(),
+                            definitions: backend.process_definition_registry(),
+                        }),
+                        process_env: backend.process_env_store(),
+                        modules: backend.module_artifacts(),
+                        engines: administration.process_engines().clone(),
+                    })
+                    .with_policy(policy),
+                )
             }
         };
         relays.push(relay);

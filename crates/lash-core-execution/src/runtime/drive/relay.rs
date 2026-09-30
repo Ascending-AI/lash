@@ -10,6 +10,16 @@
 //! attempt ceiling, then stalled. A stalled obligation is never dropped and
 //! never retried until an operator re-arms it.
 //!
+//! Every attempt runs under its kind's attempt budget
+//! ([`RelayPolicy::attempt_budget_ms`], ADR 0109 §1.8): a delivery still
+//! running when the budget elapses is abandoned and settles as a retryable
+//! failure, which idempotent delivery and claim-token fencing make safe. A
+//! retry's due time is measured from the attempt's start, so the time the
+//! attempt spent counts toward its backoff instead of adding to it. A due
+//! page's rows are attempted together, so each claimed row starts its
+//! attempt when it is claimed and a pass ends within one attempt budget of
+//! its claim.
+//!
 //! The relay is engine-neutral: a kind's [`ObligationRelay::deliver`] is the
 //! only engine call, and it is idempotent under a repeated obligation id.
 
@@ -47,6 +57,16 @@ pub struct RelayPolicy {
     pub attempt_ceiling: NonZeroU32,
     /// How long a claim holds its row before another relay may retake it.
     pub claim_ttl_ms: u64,
+    /// The longest one delivery attempt runs (ADR 0109 §1.8): past it the
+    /// attempt is abandoned and settles as a retryable failure. Default
+    /// 30 s. Keep it below [`claim_ttl_ms`](Self::claim_ttl_ms), so a
+    /// claim never lapses under an attempt still running.
+    pub attempt_budget_ms: u64,
+}
+
+impl RelayPolicy {
+    /// The attempt budget a policy carries unless its host sets another.
+    pub const DEFAULT_ATTEMPT_BUDGET_MS: u64 = 30_000;
 }
 
 impl Default for RelayPolicy {
@@ -56,6 +76,7 @@ impl Default for RelayPolicy {
             max_backoff_ms: 900_000,
             attempt_ceiling: NonZeroU32::new(16).unwrap_or(NonZeroU32::MIN),
             claim_ttl_ms: 60_000,
+            attempt_budget_ms: Self::DEFAULT_ATTEMPT_BUDGET_MS,
         }
     }
 }
@@ -154,17 +175,19 @@ fn count(pass: &mut RelayPass, verdict: &RelayVerdict) {
     }
 }
 
-/// The settlement the rule assigns a claim whose attempt ended in `result`.
+/// The settlement the rule assigns a claim whose attempt, started at
+/// `started_ms`, ended in `result`. Every due time it sets is measured from
+/// the attempt's start: the time the attempt ran counts toward the delay.
 fn settlement_for(
     policy: &RelayPolicy,
     claimed: &ClaimedObligation,
     result: Result<(), DeliveryFailure>,
-    now_ms: u64,
+    started_ms: u64,
 ) -> ObligationSettlement {
     match result {
         Ok(()) => ObligationSettlement::Delivered,
         Err(DeliveryFailure::NotYet) => ObligationSettlement::Defer {
-            due_at_ms: now_ms.saturating_add(policy.max_backoff_ms),
+            due_at_ms: started_ms.saturating_add(policy.max_backoff_ms),
         },
         Err(DeliveryFailure::Refused(error)) => ObligationSettlement::Stall {
             reason: StallReason::Refused,
@@ -183,9 +206,30 @@ fn settlement_for(
             }
         }
         Err(DeliveryFailure::Retryable(error)) => ObligationSettlement::Retry {
-            due_at_ms: now_ms.saturating_add(policy.backoff_ms(claimed.attempts)),
+            due_at_ms: started_ms.saturating_add(policy.backoff_ms(claimed.attempts)),
             error,
         },
+    }
+}
+
+/// Run `delivery` under `policy`'s attempt budget on `clock`: a delivery
+/// still running when the budget elapses is dropped and answers a retryable
+/// failure. Dropping it is safe: a delivery is idempotent under its
+/// obligation id, and its fenced writes compare a claim the next attempt
+/// retakes under a new token.
+async fn within_budget(
+    policy: &RelayPolicy,
+    clock: &dyn Clock,
+    delivery: impl std::future::Future<Output = Result<(), DeliveryFailure>>,
+) -> Result<(), DeliveryFailure> {
+    // A deadline the attempt races, not a wait: `sleep_until` on the clock.
+    let deadline = clock.now() + std::time::Duration::from_millis(policy.attempt_budget_ms);
+    tokio::select! {
+        result = delivery => result,
+        () = clock.sleep_until(deadline) => Err(DeliveryFailure::Retryable(format!(
+            "the delivery ran past its {} ms attempt budget",
+            policy.attempt_budget_ms
+        ))),
     }
 }
 
@@ -211,6 +255,7 @@ async fn attempt(
     let kind = ledger.kind();
     let policy = relay.policy();
     let consumer_settles = relay.consumer_settles();
+    let started_ms = clock.timestamp_ms();
     let result = match &claimed.key {
         // A consumer-settled claim is retaken only when its last ask lapsed
         // unsettled: past the ceiling, it stalls instead of asking again.
@@ -221,14 +266,17 @@ async fn attempt(
             )))
         }
         Ok(key) => {
-            relay
-                .deliver(ObligationDelivery {
+            within_budget(
+                &policy,
+                clock,
+                relay.deliver(ObligationDelivery {
                     id: &claimed.id,
                     key,
                     token: &claimed.token,
                     attempt: claimed.attempts,
-                })
-                .await
+                }),
+            )
+            .await
         }
         Err(undecodable) => Err(DeliveryFailure::Undecodable(undecodable.detail.clone())),
     };
@@ -240,7 +288,7 @@ async fn attempt(
         }
         return Ok(verdict);
     }
-    let settlement = settlement_for(&policy, &claimed, result, now_ms);
+    let settlement = settlement_for(&policy, &claimed, result, started_ms);
     let planned = match &settlement {
         ObligationSettlement::Delivered => RelayVerdict::Delivered,
         ObligationSettlement::Retry { due_at_ms, .. } => RelayVerdict::Retried {
@@ -321,12 +369,15 @@ pub async fn deliver_claimed(
 }
 
 /// One bounded due pass: claim at most `limit` due obligations and attempt
-/// each. One obligation's failure, undecodable key or lost claim never stops
-/// the rows behind it.
+/// them together, each under the kind's attempt budget, so the pass ends
+/// within one budget of its claim and no claimed row waits behind another's
+/// attempt while its claim runs down. One obligation's failure, undecodable
+/// key, lost claim or slow delivery never holds back the rows beside it.
 ///
 /// # Errors
 ///
-/// A claim that cannot be read or a settle that cannot be written.
+/// A claim that cannot be read or a settle that cannot be written; the
+/// page's other attempts still ran and settled.
 pub async fn relay_due(
     relay: &dyn ObligationRelay,
     clock: &dyn Clock,
@@ -341,9 +392,14 @@ pub async fn relay_due(
         claimed: claimed.len(),
         ..RelayPass::default()
     };
-    for obligation in claimed {
-        let verdict = attempt(relay, obligation, clock).await?;
-        count(&mut pass, &verdict);
+    let verdicts = futures_util::future::join_all(
+        claimed
+            .into_iter()
+            .map(|obligation| attempt(relay, obligation, clock)),
+    )
+    .await;
+    for verdict in verdicts {
+        count(&mut pass, &verdict?);
     }
     Ok(pass)
 }
@@ -356,7 +412,7 @@ pub fn relay_kind(relay: &dyn ObligationRelay) -> ObligationKind {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use lash_sansio::SessionId;
 
@@ -689,6 +745,90 @@ mod tests {
                 }
             )]
         );
+    }
+
+    /// A delivery that runs `ran_ms` on the clock and fails retryably, or
+    /// that never answers.
+    struct Slow {
+        ledger: PageLedger,
+        clock: Arc<TestClock>,
+        ran_ms: Option<u64>,
+    }
+
+    #[async_trait::async_trait]
+    impl ObligationRelay for Slow {
+        fn ledger(&self) -> &dyn ObligationLedger {
+            &self.ledger
+        }
+
+        async fn deliver(&self, _: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+            let Some(ran_ms) = self.ran_ms else {
+                return std::future::pending().await;
+            };
+            self.clock.advance(ran_ms);
+            Err(DeliveryFailure::Retryable(
+                "the engine timed out".to_owned(),
+            ))
+        }
+    }
+
+    /// ADR 0109 §1.8: a retry is due its backoff after its attempt started,
+    /// so the time the attempt ran counts toward the backoff; and an attempt
+    /// that never answers is cut at the kind's attempt budget and settles
+    /// retryable, due its backoff after it started.
+    #[tokio::test(start_paused = true)]
+    async fn retry_deadline_includes_attempt_duration() {
+        let policy = RelayPolicy::default();
+        for ran_ms in [Some(5_000), None] {
+            let clock = Arc::new(TestClock::new(1_000));
+            let relay = Slow {
+                ledger: PageLedger {
+                    page: Mutex::new(vec![claimed("slow", session_delete("s"))]),
+                    settled: Mutex::new(Vec::new()),
+                },
+                clock: Arc::clone(&clock),
+                ran_ms,
+            };
+            let pass = tokio::time::timeout(
+                std::time::Duration::from_millis(2 * policy.attempt_budget_ms),
+                relay_due(&relay, clock.as_ref(), NonZeroUsize::MIN),
+            )
+            .await
+            .expect("the attempt ends within its budget")
+            .expect("a pass over a slow delivery");
+            assert_eq!(
+                pass,
+                RelayPass {
+                    claimed: 1,
+                    retried: 1,
+                    ..RelayPass::default()
+                },
+                "{ran_ms:?}"
+            );
+            let settled = relay
+                .ledger
+                .settled
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let [(_, ObligationSettlement::Retry { due_at_ms, error })] = settled.as_slice() else {
+                panic!("{ran_ms:?}: one retry: {settled:?}");
+            };
+            assert_eq!(
+                *due_at_ms,
+                1_000 + policy.backoff_ms(1),
+                "{ran_ms:?}: due its backoff after the attempt started"
+            );
+            if ran_ms.is_none() {
+                assert_eq!(
+                    error,
+                    &format!(
+                        "the delivery ran past its {} ms attempt budget",
+                        policy.attempt_budget_ms
+                    )
+                );
+            }
+        }
     }
 
     #[test]

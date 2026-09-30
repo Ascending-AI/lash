@@ -977,6 +977,10 @@ async fn crash_gaps(server: HarnessServer) {
                     clock: &later,
                     duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
                     relays: &relays,
+                    lanes: &lash_core::drive::RelayLanes::new(
+                        Arc::new(LaterClock(3_600_000)),
+                        lash_core::engine::RecoveryPassBudget::default(),
+                    ),
                 },
                 &ReconcileCursor::default(),
                 NonZeroUsize::MIN.saturating_add(15),
@@ -1319,4 +1323,323 @@ impl lash_core::Clock for LaterClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+/// The live server's control engine behind a slow control RPC: each root
+/// release waits `delay` before it reaches the server, as an admin call held
+/// for its whole control timeout does. It records when each release and each
+/// park reconcile began.
+struct SlowControlRpc {
+    inner: Arc<dyn SessionControlEngine>,
+    delay: std::time::Duration,
+    releases: std::sync::Mutex<Vec<std::time::Instant>>,
+    parks: std::sync::Mutex<Vec<std::time::Instant>>,
+}
+#[async_trait::async_trait]
+impl SessionControlEngine for SlowControlRpc {
+    async fn reconcile_parks(
+        &self,
+        parks: &dyn ParkRecoveryWriter,
+        page: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        self.parks
+            .lock()
+            .expect("parks")
+            .push(std::time::Instant::now());
+        self.inner.reconcile_parks(parks, page).await
+    }
+    async fn resume_root(
+        &self,
+        target: &RootRef,
+        handle: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        self.inner.resume_root(target, handle).await
+    }
+    async fn release_root(
+        &self,
+        target: &RootRef,
+        handle: Option<&EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        self.releases
+            .lock()
+            .expect("releases")
+            .push(std::time::Instant::now());
+        tokio::time::sleep(self.delay).await;
+        self.inner.release_root(target, handle).await
+    }
+}
+
+/// A scope owner that records when each root scope closed.
+#[derive(Default)]
+struct RecordedCloses {
+    roots: std::sync::Mutex<Vec<std::time::Instant>>,
+}
+#[async_trait::async_trait]
+impl ScopeCloseSink for RecordedCloses {
+    async fn close_root_scope(&self, _: &RootTerminal) -> Result<(), lash_core::StoreError> {
+        self.roots
+            .lock()
+            .expect("closes")
+            .push(std::time::Instant::now());
+        Ok(())
+    }
+    async fn close_session_scope(
+        &self,
+        _: &SessionId,
+        _: ControlIntentId,
+        _: &[TurnId],
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+}
+
+/// A deployment's recovery pass over the law's stores: every tick is the
+/// kernel's `reconcile_once` on the deployment's own lanes, recorded.
+struct CadenceDriver {
+    factory: Arc<dyn lash_core::DeploymentStore>,
+    work: WithControl,
+    scopes: Arc<RecordedCloses>,
+    relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>>,
+    lanes: lash_core::drive::RelayLanes,
+    ticks: std::sync::Mutex<Vec<(std::time::Instant, ReconcileTick)>>,
+}
+#[async_trait::async_trait]
+impl SessionDriver for CadenceDriver {
+    fn owns_reconciliation(&self) -> bool {
+        true
+    }
+    async fn reconcile(
+        &self,
+        cursor: &ReconcileCursor,
+        page: NonZeroUsize,
+    ) -> Result<ReconcileCursor, lash_core::StoreError> {
+        let ticked_at = std::time::Instant::now();
+        let tick = lash_core::drive::reconcile_once(
+            &lash_core::drive::ReconcileParts {
+                sessions: self.factory.as_ref(),
+                work: &self.work,
+                scopes: self.scopes.as_ref(),
+                processes: None,
+                clock: &lash_core::facade_support::SystemClock,
+                duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+                relays: &self.relays,
+                lanes: &self.lanes,
+            },
+            cursor,
+            page,
+        )
+        .await;
+        let next = tick.next.clone();
+        self.ticks.lock().expect("ticks").push((ticked_at, tick));
+        Ok(next)
+    }
+    async fn admit(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        _: &DriveRequest,
+        _: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        panic!("the recovery interval never admits")
+    }
+    async fn run_root(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        _: Admitted,
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async { panic!("the recovery interval never runs a root") }.await,
+        )
+    }
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
+    }
+}
+
+/// ADR 0109 §1.8 on a live server: the deployment's recovery interval keeps
+/// its cadence while a control RPC is slow. A closed session's release — the
+/// intent's control RPC — is held for a minute. The production interval
+/// fires every `T` regardless; each tick's parks run against the server
+/// within its lane wait; the closed root's scope close, a later kind, is
+/// delivered in the first tick; the intent's kind is busy while its attempt
+/// runs; and the attempt is cut at the host's budget and retried by the
+/// first tick its lane is free for.
+async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer) {
+    let harness = LiveConformanceHarness::start_on(server).await;
+    let stores = harness.law_stores();
+    let factory = stores.session_store_factory();
+    let session = SessionId::from(format!("cadence-{}", harness.run_nonce()));
+    let root = TurnId::from("open-root");
+    factory
+        .admit_session(&lash_core::SessionStoreCreateRequest {
+            session_id: session.clone(),
+            relation: lash_core::SessionRelation::Root,
+            pending_observer_intents: vec![],
+            config: lash_core::testing::mock_session_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
+            owning_process_id: None,
+        })
+        .await
+        .expect("session");
+    factory
+        .bind_root_inputs(&session, &root, &[])
+        .await
+        .expect("an open root");
+    let now_ms = || lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock);
+    let intent = factory
+        .begin_session_close(&session, now_ms())
+        .await
+        .expect("close")
+        .expect("the session exists");
+    // The host's attempt budget; the release takes five times as long.
+    let budget = std::time::Duration::from_secs(12);
+    let tick = lash_core::drive::RECOVERY_TICK;
+    let slack = std::time::Duration::from_millis(1_500);
+    let pass = lash_core::engine::RecoveryPassBudget {
+        attempt: budget,
+        ..lash_core::engine::RecoveryPassBudget::default()
+    };
+    let policy = lash_core::drive::relay::RelayPolicy {
+        attempt_budget_ms: pass.attempt_ms(),
+        ..lash_core::drive::relay::RelayPolicy::default()
+    };
+    let session_work = harness.session_work();
+    let control = Arc::new(SlowControlRpc {
+        inner: session_work.control(),
+        delay: 5 * budget,
+        releases: std::sync::Mutex::new(Vec::new()),
+        parks: std::sync::Mutex::new(Vec::new()),
+    });
+    let work = WithControl {
+        work: session_work.clone(),
+        control: Arc::clone(&control) as Arc<dyn SessionControlEngine>,
+    };
+    let scopes = Arc::new(RecordedCloses::default());
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::facade_support::SystemClock);
+    let scope_close = Arc::new(
+        lash_core::drive::ScopeCloseRelay::new(
+            stores.obligation_ledger(ObligationKind::ScopeClose),
+            Arc::clone(&factory),
+            Arc::clone(&scopes) as Arc<dyn ScopeCloseSink>,
+        )
+        .with_policy(policy),
+    );
+    let intent_relay = Arc::new(
+        lash_core::drive::ControlIntentRelay::new(
+            stores.obligation_ledger(ObligationKind::ControlIntent),
+            Arc::clone(&factory),
+            Arc::new(WithControl {
+                work: session_work.clone(),
+                control: Arc::clone(&control) as Arc<dyn SessionControlEngine>,
+            }),
+            Arc::clone(&scopes) as Arc<dyn ScopeCloseSink>,
+            Arc::clone(&scope_close) as Arc<dyn lash_core::drive::relay::ObligationRelay>,
+            Arc::clone(&clock),
+        )
+        .with_policy(policy),
+    );
+    let driver = Arc::new(CadenceDriver {
+        factory: Arc::clone(&factory),
+        work,
+        scopes: Arc::clone(&scopes),
+        relays: vec![intent_relay, scope_close],
+        lanes: lash_core::drive::RelayLanes::new(Arc::clone(&clock), pass),
+        ticks: std::sync::Mutex::new(Vec::new()),
+    });
+    let started = std::time::Instant::now();
+    let installation = session_work.install_session_driver(driver.clone());
+    tokio::time::sleep(budget + 2 * tick + slack).await;
+    drop(installation);
+
+    let ticks: Vec<(std::time::Instant, ReconcileTick)> = driver
+        .ticks
+        .lock()
+        .expect("ticks")
+        .iter()
+        .map(|(at, tick)| (*at, tick.clone()))
+        .collect();
+    let offsets: Vec<std::time::Duration> = ticks.iter().map(|(at, _)| *at - started).collect();
+    assert!(
+        ticks.len() >= 4,
+        "the interval ticked through the slow release: {offsets:?}"
+    );
+    // Cadence: the interval fires on its grid, whatever the release spends.
+    let first = ticks[0].0;
+    for (index, (at, _)) in ticks.iter().enumerate() {
+        let due = first + tick * u32::try_from(index).expect("tick index");
+        assert!(
+            *at + std::time::Duration::from_millis(50) >= due && *at <= due + slack,
+            "tick {index} fired {:?} after the first, due {:?}: {offsets:?}",
+            *at - first,
+            due - first
+        );
+    }
+    // Parks: each tick's park reconcile reached the server within its lane
+    // wait.
+    let parks = control.parks.lock().expect("parks").clone();
+    assert!(parks.len() >= ticks.len() - 1, "{} parks", parks.len());
+    for ((at, _), park) in ticks.iter().zip(&parks) {
+        assert!(
+            *park <= *at + pass.tick_wait + slack,
+            "the parks of the tick at {:?} ran {:?} after it",
+            *at - first,
+            *park - *at
+        );
+    }
+    // A later kind: the closed root's scope close was delivered in the first
+    // tick.
+    let closes = scopes.roots.lock().expect("closes").clone();
+    let [closed] = closes.as_slice() else {
+        panic!("one root scope close: {} of them", closes.len());
+    };
+    assert!(
+        *closed <= first + slack,
+        "closed {:?} after the first tick",
+        *closed - first
+    );
+    // The slow kind: busy, never re-claimed, while its attempt ran.
+    for (at, tick) in &ticks[1..] {
+        if *at + slack < first + budget {
+            assert_eq!(
+                tick.obligations_busy,
+                vec![ObligationKind::ControlIntent],
+                "the tick {:?} after the first found the intent's lane busy",
+                *at - first
+            );
+        }
+    }
+    // The attempt was cut at the budget and retried by a later tick.
+    let releases = control.releases.lock().expect("releases").clone();
+    let [cut, retried, ..] = releases.as_slice() else {
+        panic!("the cut attempt was retried: {} releases", releases.len());
+    };
+    assert!(
+        *retried >= *cut + budget && *retried <= *cut + budget + tick + slack,
+        "the retry began {:?} after the cut attempt",
+        *retried - *cut
+    );
+    assert!(matches!(
+        factory
+            .load_intent(intent.id)
+            .await
+            .expect("intent")
+            .expect("retained")
+            .state,
+        ControlIntentState::Pending
+            | ControlIntentState::Failed {
+                retryable: true,
+                ..
+            }
+    ));
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires the pinned live Restate server"]
+async fn live_recovery_tick_keeps_cadence_with_slow_control_rpc() {
+    recovery_tick_keeps_cadence_with_slow_control_rpc(HarnessServer::Live).await;
 }

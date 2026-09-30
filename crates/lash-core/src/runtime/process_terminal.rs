@@ -16,7 +16,9 @@
 
 use std::sync::Arc;
 
-use crate::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+use crate::runtime::drive::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy,
+};
 use crate::store::{ObligationKey, ObligationLedger};
 use crate::{PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
@@ -26,6 +28,7 @@ pub struct ProcessTerminalRelay {
     ledger: Arc<dyn ObligationLedger>,
     registry: Arc<dyn ProcessRegistry>,
     port: Arc<dyn ProcessWorkSubstrate>,
+    policy: RelayPolicy,
 }
 
 impl ProcessTerminalRelay {
@@ -40,7 +43,16 @@ impl ProcessTerminalRelay {
             ledger,
             registry,
             port,
+            policy: RelayPolicy::default(),
         }
+    }
+
+    /// The same relay under `policy` rather than the kind's default (a host
+    /// lever, ADR 0014).
+    #[must_use]
+    pub fn with_policy(mut self, policy: RelayPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 }
 
@@ -59,6 +71,10 @@ fn failure(error: PluginError) -> DeliveryFailure {
 impl ObligationRelay for ProcessTerminalRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
+    }
+
+    fn policy(&self) -> RelayPolicy {
+        self.policy
     }
 
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {

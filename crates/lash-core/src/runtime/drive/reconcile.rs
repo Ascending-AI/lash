@@ -2,13 +2,17 @@
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
 //! One tick, [`reconcile_once`], is engine-neutral and idempotent. Every
-//! deployment first runs the obligation relays' due passes (ADR 0109 §1.4)
+//! deployment first starts the obligation relays' due passes (ADR 0109 §1.4)
 //! — among them control intents' engine halves, the scope closes a terminal
 //! write armed, parent-end plans and the ingress its admission armed (ADR
 //! 0109 §3) — claimed through every registered kind's due index, not scanned
-//! out of their tables. Then the recovery leader runs the arms below, each
-//! bounded by the tick's page and resuming from its own cursor, so a tick
-//! never serializes the fleet and one arm's failure never stops another:
+//! out of their tables. Each kind's pass runs on its own lane
+//! ([`RelayLanes`]) and the tick waits for them at most its budget's
+//! `tick_wait`, so a slow delivery holds back neither another kind nor the
+//! arms below (ADR 0109 §1.8). Then the recovery leader runs the arms below,
+//! each bounded by the tick's page and resuming from its own cursor, so a
+//! tick never serializes the fleet and one arm's failure never stops
+//! another:
 //!
 //! 1. **Parks (O3).** The engine's own view of stalled work becomes lash
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
@@ -32,8 +36,9 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use super::lanes::RelayLanes;
 use super::park::StoreParkRecovery;
-use super::relay::{ObligationRelay, relay_due, relay_kind};
+use super::relay::ObligationRelay;
 use crate::engine::{
     EnginePage, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, ScopeCloseSink,
     SlotPass,
@@ -64,6 +69,8 @@ pub struct ReconcileParts<'a> {
     pub duties: RecoveryDuties,
     /// Every obligation kind's relay whose due index this tick claims from.
     pub relays: &'a [Arc<dyn ObligationRelay>],
+    /// The deployment's lanes the relays' due passes run on, across ticks.
+    pub lanes: &'a RelayLanes,
 }
 
 /// The process side of a tick: the registry the parent-end ledger lives in,
@@ -102,9 +109,9 @@ pub async fn reconcile_once(
     // Due obligations: every deployment where claims skip each other, the
     // leader alone where they do not (ADR 0109 §1.7).
     if parts.duties.due_claims {
-        for relay in parts.relays {
-            let kind = relay_kind(relay.as_ref());
-            match relay_due(relay.as_ref(), parts.clock, page).await {
+        let lanes = parts.lanes.tick(parts.relays, page).await;
+        for (kind, ended) in lanes.ended {
+            match ended {
                 Ok(pass) => report.obligations.push((kind, pass)),
                 Err(error) => report.failures.push(ReconcileFailure {
                     arm: ReconcileArm::Obligations,
@@ -112,6 +119,7 @@ pub async fn reconcile_once(
                 }),
             }
         }
+        report.obligations_busy = lanes.busy;
     }
     if !parts.duties.leader {
         // Every arm below is a leader-only repair pass; a follower keeps

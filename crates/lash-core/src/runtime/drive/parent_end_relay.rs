@@ -316,6 +316,7 @@ mod tests {
                 max_backoff_ms: 900_000,
                 attempt_ceiling: NonZeroU32::new(3).unwrap_or(NonZeroU32::MIN),
                 claim_ttl_ms: 60_000,
+                attempt_budget_ms: RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
             }
         }
 

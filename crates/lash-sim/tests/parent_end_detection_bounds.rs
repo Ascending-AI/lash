@@ -342,6 +342,7 @@ async fn a_retryable_delivery_is_reattempted_at_its_backoff() {
             max_backoff_ms: 900_000,
             attempt_ceiling: NonZeroU32::new(16).unwrap_or(NonZeroU32::MIN),
             claim_ttl_ms: 60_000,
+            attempt_budget_ms: RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
         }),
         world.clock.as_ref(),
         NonZeroUsize::MIN,
@@ -393,6 +394,7 @@ async fn retryable_failures_stall_at_the_attempt_ceiling() {
         max_backoff_ms: 900_000,
         attempt_ceiling: NonZeroU32::new(ceiling).unwrap_or(NonZeroU32::MIN),
         claim_ttl_ms: 60_000,
+        attempt_budget_ms: RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
     });
     async fn tick_at(relay: &ParentEndRelay, world: &World) -> lash_core::engine::RelayPass {
         relay_due(relay, world.clock.as_ref(), NonZeroUsize::MIN)

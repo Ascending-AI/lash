@@ -99,3 +99,91 @@ impl serde::Serialize for DeploymentDrainStatus {
 /// composition live beside the store port that answers them, so this facade
 /// and the operator binary share one definition (FIG-3884).
 pub use lash_core::store::generation_drain::GenerationDrainStatus;
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use lash_core::store::ObligationKind;
+
+    use super::DeploymentDrainStatus;
+
+    /// ADR 0109 §1.5, FIG-3586: a deployment is drained only when admission
+    /// is closed and it holds no live work and no stalled obligation of any
+    /// kind. Each of them alone keeps it undrained, and the report names
+    /// every kind, zero included, on the wire.
+    #[test]
+    fn deployment_drain_aggregates_every_live_and_stalled_kind() {
+        let idle = DeploymentDrainStatus {
+            accepting_new_work: false,
+            remaining_invocations: 0,
+            in_flight_turns: 0,
+            parked_turns: 0,
+            parked_processes: 0,
+            oldest_parked_since_ms: None,
+            retired_by_executable_generation: BTreeMap::new(),
+            stalled_obligations: ObligationKind::ALL.iter().map(|kind| (*kind, 0)).collect(),
+            checked_at: 1,
+        };
+        assert!(idle.drained());
+        let live: [(&str, DeploymentDrainStatus); 4] = [
+            (
+                "admission open",
+                DeploymentDrainStatus {
+                    accepting_new_work: true,
+                    ..idle.clone()
+                },
+            ),
+            (
+                "a non-terminal process",
+                DeploymentDrainStatus {
+                    remaining_invocations: 1,
+                    ..idle.clone()
+                },
+            ),
+            (
+                "a turn in flight",
+                DeploymentDrainStatus {
+                    in_flight_turns: 1,
+                    ..idle.clone()
+                },
+            ),
+            (
+                "a parked turn",
+                DeploymentDrainStatus {
+                    parked_turns: 1,
+                    ..idle.clone()
+                },
+            ),
+        ];
+        for (what, status) in live {
+            assert!(!status.drained(), "{what} keeps the deployment undrained");
+        }
+        for kind in ObligationKind::ALL {
+            let mut stalled = idle.clone();
+            stalled.stalled_obligations.insert(kind, 1);
+            assert!(
+                !stalled.drained(),
+                "a stalled {kind} obligation keeps the deployment undrained"
+            );
+            let wire = serde_json::to_value(&stalled).expect("serialize the drain status");
+            assert_eq!(wire["drained"], false, "{kind}");
+            let counts = wire["stalled_obligations"]
+                .as_object()
+                .expect("stalled obligations by kind");
+            assert_eq!(
+                counts.len(),
+                ObligationKind::ALL.len(),
+                "every kind is named"
+            );
+            assert_eq!(counts[kind.label()], 1, "{kind}");
+            assert!(
+                ObligationKind::ALL
+                    .iter()
+                    .filter(|other| **other != kind)
+                    .all(|other| counts[other.label()] == 0),
+                "{kind}: only its own count moved"
+            );
+        }
+    }
+}

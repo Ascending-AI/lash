@@ -15,8 +15,8 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::drive::ControlIntentRelay;
-use lash_core::drive::relay::{RelayPolicy, relay_due};
+use lash_core::drive::relay::{ObligationRelay, RelayPolicy, relay_due};
+use lash_core::drive::{ControlIntentRelay, ScopeCloseRelay};
 use lash_core::engine::{
     EngineAck, EnginePage, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, RootRef,
     ScopeCloseSink, SessionControlEngine,
@@ -39,16 +39,22 @@ const TICK_MAX_MS: u64 = 11_000;
 
 /// The owner of the closed session's scope: every close attempt is one
 /// delivery attempt reaching the engine half. It fails while `failures`
-/// remain.
+/// remain. It records when each of the session's roots had its scope
+/// closed.
 struct CountingClose {
     clock: Arc<SimClock>,
     failures: AtomicU32,
     attempts: Mutex<Vec<u64>>,
+    root_closes: Mutex<Vec<u64>>,
 }
 
 #[async_trait::async_trait]
 impl ScopeCloseSink for CountingClose {
     async fn close_root_scope(&self, _: &RootTerminal) -> Result<(), StoreError> {
+        self.root_closes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(self.clock.logical_ms());
         Ok(())
     }
 
@@ -131,7 +137,11 @@ struct World {
     clock: Arc<SimClock>,
     stores: lash_sqlite_store::SqliteStoreSet,
     close: Arc<CountingClose>,
-    relay: ControlIntentRelay,
+    relay: Arc<ControlIntentRelay>,
+    /// The `ScopeClose` kind's relay the intent's engine half closes roots
+    /// through.
+    scope_close: Arc<ScopeCloseRelay>,
+    session: SessionId,
     intent: ControlIntent,
     /// The virtual instant the close committed, its obligation due.
     armed_at: u64,
@@ -148,7 +158,18 @@ impl World {
         failures: u32,
         engine: Arc<dyn SessionControlEngine>,
     ) -> Self {
-        let clock = SimClock::new();
+        Self::closed_on(name, root, failures, engine, SimClock::new()).await
+    }
+
+    /// [`closed`](Self::closed) on `clock`, which an engine the law built
+    /// shares.
+    async fn closed_on(
+        name: &str,
+        root: bool,
+        failures: u32,
+        engine: Arc<dyn SessionControlEngine>,
+        clock: Arc<SimClock>,
+    ) -> Self {
         clock.advance_by(1_000).await;
         let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
             .await
@@ -182,28 +203,51 @@ impl World {
             clock: Arc::clone(&clock),
             failures: AtomicU32::new(failures),
             attempts: Mutex::new(Vec::new()),
+            root_closes: Mutex::new(Vec::new()),
         });
-        let scope_close = Arc::new(lash_core::drive::ScopeCloseRelay::new(
+        let scope_close = Arc::new(ScopeCloseRelay::new(
             stores.obligation_ledger(ObligationKind::ScopeClose),
             Arc::clone(&factory) as Arc<dyn lash_core::DeploymentStore>,
             Arc::clone(&close) as Arc<dyn ScopeCloseSink>,
         ));
-        let relay = ControlIntentRelay::new(
+        let relay = Arc::new(ControlIntentRelay::new(
             stores.obligation_ledger(ObligationKind::ControlIntent),
             factory,
             Arc::new(Work(engine)),
             Arc::clone(&close) as Arc<dyn ScopeCloseSink>,
-            scope_close,
+            Arc::clone(&scope_close) as Arc<dyn ObligationRelay>,
             Arc::clone(&clock) as Arc<dyn Clock>,
-        );
+        ));
         Self {
             clock,
             stores,
             close,
             relay,
+            scope_close,
+            session,
             intent,
             armed_at,
         }
+    }
+
+    fn root_closes(&self) -> Vec<u64> {
+        self.close
+            .root_closes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Where the open root's scope-close obligation stands.
+    async fn root_scope_close(&self) -> Option<ObligationState> {
+        self.stores
+            .obligation_ledger(ObligationKind::ScopeClose)
+            .state(&lash_core::store::scope_close_obligation_id(
+                &self.session,
+                &TurnId::from("open-root"),
+            ))
+            .await
+            .expect("obligation state")
     }
 
     fn attempts(&self) -> Vec<u64> {
@@ -250,7 +294,7 @@ impl World {
                 .await;
             ticks.push(self.clock.logical_ms());
             relay_due(
-                &self.relay,
+                self.relay.as_ref(),
                 self.clock.as_ref(),
                 NonZeroUsize::MIN.saturating_add(63),
             )
@@ -470,5 +514,231 @@ async fn a_refused_intent_stalls_in_the_pass_that_claims_it() {
     assert!(
         world.attempts().is_empty(),
         "a refused release closes nothing"
+    );
+}
+
+/// An engine whose every root release waits `release_ms` on the virtual
+/// clock — a slow control RPC — recording when each release started and
+/// when each park reconcile ran.
+struct SlowReleases {
+    clock: Arc<SimClock>,
+    release_ms: u64,
+    releases: Mutex<Vec<u64>>,
+    parks: Mutex<Vec<u64>>,
+}
+
+#[async_trait::async_trait]
+impl SessionControlEngine for SlowReleases {
+    async fn reconcile_parks(
+        &self,
+        _: &dyn ParkRecoveryWriter,
+        _: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        self.parks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(self.clock.logical_ms());
+        Ok(ParkReconcileReport::default())
+    }
+
+    async fn resume_root(
+        &self,
+        _: &RootRef,
+        _: Option<&lash_core::store::EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Ok(EngineAck::NothingHeld)
+    }
+
+    async fn release_root(
+        &self,
+        _: &RootRef,
+        _: Option<&lash_core::store::EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        self.releases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(self.clock.logical_ms());
+        lash_core::Clock::sleep(
+            self.clock.as_ref(),
+            std::time::Duration::from_millis(self.release_ms),
+        )
+        .await;
+        Ok(EngineAck::Released)
+    }
+}
+
+/// ADR 0109 §1.8: a slow delivery starves neither a later kind nor the
+/// parks. The deployment's production schedule — the recovery interval,
+/// the tick and its per-kind lanes — runs on the virtual clock while the
+/// closed session's release, a control RPC, takes ten minutes. Every tick
+/// fires on its `T` grid; each tick's parks run within its lane wait; the
+/// closed root's scope close, a later kind, is delivered in the first tick
+/// beside the slow intent; the intent's kind is reported busy, never
+/// re-claimed, while its attempt runs; and the attempt is cut at its
+/// budget, its retry due its backoff after it started, and retried by the
+/// first tick its lane is free for.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
+    use lash_core::engine::{ReconcileCursor, RecoveryPassBudget};
+    use lash_core::runtime::drive::{
+        RECOVERY_TICK, ReconcileParts, RecoveryInterval, RelayLanes, reconcile_once,
+    };
+
+    const STEP_MS: u64 = 100;
+    /// How far a virtual instant the harness observes may trail the one the
+    /// schedule meant: the clock moves in steps while the store works.
+    const SLACK_MS: u64 = 1_000;
+    let tick_ms = RECOVERY_TICK.as_millis() as u64;
+    let budget = RecoveryPassBudget::default();
+    let wait_ms = budget.tick_wait.as_millis() as u64;
+    let policy = RelayPolicy::default();
+
+    let clock = SimClock::new();
+    let engine = Arc::new(SlowReleases {
+        clock: Arc::clone(&clock),
+        release_ms: 600_000,
+        releases: Mutex::new(Vec::new()),
+        parks: Mutex::new(Vec::new()),
+    });
+    let world = World::closed_on(
+        "slow-release",
+        true,
+        0,
+        Arc::clone(&engine) as Arc<dyn SessionControlEngine>,
+        Arc::clone(&clock),
+    )
+    .await;
+    assert_eq!(world.obligation().await, Some(ObligationState::Due));
+    assert_eq!(
+        world.root_scope_close().await,
+        Some(ObligationState::Due),
+        "the close armed its root's scope close"
+    );
+
+    // The deployment's schedule, as its engine runs it.
+    let ticks = Arc::new(Mutex::new(
+        Vec::<(u64, lash_core::engine::ReconcileTick)>::new(),
+    ));
+    let schedule = {
+        let ticks = Arc::clone(&ticks);
+        let clock = Arc::clone(&clock);
+        let factory = world.stores.session_store_factory();
+        let work = Work(Arc::clone(&engine) as Arc<dyn SessionControlEngine>);
+        let close = Arc::clone(&world.close);
+        let relays: Vec<Arc<dyn ObligationRelay>> = vec![
+            Arc::clone(&world.relay) as _,
+            Arc::clone(&world.scope_close) as _,
+        ];
+        tokio::spawn(async move {
+            let lanes = RelayLanes::new(Arc::clone(&clock) as Arc<dyn Clock>, budget);
+            let mut interval =
+                RecoveryInterval::new(Arc::clone(&clock) as Arc<dyn Clock>, RECOVERY_TICK);
+            let mut cursor = ReconcileCursor::default();
+            loop {
+                interval.tick().await;
+                let ticked_at = clock.logical_ms();
+                let tick = reconcile_once(
+                    &ReconcileParts {
+                        sessions: factory.as_ref(),
+                        work: &work,
+                        scopes: close.as_ref(),
+                        processes: None,
+                        clock: clock.as_ref(),
+                        duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+                        relays: &relays,
+                        lanes: &lanes,
+                    },
+                    &cursor,
+                    NonZeroUsize::MIN.saturating_add(63),
+                )
+                .await;
+                cursor = tick.next.clone();
+                ticks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((ticked_at, tick));
+            }
+        })
+    };
+    let start = clock.logical_ms();
+    let horizon = start + policy.attempt_budget_ms + 2 * tick_ms + SLACK_MS;
+    while clock.logical_ms() < horizon {
+        clock.advance_to(clock.logical_ms() + STEP_MS).await;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    schedule.abort();
+
+    let ticks = ticks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|(at, tick)| (*at, tick.clone()))
+        .collect::<Vec<_>>();
+    let instants: Vec<u64> = ticks.iter().map(|(at, _)| *at).collect();
+    assert!(
+        instants.len() >= 5,
+        "the interval ticked through the slow release: {instants:?}"
+    );
+    // Cadence: every tick fires on the grid, whatever the release spends.
+    for (index, at) in instants.iter().enumerate() {
+        let due = start + tick_ms * index as u64;
+        assert!(
+            *at >= due && *at <= due + SLACK_MS,
+            "tick {index} fired at {at}, due at {due}: {instants:?}"
+        );
+    }
+    // Parks: each tick's leader arm ran within its lane wait.
+    let parks = engine
+        .parks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert!(
+        parks.len() >= instants.len() - 1,
+        "{parks:?} for ticks {instants:?}"
+    );
+    for (at, park) in instants.iter().zip(&parks) {
+        assert!(
+            *park <= at + wait_ms + SLACK_MS,
+            "the parks of the tick at {at} ran at {park}"
+        );
+    }
+    // A later kind: the root's scope close was delivered in the first tick.
+    let closes = world.root_closes();
+    let [closed] = closes.as_slice() else {
+        panic!("one root scope close: {closes:?}");
+    };
+    assert!(
+        *closed <= start + SLACK_MS,
+        "closed at {closed}, first tick at {start}"
+    );
+    assert_eq!(
+        world.root_scope_close().await,
+        Some(ObligationState::Delivered)
+    );
+    // The slow kind: busy, never re-claimed, while its attempt ran.
+    for (at, tick) in &ticks[1..] {
+        if *at + SLACK_MS < start + policy.attempt_budget_ms {
+            assert_eq!(
+                tick.obligations_busy,
+                vec![ObligationKind::ControlIntent],
+                "the tick at {at} found the intent's lane busy"
+            );
+        }
+    }
+    // The attempt was cut at its budget and retried from its start.
+    let releases = engine
+        .releases
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let [first, second, ..] = releases.as_slice() else {
+        panic!("the cut attempt was retried: {releases:?}");
+    };
+    assert!(*first <= start + SLACK_MS, "{releases:?}");
+    assert!(
+        *second >= first + policy.attempt_budget_ms
+            && *second <= first + policy.attempt_budget_ms + tick_ms + SLACK_MS,
+        "the retry started at {second}, the cut attempt at {first}"
     );
 }

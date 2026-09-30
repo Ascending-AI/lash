@@ -471,7 +471,7 @@ async fn scope_close_state(
 async fn reconcile_tick(
     stores: &Arc<dyn crate::StoreSet>,
     relay: &lash_core::runtime::drive::ScopeCloseRelay,
-    clock: &dyn lash_core::Clock,
+    clock: Arc<dyn lash_core::Clock>,
 ) -> lash_core::engine::ReconcileTick {
     let factory = stores.session_store_factory();
     let work = crate::NoSessionWork::new();
@@ -484,9 +484,13 @@ async fn reconcile_tick(
             work: &work,
             scopes: &scopes,
             processes: None,
-            clock,
+            clock: clock.as_ref(),
             duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
             relays: &relays,
+            lanes: &lash_core::runtime::drive::RelayLanes::new(
+                Arc::clone(&clock),
+                lash_core::engine::RecoveryPassBudget::default(),
+            ),
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
@@ -683,11 +687,11 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     // the close to the scope owner, and settles the row delivered. A second
     // tick claims nothing — the delivered root is not closed again.
     let relay = scope_close_relay(&stores, closes.clone());
-    let lapsed = OffsetClock {
+    let lapsed: Arc<dyn lash_core::Clock> = Arc::new(OffsetClock {
         inner: Arc::clone(&parts.host.clock),
         offset_ms: lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms + 1,
-    };
-    let first = reconcile_tick(&stores, &relay, &lapsed).await;
+    });
+    let first = reconcile_tick(&stores, &relay, Arc::clone(&lapsed)).await;
     let pass = scope_close_pass(&first);
     assert_eq!(
         (pass.claimed, pass.delivered),
@@ -700,7 +704,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         "the delivered close settled the obligation"
     );
     let closed_once = closes.closes().len();
-    let second = reconcile_tick(&stores, &relay, &lapsed).await;
+    let second = reconcile_tick(&stores, &relay, Arc::clone(&lapsed)).await;
     let pass = scope_close_pass(&second);
     assert_eq!(pass.claimed, 0, "the second tick claimed nothing: {pass:?}");
     assert_eq!(
@@ -759,7 +763,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     let tick = reconcile_tick(
         &stores,
         &scope_close_relay(&stores, closes.clone()),
-        parts.host.clock.as_ref(),
+        Arc::clone(&parts.host.clock),
     )
     .await;
     assert_eq!(
@@ -923,7 +927,7 @@ pub async fn a_root_crashed_at_its_report_handover_still_closes_its_scope(
     })
     .await;
     let relay = scope_close_relay(&stores, closes.clone());
-    reconcile_tick(&stores, &relay, parts.host.clock.as_ref()).await;
+    reconcile_tick(&stores, &relay, Arc::clone(&parts.host.clock)).await;
     assert_eq!(
         closes.closes(),
         vec![(root.clone(), true)],

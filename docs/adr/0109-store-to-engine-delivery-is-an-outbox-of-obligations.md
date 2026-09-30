@@ -229,8 +229,10 @@ pub struct RelayPolicy {
     pub max_backoff_ms: u64,               // 900_000 (15 min)
     pub attempt_ceiling: NonZeroU32,       // 16, per kind, host-configurable
     pub claim_ttl_ms: u64,                 // 60_000
+    pub attempt_budget_ms: u64,            // 30_000, host-set, below claim_ttl
 }
-// next due = now + min(base << (attempts - 1), max)
+// next due = attempt start + min(base << (attempts - 1), max)
+// an attempt still running at attempt_budget_ms is abandoned: Retryable
 
 #[async_trait]
 pub trait ObligationRelay: Send + Sync {
@@ -254,7 +256,7 @@ pub struct RelayPass { pub claimed: usize, pub delivered: usize, pub retried: us
 /// Immediate delivery of a producer's own commit: claim by id, deliver, settle.
 pub async fn deliver_now(relay: &dyn ObligationRelay, id: &ObligationId,
     clock: &dyn Clock) -> Result<RelayVerdict, StoreError>;
-/// One bounded due-claim pass.
+/// One bounded due-claim pass: its page's rows are attempted together.
 pub async fn relay_due(relay: &dyn ObligationRelay, clock: &dyn Clock,
     limit: NonZeroUsize) -> Result<RelayPass, StoreError>;
 ```
@@ -381,8 +383,9 @@ impl RecoveryLease {
 
 The lease is named `recovery:{EffectHost::turn_control_binding_id()}`: the
 engine authority that owns the effect state, in the storage that holds the
-row. `ReconcileParts` carries `duties: RecoveryDuties` and `relays:
-&[Arc<dyn ObligationRelay>]`; the facade's driver fills both.
+row. `ReconcileParts` carries `duties: RecoveryDuties`, `relays:
+&[Arc<dyn ObligationRelay>]` and `lanes: &RelayLanes` (§1.8); the facade's
+driver fills all three and owns the lanes across its ticks.
 
 `trusted_until = renew start + ttl − trust_margin` on the host clock; a leader
 whose trust lapsed is a follower until its next successful renew. Losing the
@@ -410,29 +413,63 @@ Every duty stays idempotent under two overlapping leaders.
 
 ### 1.8 Detection bounds the sim asserts
 
-With tick `T` = 10 s ±10% (so consecutive passes are at most 11 s apart),
-the leader lease's TTL 15 s and follower retry 5.5 s, and the relay's
-`claim_ttl` 60 s:
+The bounds follow from a schedule and three host budgets, not from the pass
+keeping pace on its own:
 
-- **Immediate.** A producer's obligation is attempted before its call returns.
-- **Lost immediate attempt.** Claimed by `due_at + T` on PostgreSQL, by
-  `due_at + T + 20.5 s` on SQLite across a leader failover.
-- **Lapsed claim.** Retaken by `claimed_at + claim_ttl + T` (71 s): the
-  claim lapses at `claimed_at + claim_ttl`, and the first due pass at or
-  after the lapse retakes it. The bound is exact, not padded: a pass that
-  lands just before the lapse, followed by the longest interval, retakes the
-  row a hair under it. It holds only while the interval keeps its cadence —
-  a pass fires every `T` from the last, whatever the pass itself or a
-  harness waiting on the engine spent — which is how the crash matrix
-  measures it on both engines (FIG-3899).
-- **Retryable failure.** Attempt `n + 1` at `min(2^(n−1) s, 15 min)` after
-  attempt `n`, plus at most `T`; `stalled` after `attempt_ceiling` attempts
-  (≈ 1 h 47 min at the defaults), never later.
+- `T` = 10 s (`RECOVERY_TICK`): the engine runs the pass on a
+  `RecoveryInterval`, a fixed grid on the deployment clock. A pass that ends
+  within `T` never moves the next one; one that overran starts the next at
+  once. The sim jitters `T` by ±10%, so its passes are at most 11 s apart.
+- `B`, the attempt budget (`RelayPolicy::attempt_budget_ms`; the host sets it
+  with `LashCoreBuilder::recovery_pass_budget`, default 30 s). An attempt
+  still running at `B` is abandoned and settles retryable; idempotent
+  delivery and claim-token fencing make that safe. `B` must stay below
+  `claim_ttl` (60 s), so no claim lapses under a running attempt.
+- `W`, the tick wait (`RecoveryPassBudget::tick_wait`, host-set, default
+  1 s): each kind's due pass runs on its own lane (`RelayLanes`), and a tick
+  waits for its lanes at most `W` before the leader arms run. A lane whose
+  pass is still delivering is reported busy and skipped until the pass ends.
+  Within `W` a kind whose pass claimed nothing looks again once another
+  kind's pass claimed rows, so a row one delivery arms (a close intent's
+  acknowledgement arms its session's delete) is taken in the same tick; a
+  kind claims rows at most once a tick.
+- `P`, the page service capacity: a pass claims at most `P` = 64 rows per
+  kind and attempts them together, so it ends within `B + S` of its start,
+  `S` being the claim and settle store latency.
+- `F`, the failover delay: on SQLite only the leader claims due rows, and a
+  follower leads within `ttl + follower_retry` = 20.5 s of the leader's
+  death (the lease's own cadence, below).
+
+The bounds hold while `S`, and the leader arms' own engine calls, fit in
+`T − W`, and at most `P` rows of a kind fall due per `T`; a deployment
+outside those prerequisites is late by its overrun, never by a delivery. A
+slow delivery delays neither another kind nor the parks: every kind's pass
+runs beside it, and the parks run at most `W + S` after their tick.
+
+- **Immediate.** A producer's obligation is attempted before its call
+  returns, within `B`.
+- **Lost immediate attempt.** Claimed by `due_at + T` when its kind's lane
+  is free, and by `due_at + T + B + S` when a pass of its kind was still
+  delivering; plus `F` on SQLite across a leader failover.
+- **Lapsed claim.** Retaken by `claimed_at + claim_ttl + T` (71 s) when its
+  kind's lane is free at the lapse, and by `claimed_at + claim_ttl + T + B +
+  S` (101 s + `S` at the defaults) when a pass of its kind was still
+  delivering. It is never retaken before `claimed_at + claim_ttl`.
+- **Retryable failure.** Attempt `n + 1` is due `backoff(n) = min(2^(n−1) s,
+  15 min)` after attempt `n` started, so the time the attempt ran counts
+  toward its backoff; it starts within `[start_n + backoff(n), start_n +
+  max(backoff(n), B + S) + T]`. The obligation stalls after
+  `attempt_ceiling` attempts, the last starting at most `Σ (max(backoff(n),
+  B + S) + T)` for `n = 1 … attempt_ceiling − 1` after the first: ≈ 1 h
+  37 min at the defaults when every attempt runs its full budget, plus a
+  store latency per attempt. A stalled obligation is never attempted again
+  until an operator re-arms it.
 - **Undecodable or refused.** `stalled` in the pass that claims it; later
   rows of the same page are still delivered.
 - **Leader loss.** Leader duties resume within 20.5 s of the leader's death;
   a newer `generation_rank` takes over within `min_tenure + renew_every`
-  (35 s), and the old leader stops within one renew.
+  (35 s), and the old leader stops within one renew. The lease runs on a
+  task of its own, so a slow pass never delays it.
 
 ## 2. Rationale
 

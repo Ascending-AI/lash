@@ -88,9 +88,50 @@ pub struct ReconcileTick {
     pub failures: Vec<ReconcileFailure>,
     /// Whether this tick ran the leader-only arms (ADR 0109 §1.7).
     pub led: bool,
-    /// Each relay's due pass, in relay order; empty when this deployment
-    /// may not claim due obligations this tick.
+    /// Each kind's due pass that finished by the time this tick's leader
+    /// arms ran, in relay order: one this tick started, or one an earlier
+    /// tick started that ran on past it (ADR 0109 §1.8). Empty when this
+    /// deployment may not claim due obligations this tick.
     pub obligations: Vec<(crate::store::ObligationKind, RelayPass)>,
+    /// Kinds whose due pass an earlier tick started was still delivering, so
+    /// this tick started none for them.
+    pub obligations_busy: Vec<crate::store::ObligationKind>,
+}
+
+/// How a deployment's recovery pass bounds its obligation deliveries (ADR
+/// 0109 §1.8). Host levers (ADR 0014): lash implements the mechanics, the
+/// host chooses the numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveryPassBudget {
+    /// The longest one obligation delivery attempt runs before it is
+    /// abandoned and retried
+    /// ([`RelayPolicy::attempt_budget_ms`](crate::runtime::drive::relay::RelayPolicy::attempt_budget_ms)).
+    /// Default 30 s. Keep it below the relay's 60 s claim TTL, so a claim
+    /// never lapses under an attempt still running.
+    pub attempt: std::time::Duration,
+    /// The longest a recovery tick waits on its kinds' due passes before its
+    /// leader-only arms run. A pass still delivering then finishes on its
+    /// kind's lane, and the next tick reports it. Default 1 s.
+    pub tick_wait: std::time::Duration,
+}
+
+impl Default for RecoveryPassBudget {
+    fn default() -> Self {
+        Self {
+            attempt: std::time::Duration::from_millis(
+                crate::runtime::drive::relay::RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
+            ),
+            tick_wait: std::time::Duration::from_secs(1),
+        }
+    }
+}
+
+impl RecoveryPassBudget {
+    /// The attempt budget in milliseconds, as a relay policy carries it.
+    #[must_use]
+    pub fn attempt_ms(&self) -> u64 {
+        u64::try_from(self.attempt.as_millis()).unwrap_or(u64::MAX)
+    }
 }
 
 /// The recovery leader lease's cadence (ADR 0109 §1.6). Host levers

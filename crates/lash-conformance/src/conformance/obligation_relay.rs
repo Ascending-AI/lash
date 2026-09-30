@@ -133,6 +133,7 @@ fn policy(ceiling: u32) -> RelayPolicy {
         max_backoff_ms: 4_000,
         attempt_ceiling: NonZeroU32::new(ceiling).unwrap_or(NonZeroU32::MIN),
         claim_ttl_ms: 60_000,
+        attempt_budget_ms: RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
     }
 }
 

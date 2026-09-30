@@ -9,7 +9,9 @@
 //! Nothing re-emits the occurrence: a replayed emit would only find the
 //! reservation already held.
 
-use crate::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+use crate::runtime::drive::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy,
+};
 use crate::store::{ObligationKey, ObligationLedger};
 use crate::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};
 use std::sync::Arc;
@@ -19,6 +21,7 @@ use std::sync::Arc;
 pub struct TriggerDeliveryRelay {
     ledger: Arc<dyn ObligationLedger>,
     router: TriggerRouter,
+    policy: RelayPolicy,
 }
 
 impl TriggerDeliveryRelay {
@@ -27,7 +30,19 @@ impl TriggerDeliveryRelay {
     /// (its env store and engines), so a recovered start registers the process
     /// a first attempt would have.
     pub fn new(ledger: Arc<dyn ObligationLedger>, router: TriggerRouter) -> Self {
-        Self { ledger, router }
+        Self {
+            ledger,
+            router,
+            policy: RelayPolicy::default(),
+        }
+    }
+
+    /// The same relay under `policy` rather than the kind's default (a host
+    /// lever, ADR 0014).
+    #[must_use]
+    pub fn with_policy(mut self, policy: RelayPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 }
 
@@ -35,6 +50,10 @@ impl TriggerDeliveryRelay {
 impl ObligationRelay for TriggerDeliveryRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
+    }
+
+    fn policy(&self) -> RelayPolicy {
+        self.policy
     }
 
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {

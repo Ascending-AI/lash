@@ -751,6 +751,10 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
         Arc::clone(&clock),
     ));
     let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![relay];
+    let lanes = lash_core::drive::RelayLanes::new(
+        Arc::clone(&clock),
+        lash_core::engine::RecoveryPassBudget::default(),
+    );
     let parts = lash_core::drive::ReconcileParts {
         sessions: sessions.as_ref(),
         work: &work,
@@ -764,6 +768,7 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
         clock: clock.as_ref(),
         duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
         relays: &relays,
+        lanes: &lanes,
     };
     let first = lash_core::drive::reconcile_once(
         &parts,

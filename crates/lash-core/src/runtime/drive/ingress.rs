@@ -57,6 +57,14 @@ impl IngressRelay {
         }
     }
 
+    /// The same relay under `policy` rather than the kind's default (a host
+    /// lever, ADR 0014).
+    #[must_use]
+    pub fn with_policy(mut self, policy: RelayPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
     /// The relay of `backend`'s ingress ledger that asks `work` for drives.
     #[must_use]
     pub fn over_backend(

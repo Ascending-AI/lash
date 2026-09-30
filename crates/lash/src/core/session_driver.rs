@@ -17,6 +17,9 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) store_factory: Arc<dyn DeploymentStore>,
     pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(super) process_lifecycle_available: bool,
+    /// How the recovery pass bounds its obligation deliveries (ADR 0109
+    /// §1.8).
+    pub(super) recovery_pass: lash_core::engine::RecoveryPassBudget,
 }
 
 /// The core's session driver (FIG-3600): opens a session's runtime with the
@@ -35,11 +38,20 @@ pub(crate) struct CoreSessionDriver {
     /// What the core administers sessions through, bound with the substrate
     /// slot: the session-delete relay delivers through it (ADR 0109 §4).
     administration: std::sync::OnceLock<super::AdministrationSource>,
+    /// Each obligation kind's due-pass lane, across the recovery ticks this
+    /// deployment runs (ADR 0109 §1.8). Dropped with the deployment, which
+    /// aborts every pass still delivering.
+    lanes: lash_core::runtime::drive::RelayLanes,
 }
 
 impl CoreSessionDriver {
     pub(crate) fn new(config: Arc<CoreSessionDriverConfig>) -> Self {
+        let lanes = lash_core::runtime::drive::RelayLanes::new(
+            Arc::clone(&config.env.core.clock),
+            config.recovery_pass,
+        );
         Self {
+            lanes,
             config,
             held: super::held_drives::HeldDrives::default(),
             substrate_slot: std::sync::OnceLock::new(),
@@ -74,6 +86,10 @@ impl CoreSessionDriver {
             processes: Some(ports.process.clone()),
             administration,
             clock: Arc::clone(&self.config.env.core.clock),
+            policy: lash_core::runtime::drive::relay::RelayPolicy {
+                attempt_budget_ms: self.config.recovery_pass.attempt_ms(),
+                ..lash_core::runtime::drive::relay::RelayPolicy::default()
+            },
         })
     }
 
@@ -345,6 +361,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
                 clock: self.config.env.core.clock.as_ref(),
                 duties,
                 relays: &relays,
+                lanes: &self.lanes,
             },
             cursor,
             page,

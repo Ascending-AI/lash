@@ -763,6 +763,7 @@ pub struct LashCoreBuilder {
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
+    recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
@@ -792,6 +793,7 @@ impl LashCoreBuilder {
             plugin_stack: PluginStack::default(),
             plugin_host: None,
             recovery_lease: None,
+            recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
             live_replay_store: None,
             process_observation_config: Default::default(),
@@ -959,6 +961,17 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Bound the recovery pass's obligation deliveries (ADR 0109 §1.8): each
+    /// delivery attempt's budget — past it the attempt is abandoned and
+    /// retried — and how long a recovery tick waits on its kinds' due passes
+    /// before its leader arms run. Defaults to a 30 s attempt budget and a
+    /// 1 s tick wait. Keep the attempt budget below the relay's 60 s claim
+    /// TTL.
+    pub fn recovery_pass_budget(mut self, budget: lash_core::engine::RecoveryPassBudget) -> Self {
+        self.recovery_pass = budget;
+        self
+    }
+
     /// Configure the bounded live replay buffer used by session observation
     /// cursors. This is best-effort reconnect recovery only; durable state
     /// still comes from the session store and [`SessionReadView`].
@@ -1091,6 +1104,7 @@ impl LashCoreBuilder {
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
             self.recovery_lease.unwrap_or_default(),
+            self.recovery_pass,
         );
         // The driver's reconcile tick runs every obligation kind's relay
         // (ADR 0109 §1.4): the backend's process wiring always supplies a
@@ -1184,6 +1198,7 @@ impl LashCoreBuilder {
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
+        recovery_pass: lash_core::engine::RecoveryPassBudget,
     ) -> (Arc<CoreSessionDriver>, Arc<dyn lash_core::SessionDriver>) {
         let owner = drive_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
@@ -1198,6 +1213,7 @@ impl LashCoreBuilder {
             store_factory: Arc::clone(store_factory),
             live_replay_store,
             process_lifecycle_available,
+            recovery_pass,
         })));
         let installed = install_session_driver(session_work, driver.clone(), &owner);
         (driver, installed)

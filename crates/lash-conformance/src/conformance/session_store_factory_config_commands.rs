@@ -590,9 +590,14 @@ impl crate::Clock for ConfigSettlementClock {
         self.wait_until_ms(deadline_ms).await;
     }
 
+    /// A deadline the writer races (an obligation attempt's budget) never
+    /// moves the clock: only the writer's own waits do, so the deadline
+    /// passes when they carry the clock past it.
     async fn sleep_until(&self, deadline: std::time::Instant) {
-        self.sleep(deadline.saturating_duration_since(self.now()))
-            .await;
+        let deadline_ms = self.epoch_origin_ms.saturating_add(Self::duration_ms(
+            deadline.saturating_duration_since(self.monotonic_origin),
+        ));
+        self.wait_until_ms(deadline_ms).await;
     }
 }
 

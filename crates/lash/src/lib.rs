@@ -142,7 +142,7 @@ pub use lash_core::async_trait;
 pub use lash_core::engine::BuildGeneration;
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
-pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings};
+pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,

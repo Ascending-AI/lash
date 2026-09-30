@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::runtime::drive::relay::{
-    DeliveryFailure, ObligationDelivery, ObligationRelay, deliver_now,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, deliver_now,
 };
 use crate::store::{
     ClaimToken, ObligationKey, ObligationLedger, ObligationSettlement, process_start_obligation_id,
@@ -15,6 +15,7 @@ pub struct ProcessStartRelay {
     registry: Arc<dyn ProcessRegistry>,
     port: Arc<dyn ProcessWorkSubstrate>,
     clock: Arc<dyn Clock>,
+    policy: RelayPolicy,
 }
 
 impl ProcessStartRelay {
@@ -29,7 +30,16 @@ impl ProcessStartRelay {
             registry,
             port,
             clock,
+            policy: RelayPolicy::default(),
         }
+    }
+
+    /// The same relay under `policy` rather than the kind's default (a host
+    /// lever, ADR 0014).
+    #[must_use]
+    pub fn with_policy(mut self, policy: RelayPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 
     /// A producer's own-commit attempt on `process_id`'s armed start row
@@ -123,6 +133,10 @@ fn failure(error: PluginError) -> DeliveryFailure {
 impl ObligationRelay for ProcessStartRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
+    }
+
+    fn policy(&self) -> RelayPolicy {
+        self.policy
     }
 
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {

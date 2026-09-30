@@ -41,5 +41,5 @@ pub use drive::{
 pub use ingress::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 pub use reconcile::{
     ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, RecoveryLeaseConfig,
-    RecoveryLeaseTimings, RelayPass, SlotPass,
+    RecoveryLeaseTimings, RecoveryPassBudget, RelayPass, SlotPass,
 };

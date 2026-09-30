@@ -442,6 +442,10 @@ impl Fixture {
                 clock: later.as_ref(),
                 duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
                 relays: &relays,
+                lanes: &lash_core::runtime::drive::RelayLanes::new(
+                    Arc::clone(&later),
+                    lash_core::engine::RecoveryPassBudget::default(),
+                ),
             },
             &ReconcileCursor::default(),
             NonZeroUsize::MIN.saturating_add(63),

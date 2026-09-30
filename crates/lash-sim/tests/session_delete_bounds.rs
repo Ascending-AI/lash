@@ -492,3 +492,266 @@ async fn created_session(
     }
     core.session(session_id)
 }
+
+/// Who claims the delete in a matrix cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Claimant {
+    /// The leader of two contending deployments claims it and delivers.
+    Leader,
+    /// The leader claims it and dies holding the claim; the other deployment
+    /// takes the lease over and retakes the claim once it lapses.
+    TakenOver,
+}
+
+/// One deployment's recovery pass: the tick's lanes and duties under its
+/// own recovery lease, running the session-delete relay.
+async fn lease_pass(
+    deployment: &Deployment,
+    lease: &lash_core::runtime::recovery_lease::RecoveryLease,
+    relay: SessionDeleteRelay,
+) -> lash_core::engine::ReconcileTick {
+    let sessions = deployment.backend.session_store_factory();
+    let work = lash_core::NoSessionWork::new();
+    let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![Arc::new(relay)];
+    let lanes = lash_core::drive::RelayLanes::new(
+        Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>,
+        lash_core::engine::RecoveryPassBudget::default(),
+    );
+    lash_core::drive::reconcile_once(
+        &lash_core::drive::ReconcileParts {
+            sessions: sessions.as_ref(),
+            work: &work,
+            scopes: &lash_core::engine::NoScopeClose,
+            processes: None,
+            clock: deployment.clock.as_ref(),
+            duties: lease.duties(deployment.now()),
+            relays: &relays,
+            lanes: &lanes,
+        },
+        &lash_core::engine::ReconcileCursor::default(),
+        NonZeroUsize::MIN.saturating_add(63),
+    )
+    .await
+}
+
+/// ADR 0109 §1.5–§1.8 and ADR 0113 §2.5 over one session's deletion: every
+/// cell of {cleanup owed, cleanup delivered} × {steady leader, leader taken
+/// over} holds the same invariants.
+///
+/// - **Transactions.** The root's terminal armed its scope close and the
+///   close armed the delete, each due in its producer's own commit.
+/// - **Lease contention.** Of two deployments contending for the recovery
+///   lease one leads; on a store whose due claims need the leader the other
+///   claims nothing.
+/// - **Takeover.** A leader that dies holding the delete's claim is replaced
+///   once its lease lapses, and its claim is retaken only after the claim's
+///   own TTL, within one tick of it.
+/// - **Delete recovery.** The session is deleted exactly once, and never
+///   while its cleanup is owed: the delete waits for it (ADR 0113).
+/// - **Metrics.** Every pass's claims are accounted for by its outcomes, and
+///   nothing is left stalled: the drain status names every kind at zero.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn obligation_transaction_lease_and_delete_recovery_matrix() {
+    use lash_core::runtime::recovery_lease::RecoveryLease;
+    let policy = RelayPolicy::default();
+    for cleanup_owed in [true, false] {
+        for claimant in [Claimant::Leader, Claimant::TakenOver] {
+            let cell = format!("cleanup_owed={cleanup_owed} claimant={claimant:?}");
+            let session = format!("matrix-{cleanup_owed}-{claimant:?}").to_lowercase();
+            let deployment = deployment(1, &session, "matrix-root").await;
+            // Transactions: the root's terminal armed its scope close.
+            let scope_close = deployment.ended_root(&session, "matrix-root").await;
+            let mut cleanup_delivered = !cleanup_owed;
+            if cleanup_delivered {
+                deployment
+                    .deliver(ObligationKind::ScopeClose, &scope_close)
+                    .await;
+            }
+            deployment
+                .in_delete_handler(&session, async |context| {
+                    lash_core::session_close::close_session(&context)
+                        .await
+                        .expect("close")
+                        .expect("the session exists")
+                })
+                .await;
+            let (delete, state) = deployment
+                .delete_obligation(&session)
+                .await
+                .expect("the close armed the delete");
+            assert_eq!(state, ObligationState::Due, "{cell}");
+            let due_at = deployment.now();
+
+            // Lease contention: one of two deployments leads. The SQLite
+            // lease is judged by the database's own clock, so its TTL is
+            // short and a takeover waits it out in wall time.
+            let timings = lash_core::engine::RecoveryLeaseTimings {
+                ttl: std::time::Duration::from_secs(1),
+                trust_margin: std::time::Duration::from_millis(200),
+                ..lash_core::engine::RecoveryLeaseTimings::default()
+            };
+            let lease = |rank| {
+                RecoveryLease::new(
+                    deployment.backend.recovery_leader(),
+                    lash_core::store::recovery_leader::LeaseName::new(format!(
+                        "recovery:{session}"
+                    )),
+                    rank,
+                    timings,
+                    Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>,
+                )
+            };
+            let (first, second) = (lease(0), lease(0));
+            assert!(
+                matches!(
+                    first.step().await,
+                    lash_core::runtime::recovery_lease::Standing::Leader { .. }
+                ),
+                "{cell}"
+            );
+            assert_eq!(
+                second.step().await,
+                lash_core::runtime::recovery_lease::Standing::Follower,
+                "{cell}: the lease has one holder"
+            );
+            let followers_claim = !deployment
+                .backend
+                .recovery_leader()
+                .due_claims_need_leader();
+            assert_eq!(
+                second.duties(deployment.now()).due_claims,
+                followers_claim,
+                "{cell}"
+            );
+
+            let mut passes = Vec::new();
+            let (claimed_at, survivor) = match claimant {
+                Claimant::Leader => (None, first),
+                Claimant::TakenOver => {
+                    // The leader's pass claims the delete and dies holding it.
+                    let claimed_at = deployment.now();
+                    deployment
+                        .backend
+                        .obligation_ledger(ObligationKind::SessionDelete)
+                        .claim(
+                            &delete,
+                            &lash_core::store::ClaimToken::mint(),
+                            claimed_at,
+                            policy.claim_ttl_ms,
+                        )
+                        .await
+                        .expect("claim")
+                        .expect("the leader claims the due delete");
+                    drop(first);
+                    assert_eq!(
+                        second.step().await,
+                        lash_core::runtime::recovery_lease::Standing::Follower,
+                        "{cell}: the dead leader's lease holds until its TTL"
+                    );
+                    tokio::time::sleep(timings.ttl + std::time::Duration::from_millis(200)).await;
+                    (Some(claimed_at), second)
+                }
+            };
+            let mut deleted_at = None;
+            let mut first_claim_at = None;
+            let mut led_from_the_first_tick = None;
+            for _ in 0..40 {
+                let n = deployment.ticks.get();
+                deployment.ticks.set(n + 1);
+                deployment
+                    .double
+                    .server()
+                    .advance(std::time::Duration::from_millis(if n.is_multiple_of(2) {
+                        T_MAX_MS
+                    } else {
+                        T_MIN_MS
+                    }));
+                let led =
+                    survivor.step().await != lash_core::runtime::recovery_lease::Standing::Follower;
+                led_from_the_first_tick.get_or_insert(led);
+                let tick = lease_pass(&deployment, &survivor, deployment.relay(policy).await).await;
+                assert!(tick.failures.is_empty(), "{cell}: {:?}", tick.failures);
+                let now = deployment.now();
+                if let Some((_, pass)) = tick
+                    .obligations
+                    .iter()
+                    .find(|(kind, _)| *kind == ObligationKind::SessionDelete)
+                {
+                    if pass.claimed > 0 {
+                        first_claim_at.get_or_insert(now);
+                    }
+                    passes.push(*pass);
+                }
+                if deployment.was_deleted(&session).await {
+                    // Delete recovery: never before its cleanup.
+                    assert!(
+                        cleanup_delivered,
+                        "{cell}: deleted while its cleanup was owed"
+                    );
+                    deleted_at = Some(now);
+                    break;
+                }
+                if !cleanup_delivered
+                    && passes
+                        .iter()
+                        .any(|pass| pass.retried > 0 || pass.claim_lost > 0)
+                {
+                    // The delete waited on its cleanup; the cleanup lands.
+                    deployment
+                        .deliver(ObligationKind::ScopeClose, &scope_close)
+                        .await;
+                    cleanup_delivered = true;
+                }
+            }
+            deleted_at.unwrap_or_else(|| panic!("{cell}: never deleted"));
+            let first_claim_at = first_claim_at.expect("a pass claimed the delete");
+            assert_eq!(
+                led_from_the_first_tick,
+                Some(true),
+                "{cell}: the surviving deployment leads from its first tick"
+            );
+            if let Some(claimed_at) = claimed_at {
+                // Takeover: the new leader retakes the dead leader's claim
+                // within one tick of the claim lapsing, never before.
+                assert!(
+                    first_claim_at >= claimed_at + policy.claim_ttl_ms
+                        && first_claim_at <= claimed_at + policy.claim_ttl_ms + T_MAX_MS,
+                    "{cell}: the lapsed claim was retaken at {first_claim_at}, claimed at {claimed_at}"
+                );
+            } else {
+                assert!(
+                    first_claim_at <= due_at + T_MAX_MS,
+                    "{cell}: the leader claimed the due delete at {first_claim_at}"
+                );
+            }
+            assert_eq!(deployment.delete_obligation(&session).await, None, "{cell}");
+            // Metrics: every claim is accounted for, and nothing stalled.
+            for pass in &passes {
+                assert_eq!(
+                    pass.claimed,
+                    pass.delivered + pass.requested + pass.retried + pass.stalled + pass.claim_lost,
+                    "{cell}: {pass:?}"
+                );
+            }
+            let drain = deployment
+                .core
+                .drain_status(false)
+                .await
+                .expect("drain status");
+            assert_eq!(
+                drain
+                    .stalled_obligations
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                ObligationKind::ALL.to_vec(),
+                "{cell}: the drain status names every kind"
+            );
+            assert!(
+                drain.stalled_obligations.values().all(|count| *count == 0),
+                "{cell}: {:?}",
+                drain.stalled_obligations
+            );
+        }
+    }
+}
