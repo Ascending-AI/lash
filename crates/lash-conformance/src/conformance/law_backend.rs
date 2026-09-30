@@ -233,6 +233,10 @@ impl StoreLawStores {
 }
 
 impl crate::StoreSet for StoreLawStores {
+    fn usage_accounting(&self) -> Arc<dyn lash_core::UsageAccountingStore> {
+        Self::no_second_substrate("usage accounting")
+    }
+
     fn binding_identity(&self) -> &crate::StoreBindingId {
         &self.binding
     }

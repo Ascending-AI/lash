@@ -1771,3 +1771,6 @@ pub use runtime_store_decorator::RuntimeStoreDecorator;
 
 #[cfg(test)]
 mod tests;
+
+pub mod usage_accounting;
+pub use usage_accounting::UsageAccountingStore;

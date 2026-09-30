@@ -399,6 +399,10 @@ struct LayeredStoreSet {
 }
 
 impl StoreSet for LayeredStoreSet {
+    fn usage_accounting(&self) -> Arc<dyn lash_core_execution::UsageAccountingStore> {
+        self.inner.usage_accounting()
+    }
+
     fn binding_identity(&self) -> &StoreBindingId {
         &self.binding
     }

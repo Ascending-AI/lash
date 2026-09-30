@@ -934,3 +934,7 @@ pub mod core_internal {
         crate::session::attach_process_lineage(turn_context, lineage);
     }
 }
+
+pub use lash_core_store::usage_accounting;
+pub use lash_core_store::usage_accounting::*;
+pub use lash_core_store::{RuntimeOwner, UsageAccountingStore};

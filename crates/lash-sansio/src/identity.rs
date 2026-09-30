@@ -445,7 +445,10 @@ mod tests {
             format!("process:{}", ProcessId::fixture("owner"))
         );
         let encoded = serde_json::to_string(&process).unwrap();
-        assert_eq!(serde_json::from_str::<RuntimeOwner>(&encoded).unwrap(), process);
+        assert_eq!(
+            serde_json::from_str::<RuntimeOwner>(&encoded).unwrap(),
+            process
+        );
     }
 
     /// Each identity is spelled out by hand rather than looped over the macro:

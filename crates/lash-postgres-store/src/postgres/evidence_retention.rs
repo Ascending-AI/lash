@@ -26,6 +26,7 @@ pub(crate) async fn reclaim(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+        crate::usage_accounting::lock_retention(&mut tx).await?;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
         let removed_receipt_count =
             sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
@@ -37,6 +38,26 @@ pub(crate) async fn reclaim(
         // Only terminal usage becomes eligible; live ledgers reconstruct
         // resumed accounting. Anti-join after the receipt-root sweep.
         let removed_usage_delta_count = sqlx::query(session_sql().usage.delete_reclaimable.sql())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
+        let (facts, runs, owners) = crate::usage_accounting::retention_sql();
+        let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
+        let removed_usage_fact_count = sqlx::query(facts)
+            .bind(cutoff)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
+        let removed_usage_run_count = sqlx::query(runs)
+            .bind(cutoff)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
+        let removed_usage_owner_retirement_count = sqlx::query(owners)
+            .bind(cutoff)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -56,6 +77,9 @@ pub(crate) async fn reclaim(
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
+            removed_usage_fact_count,
+            removed_usage_run_count,
+            removed_usage_owner_retirement_count,
             removed_usage_delta_count,
             removed_attachment_root_count,
             // Effect scopes are the engine's to retire; this catalog holds

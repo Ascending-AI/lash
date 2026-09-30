@@ -620,3 +620,5 @@ mod read_failure_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+mod usage_accounting;

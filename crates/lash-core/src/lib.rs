@@ -884,3 +884,7 @@ mod tests {
         assert!(err.to_string().contains("kind"), "unexpected error: {err}");
     }
 }
+
+pub use lash_core_execution::usage_accounting;
+pub use lash_core_execution::usage_accounting::*;
+pub use lash_core_execution::{RuntimeOwner, UsageAccountingStore};

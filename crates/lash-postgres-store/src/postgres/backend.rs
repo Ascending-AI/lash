@@ -125,6 +125,11 @@ impl PostgresStoreSet {
 }
 
 impl lash_core_execution::StoreSet for PostgresStoreSet {
+    fn usage_accounting(&self) -> Arc<dyn lash_core_execution::UsageAccountingStore> {
+        Arc::clone(&self.inner.session_store_factory)
+            as Arc<dyn lash_core_execution::UsageAccountingStore>
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }

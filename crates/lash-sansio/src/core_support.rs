@@ -80,6 +80,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-tool-schema-cache/v2",
     "lash-turn-input/v2",
     "lash-usage-ledger-request/v1",
+    "lash-usage-fact-payload/v4",
     "lash-workflow-edge/v2",
     "lash-workflow-node/v2",
     "lash-workflow-node/v3",

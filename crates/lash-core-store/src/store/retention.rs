@@ -14,6 +14,12 @@ pub struct RetentionBound {
 /// Committed counts from one atomic, factory-wide evidence sweep.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RetentionReport {
+    /// Retired owner facts removed before the host horizon.
+    pub removed_usage_fact_count: usize,
+    /// Retired owner dispatch liabilities removed before the host horizon.
+    pub removed_usage_run_count: usize,
+    /// Owner retirement fences removed after their accounting rows.
+    pub removed_usage_owner_retirement_count: usize,
     /// Terminal-session receipts removed before the host's horizon.
     pub removed_receipt_count: usize,
     /// Terminal-session usage rows whose owning receipt no longer exists.
@@ -29,7 +35,10 @@ pub struct RetentionReport {
 
 impl super::MaintenanceReport for RetentionReport {
     fn reclaimed_count(&self) -> usize {
-        self.removed_receipt_count
+        self.removed_usage_fact_count
+            + self.removed_usage_run_count
+            + self.removed_usage_owner_retirement_count
+            + self.removed_receipt_count
             + self.removed_usage_delta_count
             + self.removed_attachment_root_count
             + self.retired_effect_scope_count

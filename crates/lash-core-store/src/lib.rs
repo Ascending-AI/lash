@@ -38,10 +38,10 @@ pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod run_spec;
-pub mod runtime_owner;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
+pub mod runtime_owner;
 pub mod session_catalog;
 pub mod session_graph;
 pub(crate) mod session_graph_cache;
@@ -277,3 +277,9 @@ pub(crate) use lash_sansio::attachment::AttachmentCreateMeta;
 
 pub(crate) use runtime_error::RuntimeErrorCause;
 pub(crate) use session_policy::GenerationOverlay;
+
+pub mod usage_accounting;
+pub use store::usage_accounting::UsageAccountingStore;
+pub use usage_accounting::*;
+
+pub use runtime_owner::RuntimeOwner;
