@@ -4,7 +4,7 @@
       "exports": {
         "processes": {
           "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-            "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
+            "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
             "pos": 0
           }
         }
@@ -300,7 +300,7 @@
                   "ty": "Str"
                 }
               ],
-              "return_ty": "Null"
+              "return_ty": "Bool"
             }
           }
         ],
@@ -442,7 +442,7 @@
           ]
         }
       },
-      "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4"
+      "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e"
     },
     "encoding": 1,
     "family": "lashlang-semantic-v24"
@@ -451,18 +451,18 @@
   "exports": {
     "processes": {
       "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-        "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
+        "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
         "pos": 0
       }
     }
   },
   "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
-  "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4",
+  "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e",
   "process_definition_identity": {
     "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
-    "module_ref": "lashlang:v2:blake3:be43253af638173771819185cdcb2fe36e67a47b1c13939f6405bd7e762058f4",
+    "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e",
     "process_ref": {
-      "component": "3e82cb083e3d4c67a7599c8df0eff14b1ed07e64cf85ca5a928b0372d74b308a",
+      "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
       "pos": 0
     }
   },
@@ -557,7 +557,7 @@
     "target": {
       "args": {},
       "definition_id": {
-        "$lash_definition_id": "lash.definition:sha256:e9c9dd6bf5bb9f5b4d4db637cf32ab68066c63b86ecacb46c50426e59554707c"
+        "$lash_definition_id": "lash.definition:sha256:60e4295f0c5978354801b5f1f3c2ae749990f842a8620762ee1e35a79a28e16f"
       },
       "signature_claim": {
         "encoding": {
@@ -565,7 +565,7 @@
             "kind": "process",
             "signature": {
               "output": {
-                "type": "null"
+                "type": "boolean"
               },
               "params": [
                 {
@@ -599,7 +599,7 @@
     },
     "target_identity": {
       "definition_id": {
-        "$lash_definition_id": "lash.definition:sha256:e9c9dd6bf5bb9f5b4d4db637cf32ab68066c63b86ecacb46c50426e59554707c"
+        "$lash_definition_id": "lash.definition:sha256:60e4295f0c5978354801b5f1f3c2ae749990f842a8620762ee1e35a79a28e16f"
       },
       "kind": "lashlang",
       "label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"

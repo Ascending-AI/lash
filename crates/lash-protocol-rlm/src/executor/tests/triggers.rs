@@ -1995,6 +1995,9 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// FIG-4050 wrapped stored module artifacts in a versioned envelope. The
 /// capture now pins that envelope around the same artifact; its IR, identities,
 /// exports, compiled program, registration draft and retired source are unchanged.
+/// FIG-4265 infers this async process's settled output as `Bool`, replacing
+/// the stale `Null` signature. The module and component identities change
+/// with that signature; the compiled body and registration arguments do not.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
