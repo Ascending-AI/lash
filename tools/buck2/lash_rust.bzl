@@ -6,6 +6,7 @@ load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LI
 load(":deps.bzl", "PACKAGE_DEPS")
 load(":platforms.bzl", "pool_constraint")
 load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
+load(":source_tree.bzl", "lash_rust_source_tree")
 load(":test_rules.bzl", "lash_test_wrapper")
 load(":ui_fixtures.bzl", "ui_fixture_harness")
 
@@ -93,6 +94,24 @@ def _variant_named_deps(package_name, include_dev, variant_deps, extra_deps, lib
 def _srcs(crate_root, patterns):
     return [crate_root] + glob(patterns, exclude = _IGNORED + [crate_root])
 
+def _source_attrs(name, manifest_dir, crate_root, package_srcs, workspace_srcs):
+    if not workspace_srcs:
+        return {
+            "crate_root": crate_root,
+            "srcs": package_srcs,
+        }
+    tree = name + "__source_tree"
+    lash_rust_source_tree(
+        name = tree,
+        package = manifest_dir,
+        package_srcs = package_srcs,
+        workspace_srcs = workspace_srcs,
+    )
+    return {
+        "crate_root": manifest_dir + "/" + crate_root,
+        "srcs_filegroup": ":" + tree,
+    }
+
 def _data(patterns = ["**"], exclude = []):
     return glob(patterns, exclude = _IGNORED + exclude + ["**/*.rs"])
 
@@ -128,20 +147,26 @@ def lash_rust_build_script(
         package_srcs = ["Cargo.toml"] + data,
         workspace_srcs = extra_data,
     )
+    source_attrs = _resource_attrs({})
+    source_attrs.update(_source_attrs(
+        binary,
+        manifest_dir,
+        "build.rs",
+        _srcs("build.rs", ["build/**/*.rs"]) + data,
+        extra_srcs,
+    ))
     native.rust_binary(
         name = binary,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = "build_script_build",
-        crate_root = "build.rs",
         edition = "2024",
         env = _cargo_env(package_name, "build_script_build", manifest_dir, version),
         features = crate_features,
         named_deps = _named_deps(package_name, build = True),
         rustc_flags = _rustc_flags(package_name, declared_features),
         incoming_transition = _HOST_TRANSITION,
-        srcs = _srcs("build.rs", ["build/**/*.rs"]) + data + extra_srcs,
         visibility = ["PUBLIC"],
-        **_resource_attrs({})
+        **source_attrs
     )
     cpu, memory = _request({})
     env = dict(build_script_env)
@@ -182,21 +207,28 @@ def lash_rust_library(
         _cargo_env(package_name, crate_name, manifest_dir, version),
         _rustc_flags(package_name, declared_features),
     )
-    compile_data = _data(compile_data_patterns) + extra_compile_data
+    package_compile_data = _data(compile_data_patterns)
+    compile_data = package_compile_data + extra_compile_data
+    source_attrs = _resource_attrs(exec_properties)
+    source_attrs.update(_source_attrs(
+        name,
+        manifest_dir,
+        "src/lib.rs",
+        glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + package_compile_data,
+        extra_compile_data,
+    ))
     native.rust_library(
         name = name,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
-        crate_root = "src/lib.rs",
         edition = "2024",
         env = env,
         features = crate_features,
         named_deps = _named_deps(package_name),
         resources = compile_data,
         rustc_flags = flags,
-        srcs = glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + compile_data,
         visibility = ["PUBLIC"],
-        **_resource_attrs(exec_properties)
+        **source_attrs
     )
 
 def lash_rust_binary(
@@ -220,22 +252,29 @@ def lash_rust_binary(
     deps = _named_deps(package_name, include_dev = include_dev_deps)
     if library:
         deps[library_crate_name] = library
-    compile_data = _data(compile_data_patterns, data_exclude) + extra_compile_data
+    package_compile_data = _data(compile_data_patterns, data_exclude)
+    compile_data = package_compile_data + extra_compile_data
+    source_attrs = _resource_attrs(exec_properties)
+    source_attrs.update(_source_attrs(
+        name,
+        manifest_dir,
+        crate_root,
+        _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
+        extra_compile_data,
+    ))
     native.rust_binary(
         name = name,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
-        crate_root = crate_root,
         edition = "2024",
         env = _cargo_env(package_name, crate_name, manifest_dir, version, rustc_env),
         features = crate_features,
         named_deps = deps,
         resources = compile_data,
         rustc_flags = _rustc_flags(package_name, declared_features),
-        srcs = _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + compile_data,
         labels = tags,
         visibility = ["PUBLIC"],
-        **_resource_attrs(exec_properties)
+        **source_attrs
     )
 
 def _rust_test(
@@ -272,21 +311,27 @@ def _rust_test(
     )
     package_files = glob(["**"], exclude = _IGNORED + data_exclude)
     package_data = _data(["**"], data_exclude)
+    source_attrs = _resource_attrs(exec_properties)
+    source_attrs.update(_source_attrs(
+        binary,
+        manifest_dir,
+        crate_root,
+        _srcs(crate_root, srcs_patterns) + package_data,
+        extra_compile_data,
+    ))
     native.rust_test(
         name = binary,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
-        crate_root = crate_root,
         edition = "2024",
         env = compile_env,
         features = crate_features,
         named_deps = named_deps,
         resources = package_files + extra_compile_data + extra_data,
         rustc_flags = flags,
-        srcs = _srcs(crate_root, srcs_patterns) + package_data + extra_compile_data,
         labels = ["lash.internal_test_binary"],
         visibility = [],
-        **_resource_attrs(exec_properties)
+        **source_attrs
     )
     if "cargo-trybuild" in tags:
         ui_fixture_harness(
@@ -393,22 +438,29 @@ def lash_rust_feature_library(
         _cargo_env(package_name, crate_name, manifest_dir, version),
         _rustc_flags(package_name, declared_features),
     )
-    compile_data = _data(compile_data_patterns) + extra_compile_data
+    package_compile_data = _data(compile_data_patterns)
+    compile_data = package_compile_data + extra_compile_data
+    source_attrs = _resource_attrs(exec_properties)
+    source_attrs.update(_source_attrs(
+        name,
+        manifest_dir,
+        "src/lib.rs",
+        glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + package_compile_data,
+        extra_compile_data,
+    ))
     native.rust_library(
         name = name,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
-        crate_root = "src/lib.rs",
         edition = "2024",
         env = env,
         features = crate_features,
         named_deps = _variant_named_deps(package_name, False, variant_deps, extra_deps, None, None),
         resources = compile_data,
         rustc_flags = flags,
-        srcs = glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + compile_data,
         labels = tags,
         visibility = ["PUBLIC"],
-        **_resource_attrs(exec_properties)
+        **source_attrs
     )
 
 def lash_rust_feature_binary(
@@ -438,22 +490,29 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
     extra_compile_data = kwargs.pop("extra_compile_data", [])
     compile_data_patterns = kwargs.pop("compile_data_patterns", [])
     data_exclude = kwargs.pop("data_exclude", [])
-    compile_data = _data(compile_data_patterns, data_exclude) + extra_compile_data
+    package_compile_data = _data(compile_data_patterns, data_exclude)
+    compile_data = package_compile_data + extra_compile_data
+    source_attrs = _resource_attrs(exec_properties)
+    source_attrs.update(_source_attrs(
+        name,
+        manifest_dir,
+        crate_root,
+        _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
+        extra_compile_data,
+    ))
     native.rust_binary(
         name = name,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
-        crate_root = crate_root,
         edition = "2024",
         env = _cargo_env(package_name, crate_name, manifest_dir, version, rustc_env),
         features = crate_features,
         named_deps = named_deps,
         resources = compile_data,
         rustc_flags = _rustc_flags(package_name, declared_features),
-        srcs = _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + compile_data,
         labels = tags,
         visibility = ["PUBLIC"],
-        **_resource_attrs(exec_properties)
+        **source_attrs
     )
 
 def lash_rust_feature_test(

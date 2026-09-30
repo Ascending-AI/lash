@@ -138,6 +138,8 @@ def check_inventory() -> None:
     actual = set(re.findall(r'^\s*name = "([^"]+)"', root_buck, re.M))
     assert required <= actual, f"missing stable root labels: {sorted(required - actual)}"
     assert "schema_check_group(\n    name = \"schema_checks\"" in root_buck
+    assert 'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")' in root_buck
+    assert 'lash_workspace_sources(\n    name = "workspace_rust_sources"' in root_buck
     assert root_buck.count("[check]\"") == 2 * len(checks) + len(inventory["workspace_check_targets"])
 
 
