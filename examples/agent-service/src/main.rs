@@ -285,6 +285,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let mut core_builder = lash::LashCore::rlm_builder(

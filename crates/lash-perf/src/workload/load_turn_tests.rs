@@ -236,6 +236,7 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(lash::rlm::LashlangAbilities::default().with_sleep()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core =

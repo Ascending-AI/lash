@@ -14,9 +14,10 @@ use lash_lashlang_runtime::LashlangSurface;
 
 use crate::executor::{
     ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig,
-    execute_code_with_channel_and_bounds, execute_parked_cell_for_tests,
+    execute_parked_cell_for_tests,
 };
 use crate::projection::{RlmProjectedBindings, flow_to_json_value};
+use crate::testing::execute_code_with_channel_and_bounds;
 
 /// The one language an RLM session runs (ADR 0096).
 pub(crate) const LANGUAGE_ID: &str = crate::dialect::typescript::LANGUAGE_ID;
@@ -295,7 +296,7 @@ impl Session {
             &mut crate::rlm_support::BoundVariableRenderCache::default(),
             &self.state.bound_variable_values(&none),
             &self.state.opaque_bound_variables(&none),
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )

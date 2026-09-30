@@ -553,7 +553,7 @@ pub use lash_sansio::{
     PromptContributionBody, PromptContributionGate, PromptLayer, PromptSectionTitle, PromptSlot,
     PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
     PromptTitleBuiltin, RetainedOutput, SchemaContract, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TYPESCRIPT_TOOL_BINDING_KEY, TextProjectionMetadata,
+    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata,
     TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,
     ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
     ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt,

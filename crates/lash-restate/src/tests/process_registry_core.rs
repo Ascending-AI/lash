@@ -423,6 +423,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &artifact_backend,
         )
         .with_process_lifecycle(true),

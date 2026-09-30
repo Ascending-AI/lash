@@ -18,6 +18,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
+        std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::memory_backend_blocking().clone(),
     )
     .with_process_lifecycle(false);
@@ -74,6 +75,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                 .instruction_limit(crate::InstructionBound::instructions(1000))
                 .memory_limit(crate::MemoryBound::mebibytes(1))
                 .build(),
+            std::sync::Arc::new(crate::TypescriptDialect),
             &crate::testing::memory_backend_blocking().clone(),
         )
         .with_process_lifecycle(false);
@@ -137,7 +139,9 @@ fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
 }
 fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
     let mut config = config(false, termination);
-    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new());
+    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new(Arc::new(
+        crate::dialect::TypescriptDialect,
+    )));
     config
 }
 fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
@@ -721,6 +725,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
+        std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::memory_backend().await,
     )
     .with_process_lifecycle(false);
@@ -1356,8 +1361,7 @@ fn no_cell_multipart_response_finishes_with_final_answer_prose() {
 #[test]
 fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
     for dialect in [
-        Arc::new(crate::dialect::typescript_test_dialect())
-            as Arc<crate::dialect::TypescriptDialect>,
+        Arc::new(crate::dialect::typescript_test_dialect()) as Arc<crate::dialect::SessionDialect>,
         Arc::new(crate::dialect::typescript_test_dialect()),
     ] {
         for schema in [None, Some(serde_json::json!({"type": "number"}))] {

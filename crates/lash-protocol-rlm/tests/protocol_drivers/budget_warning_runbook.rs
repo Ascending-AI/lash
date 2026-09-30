@@ -68,7 +68,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 .build();
             config.continue_as_soft_warn_tokens = Some(100);
             let factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
-                RlmProtocolPluginFactory::new(config, &backend).with_process_lifecycle(false),
+                RlmProtocolPluginFactory::new(config, std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect), &backend).with_process_lifecycle(false),
             )];
             let plugins = PluginHost::new(factories)
                 .build_session(PluginSessionRequest::creation(&session_id, Default::default()))

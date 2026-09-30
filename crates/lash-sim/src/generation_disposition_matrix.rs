@@ -489,6 +489,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

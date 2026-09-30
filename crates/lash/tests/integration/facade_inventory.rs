@@ -160,13 +160,24 @@ use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};
 #[cfg(feature = "rlm")]
 mod rlm_inventory {
     use lash::persistence::LashlangArtifacts as _;
+    // The code-mode dialect seam (ADR 0096).
+    use lash::rlm::CellTags as _;
+    use lash::rlm::Dialect as _;
+    use lash::rlm::DialectDiagnostic as _;
+    use lash::rlm::DialectPromptVocabulary as _;
+    use lash::rlm::DialectRefusal as _;
+    use lash::rlm::DialectRefusalKind as _;
+    use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::LashlangAbilities as _;
     use lash::rlm::LashlangHostEnvironment as _;
     use lash::rlm::LinkedModule as _;
     use lash::rlm::ModuleCompileOutput as _;
     use lash::rlm::NamedDataType as _;
+    use lash::rlm::ResolvedToolBinding as _;
+    use lash::rlm::ShapeNotation as _;
     use lash::rlm::TypeExpr as _;
     use lash::rlm::TypeField as _;
+    use lash::rlm::TypescriptDialect as _;
     use lash::rlm::lashlang_surface_extension as _;
     use lash::tools::link_with_deferred_resolution as _;
 

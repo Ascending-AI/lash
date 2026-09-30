@@ -1,29 +1,19 @@
-use lash_core::SessionError;
-use lash_lashlang_runtime::LashlangSurface;
-
-use super::{CellTags, Dialect, DialectDiagnostic, DialectSession, RlmDialectServices};
+use super::{
+    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
+    DialectRefusalKind, ExecutionSectionRequest, ShapeNotation,
+};
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
-/// The TypeScript front end, reached through [`Dialect`]: the only module in
-/// this crate that parses, links or diagnoses TypeScript. [`TypescriptDialect`]
-/// carries the prompt and session side of the same language.
-pub(crate) struct TypeScript;
+/// The TypeScript dialect: the only module in this crate that parses, links,
+/// diagnoses or prompts TypeScript. A host selects it by naming it
+/// (`Arc::new(TypescriptDialect)`) where it constructs the RLM protocol.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TypescriptDialect;
 
-impl Dialect for TypeScript {
+impl Dialect for TypescriptDialect {
     fn language_id(&self) -> &'static str {
         LANGUAGE_ID
-    }
-
-    fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
-        TYPESCRIPT_PROMPT_VOCABULARY
-    }
-
-    fn cell_tags(&self) -> CellTags {
-        CellTags {
-            open: "<typescript>",
-            close: "</typescript>",
-        }
     }
 
     fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
@@ -42,6 +32,26 @@ impl Dialect for TypeScript {
             .map_err(|error| diagnostic(source, refine_method_diagnostic(source, host, error)))
     }
 
+    /// Being a catalog member is being advertised, and the execution section
+    /// advertises the binding's call path as a typed declaration the model
+    /// calls verbatim. A path TypeScript resolves to anything but a tool call
+    /// — a module segment no cell can write, an ECMA global namespace, a
+    /// refused method name — can only be advertised as a callable nothing, so
+    /// it is refused (FIG-1444).
+    fn tool_call_path(
+        &self,
+        binding: &lash_lashlang_runtime::ResolvedToolBinding,
+    ) -> Result<String, DialectRefusal> {
+        let call_path = binding.call_path();
+        lash_typescript::ensure_tool_call_path_addressable(&call_path).map_err(|error| {
+            DialectRefusal {
+                kind: DialectRefusalKind::UnaddressableToolPath,
+                message: format!("no TypeScript cell can call `{call_path}` as a tool: {error}"),
+            }
+        })?;
+        Ok(call_path)
+    }
+
     fn tool_signature(
         &self,
         call_path: &str,
@@ -58,11 +68,41 @@ impl Dialect for TypeScript {
         format!("{call_path}({input}): Promise<{output}>")
     }
 
-    fn ensure_tool_call_path_addressable(&self, call_path: &str) -> Result<(), String> {
-        lash_typescript::ensure_tool_call_path_addressable(call_path)
-            .map_err(|error| error.to_string())
+    fn render_tool_example(&self, authored: &str) -> Option<String> {
+        Some(render_tool_example(authored))
+    }
+
+    fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
+        TYPESCRIPT_PROMPT_VOCABULARY
+    }
+
+    fn history_item_definition(&self, images: bool) -> Vec<String> {
+        let image_field = if images {
+            ", images?: list[HistoryImage]"
+        } else {
+            ""
+        };
+        let mut lines = vec![
+            "type HistoryItem =".to_string(),
+            "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
+            format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[any]{image_field}, error?: str | null, final_output?: any | null }}"),
+            "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
+        ];
+        if images {
+            lines.push("type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string());
+        }
+        lines
+    }
+
+    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String {
+        render_execution_section(request)
     }
 }
+
+const TYPESCRIPT_CELL_TAGS: CellTags = CellTags {
+    open: "<typescript>",
+    close: "</typescript>",
+};
 
 /// A TypeScript rejection, classified and rendered while it is still typed.
 ///
@@ -106,104 +146,6 @@ fn refine_method_diagnostic(
     }
 }
 
-pub(crate) struct TypescriptDialect {
-    surface: LashlangSurface,
-    services: RlmDialectServices,
-}
-
-impl TypescriptDialect {
-    pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
-        self.services.code_renderer.clone()
-    }
-    /// The module-artifact store the dialect's tools resolve trigger targets
-    /// and process definitions against.
-    pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
-        self.services.artifact_store.clone()
-    }
-    /// The lashlang host surface a cell of this dialect links against.
-    pub(crate) fn surface(&self) -> LashlangSurface {
-        self.surface.clone()
-    }
-    /// The dialect's front end as a plain parser: the rendered refusal on
-    /// failure. `processes.create` lowers its source through it.
-    pub(crate) fn parse_source(source: &str) -> Result<lashlang::Program, String> {
-        TypeScript
-            .parse(source)
-            .map_err(|diagnostic| diagnostic.rendered)
-    }
-    pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
-        Self { surface, services }
-    }
-
-    /// A dialect that can render prompts and diagnostics but cannot execute.
-    /// The protocol driver needs one to answer questions about cells without an
-    /// execution environment behind it.
-    pub(crate) fn prompt_only(surface: LashlangSurface) -> Self {
-        Self {
-            surface,
-            services: RlmDialectServices {
-                artifact_store: lashlang::LashlangArtifacts::new(std::sync::Arc::new(
-                    PromptOnlyArtifactStore,
-                )),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        }
-    }
-}
-
-/// The artifact port of a [`TypescriptDialect::prompt_only`] dialect: it
-/// runs no cell, so it has no backend, and every artifact operation is
-/// refused rather than answered from a store no session reopens.
-struct PromptOnlyArtifactStore;
-
-impl PromptOnlyArtifactStore {
-    fn refusal() -> lash_core::ArtifactStoreError {
-        lash_core::ArtifactStoreError::Backend(
-            "a prompt-only RLM dialect executes no cell and stores no Lashlang artifact"
-                .to_string(),
-        )
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ModuleArtifactStore for PromptOnlyArtifactStore {
-    async fn publish_module_artifact(
-        &self,
-        _claim: &lash_core::ReferrerClaim,
-        _module_ref: &str,
-        _bytes: &[u8],
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-
-    async fn acquire_module_artifact(
-        &self,
-        _claim: &lash_core::ReferrerClaim,
-        _module_ref: &str,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-
-    async fn end_module_referrer(
-        &self,
-        _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-
-    async fn get_module_artifact(
-        &self,
-        _module_ref: &str,
-    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
-        Err(Self::refusal())
-    }
-}
-
 fn is_plain_identifier(text: &str) -> bool {
     !text.is_empty()
         && text
@@ -212,21 +154,52 @@ fn is_plain_identifier(text: &str) -> bool {
         && !text.starts_with(|character: char| character.is_ascii_digit())
 }
 
-pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabulary =
-    crate::dialect::DialectPromptVocabulary {
-        language_name: "TypeScript",
-        execution_title: "TypeScript execution",
-        cell_open_tag: "<typescript>",
-        cell_noun: "cell",
-        history_type: "HistoryItem[]",
-        print_call: "console.log",
-        print_statement_prefix: "console.log(",
-        print_statement_suffix: ")",
-        finish_statement: "finish(value)",
-        finish_null_statement: "finish(null)",
-        continue_as_call: "control.continue_as(...)",
-        continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
-    };
+const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabulary {
+    language_name: "TypeScript",
+    execution_title: "TypeScript execution",
+    cell_tags: TYPESCRIPT_CELL_TAGS,
+    cell_noun: "cell",
+    history_type: "HistoryItem[]",
+    print_call: "console.log",
+    print_statement_prefix: "console.log(",
+    print_statement_suffix: ")",
+    finish_name: "finish",
+    finish_statement: "finish(value)",
+    finish_null_statement: "finish(null)",
+    continue_as_call: "control.continue_as(...)",
+    continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
+    // A wrong field name is the one mistake this runtime does not report.
+    // Reading a key that was never there yields `undefined`, which flows into
+    // arithmetic as `NaN` and into totals as nothing at all: the cell
+    // succeeds, the observation looks plausible, and the number is wrong.
+    // Every key of every value is written out — in the row itself where the
+    // record is small enough, in the `Schema:` block otherwise — so there is
+    // never a reason to write one from memory.
+    field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
+    shape_notation: TYPESCRIPT_SHAPE_NOTATION,
+};
+
+/// The shape notation TypeScript prompts have always shown for inferred
+/// values.
+const TYPESCRIPT_SHAPE_NOTATION: ShapeNotation = ShapeNotation {
+    any: "any",
+    null: "null",
+    bool: "bool",
+    int: "int",
+    float: "float",
+    str: "str",
+    record: "record",
+    list_open: "list[",
+    list_close: "]",
+    union_separator: " | ",
+    definition_keyword: "type ",
+    definition_assign: " = ",
+    record_open: "{",
+    field_indent: "  ",
+    field_separator: ": ",
+    field_terminator: ",",
+    record_close: "}",
+};
 
 /// Lashlang's type syntax in TypeScript's spelling.
 ///
@@ -318,129 +291,126 @@ fn typescript_nominal_output(output: &str) -> String {
     }
 }
 
-impl TypescriptDialect {
-    fn render_host_surface_section(
-        &self,
-        tool_catalog: &lash_core::ToolCatalog,
-        host_environment: &lashlang::LashlangHostEnvironment,
-    ) -> String {
-        let mut inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
-        // FIG-2999: the trigger operations are no longer gated by an ability,
-        // so the prompt gates them on there being something to register. With
-        // no declared trigger source a cell cannot build a `source` value, and
-        // the whole `triggers.*` block — with the registration row type it
-        // returns — is prose the model can never act on.
-        if inventory.trigger_sources.is_empty() {
-            inventory
-                .operations
-                .retain(|operation| operation.alias != lashlang::TRIGGER_MODULE_ALIAS);
-            inventory
-                .data_types
-                .retain(|(name, _)| name != lashlang::TRIGGER_REGISTRATION_TYPE_NAME);
-        }
-        // Catalog tools already have a fully typed declaration under **Tools**,
-        // rendered from the same contract; repeating them here would be a
-        // second, weaker copy of the same signature.
-        let documented_tools = tool_catalog
-            .tools
-            .iter()
-            .filter_map(|tool| {
-                lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
-                    .ok()
-                    .map(|binding| binding.call_path())
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        let operations = inventory
+fn render_host_surface_section(
+    tool_catalog: &lash_core::ToolCatalog,
+    host_environment: &lashlang::LashlangHostEnvironment,
+) -> String {
+    let mut inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
+    // FIG-2999: the trigger operations are no longer gated by an ability,
+    // so the prompt gates them on there being something to register. With
+    // no declared trigger source a cell cannot build a `source` value, and
+    // the whole `triggers.*` block — with the registration row type it
+    // returns — is prose the model can never act on.
+    if inventory.trigger_sources.is_empty() {
+        inventory
             .operations
+            .retain(|operation| operation.alias != lashlang::TRIGGER_MODULE_ALIAS);
+        inventory
+            .data_types
+            .retain(|(name, _)| name != lashlang::TRIGGER_REGISTRATION_TYPE_NAME);
+    }
+    // Catalog tools already have a fully typed declaration under **Tools**,
+    // rendered from the same contract; repeating them here would be a
+    // second, weaker copy of the same signature.
+    let documented_tools = tool_catalog
+        .tools
+        .iter()
+        .filter_map(|tool| {
+            lash_lashlang_runtime::required_tool_executable(&tool.manifest)
+                .ok()
+                .map(|binding| binding.call_path())
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let operations = inventory
+        .operations
+        .iter()
+        .filter(|operation| {
+            !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
+        })
+        .collect::<Vec<_>>();
+    if operations.is_empty()
+        && inventory.data_types.is_empty()
+        && inventory.constructors.is_empty()
+        && inventory.trigger_sources.is_empty()
+    {
+        return String::new();
+    }
+    let mut section = String::from("\n\n### Host Surface");
+    if !operations.is_empty() {
+        let lines = operations
             .iter()
-            .filter(|operation| {
-                !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
+            .map(|operation| {
+                let signature = format!(
+                    "{}.{}(input: {}): Promise<{}>; // lashlang `{}_{}`",
+                    operation.alias,
+                    operation.operation,
+                    typescript_type(operation.input).replace("Record<string, never>", "{}"),
+                    typescript_type(operation.output),
+                    operation.alias,
+                    operation.operation,
+                );
+                match crate::protocol::prompt::host_operation_description(
+                    &operation.alias,
+                    &operation.operation,
+                ) {
+                    Some(description) => format!("{signature}\n{description}"),
+                    None => signature,
+                }
             })
-            .collect::<Vec<_>>();
-        if operations.is_empty()
-            && inventory.data_types.is_empty()
-            && inventory.constructors.is_empty()
-            && inventory.trigger_sources.is_empty()
-        {
-            return String::new();
-        }
-        let mut section = String::from("\n\n### Host Surface");
-        if !operations.is_empty() {
-            let lines = operations
-                .iter()
-                .map(|operation| {
-                    let signature = format!(
-                        "{}.{}(input: {}): Promise<{}>; // lashlang `{}_{}`",
-                        operation.alias,
-                        operation.operation,
-                        typescript_type(operation.input).replace("Record<string, never>", "{}"),
-                        typescript_type(operation.output),
-                        operation.alias,
-                        operation.operation,
-                    );
-                    match crate::protocol::prompt::host_operation_description(
-                        &operation.alias,
-                        &operation.operation,
-                    ) {
-                        Some(description) => format!("{signature}\n{description}"),
-                        None => signature,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n    ");
-            section.push_str(&format!(
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        section.push_str(&format!(
                 "\n\nAwaited runtime operations, called as `await <module>.<operation>(input)`:\n\n    {lines}"
             ));
-        }
-        if !inventory.data_types.is_empty() {
-            let lines = inventory
-                .data_types
-                .iter()
-                .map(|(name, ty)| {
-                    format!(
-                        "// {name}\n    type {} = {};",
-                        name.replace('.', "_"),
-                        typescript_type(ty)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n    ");
-            section.push_str(&format!("\n\nNamed host data types:\n\n    {lines}"));
-        }
-        if !inventory.constructors.is_empty() {
-            let lines = inventory
-                .constructors
-                .iter()
-                .map(|constructor| {
-                    format!(
-                        "{}(input: {}): {}",
-                        constructor.path,
-                        typescript_type(constructor.input),
-                        typescript_nominal_output(&constructor.output)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n    ");
-            section.push_str(&format!(
+    }
+    if !inventory.data_types.is_empty() {
+        let lines = inventory
+            .data_types
+            .iter()
+            .map(|(name, ty)| {
+                format!(
+                    "// {name}\n    type {} = {};",
+                    name.replace('.', "_"),
+                    typescript_type(ty)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        section.push_str(&format!("\n\nNamed host data types:\n\n    {lines}"));
+    }
+    if !inventory.constructors.is_empty() {
+        let lines = inventory
+            .constructors
+            .iter()
+            .map(|constructor| {
+                format!(
+                    "{}(input: {}): {}",
+                    constructor.path,
+                    typescript_type(constructor.input),
+                    typescript_nominal_output(&constructor.output)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        section.push_str(&format!(
                 "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n    {lines}"
             ));
-        }
-        if !inventory.trigger_sources.is_empty() {
-            let lines = inventory
-                .trigger_sources
-                .iter()
-                .map(|(source_ty, event)| {
-                    format!(
-                        "- `{source_ty}` is a `triggers.register` `source` and emits `{}`",
-                        typescript_type_name(event)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            section.push_str(&format!("\n\nTrigger source protocol metadata:\n\n{lines}"));
-        }
-        section
     }
+    if !inventory.trigger_sources.is_empty() {
+        let lines = inventory
+            .trigger_sources
+            .iter()
+            .map(|(source_ty, event)| {
+                format!(
+                    "- `{source_ty}` is a `triggers.register` `source` and emits `{}`",
+                    typescript_type_name(event)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        section.push_str(&format!("\n\nTrigger source protocol metadata:\n\n{lines}"));
+    }
+    section
 }
 
 /// The process operations are leaf tools now (FIG-2999): nothing in the
@@ -448,7 +418,7 @@ impl TypescriptDialect {
 /// host actually rendered rather than off an ability flag.
 pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalog) -> bool {
     tool_catalog.tools.iter().any(|tool| {
-        lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
+        lash_lashlang_runtime::required_tool_executable(&tool.manifest)
             .is_ok_and(|binding| binding.call_path().starts_with("processes."))
     })
 }
@@ -470,320 +440,135 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
         .to_string()
 }
 
-impl TypescriptDialect {
-    pub(crate) fn language_id(&self) -> &'static str {
-        LANGUAGE_ID
-    }
-
-    /// The front end this dialect's cells are parsed and diagnosed by.
-    pub(crate) fn language(&self) -> &'static dyn Dialect {
-        &TypeScript
-    }
-
-    pub(crate) fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
-        self.language().prompt_vocabulary()
-    }
-
-    pub(crate) fn tool_call_path(
-        &self,
-        manifest: &lash_core::ToolManifest,
-    ) -> Result<String, SessionError> {
-        Ok(
-            lash_lashlang_runtime::required_tool_typescript_executable(manifest)
-                .map_err(|error| SessionError::Protocol(error.to_string()))?
-                .call_path(),
-        )
-    }
-
-    /// Rewrites an authored Lashlang example into this dialect.
-    ///
-    /// Deliberately a small, total rewriter over the shapes the authored corpus
-    /// actually uses rather than a translator: every example is a sequence of
-    /// statement lines that are either an awaited call, an assignment, or a
-    /// `finish`. Anything it does not recognize still loses the try-operator
-    /// and gains a terminator, which is the difference between "reads like
-    /// TypeScript" and "is a syntax error".
-    ///
-    /// It rewrites line by line, so an example whose *string literal* spans a
-    /// real newline would have a terminator inserted inside the literal. No
-    /// authored example does that (they escape it as `\n`), and the walker
-    /// parses every rendered example, so the day one does the check fails
-    /// rather than the model reading a syntax error.
-    pub(crate) fn render_tool_example(&self, example: &str) -> String {
-        example
-            .lines()
-            .map(|line| {
-                let trimmed = line.trim_end();
-                if trimmed.is_empty() {
-                    return String::new();
-                }
-                let indent_len = trimmed.len() - trimmed.trim_start().len();
-                let (indent, body) = trimmed.split_at(indent_len);
-                // `expr?` — the Lashlang try-operator. TypeScript propagates a
-                // rejection from `await` itself, so the operator has no twin.
-                let body = body.strip_suffix('?').unwrap_or(body);
-                let body = match body.strip_prefix("finish ") {
-                    Some(value) => format!("finish({value})"),
-                    None => match body.split_once(" = ") {
-                        Some((name, value)) if is_plain_identifier(name) => {
-                            format!("const {name} = {value}")
-                        }
-                        _ => body.to_string(),
-                    },
-                };
-                let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
-                    body
-                } else {
-                    format!("{body};")
-                };
-                format!("{indent}{body}")
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    pub(crate) fn cell_tags(&self) -> CellTags {
-        self.language().cell_tags()
-    }
-
-    pub(crate) fn create_session(&self) -> DialectSession {
-        DialectSession::new(self.language(), self.surface.clone(), self.services.clone())
-    }
-
-    pub(crate) fn render_execution_section(
-        &self,
-        features: crate::protocol::RlmPromptFeatures,
-        tool_catalog: &lash_core::ToolCatalog,
-        channel: crate::plugin::RlmChannel,
-    ) -> Result<String, SessionError> {
-        let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
-        let tools = if tools.is_empty() {
-            String::new()
-        } else {
-            format!("\n\n### Tools\n\n{tools}")
-        };
-        let environment = self
-            .surface
-            .host_environment(tool_catalog)
-            .map_err(|error| {
-                SessionError::Protocol(format!("invalid host tool surface: {error}"))
-            })?;
-        let host_surface = self.render_host_surface_section(tool_catalog, &environment);
-        let allowed_sections = if host_surface.is_empty() {
-            "**Tools**"
-        } else {
-            "**Tools** or **Host Surface**"
-        };
-        // Transport prose is authored per channel, side by side, rather than
-        // derived from the cell wording by string replacement (FIG-2881).
-        let action = match channel {
-            crate::plugin::RlmChannel::Cell => {
-                format!("a paired `{}` block", self.cell_tags().open)
+/// Rewrites an authored Lashlang example into this dialect.
+///
+/// Deliberately a small, total rewriter over the shapes the authored corpus
+/// actually uses rather than a translator: every example is a sequence of
+/// statement lines that are either an awaited call, an assignment, or a
+/// `finish`. Anything it does not recognize still loses the try-operator
+/// and gains a terminator, which is the difference between "reads like
+/// TypeScript" and "is a syntax error".
+///
+/// It rewrites line by line, so an example whose *string literal* spans a
+/// real newline would have a terminator inserted inside the literal. No
+/// authored example does that (they escape it as `\n`), and the walker
+/// parses every rendered example, so the day one does the check fails
+/// rather than the model reading a syntax error.
+fn render_tool_example(example: &str) -> String {
+    example
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() {
+                return String::new();
             }
-            crate::plugin::RlmChannel::NativeTool => "the `execute_code` program".to_string(),
-        };
-        let response_shape = match channel {
-            crate::plugin::RlmChannel::Cell => super::cell_response_shape(self.cell_tags()),
-            crate::plugin::RlmChannel::NativeTool => concat!(
-                "### Tool transport\n\nEach response makes one `execute_code` call with ",
-                "`{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside ",
-                "the program; prose before the call is commentary.\n"
-            )
-            .to_string(),
-        };
-        let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
-        let durable = if durable.is_empty() {
-            durable
-        } else {
-            format!("\n\n### Processes\n\n{durable}")
-        };
-        let sleep = if environment.abilities.sleep {
-            "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."
-        } else {
-            ""
-        };
-        let host_api = format!(
-            r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+            let indent_len = trimmed.len() - trimmed.trim_start().len();
+            let (indent, body) = trimmed.split_at(indent_len);
+            // `expr?` — the Lashlang try-operator. TypeScript propagates a
+            // rejection from `await` itself, so the operator has no twin.
+            let body = body.strip_suffix('?').unwrap_or(body);
+            let body = match body.strip_prefix("finish ") {
+                Some(value) => format!("finish({value})"),
+                None => match body.split_once(" = ") {
+                    Some((name, value)) if is_plain_identifier(name) => {
+                        format!("const {name} = {value}")
+                    }
+                    _ => body.to_string(),
+                },
+            };
+            let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
+                body
+            } else {
+                format!("{body};")
+            };
+            format!("{indent}{body}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_execution_section(request: ExecutionSectionRequest<'_>) -> String {
+    let ExecutionSectionRequest {
+        channel,
+        tools,
+        tool_catalog,
+        host_environment: environment,
+        discovery_operation,
+    } = request;
+    let tools = if tools.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n### Tools\n\n{tools}")
+    };
+    let host_surface = render_host_surface_section(tool_catalog, environment);
+    let allowed_sections = if host_surface.is_empty() {
+        "**Tools**"
+    } else {
+        "**Tools** or **Host Surface**"
+    };
+    // Transport prose is authored per channel, side by side, rather than
+    // derived from the cell wording by string replacement (FIG-2881).
+    let action = match channel {
+        crate::plugin::RlmChannel::Cell => {
+            format!("a paired `{}` block", TYPESCRIPT_CELL_TAGS.open)
+        }
+        crate::plugin::RlmChannel::NativeTool => "the `execute_code` program".to_string(),
+    };
+    let response_shape = match channel {
+        crate::plugin::RlmChannel::Cell => super::cell_response_shape(TYPESCRIPT_CELL_TAGS),
+        crate::plugin::RlmChannel::NativeTool => concat!(
+            "### Tool transport\n\nEach response makes one `execute_code` call with ",
+            "`{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside ",
+            "the program; prose before the call is commentary.\n"
+        )
+        .to_string(),
+    };
+    let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
+    let durable = if durable.is_empty() {
+        durable
+    } else {
+        format!("\n\n### Processes\n\n{durable}")
+    };
+    let sleep = if environment.abilities.sleep {
+        "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."
+    } else {
+        ""
+    };
+    let host_api = format!(
+        r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes and generators are not supported.
 
 ### Host API
 
 `console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{sleep}{durable}"#
-        );
-        // One worked program, rendered in each channel's own call shape.
-        let example_program = "const total = 1 + 2;\nfinish(total);";
-        let example = match channel {
-            crate::plugin::RlmChannel::Cell => format!(
-                "### Example cell\n\n{open}\n{example_program}\n{close}",
-                open = self.cell_tags().open,
-                close = self.cell_tags().close,
-            ),
-            crate::plugin::RlmChannel::NativeTool => format!(
-                "### Example execute_code call\n\nexecute_code({})",
-                serde_json::json!({"code": example_program})
-            ),
-        };
-        // `tools` and `host_surface` either carry their own leading `\n\n` or
-        // are empty, so they append directly — an unconditional separator here
-        // leaves stray blank lines where a skipped block would have gone.
-        Ok(format!(
-            "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
-        ))
-    }
-
-    pub(crate) fn finalization_copy(
-        &self,
-        termination: &lash_rlm_types::RlmTermination,
-        channel: crate::plugin::RlmChannel,
-    ) -> String {
-        match termination {
-            lash_rlm_types::RlmTermination::FinishRequired { schema } => {
-                self.finish_required_finalization(schema.is_some(), channel)
-            }
-            lash_rlm_types::RlmTermination::Natural => {
-                let step = match channel {
-                    crate::plugin::RlmChannel::Cell => "in a block",
-                    crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
-                };
-                format!(
-                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}, and call `finish(value)` inside the program to return a computed value."
-                )
-            }
-        }
-    }
-
-    pub(crate) fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
-        match error {
-            crate::protocol::CellExtractionError::UnclosedCell => {
-                "Model response started a `<typescript>` block but did not close it. Retry with one complete paired block. A line whose trimmed content is exactly `</typescript>` closes the cell.".to_string()
-            }
-        }
-    }
-
-    pub(crate) fn finish_required_copy(
-        &self,
-        requires_schema: bool,
-        channel: crate::plugin::RlmChannel,
-    ) -> String {
-        match (channel, requires_schema) {
-            (crate::plugin::RlmChannel::Cell, true) => {
-                "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
-            }
-            (crate::plugin::RlmChannel::Cell, false) => {
-                "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
-            }
-            (crate::plugin::RlmChannel::NativeTool, true) => {
-                "Call `finish(value)` inside the `code` argument of an `execute_code` call when the task is complete, with a value matching the required output schema.".to_string()
-            }
-            (crate::plugin::RlmChannel::NativeTool, false) => {
-                "Call `finish(value)` inside the `code` argument of an `execute_code` call when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
-            }
-        }
-    }
-
-    pub(crate) fn finish_schema_mismatch_copy(&self) -> String {
-        "The `finish` value did not match the required output schema. Correct it and call `finish(value)` again.".to_string()
-    }
-
-    pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
-        format!(
-            "{error_text}\n\nReply again using exactly one paired `<typescript>...</typescript>` block."
-        )
-    }
-
-    /// What to tell a model whose reply carried a provider tool call on a
-    /// channel that declared no tools.
-    ///
-    /// The call is malformed provider output, not a protocol violation — the
-    /// request showed no tool surface — so the copy names what happened and
-    /// sends the work back inside the cell (FIG-2777).
-    pub(crate) fn native_tool_call_copy(&self, tool_name: &str) -> String {
-        format!(
-            "The model response carried a provider tool call `{tool_name}`, but this channel's request declares no tools, so nothing was executed. Express that work inside the program instead."
-        )
-    }
-
-    pub(crate) fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
-        let cap = output_token_cap
-            .map(|cap| format!(" The request cap was {cap} tokens."))
-            .unwrap_or_default();
-        format!(
-            "Model output truncated the `<typescript>` block before `</typescript>`.{cap} Retry with a shorter block."
-        )
-    }
-
-    pub(crate) fn code_stream_kind(&self) -> lash_core::session_model::StreamMessageKind {
-        lash_core::session_model::StreamMessageKind::TypescriptCode
-    }
-
-    pub(crate) fn execution_diagnostic_name(&self) -> &'static str {
-        "execute_typescript"
-    }
-
-    pub(crate) fn stream_cell_start_event_name(&self) -> &'static str {
-        "rlm_typescript_cell_start"
-    }
-
-    pub(crate) fn stream_cell_end_event_name(&self) -> &'static str {
-        "rlm_typescript_cell_end"
-    }
-
-    pub(crate) fn render_history_cell(&self, prose: &str, code: &str) -> String {
-        crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
-    }
-
-    pub(crate) fn finish_required_finalization(
-        &self,
-        requires_schema: bool,
-        channel: crate::plugin::RlmChannel,
-    ) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let mut text = match channel {
-            crate::plugin::RlmChannel::Cell => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
-                open = self.cell_tags().open,
-                close = self.cell_tags().close,
-                finish = vocabulary.finish_statement,
-                finish_null = vocabulary.finish_null_statement,
-            ),
-            crate::plugin::RlmChannel::NativeTool => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the `execute_code` call that performs it.",
-                finish = vocabulary.finish_statement,
-                finish_null = vocabulary.finish_null_statement,
-            ),
-        };
-        if requires_schema {
-            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
-        }
-        text
-    }
-
-    /// What to tell a model that opened a line with the cell tag in a position
-    /// the cell grammar refuses.
-    ///
-    /// The rule itself is the whole content, because the failure this replaces
-    /// was a reply that got no rule at all: a misplaced fence was read as prose,
-    /// the driver answered "please finish", and the model — correctly seeing
-    /// nothing wrong with its own code — re-sent it until the turn's budget died
-    /// (FIG-1475).
-    ///
-    /// It names the *canonical* shape only, and deliberately says nothing about
-    /// the one-line shape the scanner also reads. Every prompt fragment teaches
-    /// standalone tag lines; a correction that advertised a second accepted
-    /// shape would contradict them, and this copy exists to remove a
-    /// contradiction rather than add one. A reply already in the one-line shape
-    /// never reaches this copy — it executes.
-    pub(crate) fn malformed_cell_fence_retry_copy(&self) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = self.cell_tags();
-        format!(
-            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
-            noun = vocabulary.cell_noun,
-            open = tags.open,
-            close = tags.close,
-        )
-    }
+    );
+    // One worked program, rendered in each channel's own call shape.
+    let example_program = "const total = 1 + 2;\nfinish(total);";
+    let example = match channel {
+        crate::plugin::RlmChannel::Cell => format!(
+            "### Example cell\n\n{open}\n{example_program}\n{close}",
+            open = TYPESCRIPT_CELL_TAGS.open,
+            close = TYPESCRIPT_CELL_TAGS.close,
+        ),
+        crate::plugin::RlmChannel::NativeTool => format!(
+            "### Example execute_code call\n\nexecute_code({})",
+            serde_json::json!({"code": example_program})
+        ),
+    };
+    // `tools` and `host_surface` either carry their own leading `\n\n` or
+    // are empty, so they append directly — an unconditional separator here
+    // leaves stray blank lines where a skipped block would have gone.
+    // A host with a discovery tool says so at the end of the first
+    // paragraph, where the model reads which tools it may call.
+    let discovery = discovery_operation
+        .map(|operation| {
+            format!(" Other tools exist; find them with `await {operation}({{ ... }})`.")
+        })
+        .unwrap_or_default();
+    format!(
+        "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.{discovery}\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
+    )
 }
 
 #[cfg(test)]
@@ -791,16 +576,19 @@ mod tests {
     use lash_sansio::SessionId;
 
     use super::*;
+    use crate::dialect::{RlmDialectServices, SessionDialect};
     use crate::projection::RlmProjectedBindings;
     use lash_core::ExecRequest;
     use lash_core::plugin::ToolCatalogContext;
+    use lash_lashlang_runtime::LashlangSurface;
 
     const SEED: u64 = 0x5_2c04;
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
     fn identity_and_cell_tags_are_typescript() {
-        let dialect = TypescriptDialect::new(
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
@@ -854,7 +642,8 @@ mod tests {
                 .expect("valid tick type"),
             )
             .expect("cron trigger source");
-        let dialect = TypescriptDialect::new(
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             lash_lashlang_runtime::LashlangSurface {
                 abilities: lashlang::LashlangAbilities::all(),
                 language_features: Default::default(),
@@ -875,6 +664,7 @@ mod tests {
                 crate::protocol::RlmPromptFeatures::default(),
                 &lash_core::ToolCatalog::from_tool_definitions(vec![]),
                 crate::plugin::RlmChannel::Cell,
+                None,
             )
             .expect("render execution section");
 
@@ -938,7 +728,8 @@ mod tests {
 
     #[test]
     fn execution_section_renders_promise_tool_signatures_and_agent_contract() {
-        let dialect = TypescriptDialect::new(
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
@@ -969,6 +760,7 @@ mod tests {
                 crate::protocol::RlmPromptFeatures::default(),
                 &catalog,
                 crate::plugin::RlmChannel::Cell,
+                None,
             )
             .expect("render execution section");
         assert!(
@@ -999,7 +791,8 @@ mod tests {
     /// and where the awaited signal payload is typed.
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
-        let dialect = TypescriptDialect::new(
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
@@ -1017,6 +810,7 @@ mod tests {
                     crate::protocol::RlmPromptFeatures::default(),
                     catalog,
                     crate::plugin::RlmChannel::Cell,
+                    None,
                 )
                 .expect("render execution section")
         };
@@ -1083,7 +877,8 @@ mod tests {
     /// instance.
     #[test]
     fn every_diagnostic_code_named_in_the_prompt_exists() {
-        let dialect = TypescriptDialect::new(
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
@@ -1100,6 +895,7 @@ mod tests {
                 crate::protocol::RlmPromptFeatures::default(),
                 &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
                 crate::plugin::RlmChannel::Cell,
+                None,
             )
             .expect("render execution section");
         let mut named = std::collections::BTreeSet::new();
@@ -1231,7 +1027,8 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let dialect = TypescriptDialect::new(
+                let dialect = SessionDialect::new(
+                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
                     LashlangSurface::default(),
                     RlmDialectServices {
                         artifact_store: crate::testing::memory_artifact_store().await,
@@ -1410,13 +1207,17 @@ mod tests {
         let catalog = lash_core::ToolCatalog::from_tool_definitions(
             admitted.iter().map(|(tool, ..)| tool.clone()).collect(),
         );
-        let section = TypescriptDialect::prompt_only(LashlangSurface::default())
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &catalog,
-                crate::plugin::RlmChannel::Cell,
-            )
-            .expect("render execution section");
+        let section = SessionDialect::prompt_only(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
+            LashlangSurface::default(),
+        )
+        .render_execution_section(
+            crate::protocol::RlmPromptFeatures::default(),
+            &catalog,
+            crate::plugin::RlmChannel::Cell,
+            None,
+        )
+        .expect("render execution section");
         let declarations = tool_declarations(&section);
         assert_eq!(
             declarations.len(),

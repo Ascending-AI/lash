@@ -1006,7 +1006,7 @@ async fn run_seed_probe_inner(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build()
-                    .with_lashlang_language_features(language_features),
+                    .with_lashlang_language_features(language_features), std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &backend,
             )
             .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())
@@ -1371,7 +1371,13 @@ fn spawn_agent_examples_render_as_parseable_typescript() {
 
     let rendered = examples
         .iter()
-        .map(|example| lash_protocol_rlm::render_tool_example_for_typescript_catalog(example))
+        .map(|example| {
+            lash_protocol_rlm::Dialect::render_tool_example(
+                &lash_protocol_rlm::TypescriptDialect,
+                example,
+            )
+            .expect("TypeScript spells every authored example")
+        })
         .collect::<Vec<_>>();
     // Parsed rather than linked: examples name host modules and free
     // identifiers no isolated environment has, so `UnknownBinding` is expected

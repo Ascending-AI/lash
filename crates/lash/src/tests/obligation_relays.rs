@@ -197,7 +197,11 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
                 "memory_limit": { "bounded": 67_108_864 },
             }))
             .expect("rlm config");
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend);
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            config,
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            &backend,
+        );
         let core = configured(LashCore::rlm_builder(
             backend,
             crate::TurnBudget::Unbounded,

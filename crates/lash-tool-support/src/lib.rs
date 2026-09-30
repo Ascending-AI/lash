@@ -3,7 +3,7 @@
 use lash_core::{ToolFailure, ToolOutcome};
 
 mod static_provider;
-pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
 pub use static_provider::{StaticToolExecute, StaticToolProvider};
 
 pub fn invalid_tool_args(message: impl Into<String>) -> ToolOutcome {

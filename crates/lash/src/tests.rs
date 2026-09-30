@@ -1198,6 +1198,7 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         backend,
     )
 }

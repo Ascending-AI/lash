@@ -1,9 +1,9 @@
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use lash_core::plugin::AssistantProseProjectorPlugin;
 use std::sync::Arc;
 
 pub(super) struct RlmAssistantProseProjector {
-    pub(super) dialect: Arc<TypescriptDialect>,
+    pub(super) dialect: Arc<SessionDialect>,
 }
 
 impl AssistantProseProjectorPlugin for RlmAssistantProseProjector {

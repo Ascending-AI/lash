@@ -50,96 +50,6 @@ pub(crate) struct RlmLashlangExecutionTraceConfig {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-async fn execute_code_unbounded_for_tests(
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-) -> ExecResponse {
-    Box::pin(execute_code_with_bounds(
-        state,
-        ctx,
-        request,
-        artifact_store,
-        lashlang_surface,
-        deferred_tool_resolver,
-        session_projected_bindings,
-        lashlang_execution_trace_config,
-        lashlang::ExecutionBounds::unbounded(),
-    ))
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(
-    dead_code,
-    reason = "the bounded entrypoint is consumed by test and testing-feature harnesses"
-)]
-pub(crate) async fn execute_code_with_bounds(
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    execution_bounds: lashlang::ExecutionBounds,
-) -> ExecResponse {
-    Box::pin(execute_code_with_channel_and_bounds(
-        state,
-        ctx,
-        request,
-        artifact_store,
-        lashlang_surface,
-        deferred_tool_resolver,
-        session_projected_bindings,
-        lashlang_execution_trace_config,
-        execution_bounds,
-        crate::plugin::RlmChannel::Cell,
-        crate::render::CodeRendererSlot::default(),
-    ))
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_channel_and_bounds(
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    execution_bounds: lashlang::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    code_renderer: crate::render::CodeRendererSlot,
-) -> ExecResponse {
-    Box::pin(execute_code_with_channel_and_bounds_with_trigger_resolver(
-        crate::dialect::rlm_dialect(),
-        state,
-        ctx,
-        request,
-        artifact_store,
-        lashlang_surface,
-        deferred_tool_resolver,
-        None,
-        session_projected_bindings,
-        lashlang_execution_trace_config,
-        execution_bounds,
-        channel,
-        code_renderer,
-    ))
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
@@ -423,6 +333,7 @@ fn fail_cell_on_nested_error(
 /// internals as public protocol API.
 #[cfg(feature = "testing")]
 pub struct RlmCheckpointPerfFixture {
+    dialect: Arc<dyn crate::dialect::Dialect>,
     state: RlmExecutionState,
     artifact_store: lashlang::LashlangArtifacts,
     binding_count: usize,
@@ -433,11 +344,12 @@ pub struct RlmCheckpointPerfFixture {
 impl RlmCheckpointPerfFixture {
     /// A fixture whose cells keep their Lashlang artifacts in `backend`.
     pub fn new(
+        dialect: Arc<dyn crate::dialect::Dialect>,
         backend: &lash_core::Backend,
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::for_engine(crate::dialect::rlm_dialect().language_id());
+        let mut state = RlmExecutionState::for_engine(dialect.language_id());
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
@@ -454,6 +366,7 @@ impl RlmCheckpointPerfFixture {
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
         }
         Ok(Self {
+            dialect,
             state,
             artifact_store: lashlang::LashlangArtifacts::of_backend(backend),
             binding_count,
@@ -481,7 +394,8 @@ impl RlmCheckpointPerfFixture {
             "x".repeat(self.payload_bytes),
             "y".repeat(self.payload_bytes / 8)
         );
-        let response = execute_code_with_bounds(
+        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+            self.dialect.as_ref(),
             &mut self.state,
             // The fixture measures state capture over pure bindings: no
             // effect, environment or attachment is reached, so the context
@@ -496,9 +410,12 @@ impl RlmCheckpointPerfFixture {
             self.artifact_store.clone(),
             LashlangSurface::default(),
             None,
+            None,
             RlmProjectedBindings::default(),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+            crate::render::CodeRendererSlot::default(),
         )
         .await;
         if let Some(error) = response.error {
@@ -510,9 +427,11 @@ impl RlmCheckpointPerfFixture {
         Ok(())
     }
 
-    pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
-        let mut restored =
-            RlmExecutionState::for_engine(crate::dialect::rlm_dialect().language_id());
+    pub fn restore(
+        dialect: &dyn crate::dialect::Dialect,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), SessionError> {
+        let mut restored = RlmExecutionState::for_engine(dialect.language_id());
         restored
             .restore_execution_state(state, lash_core::FleetFormat::current())
             .map_err(|error| SessionError::Protocol(error.to_string()))
@@ -734,7 +653,11 @@ async fn execute_code_inner(
                 .map_err(|error| {
                     (
                         error.kind,
-                        format_rlm_parse_diagnostic(error.rendered, channel, dialect.cell_tags()),
+                        format_rlm_parse_diagnostic(
+                            error.rendered,
+                            channel,
+                            dialect.prompt_vocabulary().cell_tags,
+                        ),
                     )
                 })
                 .and_then(|program| {

@@ -203,7 +203,7 @@ mod tests {
             .expect("bind task payload");
         let contribution = RlmProjectionExtension::prompt_contributions_for(
             &bindings,
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
         )
         .pop()
         .expect("prompt contribution");

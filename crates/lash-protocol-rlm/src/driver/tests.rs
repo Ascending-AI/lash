@@ -5,7 +5,10 @@ use lash_sansio::TurnId;
 /// These fixtures cover the prompt wording; the walker in
 /// `dialect::prompt_walker_tests` covers the whole contract.
 fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
-    final_answer_format_prompt(options, crate::dialect::DialectPromptVocabulary::default())
+    final_answer_format_prompt(
+        options,
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+    )
 }
 
 use super::*;
@@ -85,7 +88,10 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         prompt_features: Default::default(),
         max_output_chars,
         max_budget_tokens: None,
-        dialect: Arc::new(TypescriptDialect::prompt_only(LashlangSurface::default())),
+        dialect: Arc::new(SessionDialect::prompt_only(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
+            LashlangSurface::default(),
+        )),
     }
 }
 
@@ -103,7 +109,7 @@ fn rendered_bound_variables(
         cache,
         &globals,
         &[],
-        crate::dialect::DialectPromptVocabulary::default(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
         &crate::render::BuiltinCodeRenderer,
         &lash_render::RenderParams::preview(),
     )
@@ -180,7 +186,9 @@ pub(super) fn projection_test_config(
 ) -> lash_core::TurnMachineConfig {
     lash_core::TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
+        protocol_driver: Arc::new(crate::protocol::RlmDriver::new(Arc::new(
+            crate::dialect::TypescriptDialect,
+        ))),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
         sync_execution_environment: true,
         model: model.to_string(),

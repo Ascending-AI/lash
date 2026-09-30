@@ -2,7 +2,7 @@
 //! restore.
 
 use super::*;
-use crate::dialect::{RlmDialectServices, TypescriptDialect};
+use crate::dialect::{RlmDialectServices, SessionDialect};
 use lashlang::{
     DurableFragment, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -1399,7 +1399,8 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
 
 #[test]
 fn the_dialect_pins_snapshot_engine_id() {
-    let dialect = TypescriptDialect::new(
+    let dialect = SessionDialect::new(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
         RlmDialectServices {
             artifact_store: crate::testing::memory_artifact_store_blocking(),

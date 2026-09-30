@@ -18,6 +18,8 @@ use crate::rlm_support::effective_budget_tokens;
 
 pub(crate) struct RlmProtocolSession {
     config: RlmProtocolPluginConfig,
+    /// The host-selected dialect's language id, recorded on materialization.
+    language_id: &'static str,
     runtime_state: Arc<RlmRuntimeState>,
     warned_at_threshold: Mutex<bool>,
 }
@@ -25,11 +27,13 @@ pub(crate) struct RlmProtocolSession {
 impl RlmProtocolSession {
     pub(crate) fn new(
         config: RlmProtocolPluginConfig,
+        language_id: &'static str,
         runtime_state: Arc<RlmRuntimeState>,
     ) -> Self {
         Self {
             runtime_state,
             config,
+            language_id,
             warned_at_threshold: Mutex::new(false),
         }
     }
@@ -139,6 +143,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
             materialization.is_root_session,
         )?;
         let options = super::channel::record_channel(options, self.config.channel);
+        let options = super::channel::record_dialect(options, self.language_id);
         ctx.set_protocol_turn_options_all_frames(options);
         Ok(())
     }
@@ -162,46 +167,22 @@ pub fn rlm_session_config(
     if options.is_empty() {
         return Ok(RlmSessionConfig::default());
     }
-    let without_channel = super::channel::without_channel(options);
-    if without_channel.payload.get(RETIRED_DIALECT_FIELD).is_some() {
-        return Err(RlmSessionConfigDecodeError::RetiredDialectField);
-    }
-    let extras = without_channel
+    let extras = super::channel::without_session_pins(options)
         .decode::<RlmCreateExtras>()
         .map_err(|err| RlmSessionConfigDecodeError::Invalid(err.to_string()))?;
     Ok(RlmSessionConfig::from(&extras))
 }
 
-/// The session-scoped language pin that TypeScript-only RLM retired.
-///
-/// A bag that still carries it was written before the cutover, and the values
-/// it could carry are not equivalent: a `lashlang` session pinned a parser and
-/// a value-semantics contract that no longer exist. Reading it as absence would
-/// silently run such a session under ECMA reference semantics, so it is refused
-/// (ADR 0096). `RlmCreateExtras` denies unknown fields, so the decode would
-/// refuse it anyway; naming it here is what turns a serde message about an
-/// unexpected key into a typed incompatible-format answer a host can match.
-const RETIRED_DIALECT_FIELD: &str = "dialect";
-
 /// A recorded RLM options bag that could not be decoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RlmSessionConfigDecodeError {
-    /// The bag records the retired session language pin. There is no
-    /// compatibility read for it: the session predates the TypeScript-only
-    /// cutover and its recorded language is not a fact this build can honour.
-    RetiredDialectField,
-    /// The bag is not a valid RLM session config for any other reason.
+    /// The bag is not a valid RLM session config.
     Invalid(String),
 }
 
 impl std::fmt::Display for RlmSessionConfigDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RetiredDialectField => write!(
-                f,
-                "RLM session config records the retired `{RETIRED_DIALECT_FIELD}` field; \
-                 the session predates the TypeScript-only RLM cutover and cannot be opened"
-            ),
             Self::Invalid(detail) => write!(f, "invalid RLM session config: {detail}"),
         }
     }
@@ -267,16 +248,17 @@ pub fn rlm_session_config_options(
 /// has recorded nothing yet — its creation — takes the creator's stated facts
 /// and fills the one fact the runtime cannot start without from its default:
 /// the presentation format the prompt is written against (`Markdown` for
-/// root sessions, `RawFinalValue` for children). A session records no
-/// language: TypeScript is the only one (ADR 0096), so there is nothing to pin.
+/// root sessions, `RawFinalValue` for children). The session's channel and
+/// dialect are recorded beside these facts by the materializing session
+/// itself, from the host's selection (ADR 0096).
 pub(crate) fn resolve_rlm_session_options(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
     is_root_session: bool,
 ) -> Result<ProtocolTurnOptions, SessionError> {
     if !existing.is_empty() {
-        // Read strictly: a recorded bag that does not decode — a
-        // pre-cutover `dialect` pin among them — refuses rather than runs.
+        // Read strictly: a recorded bag that does not decode refuses rather
+        // than runs.
         rlm_session_config(existing).map_err(|err| SessionError::Protocol(err.to_string()))?;
         return Ok(existing.clone());
     }
@@ -331,15 +313,17 @@ pub(crate) fn patch_rlm_session_options(
     let next =
         apply_rlm_session_config_if_unset(&recorded_config, &RlmSessionConfig::from(&requested))
             .map_err(refused)?;
-    let recorded_render = super::channel::without_channel(recorded)
+    let recorded_render = super::channel::without_session_pins(recorded)
         .decode::<RlmCreateExtras>()
         .map_err(refused)?
         .render;
     let mut extras = RlmCreateExtras::from(&next);
     extras.render = recorded_render.or(requested.render);
     let mut options = ProtocolTurnOptions::typed(extras)?;
-    if let Some(channel) = recorded.payload.get("channel") {
-        options.payload["channel"] = channel.clone();
+    for pin in ["channel", "dialect"] {
+        if let Some(value) = recorded.payload.get(pin) {
+            options.payload[pin] = value.clone();
+        }
     }
     Ok(options)
 }
@@ -480,70 +464,12 @@ mod tests {
         assert!(err.to_string().contains("invalid RLM create options"));
     }
 
-    /// A session bag written before the TypeScript-only cutover still records
-    /// the retired language pin. It is refused as an incompatible format, not
-    /// read as absence: a `lashlang` session pinned a parser and a value
-    /// semantics this build no longer has, and resuming it under ECMA
-    /// reference semantics would silently change what its program means.
+    /// A create request cannot choose the dialect: the host selects it where
+    /// it constructs the protocol, the create contract has no such field and
+    /// `RlmCreateExtras` denies unknown keys, so the host learns at once
+    /// rather than having its choice silently dropped.
     #[test]
-    fn a_recorded_retired_dialect_field_is_refused_as_an_incompatible_format() {
-        for payload in [
-            serde_json::json!({"dialect": "lashlang"}),
-            serde_json::json!({"dialect": "typescript"}),
-            serde_json::json!({"dialect": serde_json::Value::Null}),
-            serde_json::json!({"dialect": "lashlang", "termination": {"kind": "natural"}}),
-        ] {
-            let recorded = ProtocolTurnOptions::from_payload(payload.clone());
-            assert_eq!(
-                rlm_session_config(&recorded),
-                Err(RlmSessionConfigDecodeError::RetiredDialectField),
-                "{payload} must refuse as a retired-format record"
-            );
-            let error = resolve_rlm_session_options(&recorded, &PluginOptions::default(), true)
-                .expect_err("a pre-cutover session cannot be materialized");
-            assert!(
-                error.to_string().contains("retired `dialect` field"),
-                "the refusal names the retired field: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn retired_dialect_fixture_matrix_refuses_every_boundary() {
-        let program = lash_typescript::parse("finish(1)").unwrap();
-        let artifact = lashlang::ModuleArtifact::from_program(program).unwrap();
-        let current: serde_json::Value =
-            serde_json::from_slice(&artifact.to_store_bytes().unwrap()).unwrap();
-        for retired in [
-            serde_json::json!("lashlang"),
-            serde_json::json!("typescript"),
-            serde_json::Value::Null,
-        ] {
-            let mut wire = current.clone();
-            wire["artifact"]["compilation_dialect"] = retired.clone();
-            assert!(matches!(
-                lashlang::ModuleArtifact::from_store_bytes(&serde_json::to_vec(&wire).unwrap()),
-                Err(lashlang::ModuleArtifactError::RetiredCompilationDialect)
-            ));
-            let recorded =
-                ProtocolTurnOptions::from_payload(serde_json::json!({"dialect":retired}));
-            assert_eq!(
-                rlm_session_config(&recorded),
-                Err(RlmSessionConfigDecodeError::RetiredDialectField)
-            );
-            assert!(
-                resolve_rlm_session_options(&recorded, &PluginOptions::default(), true).is_err()
-            );
-            assert!(serde_json::from_value::<RlmCreateExtras>(recorded.payload).is_err());
-        }
-    }
-
-    /// A create request that still names a language is refused the same way:
-    /// the create contract has no such field and `RlmCreateExtras` denies
-    /// unknown keys, so the host learns at once rather than having its choice
-    /// silently dropped.
-    #[test]
-    fn create_options_naming_a_language_are_refused() {
+    fn create_options_naming_a_dialect_are_refused() {
         let mut plugin_options = PluginOptions::default();
         plugin_options.plugins.insert(
             RLM_PROTOCOL_PLUGIN_ID.to_string(),
@@ -693,7 +619,7 @@ mod tests {
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
         let runtime_state = Arc::new(RlmRuntimeState::new_for_tests().expect("runtime state"));
-        RlmProtocolSession::new(config, runtime_state)
+        RlmProtocolSession::new(config, "typescript", runtime_state)
     }
 
     #[tokio::test]

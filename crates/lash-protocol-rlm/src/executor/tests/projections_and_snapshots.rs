@@ -1112,7 +1112,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             &mut cache,
             &globals,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -1173,7 +1173,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &mut cache,
             &globals,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )

@@ -557,6 +557,7 @@ pub(super) async fn prove_final_value_semantic_channel()
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

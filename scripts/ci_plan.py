@@ -1440,6 +1440,7 @@ def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list
 # test file of their own name.
 SCRIPT_PROOFS = {
     "scripts/check-substrate-boundary.sh": "scripts/test_check_substrate_boundary.py",
+    "scripts/check-dialect-boundary.py": "scripts/test_check_dialect_boundary.py",
     "scripts/check-history-readers.sh": "scripts/test_ci_plan.py",
     "scripts/check-guarded-transactions.py": "scripts/test_check_guarded_transactions.py",
     "scripts/guarded-transaction-readonly.txt": "scripts/test_check_guarded_transactions.py",

@@ -14,10 +14,9 @@ mod tests {
 
     #[test]
     fn disabled_decomposition_finishes_at_budget_thresholds() {
-        for vocabulary in [
-            crate::dialect::DialectPromptVocabulary::default(),
-            crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
-        ] {
+        {
+            let vocabulary =
+                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect);
             for used in [60, 90, 100, 110] {
                 let usage = TokenUsage {
                     input_tokens: used as i64,
@@ -55,7 +54,7 @@ mod tests {
                 0,
                 Some(&prompt_usage(threshold)),
                 Some(threshold),
-                crate::dialect::DialectPromptVocabulary::default(),
+                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
                 true,
             )
             .expect("budget suffix should render");
@@ -70,7 +69,7 @@ mod tests {
             0,
             Some(&usage),
             Some(200_000),
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             true,
         )
         .expect("budget suffix should render");
@@ -89,7 +88,7 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             true,
         )
         .expect("budget suffix should render");
@@ -107,7 +106,7 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             true,
         )
         .expect("budget suffix should render");
@@ -126,7 +125,7 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             true,
         )
         .expect("budget suffix should render");
@@ -147,7 +146,7 @@ mod tests {
                 0,
                 Some(&usage),
                 None,
-                crate::dialect::DialectPromptVocabulary::default(),
+                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
                 true,
             )
             .is_none()
@@ -163,7 +162,7 @@ mod tests {
                 0,
                 Some(&usage),
                 Some(200_000),
-                crate::dialect::DialectPromptVocabulary::default(),
+                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
                 true,
             )
             .is_none()

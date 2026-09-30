@@ -248,6 +248,7 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &RECOVERY_ARTIFACT_BACKEND,
         )
         .with_process_lifecycle(false),
@@ -402,6 +403,7 @@ fn declared_start_tier(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build(),
+                std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &backend,
             )
             .with_process_lifecycle(true),

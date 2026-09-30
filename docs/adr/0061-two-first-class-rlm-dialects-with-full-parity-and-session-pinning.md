@@ -12,11 +12,13 @@ that IR. A dialect does not emulate another language.
 
 TypeScript is the shipped dialect. Its language ID is `typescript`, used in
 prompt vocabulary, execution reporting and persisted RLM execution state.
-`rlm_dialect()` selects that front end directly. There is no host dialect
-selector or first-commit language pin.
+A host selects it by passing `TypescriptDialect` where it constructs the RLM
+protocol; a session records the selected language id and resumes only under
+it (ADR 0096).
 
-The internal `Dialect` contract owns parsing, cell parsing, diagnostics, prompt
-vocabulary, cell tags, tool signatures and addressable tool paths. Shared
+The public `Dialect` contract owns parsing, cell parsing, diagnostics, prompt
+vocabulary, cell tags, shape notation, tool signatures, tool call paths,
+authored examples, the history item definition and the execution section. Shared
 execution-session services own artifact storage, resolvers, trace configuration,
 bounds and transport.
 

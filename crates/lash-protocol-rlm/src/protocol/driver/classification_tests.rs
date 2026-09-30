@@ -16,7 +16,7 @@ fn non_cell_reply_classification_table_is_byte_identical() {
         },
     }
 
-    let driver = RlmDriver::new();
+    let driver = RlmDriver::new(std::sync::Arc::new(crate::dialect::TypescriptDialect));
     let turn_id = TurnId::from("turn-9");
     let iteration = 4;
     let attempt = AttemptContext {

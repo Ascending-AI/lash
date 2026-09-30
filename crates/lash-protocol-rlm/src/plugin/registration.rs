@@ -6,17 +6,17 @@ use super::protocol_driver::RlmProtocolDriver;
 use super::protocol_session::RlmProtocolSession;
 use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use crate::stream_mask;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
 pub(super) fn register_rlm_protocol_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 ) -> Result<(), PluginError> {
-    // The catalog contribution carries the dialect so the neutrality guard
-    // knows the words model-facing tool prose may not spell literally.
+    // The catalog contribution carries the dialect that spells every catalog
+    // member's call path.
     let catalog_dialect = Arc::clone(&dialect);
     let discovery = config.discovery.clone();
     let discovery_dialect = Arc::clone(&dialect);
@@ -27,6 +27,7 @@ pub(super) fn register_rlm_protocol_plugin(
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
         config.clone(),
+        dialect.language_id(),
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;
@@ -54,7 +55,7 @@ pub(super) fn register_rlm_protocol_plugin(
     reg.tools().provider(Arc::new(
         lash_lashlang_runtime::process_create_tool_provider(
             dialect.language_id(),
-            TypescriptDialect::parse_source,
+            dialect.process_source_parser(),
             dialect.surface(),
         ),
     ))?;

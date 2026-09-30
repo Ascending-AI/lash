@@ -46,7 +46,7 @@ async fn execute_code_with_test_render(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
-    super::execute_code_with_channel_and_bounds(
+    crate::testing::execute_code_with_channel_and_bounds(
         state,
         test_render_context(ctx),
         request,
@@ -78,7 +78,7 @@ async fn execute_code_with_trigger_test_render(
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     super::execute_code_with_channel_and_bounds_with_trigger_resolver(
-        crate::dialect::rlm_dialect(),
+        &crate::dialect::TypescriptDialect,
         state,
         test_render_context(ctx),
         request,
@@ -106,7 +106,7 @@ async fn execute_code_unbounded_with_test_render(
     session_projected_bindings: RlmProjectedBindings,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
 ) -> ExecResponse {
-    super::execute_code_unbounded_for_tests(
+    crate::testing::execute_code_unbounded_for_tests(
         state,
         test_render_context(ctx),
         request,
@@ -131,7 +131,7 @@ async fn execute_code_with_bounds_test_render(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
-    super::execute_code_with_bounds(
+    crate::testing::execute_code_with_bounds(
         state,
         test_render_context(ctx),
         request,

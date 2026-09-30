@@ -196,6 +196,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         let artifacts_backend =
             lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
         let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &artifacts_backend,
             point.component_count,
             point.transcript_bytes,
@@ -319,8 +320,11 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                     let execution_state = loaded_state
                         .execution_state_hydration()?
                         .ok_or_else(|| anyhow::anyhow!("{prefix} load omitted execution state"))?;
-                    lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&execution_state)
-                        .map_err(anyhow::Error::from)?;
+                    lash_protocol_rlm::RlmCheckpointPerfFixture::restore(
+                        &lash_protocol_rlm::TypescriptDialect,
+                        &execution_state,
+                    )
+                    .map_err(anyhow::Error::from)?;
                     Ok(loaded_state)
                 })
                 .await?;

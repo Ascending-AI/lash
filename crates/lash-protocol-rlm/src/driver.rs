@@ -12,7 +12,7 @@ use lash_core::{
 use lash_lashlang_runtime::LashlangSurface;
 use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
@@ -21,8 +21,11 @@ use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 use history::render_history_messages;
 use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 
+/// A prompt-only RLM preamble's configuration: the host's selected dialect
+/// and the prompt knobs.
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
+    pub dialect: Arc<dyn crate::dialect::Dialect>,
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub max_output_chars: usize,
     pub max_budget_tokens: Option<usize>,
@@ -37,9 +40,11 @@ pub(crate) struct RlmPreambleConfig {
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
 }
 
-impl Default for RlmProjectorConfig {
-    fn default() -> Self {
+impl RlmProjectorConfig {
+    /// A preamble in `dialect`, with the default prompt knobs.
+    pub fn new(dialect: Arc<dyn crate::dialect::Dialect>) -> Self {
         Self {
+            dialect,
             discovery: None,
             max_output_chars: 10_000,
             max_budget_tokens: None,
@@ -53,7 +58,8 @@ pub fn build_rlm_preamble(
     input: ProtocolBuildInput,
     config: RlmProjectorConfig,
 ) -> TurnDriverPreamble {
-    let dialect: Arc<TypescriptDialect> = Arc::new(TypescriptDialect::prompt_only(
+    let dialect: Arc<SessionDialect> = Arc::new(SessionDialect::prompt_only(
+        Arc::clone(&config.dialect),
         config.lashlang_surface.clone(),
     ));
     build_rlm_preamble_with_dialect(
@@ -75,7 +81,7 @@ pub fn build_rlm_preamble(
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
@@ -95,13 +101,9 @@ pub(crate) fn build_rlm_preamble_with_dialect(
             config.prompt_features,
             tool_catalog,
             crate::plugin::RlmChannel::Cell,
+            config.discovery.as_ref(),
         )
         .expect("validated dialect surface");
-    let execution = crate::tool_catalog::with_discovery_sentence(
-        execution,
-        config.discovery.as_ref(),
-        dialect.as_ref(),
-    );
     TurnDriverPreamble {
         config: TurnDriverConfig {
             protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
@@ -171,7 +173,7 @@ mod catalogue_tests {
                     lashlang::LashlangLanguageFeatures::default(),
                     lashlang::LashlangHostCatalog::tool_default(["search_tools", "grep"]),
                 ),
-                ..RlmProjectorConfig::default()
+                ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
             },
         );
 
@@ -203,7 +205,7 @@ mod catalogue_tests {
                     lashlang::LashlangLanguageFeatures::default(),
                     lashlang::LashlangHostCatalog::tool_default(["grep"]),
                 ),
-                ..RlmProjectorConfig::default()
+                ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
             },
         );
 
@@ -252,7 +254,7 @@ struct RlmContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
@@ -438,8 +440,11 @@ fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
-    TypescriptDialect::prompt_only(LashlangSurface::default())
-        .finalization_copy(termination, crate::plugin::RlmChannel::Cell)
+    SessionDialect::prompt_only(
+        Arc::new(crate::dialect::TypescriptDialect),
+        LashlangSurface::default(),
+    )
+    .finalization_copy(termination, crate::plugin::RlmChannel::Cell)
 }
 
 impl RlmContextProjector {
@@ -477,7 +482,10 @@ impl RlmContextProjector {
 pub(crate) fn render_conformance_history_message(
     message: lash_core::Message,
 ) -> Result<LlmMessage, String> {
-    let dialect = TypescriptDialect::prompt_only(LashlangSurface::default());
+    let dialect = SessionDialect::prompt_only(
+        Arc::new(crate::dialect::TypescriptDialect),
+        LashlangSurface::default(),
+    );
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
     )];

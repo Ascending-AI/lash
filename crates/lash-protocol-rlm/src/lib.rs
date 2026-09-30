@@ -1,7 +1,7 @@
 //! RLM protocol plugin: a trajectory-shaped driver that uses lashlang as the
-//! persistent REPL. Provider reasoning is stored as trajectory reasoning,
-//! paired `<typescript>` blocks are executed, `print` yields observations, and
-//! `finish` yields the final value.
+//! persistent REPL. Provider reasoning is stored as trajectory reasoning, the
+//! host-selected [`Dialect`]'s cells are executed, printed values yield
+//! observations, and the dialect's finish form yields the final value.
 
 mod cell_scan;
 mod control_tools;
@@ -27,10 +27,15 @@ mod testing;
 mod tool_catalog;
 
 pub use control_tools::continue_as_tool_definition;
+pub use dialect::{
+    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
+    DialectRefusalKind, ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
+};
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RLM_SNAPSHOT_VERSION;
 #[cfg(feature = "testing")]
 pub use executor::RlmCheckpointPerfFixture;
+pub use lash_lashlang_runtime::ResolvedToolBinding;
 pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
@@ -55,12 +60,3 @@ pub use rlm_support::format_budget_suffix;
 
 #[cfg(test)]
 mod prompt_contract_tests;
-
-/// Examples are authored in the crate that owns the tool, where neither the prompt walker's
-/// copied corpus nor the prose sweep reaches them (FIG-1449's documented blind spot); this
-/// hook lets each owning crate pin its own rendered examples (FIG-1480).
-#[cfg(feature = "testing")]
-pub fn render_tool_example_for_typescript_catalog(example: &str) -> String {
-    dialect::TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
-        .render_tool_example(example)
-}

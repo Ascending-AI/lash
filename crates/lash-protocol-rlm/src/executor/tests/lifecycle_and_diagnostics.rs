@@ -959,7 +959,7 @@ pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
     let diagnostic = format_rlm_parse_diagnostic(
         "unterminated template literal".to_string(),
         crate::plugin::RlmChannel::Cell,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert!(diagnostic.contains("standalone `</typescript>` line"));
     assert!(diagnostic.contains("inside multiline source text"));
@@ -976,7 +976,7 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
     let native = format_rlm_parse_diagnostic(
         positioned.clone(),
         crate::plugin::RlmChannel::NativeTool,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert_eq!(native, positioned);
     assert!(!native.contains("</typescript>"), "{native}");
@@ -985,7 +985,7 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
     let cell = format_rlm_parse_diagnostic(
         positioned.clone(),
         crate::plugin::RlmChannel::Cell,
-        crate::dialect::rlm_dialect().cell_tags(),
+        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect).cell_tags,
     );
     assert_eq!(
         cell.strip_prefix(positioned.as_str())
@@ -1007,7 +1007,7 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
 pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
     use crate::dialect::Dialect;
     let kind = |source: &str| {
-        crate::dialect::TypeScript
+        crate::dialect::TypescriptDialect
             .parse(source)
             .expect_err("the source is rejected")
             .kind
@@ -1102,7 +1102,7 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
             .with_globals(["text"]);
 
     use crate::dialect::Dialect;
-    let shadowed = crate::dialect::TypeScript
+    let shadowed = crate::dialect::TypescriptDialect
         .parse_cell("text.sha256({});", &environment)
         .expect_err("the cache parse does not carry the module catalog");
     assert_eq!(
@@ -1110,7 +1110,7 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
 
-    let ordinary = crate::dialect::TypeScript
+    let ordinary = crate::dialect::TypescriptDialect
         .parse_cell("const s = 'a,b'; s.anchor(',');", &environment)
         .expect_err("an ordinary local method remains unsupported");
     assert_eq!(
@@ -1293,7 +1293,7 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
 pub(super) async fn execute_continue_as_with_trace_sink(
     trace_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>>,
 ) -> lash_core::ToolCallRecord {
-    let definition = crate::continue_as_tool_definition();
+    let definition = crate::continue_as_tool_definition(&crate::dialect::TypescriptDialect);
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition]);
     let invocation = lash_core::testing::exec_code_invocation(
         "test-session",
@@ -1316,7 +1316,9 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             crate::testing::double_ports(&double, &handler),
             Arc::new(crate::control_tools::RlmControlToolsProvider {
-                vocabulary: crate::dialect::DialectPromptVocabulary::default(),
+                vocabulary: crate::dialect::Dialect::prompt_vocabulary(
+                    &crate::dialect::TypescriptDialect,
+                ),
             }),
             catalog,
             invocation,

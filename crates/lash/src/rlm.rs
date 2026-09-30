@@ -100,10 +100,10 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 /// wants a fact *asserted* compares [`RlmSessionExt::rlm_config`] against
 /// what it requires and refuses loudly.
 ///
-/// There is no language among these facts: TypeScript is the sole RLM dialect
-/// (ADR 0096), so a session neither states nor records one, and a session that
-/// still carries a recorded `dialect` is refused as an incompatible format
-/// rather than read.
+/// The session's dialect is not among these facts: the host selects it where
+/// it constructs the RLM protocol, the session records its language id when
+/// it materializes, and a host that selects another dialect is refused when it
+/// reopens the session (ADR 0096).
 #[cfg(feature = "rlm")]
 pub trait RlmSessionExt {
     /// The RLM config this session recorded, as recorded.
@@ -169,6 +169,13 @@ pub use lash_protocol_rlm::{
     MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
     TypeExpr, TypeField, UnsetBound, format_type_expr,
+};
+/// The code-mode dialect seam: a host selects one [`Dialect`] where it
+/// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
+pub use lash_protocol_rlm::{
+    CellTags, Dialect, DialectDiagnostic, DialectPromptVocabulary, DialectRefusal,
+    DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation,
+    TypescriptDialect,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local

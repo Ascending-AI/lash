@@ -884,14 +884,13 @@ impl ToolDefinition {
     }
 }
 
-/// The one manifest key a tool binding lives under. A `lashlang.tool` twin
-/// used to be written beside it for the retired surface dialect (FIG-3021);
-/// readers now share this key, so a manifest has exactly one binding truth.
+/// The one manifest key a tool binding lives under.
 ///
 /// The key is lash's internal projection onto the manifest's opaque `bindings`
-/// map: hosts never read or write it, and which dialect resolves a bound tool
-/// is decided inside lash, not by the host.
-pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
+/// map: hosts never read or write it. The binding it holds names a module path
+/// and operation, not a source language; each dialect spells that binding in
+/// its own syntax (ADR 0096).
+pub const TOOL_BINDING_KEY: &str = "lash.tool";
 
 /// Dialect-agnostic binding that makes a host tool callable as a module
 /// operation during code-mode execution. Which dialect executes the call is
@@ -936,7 +935,7 @@ impl ToolBinding {
 /// The one host-facing setter for a tool's executable binding.
 ///
 /// The manifest key the binding is written under
-/// ([`TYPESCRIPT_TOOL_BINDING_KEY`]) is lash's own projection onto the opaque
+/// ([`TOOL_BINDING_KEY`]) is lash's own projection onto the opaque
 /// `bindings` map: hosts never read or write it, and no dialect choice is
 /// exposed or implied by calling this setter.
 pub trait ToolDefinitionBindingExt {
@@ -950,7 +949,7 @@ impl ToolDefinitionBindingExt for ToolDefinition {
     )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
         self.manifest.bindings.insert(
-            TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
+            TOOL_BINDING_KEY.to_string(),
             serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
         );
         self

@@ -22,10 +22,11 @@ use lash_tool_support::{StaticToolExecute, StaticToolProvider, ToolDefinitionBin
 
 use crate::LashlangSurface;
 
-/// Lowers source text in one dialect to a lashlang program, answering the
-/// rendered refusal on failure. The dialect front end owns the parse (ADR
-/// 0096); this tool owns the link and the declaration.
-pub type ProcessSourceParser = fn(&str) -> Result<lashlang::Program, String>;
+/// Lowers source text in the session's selected dialect to a lashlang
+/// program, answering the rendered refusal on failure. The dialect front end
+/// owns the parse (ADR 0096); this tool owns the link and the declaration.
+pub type ProcessSourceParser =
+    std::sync::Arc<dyn Fn(&str) -> Result<lashlang::Program, String> + Send + Sync>;
 
 /// The `processes.create` tool definition.
 pub fn process_create_tool_definition() -> ToolDefinition {
@@ -230,10 +231,10 @@ mod tests {
         Err("the dialect refused this source".to_string())
     }
 
-    fn tools(parse: ProcessSourceParser) -> ProcessCreateTools {
+    fn tools(parse: fn(&str) -> Result<lashlang::Program, String>) -> ProcessCreateTools {
         ProcessCreateTools {
             dialect: DIALECT,
-            parse,
+            parse: std::sync::Arc::new(parse),
             surface: LashlangSurface::default(),
         }
     }
@@ -388,7 +389,7 @@ mod tests {
             definition
                 .manifest
                 .bindings
-                .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
+                .get(lash_tool_support::TOOL_BINDING_KEY),
             Some(
                 &serde_json::to_value(lash_core::ToolBinding::new(["processes"], "create"))
                     .expect("binding serializes")

@@ -5,50 +5,38 @@ use std::sync::Arc;
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_lashlang_runtime::{
-    LashlangArtifacts, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    LashlangArtifacts, LashlangHostEnvironment, LashlangSurface, ResolvedToolBinding,
+    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-pub(crate) use typescript::{TypeScript, TypescriptDialect};
+pub use typescript::TypescriptDialect;
 
 use crate::executor::{
     RlmExecutionState, execute_code_with_channel_and_bounds_with_trigger_resolver,
 };
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
-/// A dialect's refusal of a program, rendered against the source it refused.
-#[derive(Clone, Debug)]
-pub(crate) struct DialectDiagnostic {
-    /// Whether the dialect refuses a construct
-    /// ([`lash_core::CellFailureKind::Policy`]) or reports a wrong program
-    /// ([`lash_core::CellFailureKind::Program`]).
-    pub(crate) kind: lash_core::CellFailureKind,
-    /// What the dialect refused, and nothing else.
-    pub(crate) message: String,
-    pub(crate) span: Option<lashlang::Span>,
-    /// The refusal rendered against the source, with the line the model wrote.
-    pub(crate) rendered: String,
-}
-
-/// The language a cell is written in, as the protocol layer reaches it.
+/// The language a code-mode session's model writes: one front end over the
+/// shared IR and VM, and every prompt adapter that speaks its syntax.
 ///
-/// Each dialect defines its own semantics and targets the IR: it lowers its
-/// source to a Lashlang [`lashlang::Program`], explains its own refusals, and
-/// spells the host's schemas in its own syntax. No module in this crate calls a
-/// dialect's front end except that dialect's own implementation of this trait.
-/// Shared session code also takes its prompt vocabulary and cell tags here.
-/// Dialects target one IR and VM with independent semantics and evidence;
-/// ADR 0096 records the prompt-adapter and registration work a new one needs.
-pub(crate) trait Dialect: Send + Sync {
-    /// The id the dialect names itself by.
+/// A host selects exactly one dialect per RLM protocol by passing it to
+/// [`crate::RlmProtocolPluginFactory::new`] (or, for prompt-only use, to
+/// [`crate::RlmDriver::new`] or [`crate::RlmProjectorConfig::new`]). There is no
+/// default and no registry: every parse, tool-path spelling and prompt fragment
+/// a session produces comes from that one value, and the session records its
+/// [`Dialect::language_id`] so it only ever resumes under the same dialect
+/// (ADR 0096).
+///
+/// A dialect lowers its source to a [`lashlang::Program`]; it adds no IR, VM,
+/// store or wire feature. Shared code does language-neutral work only.
+pub trait Dialect: Send + Sync + 'static {
+    /// The stable id the dialect names itself by. A session records it and
+    /// refuses to resume under a dialect with another id.
     fn language_id(&self) -> &'static str;
 
-    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
-
-    fn cell_tags(&self) -> CellTags;
-
-    /// Lowers `source` with no host: enough to read what a cell references
-    /// before the host it links against is assembled.
+    /// Lowers `source` with no host: module and process source, and enough of
+    /// a cell to read what it references before its host is assembled.
     fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic>;
 
     /// Lowers one cell against the host it will link against, including the
@@ -56,8 +44,12 @@ pub(crate) trait Dialect: Send + Sync {
     fn parse_cell(
         &self,
         source: &str,
-        host: &lashlang::LashlangHostEnvironment,
+        host: &LashlangHostEnvironment,
     ) -> Result<lashlang::Program, DialectDiagnostic>;
+
+    /// The call path a cell in this dialect writes to call a bound tool, or
+    /// the refusal when no cell in this dialect can address it.
+    fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal>;
 
     /// A catalog tool's callable signature, in this dialect's syntax.
     fn tool_signature(
@@ -67,16 +59,163 @@ pub(crate) trait Dialect: Send + Sync {
         output_schema: &serde_json::Value,
     ) -> String;
 
-    /// Refuses a tool call path that no cell in this dialect can call as a
-    /// tool.
-    fn ensure_tool_call_path_addressable(&self, call_path: &str) -> Result<(), String>;
+    /// A tool's authored example in this dialect's syntax, or `None` when the
+    /// dialect cannot spell it; an example it cannot spell is left out of the
+    /// prompt.
+    fn render_tool_example(&self, authored: &str) -> Option<String>;
+
+    /// The words, tags and notation shared prompt fragments read.
+    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
+
+    /// The definition of one history item, in this dialect's notation, shown
+    /// where the prompt introduces the history collection.
+    fn history_item_definition(&self, images: bool) -> Vec<String>;
+
+    /// The whole execution section of the system prompt.
+    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String;
 }
 
-/// The current host's dialect. TypeScript is the only shipped one today;
-/// future registration must select the front end consistently with its prompt
-/// adapter and restored session state (ADR 0096).
-pub(crate) fn rlm_dialect() -> &'static dyn Dialect {
-    &TypeScript
+/// A dialect's refusal of a program, rendered against the source it refused.
+#[derive(Clone, Debug)]
+pub struct DialectDiagnostic {
+    /// Whether the dialect refuses a construct
+    /// ([`lash_core::CellFailureKind::Policy`]) or reports a wrong program
+    /// ([`lash_core::CellFailureKind::Program`]).
+    pub kind: lash_core::CellFailureKind,
+    /// What the dialect refused, and nothing else.
+    pub message: String,
+    pub span: Option<lashlang::Span>,
+    /// The refusal rendered against the source, with the line the model wrote.
+    pub rendered: String,
+}
+
+/// A dialect's refusal of something the host asked it to spell.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DialectRefusal {
+    pub kind: DialectRefusalKind,
+    pub message: String,
+}
+
+/// What a [`DialectRefusal`] refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DialectRefusalKind {
+    /// No cell in the dialect can call the tool binding's path as a tool.
+    UnaddressableToolPath,
+}
+
+impl std::fmt::Display for DialectRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for DialectRefusal {}
+
+/// The lines that open and close one cell on the cell channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellTags {
+    pub open: &'static str,
+    pub close: &'static str,
+}
+
+/// What shared code hands a dialect to render its execution section. The
+/// dialect owns every word of the section.
+#[derive(Clone, Copy)]
+#[non_exhaustive]
+pub struct ExecutionSectionRequest<'a> {
+    /// The transport programs arrive on.
+    pub channel: crate::plugin::RlmChannel,
+    /// The callable tools' docs, already rendered through this dialect's
+    /// call paths, signatures and examples; empty when there are none.
+    pub tools: &'a str,
+    /// The catalog the docs were rendered from.
+    pub tool_catalog: &'a lash_core::ToolCatalog,
+    /// The host a cell links against.
+    pub host_environment: &'a LashlangHostEnvironment,
+    /// The tool that finds the tools not listed, when the host has one.
+    pub discovery_operation: Option<&'a str>,
+}
+
+/// The words and call forms shared prompt fragments take from their dialect.
+#[derive(Clone, Copy, Debug)]
+pub struct DialectPromptVocabulary {
+    /// How the prompt names the language in prose.
+    pub language_name: &'static str,
+    /// The heading of the prompt template's execution section.
+    pub execution_title: &'static str,
+    /// The cell channel's tag lines.
+    pub cell_tags: CellTags,
+    /// What the prompt calls one unit of code.
+    pub cell_noun: &'static str,
+    /// The history collection's type, as the dialect spells it in prompts.
+    pub history_type: &'static str,
+    /// The call that shows a value for inspection.
+    pub print_call: &'static str,
+    /// The inspect form, ready to take a value expression.
+    pub print_statement_prefix: &'static str,
+    pub print_statement_suffix: &'static str,
+    /// The name of the form that ends the turn with a value.
+    pub finish_name: &'static str,
+    /// The finish form as the prompt spells it in prose.
+    pub finish_statement: &'static str,
+    /// The finish form for an intentional null result.
+    pub finish_null_statement: &'static str,
+    /// The continue-as control call, as a model would write it.
+    pub continue_as_call: &'static str,
+    /// A complete continue-as example for the tool doc.
+    pub continue_as_example: &'static str,
+    /// The rule the bound-variable listing states about field names, in the
+    /// terms of what this dialect's runtime does with a missing field.
+    pub field_miss_rule: &'static str,
+    /// How the prompt spells the shapes shared code infers from values.
+    pub shape_notation: ShapeNotation,
+}
+
+impl DialectPromptVocabulary {
+    /// The inspect form for one expression.
+    pub(crate) fn print_statement(&self, expression: &str) -> String {
+        format!(
+            "{}{expression}{}",
+            self.print_statement_prefix, self.print_statement_suffix
+        )
+    }
+}
+
+/// The spelling of the language-neutral shapes shared code infers from
+/// values: bound variables, read-only values and their named record types.
+#[derive(Clone, Copy, Debug)]
+pub struct ShapeNotation {
+    pub any: &'static str,
+    pub null: &'static str,
+    pub bool: &'static str,
+    pub int: &'static str,
+    pub float: &'static str,
+    pub str: &'static str,
+    /// A record the listing does not name.
+    pub record: &'static str,
+    /// A list is `list_open`, its item's shape, then `list_close`.
+    pub list_open: &'static str,
+    pub list_close: &'static str,
+    pub union_separator: &'static str,
+    /// A named type is `definition_keyword`, its name, `definition_assign`
+    /// and its shape.
+    pub definition_keyword: &'static str,
+    pub definition_assign: &'static str,
+    /// A named record's fields, one per line between `record_open` and
+    /// `record_close`: `field_indent`, name, `field_separator`, shape,
+    /// `field_terminator`.
+    pub record_open: &'static str,
+    pub field_indent: &'static str,
+    pub field_separator: &'static str,
+    pub field_terminator: &'static str,
+    pub record_close: &'static str,
+}
+
+impl ShapeNotation {
+    pub(crate) fn list(&self, item: &str) -> String {
+        format!("{}{item}{}", self.list_open, self.list_close)
+    }
 }
 
 /// Everything one execution session needs from the host that opened it.
@@ -98,12 +237,6 @@ pub(crate) struct RlmDialectServices {
     pub(crate) channel: crate::plugin::RlmChannel,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CellTags {
-    pub(crate) open: &'static str,
-    pub(crate) close: &'static str,
-}
-
 /// Shared cell transport teaching; native transport replaces this whole section.
 pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     format!(
@@ -111,6 +244,365 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
         open = tags.open,
         close = tags.close
     )
+}
+
+/// The session's selected dialect with the host resources it runs against:
+/// what every protocol adapter of one session carries. It holds the host's
+/// one selection; nothing here names a language.
+#[derive(Clone)]
+pub(crate) struct SessionDialect {
+    dialect: Arc<dyn Dialect>,
+    surface: LashlangSurface,
+    services: RlmDialectServices,
+}
+
+impl SessionDialect {
+    pub(crate) fn new(
+        dialect: Arc<dyn Dialect>,
+        surface: LashlangSurface,
+        services: RlmDialectServices,
+    ) -> Self {
+        Self {
+            dialect,
+            surface,
+            services,
+        }
+    }
+
+    /// A session dialect that can render prompts and diagnostics but cannot
+    /// execute. The protocol driver needs one to answer questions about cells
+    /// without an execution environment behind it.
+    pub(crate) fn prompt_only(dialect: Arc<dyn Dialect>, surface: LashlangSurface) -> Self {
+        Self {
+            dialect,
+            surface,
+            services: RlmDialectServices {
+                artifact_store: lashlang::LashlangArtifacts::new(Arc::new(PromptOnlyArtifactStore)),
+                deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
+                channel: crate::plugin::RlmChannel::Cell,
+            },
+        }
+    }
+
+    pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
+        self.services.code_renderer.clone()
+    }
+
+    /// The module-artifact store the session's tools resolve trigger targets
+    /// and process definitions against.
+    pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
+        self.services.artifact_store.clone()
+    }
+
+    /// The lashlang host surface a cell of this session links against.
+    pub(crate) fn surface(&self) -> LashlangSurface {
+        self.surface.clone()
+    }
+
+    /// The selected front end.
+    pub(crate) fn language(&self) -> &dyn Dialect {
+        self.dialect.as_ref()
+    }
+
+    pub(crate) fn language_id(&self) -> &'static str {
+        self.dialect.language_id()
+    }
+
+    pub(crate) fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
+        self.dialect.prompt_vocabulary()
+    }
+
+    pub(crate) fn cell_tags(&self) -> CellTags {
+        self.prompt_vocabulary().cell_tags
+    }
+
+    /// The selected front end as `processes.create`'s parser: the rendered
+    /// refusal on failure. The process engine receives the lowered IR.
+    pub(crate) fn process_source_parser(&self) -> lash_lashlang_runtime::ProcessSourceParser {
+        let dialect = Arc::clone(&self.dialect);
+        Arc::new(move |source| {
+            dialect
+                .parse(source)
+                .map_err(|diagnostic| diagnostic.rendered)
+        })
+    }
+
+    /// A catalog tool's call path in the selected dialect: the manifest's
+    /// neutral binding, spelled by the dialect.
+    pub(crate) fn tool_call_path(
+        &self,
+        manifest: &lash_core::ToolManifest,
+    ) -> Result<String, SessionError> {
+        let binding = lash_lashlang_runtime::required_tool_executable(manifest)
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        self.dialect
+            .tool_call_path(&binding)
+            .map_err(|refusal| SessionError::Protocol(refusal.to_string()))
+    }
+
+    pub(crate) fn render_tool_example(&self, example: &str) -> Option<String> {
+        self.dialect.render_tool_example(example)
+    }
+
+    pub(crate) fn create_session(&self) -> DialectSession {
+        DialectSession::new(
+            Arc::clone(&self.dialect),
+            self.surface.clone(),
+            self.services.clone(),
+        )
+    }
+
+    pub(crate) fn render_execution_section(
+        &self,
+        features: crate::protocol::RlmPromptFeatures,
+        tool_catalog: &lash_core::ToolCatalog,
+        channel: crate::plugin::RlmChannel,
+        discovery: Option<&lash_core::ToolDiscovery>,
+    ) -> Result<String, SessionError> {
+        let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
+        let host_environment = self
+            .surface
+            .host_environment(tool_catalog)
+            .map_err(|error| {
+                SessionError::Protocol(format!("invalid host tool surface: {error}"))
+            })?;
+        Ok(self
+            .dialect
+            .render_execution_section(ExecutionSectionRequest {
+                channel,
+                tools: &tools,
+                tool_catalog,
+                host_environment: &host_environment,
+                discovery_operation: discovery.map(|discovery| discovery.operation.as_str()),
+            }))
+    }
+
+    pub(crate) fn history_item_definition(&self, images: bool) -> Vec<String> {
+        self.dialect.history_item_definition(images)
+    }
+
+    pub(crate) fn finalization_copy(
+        &self,
+        termination: &lash_rlm_types::RlmTermination,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
+        match termination {
+            lash_rlm_types::RlmTermination::FinishRequired { schema } => {
+                self.finish_required_finalization(schema.is_some(), channel)
+            }
+            lash_rlm_types::RlmTermination::Natural => {
+                let step = match channel {
+                    crate::plugin::RlmChannel::Cell => "in a block",
+                    crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
+                };
+                format!(
+                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}, and call `{finish}` inside the program to return a computed value.",
+                    finish = self.prompt_vocabulary().finish_statement,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
+        let tags = self.cell_tags();
+        match error {
+            crate::protocol::CellExtractionError::UnclosedCell => format!(
+                "Model response started a `{open}` block but did not close it. Retry with one complete paired block. A line whose trimmed content is exactly `{close}` closes the cell.",
+                open = tags.open,
+                close = tags.close,
+            ),
+        }
+    }
+
+    pub(crate) fn finish_required_copy(
+        &self,
+        requires_schema: bool,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = vocabulary.cell_tags;
+        let place = match channel {
+            crate::plugin::RlmChannel::Cell => {
+                format!("inside a paired `{}...{}` block", tags.open, tags.close)
+            }
+            crate::plugin::RlmChannel::NativeTool => {
+                "inside the `code` argument of an `execute_code` call".to_string()
+            }
+        };
+        let finish = vocabulary.finish_statement;
+        if requires_schema {
+            format!(
+                "Call `{finish}` {place} when the task is complete, with a value matching the required output schema."
+            )
+        } else {
+            format!(
+                "Call `{finish}` {place} when the task is complete. Use `{}` only when null is intentional.",
+                vocabulary.finish_null_statement
+            )
+        }
+    }
+
+    pub(crate) fn finish_schema_mismatch_copy(&self) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        format!(
+            "The `{}` value did not match the required output schema. Correct it and call `{}` again.",
+            vocabulary.finish_name, vocabulary.finish_statement
+        )
+    }
+
+    pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
+        let tags = self.cell_tags();
+        format!(
+            "{error_text}\n\nReply again using exactly one paired `{}...{}` block.",
+            tags.open, tags.close
+        )
+    }
+
+    /// What to tell a model whose reply carried a provider tool call on a
+    /// channel that declared no tools.
+    ///
+    /// The call is malformed provider output, not a protocol violation — the
+    /// request showed no tool surface — so the copy names what happened and
+    /// sends the work back inside the cell (FIG-2777).
+    pub(crate) fn native_tool_call_copy(&self, tool_name: &str) -> String {
+        format!(
+            "The model response carried a provider tool call `{tool_name}`, but this channel's request declares no tools, so nothing was executed. Express that work inside the program instead."
+        )
+    }
+
+    pub(crate) fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
+        let tags = self.cell_tags();
+        let cap = output_token_cap
+            .map(|cap| format!(" The request cap was {cap} tokens."))
+            .unwrap_or_default();
+        format!(
+            "Model output truncated the `{}` block before `{}`.{cap} Retry with a shorter block.",
+            tags.open, tags.close
+        )
+    }
+
+    /// The diagnostic name of one program execution: derived from the
+    /// session's language id, so it names the dialect that ran.
+    pub(crate) fn execution_diagnostic_name(&self) -> String {
+        format!("execute_{}", self.language_id())
+    }
+
+    pub(crate) fn stream_cell_start_event_name(&self) -> String {
+        format!("rlm_{}_cell_start", self.language_id())
+    }
+
+    pub(crate) fn stream_cell_end_event_name(&self) -> String {
+        format!("rlm_{}_cell_end", self.language_id())
+    }
+
+    pub(crate) fn render_history_cell(&self, prose: &str, code: &str) -> String {
+        crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
+    }
+
+    pub(crate) fn finish_required_finalization(
+        &self,
+        requires_schema: bool,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = vocabulary.cell_tags;
+        let mut text = match channel {
+            crate::plugin::RlmChannel::Cell => format!(
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+                open = tags.open,
+                close = tags.close,
+                finish = vocabulary.finish_statement,
+                finish_null = vocabulary.finish_null_statement,
+            ),
+            crate::plugin::RlmChannel::NativeTool => format!(
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the `execute_code` call that performs it.",
+                finish = vocabulary.finish_statement,
+                finish_null = vocabulary.finish_null_statement,
+            ),
+        };
+        if requires_schema {
+            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
+        }
+        text
+    }
+
+    /// What to tell a model that opened a line with the cell tag in a position
+    /// the cell grammar refuses.
+    ///
+    /// The rule itself is the whole content, because the failure this replaces
+    /// was a reply that got no rule at all: a misplaced fence was read as prose,
+    /// the driver answered "please finish", and the model — correctly seeing
+    /// nothing wrong with its own code — re-sent it until the turn's budget died
+    /// (FIG-1475).
+    ///
+    /// It names the *canonical* shape only, and deliberately says nothing about
+    /// the one-line shape the scanner also reads. Every prompt fragment teaches
+    /// standalone tag lines; a correction that advertised a second accepted
+    /// shape would contradict them, and this copy exists to remove a
+    /// contradiction rather than add one. A reply already in the one-line shape
+    /// never reaches this copy — it executes.
+    pub(crate) fn malformed_cell_fence_retry_copy(&self) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = vocabulary.cell_tags;
+        format!(
+            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
+            noun = vocabulary.cell_noun,
+            open = tags.open,
+            close = tags.close,
+        )
+    }
+}
+
+/// The artifact port of a [`SessionDialect::prompt_only`] session: it runs no
+/// cell, so it has no backend, and every artifact operation is refused rather
+/// than answered from a store no session reopens.
+struct PromptOnlyArtifactStore;
+
+impl PromptOnlyArtifactStore {
+    fn refusal() -> lash_core::ArtifactStoreError {
+        lash_core::ArtifactStoreError::Backend(
+            "a prompt-only RLM dialect executes no cell and stores no Lashlang artifact"
+                .to_string(),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ModuleArtifactStore for PromptOnlyArtifactStore {
+    async fn publish_module_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _module_ref: &str,
+        _bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn end_module_referrer(
+        &self,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn get_module_artifact(
+        &self,
+        _module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
 }
 
 pub(crate) struct BoundVariablesPromptRender {
@@ -132,9 +624,10 @@ impl BoundVariablesPromptRender {
 /// One RLM execution session.
 ///
 /// The session runs its dialect over the Lashlang IR and VM, and seeds its
-/// state's engine id from that dialect.
+/// state's engine id from that dialect: the snapshot records the id, and a
+/// restore under another dialect is refused.
 pub(crate) struct DialectSession {
-    dialect: &'static dyn Dialect,
+    dialect: Arc<dyn Dialect>,
     state: RlmExecutionState,
     surface: lash_lashlang_runtime::LashlangSurface,
     services: RlmDialectServices,
@@ -142,11 +635,8 @@ pub(crate) struct DialectSession {
 }
 
 impl DialectSession {
-    /// The id is durability identity: it is written into persisted state that a
-    /// later process reads back, which is why it stays a named constant rather
-    /// than a spelling each call site repeats.
     pub(crate) fn new(
-        dialect: &'static dyn Dialect,
+        dialect: Arc<dyn Dialect>,
         surface: lash_lashlang_runtime::LashlangSurface,
         services: RlmDialectServices,
     ) -> Self {
@@ -161,7 +651,6 @@ impl DialectSession {
             )),
         }
     }
-
     pub(crate) async fn execute(
         &mut self,
         ctx: RuntimeExecutionContext<'_>,
@@ -175,7 +664,7 @@ impl DialectSession {
             .prepare_runtime_code_execution()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
-            self.dialect,
+            self.dialect.as_ref(),
             &mut self.state,
             ctx,
             request,
@@ -301,54 +790,6 @@ impl DialectSession {
     }
 }
 
-/// The words and call forms shared prompt fragments take from their dialect.
-/// Session code passes the selected vocabulary explicitly. The prompt walker
-/// and extension-session tests check that syntax matches the served front end.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DialectPromptVocabulary {
-    /// How the prompt names the language in prose.
-    pub(crate) language_name: &'static str,
-    /// The heading of the prompt template's execution section.
-    pub(crate) execution_title: &'static str,
-    /// The opening cell tag, quoted in prose that points at cells.
-    pub(crate) cell_open_tag: &'static str,
-    /// What the prompt calls one unit of code.
-    pub(crate) cell_noun: &'static str,
-    /// The history collection's type, as the dialect spells it in prompts.
-    pub(crate) history_type: &'static str,
-    /// The call that prints a value for inspection.
-    pub(crate) print_call: &'static str,
-    /// `console.log(x)`, ready to take a value expression.
-    pub(crate) print_statement_prefix: &'static str,
-    pub(crate) print_statement_suffix: &'static str,
-    /// The finish form as the prompt spells it in prose.
-    pub(crate) finish_statement: &'static str,
-    /// The finish form for an intentional null result.
-    pub(crate) finish_null_statement: &'static str,
-    /// The continue-as control call, as a model would write it.
-    pub(crate) continue_as_call: &'static str,
-    /// A complete continue-as example for the tool doc.
-    pub(crate) continue_as_example: &'static str,
-}
-
-impl Default for DialectPromptVocabulary {
-    /// The current host's default. Shared session code reads its selected
-    /// dialect's vocabulary explicitly.
-    fn default() -> Self {
-        crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY
-    }
-}
-
-impl DialectPromptVocabulary {
-    /// `console.log(x)` for one expression.
-    pub(crate) fn print_statement(&self, expression: &str) -> String {
-        format!(
-            "{}{expression}{}",
-            self.print_statement_prefix, self.print_statement_suffix
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,16 +806,12 @@ mod tests {
         fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
             DialectPromptVocabulary {
                 language_name: "Extension fixture",
-                cell_open_tag: "<fixture>",
+                cell_tags: CellTags {
+                    open: "<fixture>",
+                    close: "</fixture>",
+                },
                 history_type: "FixtureHistory",
-                ..typescript::TYPESCRIPT_PROMPT_VOCABULARY
-            }
-        }
-
-        fn cell_tags(&self) -> CellTags {
-            CellTags {
-                open: "<fixture>",
-                close: "</fixture>",
+                ..TypescriptDialect.prompt_vocabulary()
             }
         }
 
@@ -395,6 +832,10 @@ mod tests {
             self.parse(source)
         }
 
+        fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {
+            Ok(binding.call_path())
+        }
+
         fn tool_signature(
             &self,
             call_path: &str,
@@ -404,15 +845,23 @@ mod tests {
             call_path.to_string()
         }
 
-        fn ensure_tool_call_path_addressable(&self, _call_path: &str) -> Result<(), String> {
-            Ok(())
+        fn render_tool_example(&self, _authored: &str) -> Option<String> {
+            None
+        }
+
+        fn history_item_definition(&self, _images: bool) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn render_execution_section(&self, _request: ExecutionSectionRequest<'_>) -> String {
+            String::new()
         }
     }
 
     #[test]
     fn extension_session_bound_variables_use_its_vocabulary() {
         let mut session = DialectSession::new(
-            &ExtensionFixture,
+            Arc::new(ExtensionFixture),
             lash_lashlang_runtime::LashlangSurface::default(),
             test_dialect_services(),
         );
@@ -444,7 +893,7 @@ mod tests {
             let mut services = test_dialect_services();
             services.channel = channel;
             let mut session = DialectSession::new(
-                &ExtensionFixture,
+                Arc::new(ExtensionFixture),
                 lash_lashlang_runtime::LashlangSurface::default(),
                 services,
             );
@@ -500,7 +949,7 @@ mod tests {
             let mut services = test_dialect_services();
             services.channel = channel;
             let mut session = DialectSession::new(
-                rlm_dialect(),
+                Arc::new(TypescriptDialect),
                 lash_lashlang_runtime::LashlangSurface::default(),
                 services,
             );
@@ -555,8 +1004,9 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
 }
 
 #[cfg(test)]
-pub(crate) fn typescript_test_dialect() -> TypescriptDialect {
-    TypescriptDialect::new(
+pub(crate) fn typescript_test_dialect() -> SessionDialect {
+    SessionDialect::new(
+        Arc::new(TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
         test_dialect_services(),
     )

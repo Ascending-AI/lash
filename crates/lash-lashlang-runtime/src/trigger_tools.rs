@@ -164,7 +164,7 @@ mod tests {
             definition
                 .manifest
                 .bindings
-                .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
+                .get(lash_tool_support::TOOL_BINDING_KEY),
             Some(
                 &serde_json::to_value(lash_core::ToolBinding::new(["triggers"], "register"))
                     .expect("binding serializes")

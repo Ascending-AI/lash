@@ -25,9 +25,9 @@ different from explicitly recording its default value. Read it through
 `RlmSessionReadViewExt::rlm_config` or `RlmSessionExt::rlm_config`.
 
 Reads return `Result`. Malformed recorded options refuse instead of defaulting.
-A bag containing a `dialect` field returns
-`RlmSessionConfigDecodeError::RetiredDialectField`. The session records no
-source-language selection; ADR 0096 governs the shipped dialect.
+The session's dialect is not an RLM fact: the host selects it where it
+constructs the protocol, and the session records its language id beside the
+channel in the protocol-turn options (ADR 0096).
 
 ### Creation and opening
 
@@ -66,8 +66,8 @@ with `SessionConfigAdmin::update(SessionConfigPatch)`. The protocol's
 The command settles a durable config write. Successful return means the patch
 is durable. Conflicts travel as `SessionError::SessionConfigRefused` and are
 read with `lash::rlm::rlm_session_config_conflict`; error prose is presentation.
-The RLM patch preserves the recorded channel and refuses plugin keys it does
-not accept.
+The RLM patch preserves the recorded channel and dialect and refuses plugin
+keys it does not accept.
 
 Because creation fills the final-answer format, a later statement normally
 agrees or refuses. Termination can be introduced later where absent. RLM

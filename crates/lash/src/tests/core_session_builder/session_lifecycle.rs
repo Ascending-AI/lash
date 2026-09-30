@@ -894,7 +894,11 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
     }))
     .expect("rlm config");
     let backend = double_backend().await;
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, &backend.clone());
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        config,
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend.clone(),
+    );
     let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(mock_model_spec())
@@ -1111,14 +1115,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // them (here `compile-extra-tool` resolves to `lookup`).
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone());
-    let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        &backend.clone(),
-    ));
+    let factory = Arc::new(rlm_factory(&backend));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn PluginFactory>,
         Arc::new(CompileSurfaceToolFactory::new(

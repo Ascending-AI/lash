@@ -452,6 +452,7 @@ fn process_core(engine: &Engine, executions: &Arc<AtomicUsize>) -> lash::LashCor
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -1515,6 +1516,7 @@ async fn cell_parity(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)

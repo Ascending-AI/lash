@@ -296,7 +296,7 @@ mod tests {
         let event = || {
             crate::engine::ObservedEvent::Session(crate::SessionStreamEvent::Message {
                 text: "marker".to_string(),
-                kind: crate::StreamMessageKind::TypescriptCode,
+                kind: crate::StreamMessageKind::Code,
             })
         };
         body_cursor.observe(&sink, event());

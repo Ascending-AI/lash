@@ -24,7 +24,7 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
                 render.renderer_id = id.to_string();
                 context = context.with_recorded_render(render);
             }
-            let response = crate::executor::execute_code_with_channel_and_bounds(
+            let response = crate::testing::execute_code_with_channel_and_bounds(
                 &mut RlmExecutionState::for_engine("typescript"),
                 context,
                 ExecRequest {
@@ -92,7 +92,7 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
             params: serde_json::to_value(params).expect("render params"),
         });
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let response = crate::executor::execute_code_with_channel_and_bounds(
+        let response = crate::testing::execute_code_with_channel_and_bounds(
             &mut RlmExecutionState::for_engine("typescript"),
             context,
             ExecRequest {
@@ -156,7 +156,7 @@ fn journaled_prints_replay_without_calling_the_renderer() {
                         params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
                             .expect("render params"),
                     });
-                    let response = crate::executor::execute_code_with_channel_and_bounds(
+                    let response = crate::testing::execute_code_with_channel_and_bounds(
                         &mut RlmExecutionState::for_engine("typescript"),
                         context,
                         ExecRequest {

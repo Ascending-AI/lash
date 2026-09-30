@@ -409,3 +409,97 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
             .expect("test render params serialize"),
     }
 }
+
+// The executor's TypeScript entry points for cell-level tests: each runs one
+// cell under the TypeScript dialect a host would select.
+use crate::executor::{RlmExecutionState, RlmLashlangExecutionTraceConfig};
+use crate::projection::RlmProjectedBindings;
+use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
+use lash_lashlang_runtime::LashlangSurface;
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_unbounded_for_tests(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: lashlang::LashlangArtifacts,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+) -> ExecResponse {
+    Box::pin(execute_code_with_bounds(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        lashlang_execution_trace_config,
+        lashlang::ExecutionBounds::unbounded(),
+    ))
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_bounds(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: lashlang::LashlangArtifacts,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+) -> ExecResponse {
+    Box::pin(execute_code_with_channel_and_bounds(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        lashlang_execution_trace_config,
+        execution_bounds,
+        crate::plugin::RlmChannel::Cell,
+        crate::render::CodeRendererSlot::default(),
+    ))
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_channel_and_bounds(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: lashlang::LashlangArtifacts,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+    channel: crate::plugin::RlmChannel,
+    code_renderer: crate::render::CodeRendererSlot,
+) -> ExecResponse {
+    Box::pin(
+        crate::executor::execute_code_with_channel_and_bounds_with_trigger_resolver(
+            &crate::dialect::TypescriptDialect,
+            state,
+            ctx,
+            request,
+            artifact_store,
+            lashlang_surface,
+            deferred_tool_resolver,
+            None,
+            session_projected_bindings,
+            lashlang_execution_trace_config,
+            execution_bounds,
+            channel,
+            code_renderer,
+        ),
+    )
+    .await
+}

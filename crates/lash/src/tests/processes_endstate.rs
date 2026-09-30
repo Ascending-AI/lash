@@ -215,6 +215,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     LashCore::rlm_builder(

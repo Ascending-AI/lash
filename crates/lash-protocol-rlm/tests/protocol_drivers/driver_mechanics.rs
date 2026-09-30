@@ -2168,7 +2168,9 @@ fn drive_rlm_to_second_llm_request(
         },
         lash_protocol_rlm::RlmProjectorConfig {
             max_budget_tokens: Some(1_000),
-            ..Default::default()
+            ..lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(
+                lash_protocol_rlm::TypescriptDialect,
+            ))
         },
     );
     let mut config = test_config();

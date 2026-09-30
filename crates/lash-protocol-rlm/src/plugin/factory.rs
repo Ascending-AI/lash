@@ -14,7 +14,7 @@ use lash_lashlang_runtime::{
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
-use crate::dialect::{RlmDialectServices, TypescriptDialect};
+use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
 use crate::executor::RlmLashlangExecutionTraceConfig;
 
 /// Apply the RLM protocol config transformation: enable, when process lifecycle
@@ -59,6 +59,9 @@ pub fn rlm_lashlang_surface(
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
+    /// The host's one dialect selection: every session this factory builds
+    /// parses, spells tools and prompts in it, and records its language id.
+    dialect: Arc<dyn Dialect>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: LashlangArtifacts,
@@ -78,8 +81,13 @@ pub struct RlmProtocolPluginFactory {
 }
 
 impl RlmProtocolPluginFactory {
-    /// An RLM protocol over `backend`, the substrate its Lashlang module
-    /// artifacts live in (ADR 0102, D2).
+    /// An RLM protocol in `dialect` over `backend`, the substrate its
+    /// Lashlang module artifacts live in (ADR 0102, D2).
+    ///
+    /// `dialect` is the host's selection of the language its models write
+    /// (ADR 0096): cells, `processes.create` sources, compiled modules and
+    /// every prompt fragment go through it, and a session records its
+    /// language id so it never resumes under another dialect.
     ///
     /// The artifact store comes from the backend, never beside it: a session
     /// resumed after a restart reopens the same backend and finds the modules
@@ -87,9 +95,14 @@ impl RlmProtocolPluginFactory {
     /// sessions wrote. Pass the backend the runtime is built over; a runtime
     /// over another backend refuses this factory
     /// ([`PluginFactory::bound_backend`]).
-    pub fn new(config: RlmProtocolPluginConfig, backend: &lash_core::Backend) -> Self {
+    pub fn new(
+        config: RlmProtocolPluginConfig,
+        dialect: Arc<dyn Dialect>,
+        backend: &lash_core::Backend,
+    ) -> Self {
         Self {
             config,
+            dialect,
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
@@ -267,15 +280,13 @@ impl RlmProtocolPluginFactory {
                     diagnostic: Some(err.to_string()),
                 })
             })?;
-        let program = crate::dialect::rlm_dialect()
-            .parse(&request.source)
-            .map_err(|diagnostic| {
-                lashlang::ModuleCompileError::parse_failure(
-                    diagnostic.span,
-                    diagnostic.message,
-                    diagnostic.rendered,
-                )
-            })?;
+        let program = self.dialect.parse(&request.source).map_err(|diagnostic| {
+            lashlang::ModuleCompileError::parse_failure(
+                diagnostic.span,
+                diagnostic.message,
+                diagnostic.rendered,
+            )
+        })?;
         lashlang::compile_module(lashlang::ModuleCompileRequest {
             source: &request.source,
             program,
@@ -338,6 +349,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
             self.config.channel,
             ctx.materialization,
         )?;
+        super::channel::validate_dialect(
+            &ctx.protocol_turn_options,
+            self.dialect.language_id(),
+            ctx.materialization,
+        )?;
         let lashlang_surface = LashlangSurface::new(
             config.lashlang_abilities.into_engine(),
             config.lashlang_language_features.into_engine(),
@@ -354,12 +370,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
         };
-        // TypeScript is the only RLM language (ADR 0096), so there is nothing to
-        // resolve from the session: the create contract and the durable record
-        // carry no language pin, and a pre-cutover record that still does is
-        // refused by `rlm_session_config` rather than read here.
-        let dialect: Arc<TypescriptDialect> =
-            Arc::new(TypescriptDialect::new(lashlang_surface, services));
+        let dialect = Arc::new(SessionDialect::new(
+            Arc::clone(&self.dialect),
+            lashlang_surface,
+            services,
+        ));
         if config.channel == super::RlmChannel::NativeTool {
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
                 config,
@@ -420,7 +435,7 @@ pub type ModuleCompileOutput = lashlang::ModuleCompileOutput;
 
 struct RlmProtocolPlugin {
     config: RlmProtocolPluginConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 
 impl SessionPlugin for RlmProtocolPlugin {
@@ -509,6 +524,7 @@ mod label_annotation_tests {
                     .instruction_limit(crate::InstructionBound::instructions(1_000_000))
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
+                std::sync::Arc::new(crate::TypescriptDialect),
                 &crate::testing::memory_store_backend().await,
             )
             .with_process_lifecycle(false),

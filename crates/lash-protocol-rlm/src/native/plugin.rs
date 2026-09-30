@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use crate::plugin::RlmProtocolPluginConfig;
 use crate::plugin::protocol_session::RlmProtocolSession;
 use crate::plugin::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
@@ -10,10 +10,10 @@ use lash_core::plugin::{PluginError, PluginRegistrar};
 pub(super) fn register_native_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 ) -> Result<(), PluginError> {
-    // The catalog contribution carries the dialect so the neutrality guard
-    // knows the words model-facing tool prose may not spell literally.
+    // The catalog contribution carries the dialect that spells every catalog
+    // member's call path.
     let catalog_dialect = Arc::clone(&dialect);
     let discovery = config.discovery.clone();
     let discovery_dialect = Arc::clone(&dialect);
@@ -24,6 +24,7 @@ pub(super) fn register_native_plugin(
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
         config.clone(),
+        dialect.language_id(),
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;
@@ -47,7 +48,7 @@ pub(super) fn register_native_plugin(
     reg.tools().provider(Arc::new(
         lash_lashlang_runtime::process_create_tool_provider(
             dialect.language_id(),
-            TypescriptDialect::parse_source,
+            dialect.process_source_parser(),
             dialect.surface(),
         ),
     ))?;
@@ -86,7 +87,7 @@ pub(super) fn register_native_plugin(
                     ]
                     .into_iter()
                     .map(|name| lash_core::PluginRuntimeEvent::Custom {
-                        name: name.to_string(),
+                        name,
                         payload: serde_json::json!({}),
                     })
                     .collect()
@@ -116,7 +117,7 @@ fn register_projected_bindings_prompt_contributor(
 /// Provider-native RLM protocol session, selected by the RLM factory config.
 pub struct RlmNativeToolPlugin {
     pub(crate) config: RlmProtocolPluginConfig,
-    pub(crate) dialect: Arc<TypescriptDialect>,
+    pub(crate) dialect: Arc<SessionDialect>,
 }
 impl lash_core::plugin::SessionPlugin for RlmNativeToolPlugin {
     fn id(&self) -> &'static str {
@@ -134,7 +135,7 @@ impl lash_core::plugin::AssistantProseProjectorPlugin for NativeProseProjector {
 }
 struct NativeProtocolDriver {
     config: RlmProtocolPluginConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
     fn resolve_render(

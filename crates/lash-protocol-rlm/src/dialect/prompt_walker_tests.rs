@@ -31,7 +31,6 @@
 //! test on `spawn_agent_tool_definition` in `lash-subagents`).
 
 use super::*;
-use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
 /// The authored example corpus, as tool authors spell it.
@@ -132,12 +131,12 @@ fn strip_carve_outs(text: &str) -> String {
     text
 }
 
-fn assembled_prompt_fragments(dialect: &TypescriptDialect) -> Vec<(&'static str, String)> {
+fn assembled_prompt_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
     assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs"))
 }
 
 fn assembled_prompt_fragments_with_projection(
-    dialect: &TypescriptDialect,
+    dialect: &SessionDialect,
     projected_value: serde_json::Value,
 ) -> Vec<(&'static str, String)> {
     let vocabulary = dialect.prompt_vocabulary();
@@ -213,6 +212,7 @@ fn assembled_prompt_fragments_with_projection(
                 crate::protocol::RlmPromptFeatures::default(),
                 &catalog,
                 crate::plugin::RlmChannel::Cell,
+                None,
             )
             .expect("render execution section"),
     )];
@@ -415,10 +415,12 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     // example names host modules and free identifiers that no isolated
     // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
     // is not.
-    let typescript = crate::dialect::typescript_test_dialect();
+    let typescript = crate::dialect::TypescriptDialect;
     let mut unparseable = Vec::new();
     for example in authored_tool_examples() {
-        let rendered = typescript.render_tool_example(example);
+        let rendered = typescript
+            .render_tool_example(example)
+            .expect("TypeScript spells every authored example");
         if let Err(error) = lash_typescript::parse(&rendered) {
             let code = format!("{:?}", error.code);
             if code.contains("UnknownBinding") || code.contains("LinkError") {
@@ -443,12 +445,16 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
 
     // The rewriter itself: a reader must be shown the examples rewritten.
     assert_eq!(
-        typescript.render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#),
-        r#"await web.fetch({ url: "https://example.test/" });"#
+        typescript
+            .render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#)
+            .as_deref(),
+        Some(r#"await web.fetch({ url: "https://example.test/" });"#)
     );
     assert_eq!(
-        typescript.render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page"),
-        "const page = await web.fetch({ url: \"u\" });\nfinish(page);"
+        typescript
+            .render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page")
+            .as_deref(),
+        Some("const page = await web.fetch({ url: \"u\" });\nfinish(page);")
     );
 
     // And the markers themselves must be present in the retired surface's real
@@ -456,7 +462,11 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     assert!(RETIRED_SURFACE_MARKERS.contains(&"<lashlang>"));
     assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
     assert_ne!(
-        TYPESCRIPT_PROMPT_VOCABULARY.cell_open_tag, "<lashlang>",
+        crate::dialect::TypescriptDialect
+            .prompt_vocabulary()
+            .cell_tags
+            .open,
+        "<lashlang>",
         "the sole vocabulary must not be the retired one"
     );
 }
@@ -517,7 +527,8 @@ fn composed_typescript_prompt_has_no_markdown_fences() {
             .expect("tick type"),
         )
         .expect("trigger constructor");
-    let dialect = super::TypescriptDialect::new(
+    let dialect = super::SessionDialect::new(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface {
             abilities: ::lashlang::LashlangAbilities::all(),
             language_features: Default::default(),

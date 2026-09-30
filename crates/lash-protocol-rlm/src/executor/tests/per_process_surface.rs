@@ -114,6 +114,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
             .instruction_limit(crate::InstructionBound::instructions(1_000_000))
             .memory_limit(crate::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(crate::TypescriptDialect),
         &backend,
     ));
     let plugin_host = PluginHost::new(vec![

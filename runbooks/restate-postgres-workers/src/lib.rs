@@ -498,6 +498,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &config.backend.clone().into(),
     );
     if let Some(trace_dir) = config.trace_dir.as_ref() {

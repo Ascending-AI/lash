@@ -3,7 +3,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 
 use crate::native::prompt::execution_section;
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
@@ -51,7 +51,7 @@ fn process_catalog() -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(tools)
 }
 
-fn dialect(enabled: bool) -> TypescriptDialect {
+fn dialect(enabled: bool) -> SessionDialect {
     let surface = LashlangSurface {
         abilities: if enabled {
             lashlang::LashlangAbilities::all()
@@ -65,15 +65,18 @@ fn dialect(enabled: bool) -> TypescriptDialect {
         },
         ..LashlangSurface::default()
     };
-    crate::dialect::TypescriptDialect::prompt_only(surface)
+    crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
+        surface,
+    )
 }
 
-fn system(dialect: &TypescriptDialect, native: bool, enabled: bool) -> String {
+fn system(dialect: &SessionDialect, native: bool, enabled: bool) -> String {
     system_with(dialect, native, enabled, catalog())
 }
 
 fn system_with(
-    dialect: &TypescriptDialect,
+    dialect: &SessionDialect,
     native: bool,
     enabled: bool,
     catalog: lash_core::ToolCatalog,
@@ -83,10 +86,10 @@ fn system_with(
         decomposition: enabled,
     };
     let execution = if native {
-        execution_section(dialect, features, &catalog)
+        execution_section(dialect, features, &catalog, None)
     } else {
         dialect
-            .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell)
+            .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell, None)
             .unwrap()
     };
     lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
@@ -210,12 +213,16 @@ fn the_process_block_follows_the_catalogue_and_sleep_follows_its_ability() {
             abilities: lashlang::LashlangAbilities { sleep },
             ..LashlangSurface::default()
         };
-        let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+        let dialect = crate::dialect::SessionDialect::prompt_only(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
+            surface,
+        );
         let text = dialect
             .render_execution_section(
                 crate::protocol::RlmPromptFeatures::default(),
                 &catalog(),
                 crate::plugin::RlmChannel::Cell,
+                None,
             )
             .unwrap();
         assert_eq!(
@@ -261,7 +268,10 @@ fn toolbench_shaped_prompt_has_no_process_vocabulary() {
                 .with_label_annotations(),
             ..Default::default()
         };
-        let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+        let dialect = crate::dialect::SessionDialect::prompt_only(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
+            surface,
+        );
         let prompt = system(&dialect, false, true);
         for forbidden in [",s.", "process", "defineProcess", "waitSignal"] {
             assert!(!prompt.contains(forbidden), "{forbidden}: {prompt}");
@@ -416,15 +426,19 @@ fn each_host_capability_gates_its_own_vocabulary() {
                         ]
                     }
                 };
-                let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+                let dialect = crate::dialect::SessionDialect::prompt_only(
+                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
+                    surface,
+                );
                 let text = if native {
-                    execution_section(&dialect, features, &catalog)
+                    execution_section(&dialect, features, &catalog, None)
                 } else {
                     dialect
                         .render_execution_section(
                             features,
                             &catalog,
                             crate::plugin::RlmChannel::Cell,
+                            None,
                         )
                         .unwrap()
                 };
@@ -476,10 +490,13 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
     for native in [false, true] {
         for sleep in [false, true] {
             for process_surface in [false, true] {
-                let dialect = crate::dialect::TypescriptDialect::prompt_only(LashlangSurface {
-                    abilities: lashlang::LashlangAbilities { sleep },
-                    ..Default::default()
-                });
+                let dialect = crate::dialect::SessionDialect::prompt_only(
+                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
+                    LashlangSurface {
+                        abilities: lashlang::LashlangAbilities { sleep },
+                        ..Default::default()
+                    },
+                );
                 let catalog = if process_surface {
                     process_catalog()
                 } else {
@@ -560,12 +577,16 @@ fn opening_line_names_exactly_the_available_sections() {
                     )
                     .unwrap();
             }
-            let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+            let dialect = crate::dialect::SessionDialect::prompt_only(
+                std::sync::Arc::new(crate::dialect::TypescriptDialect),
+                surface,
+            );
             let text = dialect
                 .render_execution_section(
                     Default::default(),
                     &catalog(),
                     crate::plugin::RlmChannel::Cell,
+                    None,
                 )
                 .unwrap();
             let expected = if host_surface {

@@ -69,7 +69,7 @@ counterpart use the durable sequential async-map driver. The all-settled form
 wraps each callback in guest `try`/`catch`, so a rejection becomes that input's
 `{status: "rejected", reason}` record and later callbacks still run. Promise
 chaining and synthetic promises remain named rejects.
-Tool calls require `await` and use explicit `typescript.tool` module paths;
+Tool calls require `await` and use explicit `lash.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
 

@@ -327,7 +327,7 @@ pub mod tools {
     /// The dialect-agnostic tool binding and its one setter. The manifest key
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.
-    pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+    pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
         facade_support::SupersededToolIdentity, facade_support::ToolRestoreReport,
@@ -356,7 +356,7 @@ pub mod tools {
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
     /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
-    /// `ToolBinding`, `ToolDefinitionBindingExt`, `TYPESCRIPT_TOOL_BINDING_KEY`,
+    /// `ToolBinding`, `ToolDefinitionBindingExt`, `TOOL_BINDING_KEY`,
     /// `LASHLANG_BINDINGS_ENABLED`) tools are built from. The glob keeps the
     /// facade complete as the crate grows; where it overlaps the explicit
     /// `rlm` re-exports above, those name the same items.

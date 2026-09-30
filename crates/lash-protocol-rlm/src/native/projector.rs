@@ -1,5 +1,5 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use crate::driver::RlmPreambleConfig;
 use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
@@ -27,12 +27,11 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     };
 
     prompt_contributions.extend(input.extra_prompt_contributions);
-    let execution =
-        super::prompt::execution_section(dialect.as_ref(), config.prompt_features, tool_catalog);
-    let execution = crate::tool_catalog::with_discovery_sentence(
-        execution,
-        config.discovery.as_ref(),
+    let execution = super::prompt::execution_section(
         dialect.as_ref(),
+        config.prompt_features,
+        tool_catalog,
+        config.discovery.as_ref(),
     );
     TurnDriverPreamble {
         config: TurnDriverConfig {
@@ -61,7 +60,7 @@ struct NativeContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {

@@ -128,6 +128,7 @@ fn rlm(backend: &lash_core::Backend) -> Vec<Arc<dyn lash_core::facade_support::P
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             backend,
         )
         .with_process_lifecycle(true),
