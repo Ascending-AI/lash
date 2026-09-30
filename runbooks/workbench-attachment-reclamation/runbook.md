@@ -40,7 +40,7 @@ Four facts drive every judgment below:
 model and makes no paid provider call: the workbench boots with
 `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion`, which is the
 scripted provider. It is listed under `deterministic_only` in
-`parity-matrix.toml`, emits no judged row, and must never be submitted to a paid
+`judged-matrix.toml`, emits no judged row, and must never be submitted to a paid
 judge. Any real provider request invalidates the rehearsal.
 
 **No UI affordance exists, deliberately.** The workbench schedules neither lever

@@ -78,11 +78,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
-            history_type: if input.dialect.language_id() == "typescript" {
-                "HistoryItem[]"
-            } else {
-                "list[HistoryItem]"
-            },
+            history_type: input.dialect.prompt_vocabulary().history_type,
             images: input.images,
             history_len,
             history_has_structure,

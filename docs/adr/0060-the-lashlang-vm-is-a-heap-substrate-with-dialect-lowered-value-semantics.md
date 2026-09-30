@@ -5,7 +5,8 @@
 Accepted.
 
 Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
-surface and makes TypeScript the sole authoring language. This ADR's separation
+surface. TypeScript is the only shipped authoring dialect today; future
+dialects target the same IR and VM with independent semantics (FIG-4276). This ADR's separation
 of machine from language stands and is what made the retirement cheap: "Lashlang"
 below names the IR and VM. What is gone is the second front end, not a second
 machine.

@@ -1,187 +1,116 @@
-# 0096: TypeScript is the sole RLM dialect; lashlang names the IR and VM
+# 0096: One IR and VM, extensible dialects, TypeScript today
 
-Status: Accepted (FIG-3016, 2026-09-13). FIG-3021's tool-prose cutover
-completed by FIG-4093 on 2026-09-29. Supersedes
-[ADR 0061](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md)
-and [ADR 0063](0063-one-rlm-turn-is-prompted-in-one-dialect.md). Amends
-[ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md),
-[ADR 0055](0055-lashlang-execution-bounds-span-durable-process-lifetimes.md),
-[ADR 0060](0060-the-lashlang-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md),
-[ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) and
-[ADR 0064](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md).
-
-Amended by FIG-3571 (arc FIG-3570): artifact identity hashes the linked IR the
-artifact carries, names included. `ModuleArtifact::ir` is that program,
-verbatim; there is no normalized or renamed copy, and `module_ref` hashes its
-binder names along with its structure and hidden process arguments. Two
-alpha-variant cells are therefore two distinct modules with two refs, each
-stored immutably (law L9); the earlier normalizer that made them share a ref is
-deleted. Each binding's visibility role is part of the identity (a front end's
-private slots never reach session globals). Number literals follow one rule in identity and storage: `0` and
-`-0` are distinct, every NaN is one, and non-finite values store losslessly.
-The measured cost on a multi-session corpus was about 1.3% more artifacts and
-stored bytes.
-
-Amended by FIG-4020 (arc FIG-3476, ruled by Sam on 2026-09-29): each dialect
-defines its own semantics and targets the IR; no dialect emulates another's.
-A module's identity is therefore its IR, not the dialect that produced it: the
-program records no front-end language, and the module ref and source identity
-write the dialect-neutral atom `lashlang-ir` where a front end's name used to
-stand, so two dialects that lower to the same program share one module ref.
-The journaled clock and random-source module every host environment registers
-is `__lashlang_runtime`, its receiver resource type `lashlang.Runtime` and its
-host operation `lashlang.runtime`, all dialect-neutral. The protocol layer
-reaches the TypeScript front end through a dialect trait rather than calling it
-directly, and neither `ExecRequest` nor the exec-code effect command carries
-a language string. All three moves happen in place under the pre-1.0 version
-freeze, with no compatibility path.
-
-## Context
-
-ADR 0061 made two dialects first-class, permanently, at full parity, and
-accepted a doubled battery as the price. The price turned out to be paid twice
-over, in a currency that ADR did not price: every ruling forks.
-
-The evidence is on the tickets of the current window. FIG-2986 rules that
-TypeScript triggers take the event as a parameter and, in the same breath, has
-to say that Lashlang keeps `trigger.event` — one ruling, two answers, because
-parity obliges a Lashlang answer to exist. FIG-2999 deletes `defineProcess`,
-`start`, `wake`, `registerTrigger` and the `signals` block, and has to delete
-them from two surfaces with two lowerings. FIG-3001 re-authors the codemode
-parity examples, the runbook and the Restate replay fixtures for both. None of
-those are dialect work; they are runtime and language-design work that a second
-surface taxes on the way through.
-
-The tax is not buying much. Since August the `lash-typescript` crate has taken
-40 commits and the lashlang surface — lexer, parser, canonical printer — has
-taken 12. The work is already in one dialect. So are the models: a model
-arrives knowing TypeScript, and ADR 0062 exists precisely because that prior is
-the strongest asset the dialect has. Nothing comparable accrues to a bespoke
-surface, and every gap ruling under ADR 0064 has to be spent teaching one.
-
-The retirement is unusually cheap on the side that would normally make it
-expensive. Artifact identity hashes the canonical IR, not canonical source. No
-process id, effect id, bytecode blob or continuation moves because the surface
-that produced it is gone. ADR 0060 already separated the machine from the
-language: the VM is a heap substrate and a dialect is a lowering into it. What
-this ADR retires is one lowering's front end, not the machine.
+Status: Accepted (FIG-3016, 2026-09-13), clarified by Sam's FIG-4276 ruling
+on 2026-09-30. Supersedes the parity and session-pinning obligations of
+ADR 0061 and ADR 0063, while retaining their multi-dialect architecture.
+Amends ADRs 0037, 0055, 0060, 0062 and 0064.
 
 ## Decision
 
-**TypeScript is the only RLM authoring language. "Lashlang" names the
-dialect-neutral IR and the VM that executes it, and nothing else.**
+Lash has one dialect-neutral IR and VM and supports many possible code-mode
+dialects. TypeScript is the only shipped dialect today. Each dialect defines
+its own semantics and targets the IR. Dialects need no parity and do not
+emulate one another.
 
-### What stays
+`lashlang` names the AST, linker, compiler, bytecode, continuations, heap and
+value model, VM, workflow graph and `lash-lashlang-runtime` engine. It has no
+authored source language. The retired Lashlang lexer, parser, canonical source
+printer and prompt contract remain deleted. A future dialect is a new
+front end for the current IR, with its own semantics and acceptance evidence.
 
-The `lashlang` crate keeps everything below the surface: the AST, the linker,
-the compiler, the bytecode format, the continuation format, the heap and value
-model, the VM, the workflow graph, and the `lash-lashlang-runtime` engine
-crate. These are the IR that TypeScript lowers into. They are not deprecated,
-not on a clock, and not renamed — the name now means the IR, and renaming the
-crate would be a cosmetic change that moves durable engine ids for nothing.
+## Dialect extension contract
 
-### What goes
+The retained `Dialect` trait in `lash-protocol-rlm/src/dialect.rs` owns:
 
-The lashlang *surface*: the lexer, the parser, the canonical printer, `.lash`
-files anywhere in the tree, and the lashlang prompt contract (its vocabulary,
-cell tag, finish form and tool call path) in `lash-protocol-rlm`.
+- A stable language id used for the source execution and its session state.
+- Source-only parsing and cell parsing against the live host environment,
+  including prior globals, expired functions and process handles.
+- Typed refusal classification, source spans and rendered diagnostics.
+- Callable host-tool signatures and call-path addressability in its syntax.
+- Prompt vocabulary and transport cell tags consumed by shared session code.
 
-`RlmDialect::Lashlang` and `CompilationDialect::Lashlang` go, **and so do the
-enums**. A two-variant enum reduced to one variant is not a simplification; it
-is a compatibility reader wearing a type's clothes, and it keeps every match
-arm, every wire field and every host selector alive to serve a choice that no
-longer exists. One language id, `typescript`, spelled out, per ADR 0061's
-naming rule, which survives its parent.
+`RlmDialectServices` carries session resources rather than source semantics:
+artifact storage, deferred tool and trigger resolvers, trace configuration,
+execution bounds, the renderer and the session's cell or native-tool channel.
+`DialectSession` runs the supplied lowering over the shared IR and VM and
+retains that dialect's language id in its execution state. Shared code must
+read language syntax through the selected dialect, rather than defaulting to
+TypeScript. The native-tool channel has no cell delimiter.
 
-### No compatibility reader
+A new production dialect also needs its own prompt and tool adapter,
+schema/type spelling, renderer where syntax matters, canonical printer if it
+participates in the workflow lens, and acceptance tests. It must be explicitly
+selected at the host's front-end/session boundary, consistently with prompt
+assembly, tool bindings and restored execution state. The current host serves
+TypeScript without a language selector or first-commit session pin.
 
-A session record or bytecode blob that pinned the retired dialect is refused
-with a typed incompatible-format error. Nothing decodes it, nothing coerces it,
-and nothing falls back. This is ADR 0061's own cutover stance — no migration
-decoders at any format boundary — applied to the ADR that stated it.
-Deployments drain or recreate parked processes across the window, as they
-already do when a durable format version moves.
+This is an extension boundary, not a claim that registration alone already
+adds a production dialect. `rlm_dialect()` currently selects TypeScript, and
+protocol factories, prompt drivers and `processes.create` still use the
+concrete `TypescriptDialect` adapter. Generalizing those adapters and defining
+the selection contract belong to the addition of a production dialect. The
+FIG-4276 report records their code references and recommendations.
 
-### Reversal stance
+## Dialect-neutral guarantees
 
-A lashlang surface is not preserved against the possibility of wanting it back.
-If one ever returns it is a **new dialect, authored against the IR of that
-day**, with its own ADR, its own lowering and its own battery — not a restore
-of deleted code against an IR that will have moved. That cost is understood and
-accepted as the price of this ruling.
+A module's identity is its linked IR, not the front end that produced it.
+`ModuleArtifact::ir` retains that program verbatim, including binder names,
+binding visibility and hidden process arguments. There is no renamed copy.
+Alpha-variant cells have distinct refs and immutable artifacts (law L9).
+`0` and `-0` are distinct, NaNs share one representation, and non-finite
+values store losslessly (FIG-3571).
 
-Ruled by Sam on 2026-09-13, following the processes-are-values design session
-([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)).
+The module ref and source identity use the atom `lashlang-ir`. Identical
+linked programs share a module ref regardless of their source dialect
+(FIG-4020). Neither `ExecRequest` nor the exec-code effect command carries a
+language string. Compiled artifacts, durable processes, stores and wire
+execution commands consume IR and shared values, not source syntax.
 
-## Consequences
+The journaled clock/random module is `__lashlang_runtime`, its receiver type
+is `lashlang.Runtime`, and its host operation is `lashlang.runtime`. Internal
+modules in the reserved `__` namespace are hidden from the model. Durable
+engine, process and effect identifiers keep their Lashlang spellings.
 
-- **ADR 0061 is superseded in full.** There is no parity obligation, no
-  doubled battery, no per-session dialect choice and no default to preserve.
-  Its naming rule (`typescript`, spelled out, everywhere) and its cutover
-  stance (no migration decoders) are carried forward by this ADR.
-- **ADR 0063's two-language rules are superseded.** The single-TypeScript
-  `DialectPromptVocabulary`, `tool_call_path`, and prompt walker with its
-  explicit substrate carve-outs remain. The walker checks that assembled
-  fragments carry no retired source-language words; it no longer enforces
-  parity between two languages.
-- **Substrate identifiers keep their spellings.** `lashlang_step`,
-  `process:lashlang:v2:…` and `lashlang:effect:…` still name the engine, which
-  is still the lashlang VM. They were carved out in ADR 0063 because renaming
-  them moves durable identity; that reason is unchanged, and this ADR renames
-  nothing. What changes is that they are no longer *foreign* words in a
-  prompt — they are the substrate's name, under the only dialect there is.
-- **The `__` namespace stays reserved.** The journaled runtime module (now
-  `__lashlang_runtime`, FIG-4020) and its siblings remain hidden from the
-  model.
-- **Tool prose may name TypeScript.** FIG-4093 removed the registration guard
-  that refused the sole dialect's name and retired the `{{…}}` prose token
-  mechanism. Tool descriptions and schema prose render verbatim.
-- **The workflow-graph lens has a TypeScript canonical printer.** The
-  former unbuilt-printer description is historical under ADR 0037's FIG-3469
-  amendment. The implemented source, graph and IR lens holds canonical
-  get-put and put-get laws, with typed refusals for IR the printer cannot
-  spell.
-- **"Lashlang" in prose means the IR and VM.** ADRs 0037, 0055, 0060, 0062 and
-  0064 carry a dated amendment to that effect; the root `CONTEXT.md` glossary
-  says it directly, and adds "TypeScript dialect" as the only RLM language.
-  The claim that isolation copies and dialect-scoped durable validation stay
-  unchanged is historical under ADR 0060's FIG-3019 amendment. The compiler
-  emits ECMA reference semantics, and durable capture preserves shared acyclic
-  identity through validated graph encoding while refusing cycles.
-- **One breaking window, already scheduled.** The dialect tag leaves the
-  session record, bytecode and wire in FIG-3019, which coordinates its format
-  bump with FIG-2996 rather than spending a second window.
+The compiler emits reference semantics. Durable capture preserves shared
+acyclic identity through validated graph encoding and refuses cycles. A new
+dialect that needs a new IR operation must justify that shared machine change
+explicitly; it does not fork a VM or add language switches to storage.
 
-## Children
+## Prompt, tools and workflow lens
 
-The arc is FIG-3015. This ADR is its first child and lands before any deletion.
+Each dialect owns its prompt syntax. Shared fragments consume its vocabulary
+and tags. Tool descriptions and schema prose render verbatim; hosts own any
+syntax-specific prose they supply. FIG-4093 removed the former tool-prose
+registration guard and `{{...}}` token mechanism.
 
-- **FIG-3019** — `RlmDialect` and `CompilationDialect` lose the variant and the
-  enums; no dialect field on sessions, bytecode or the wire.
-- **FIG-3020** — lashlang crate: lexer, parser and canonical printer deleted,
-  `.lash` gone, language tests re-authored in TypeScript.
-- **FIG-3021** — `lash-protocol-rlm`: lashlang prompt contract and dialect
-  registry deleted.
-- **FIG-3022** — hosts and examples: every `RlmDialect::Lashlang` site and
-  dialect selector removed.
-- **FIG-3023** — runbooks: the lashlang-driven judged runbooks re-authored in
-  TypeScript and re-judged.
-- **FIG-3024** — docs and READMEs: lashlang means the IR; TypeScript is the
-  authoring language everywhere.
+The TypeScript canonical workflow printer is implemented. Canonical get-put
+and put-get laws and typed refusals govern IR it can spell. The single-shipped-
+dialect prompt walker retains explicit IR/VM identifier carve-outs. These
+are implemented contracts, not pending printer or retirement work (FIG-4163).
 
-## Amendment (FIG-4125, 2026-09-29)
+The examples and judged runbooks cover the behavior they name. The
+`typescript-host-flows` cells and runbook exercise host results, aggregate
+settlement, agent loops and durable process lifecycle. Future dialects own
+coverage for their semantics rather than a paired battery.
 
-Items 4 and 24: During the version freeze, shapes change in place;
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
-1.0 cut. The FIG-3021 tool-prose cutover is complete via FIG-4093, so its former
-pending status and transitional prose are historical.
+## Superseded history
 
-## Amendment (FIG-4163, 2026-09-30)
+ADR 0061 formerly required two permanent dialects at full parity and
+first-commit session pinning. The authored Lashlang language was retired by
+FIG-3019 through FIG-3024, including its enums, registry, host selectors,
+`.lash` sources and doubled runbook/example battery. That retirement did not
+remove the architecture for future front ends over one IR and VM.
 
-The single-language prompt walker, TypeScript canonical lens and ECMA reference semantics are implemented contracts, not pending retirement or printer work.
-`no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
-[the prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs),
-`canonical_get_put_and_put_get` in [the lens tests](../../crates/lash-typescript/tests/workflow_graph.rs),
-and `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
-in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs)
-pin the retained behavior.
+The original format-bump and drain window is historical. Under the pre-1.0
+version freeze, shapes change in place with no bumps, upcasters or compatibility
+readers (FIG-3846). ADR 0115 governs the 1.0 cut (FIG-4125).
+
+## Executable evidence
+
+- `no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
+  [the prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs).
+- The extension-session vocabulary and parse-feedback tests in `dialect.rs`.
+- `canonical_get_put_and_put_get` in
+  [the lens tests](../../crates/lash-typescript/tests/workflow_graph.rs).
+- `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
+  in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs).

@@ -18,8 +18,6 @@ mod assignment_in_operand;
 mod cell_boundary_closures;
 #[path = "closed_shape_guard.rs"]
 mod closed_shape_guard;
-#[path = "codemode_parity_examples.rs"]
-mod codemode_parity_examples;
 #[path = "console_observation.rs"]
 mod console_observation;
 #[path = "constructs.rs"]
@@ -46,6 +44,8 @@ mod global_this_reads;
 mod grammar_coverage;
 #[path = "guest_coercion.rs"]
 mod guest_coercion;
+#[path = "host_flow_examples.rs"]
+mod host_flow_examples;
 #[path = "mutable_captures.rs"]
 mod mutable_captures;
 #[path = "no_abort_guarantee.rs"]

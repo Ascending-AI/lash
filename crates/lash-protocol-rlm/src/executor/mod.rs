@@ -734,7 +734,7 @@ async fn execute_code_inner(
                 .map_err(|error| {
                     (
                         error.kind,
-                        format_rlm_parse_diagnostic(error.rendered, channel),
+                        format_rlm_parse_diagnostic(error.rendered, channel, dialect.cell_tags()),
                     )
                 })
                 .and_then(|program| {
@@ -1134,21 +1134,26 @@ fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> lash_core::CellFa
 /// Render a parse failure for the model, with the cell-delimiter warning only
 /// where a cell delimiter exists.
 ///
-/// The warning explains a truncation the model cannot see: a `</typescript>`
-/// line inside a template literal closes the cell early, so the executor
+/// The warning explains a truncation the model cannot see: a closing delimiter
+/// line inside multiline source closes the cell early, so the executor
 /// receives a program that stops mid-literal. Native `execute_code` calls (ADR
 /// 0083) carry the program as a tool argument, where no delimiter can truncate
 /// anything — there the sentence names syntax the model never wrote and sends
 /// it looking for a cause that does not exist.
 ///
-/// Gated on the channel alone, not on the source containing `</typescript>`:
+/// Gated on the channel alone, not on the source containing the closing tag:
 /// by the time the executor sees the code, cell extraction has already consumed
 /// the delimiter that truncated it, so an implicated delimiter is exactly the
 /// case where the source cannot mention one.
-fn format_rlm_parse_diagnostic(diagnostic: String, channel: crate::plugin::RlmChannel) -> String {
+fn format_rlm_parse_diagnostic(
+    diagnostic: String,
+    channel: crate::plugin::RlmChannel,
+    tags: crate::dialect::CellTags,
+) -> String {
     match channel {
         crate::plugin::RlmChannel::Cell => format!(
-            "{diagnostic}\n\nA standalone `</typescript>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
+            "{diagnostic}\n\nA standalone `{}` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
+            tags.close,
         ),
         crate::plugin::RlmChannel::NativeTool => diagnostic,
     }

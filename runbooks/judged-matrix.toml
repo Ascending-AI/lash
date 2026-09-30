@@ -2,9 +2,9 @@ schema_version = 3
 judge_model_floor = "gpt-5.6-sol"
 artifact_layout = "<run-root>/<scenario>/<label>"
 
-# ADR 0096: TypeScript is the only RLM authoring language. There is one
-# language id, spelled out, and a judged RLM scenario is therefore one row, not
-# a parity pair. `language` is the id every RLM row carries; the no-RLM rows
+# ADR 0096: one IR and VM support extensible dialects. TypeScript is the
+# only shipped dialect today, so each judged RLM scenario has one row.
+# `language` names the dialect these rows exercise; the no-RLM rows
 # below carry `standard`, which is a mode rather than a language.
 language = "typescript"
 
@@ -83,14 +83,14 @@ workbench-weather = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 # listed apart from `scenarios` because the runbook keeps all three together:
 # its final phase composes them into the required durable restart turn.
 [typescript_only]
-typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
+typescript-host-flows = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
 # Scenarios that open no RLM session have no language to pin at all. They get
 # one row each, emitted with the label `standard` — the mode, not a language —
 # which is also their artifact directory. This is a behavioral predicate: a
 # standard-mode host is one example, not the definition. The distinction
-# survives the retirement of the second dialect: `typescript` on a row is a
-# claim that a session was opened and pinned, and these rows cannot make it.
+# is independent of future dialects: `typescript` on a row claims that an
+# RLM session served it, and these rows cannot make that claim.
 [no_rlm_session_only]
 workbench-valid-empty-completion = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }

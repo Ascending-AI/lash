@@ -1,13 +1,16 @@
 # Lash TypeScript dialect
 
 `lash-typescript` is the source front-end for the durable Lash heap VM, and the
-only one: TypeScript is the sole RLM authoring language, and `lashlang` names
+only shipped one today: future dialects may target the same IR and VM with
+their own semantics. `lashlang` names
 the dialect-neutral IR and VM it lowers into (ADR 0096). SWC is
 confined to `src/adapter/`; the adapter produces a Lash-owned normalized tree,
 which lowers into `lashlang::Program`. Process parameter and return annotations
 carry their durable signature; other runtime type annotations are erased.
-There is no dialect choice to make: no language selector, no session pin, and
-no second surface to be at parity with.
+The current host serves TypeScript without a language selector or session pin.
+The retained `Dialect` extension contract is documented in ADR 0096; new
+dialects need their own lowering and evidence, with no cross-language matching
+obligation.
 
 ## Dialect contract
 

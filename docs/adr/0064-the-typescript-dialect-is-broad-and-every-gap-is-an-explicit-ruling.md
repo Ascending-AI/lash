@@ -5,7 +5,7 @@
 Accepted.
 
 Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) makes this the only RLM
-dialect. A gap ruling here no longer has a second surface to be weighed against;
+dialect shipped today. A gap ruling here no longer has a second surface to be weighed against;
 it is the whole authoring contract. References to "Lashlang" name the IR and VM.
 
 Amended 2026-09-23 (FIG-3599): "every gap is an explicit ruling" now covers
@@ -106,7 +106,7 @@ slice should be, and v1 shipped deliberately narrow: no destructuring, no
 spread, no `switch`, no regex, no collections, a 64-name stdlib.
 
 Three independent evidence streams then converged on the same verdict. The
-judged dialect-parity battery showed real models hitting the rejection wall in
+judged TypeScript fluency battery showed real models hitting the rejection wall in
 first-shot code — destructuring in callback parameters, `Promise.all` over
 async arrows, `new Set(...)` dedupe, regex extraction — and burning turns on
 repairs. A read of the two peer codemode systems (ax, opencode) showed both

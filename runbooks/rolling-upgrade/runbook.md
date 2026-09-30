@@ -15,7 +15,7 @@ stop-then-start, and can be rolled back to
 the backfill and contract that finalize releases (FIG-3800 B, FIG-3817).
 
 **Execution class.** Deterministic-only. It is listed under `deterministic_only`
-in `parity-matrix.toml`. Every model reply comes from the node's scripted
+in `judged-matrix.toml`. Every model reply comes from the node's scripted
 provider, which answers `served by <build> at generation <G>`. The run makes
 no provider network call and produces no judged dialect row.
 

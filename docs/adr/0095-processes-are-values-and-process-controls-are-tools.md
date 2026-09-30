@@ -16,7 +16,8 @@ definition registry is withdrawn. *One definition reference, one codec* and
 to match.
 
 Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-made TypeScript the sole RLM dialect. The Lashlang `process (…) { }` literal
+made TypeScript the only shipped RLM dialect today. Future dialects
+may target the same IR and VM with independent semantics (FIG-4276). The Lashlang `process (…) { }` literal
 and the other "both dialects" wording below are historical; the process
 literal is the TypeScript async arrow. The process-control tools are
 `processes.create`, `get`, `start`, `await`, `emit`, `signal`, `cancel` and

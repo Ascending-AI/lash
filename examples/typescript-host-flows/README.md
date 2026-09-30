@@ -12,9 +12,9 @@ awaiting one are leaf tools the catalogue declares (ADR 0095): there is no
 `defineProcess`, no bare `start` or `wake`, and no `signals:` block — the signal
 set is inferred from the `waitSignal` calls the body reaches.
 
-TypeScript is the sole RLM language (ADR 0096), so there is no dialect to state
-at session creation and no second spelling of either flow to keep in parity.
+TypeScript is the only shipped RLM dialect today (ADR 0096). Future dialects
+may lower into the same IR and VM with their own semantics and examples.
 
 Both cells are linked against a host catalogue by
-`crates/lash-typescript/tests/codemode_parity_examples.rs`, so a retired
+`crates/lash-typescript/tests/host_flow_examples.rs`, so a retired
 spelling fails that target instead of quietly rotting here.

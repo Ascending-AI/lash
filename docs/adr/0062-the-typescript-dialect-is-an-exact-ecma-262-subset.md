@@ -16,7 +16,8 @@ cell-only `finish` are unchanged, as is the `return`/`throw`/`finally`
 contract for a process body.
 
 Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) makes this the only RLM
-dialect; there is no second surface to be at parity with. Every reference to
+dialect shipped today. The IR and VM admit future dialects with independent
+semantics and evidence (FIG-4276). Every reference to
 "Lashlang" below names the IR and VM that this dialect lowers into, never a
 second authored language.
 
@@ -138,8 +139,8 @@ The substrate is not the constraint. ADR 0060 settled that the VM is
 reference-semantic and that a dialect is a lowering, and it supplies what this
 dialect needs: heap objects with deterministic identity, stackless frames and
 closures, exceptions with a three-layer catchability taxonomy, and durable error
-origins. ADR 0061 settled that this dialect is permanent, at parity, pinned per
-session. What remains is a contract question — which slice of ECMA-262 is
+origins. ADR 0096 retains this dialect today and the extension seam for future
+dialects, each with independent semantics. What remains is a contract question — which slice of ECMA-262 is
 implemented, what happens at the edge of that slice, and what an agent writes.
 
 ## Decision

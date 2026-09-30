@@ -13,6 +13,23 @@ SPEC.loader.exec_module(MATRIX)
 
 
 class JudgedRunbookMatrixTests(unittest.TestCase):
+    def test_typescript_host_flows_keep_their_cells_and_judged_row(self) -> None:
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        emitted = [
+            row for row in MATRIX.rows(config)
+            if row["scenario"] == "typescript-host-flows"
+        ]
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(emitted[0]["label"], "typescript")
+        self.assertTrue((ROOT / emitted[0]["runbook"]).is_file())
+        for cell in ("turn.ts", "durable-process.ts"):
+            self.assertTrue((ROOT / "examples" / "typescript-host-flows" / cell).is_file())
+        tests = ROOT / "crates" / "lash-typescript" / "tests"
+        self.assertIn("mod host_flow_examples;", (tests / "main.rs").read_text())
+        self.assertIn("typescript-host-flows", (tests / "host_flow_examples.rs").read_text())
+        self.assertEqual(MATRIX.MATRIX.name, "judged-matrix.toml")
+
     def test_every_existing_runbook_has_exactly_one_typescript_row(self) -> None:
         # Discovery plus the row shape in one test: a runbook directory that
         # nobody classified is as invisible as a scenario that quietly emits a

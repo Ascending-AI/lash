@@ -959,6 +959,7 @@ pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
     let diagnostic = format_rlm_parse_diagnostic(
         "unterminated template literal".to_string(),
         crate::plugin::RlmChannel::Cell,
+        crate::dialect::rlm_dialect().cell_tags(),
     );
     assert!(diagnostic.contains("standalone `</typescript>` line"));
     assert!(diagnostic.contains("inside multiline source text"));
@@ -972,13 +973,20 @@ pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
 pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
     let positioned = "unterminated template literal".to_string();
 
-    let native =
-        format_rlm_parse_diagnostic(positioned.clone(), crate::plugin::RlmChannel::NativeTool);
+    let native = format_rlm_parse_diagnostic(
+        positioned.clone(),
+        crate::plugin::RlmChannel::NativeTool,
+        crate::dialect::rlm_dialect().cell_tags(),
+    );
     assert_eq!(native, positioned);
     assert!(!native.contains("</typescript>"), "{native}");
     assert!(!native.contains("standalone delimiter line"), "{native}");
 
-    let cell = format_rlm_parse_diagnostic(positioned.clone(), crate::plugin::RlmChannel::Cell);
+    let cell = format_rlm_parse_diagnostic(
+        positioned.clone(),
+        crate::plugin::RlmChannel::Cell,
+        crate::dialect::rlm_dialect().cell_tags(),
+    );
     assert_eq!(
         cell.strip_prefix(positioned.as_str())
             .expect("the cell diagnostic is the same diagnostic plus the hint")

@@ -12,7 +12,7 @@ kill only the dispatcher invocation ID recorded in the retired index, and prove 
 late READY/RANK registrations, and a late payload put all retain `Retired`.
 
 **Execution class.** Deterministic-only. This run opens no RLM session and makes no
-provider call. It is listed under `deterministic_only` in `parity-matrix.toml`, produces no
+provider call. It is listed under `deterministic_only` in `judged-matrix.toml`, produces no
 dialect rows, and must never be submitted to a paid judge. Agent-service requires an
 `OPENROUTER_API_KEY` at boot; use an inert value and send only the effect-group requests
 named here. Any provider request invalidates the rehearsal.

@@ -228,7 +228,7 @@ packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench"]
 kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 
-# The codemode parity module links the checked-in `examples/codemode-parity/*.ts`
+# The TypeScript host-flow module links the checked-in `examples/typescript-host-flows/*.ts`
 # cells with `include_str!`, the schema agreement test compiles the published
 # graph schema in and validates real serialized graph documents, and the
 # deviation-register census reads ADR 0062's register the same way.
@@ -237,18 +237,18 @@ packages = ["lash-internal-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
 compile_data = [
-    "//examples:codemode_parity_cells",
+    "//examples:typescript_host_flow_cells",
     "//:workflow_graph_schema",
     "//:dialect_deviation_register",
 ]
 
-# The corpus laws (FIG-3599) run over every corpus, the codemode parity cells
+# The corpus laws (FIG-3599) run over every corpus, the TypeScript host-flow cells
 # among them.
 [[rule]]
 packages = ["lash-internal-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["corpus_laws"]
-compile_data = ["//examples:codemode_parity_cells"]
+compile_data = ["//examples:typescript_host_flow_cells"]
 
 # The schema agreement tests compile the published trace record and graph
 # snapshot schemas in and validate real serialized records against them.

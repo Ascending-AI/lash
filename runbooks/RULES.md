@@ -33,22 +33,22 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 | `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs the three separately funded matrix rows `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and `rlm-smoke-config-contract-edit` against exact shell oracles after live OpenRouter turns; this one line describes the gate, the three matrix rows are the inventory. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
-## One judged row per scenario, pinned to TypeScript
+## One judged row per scenario, served in TypeScript today
 
-[ADR 0096](../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves one RLM
-authoring language. Every judged scenario **that runs an RLM session** is therefore a
-single row, pinned to the language id `typescript`, not a parity pair: there is no second
-surface to run, no twin evidence to keep apart, and no default to record. The
-machine-readable inventory is [`parity-matrix.toml`](parity-matrix.toml), whose top-level
-`language` key is that id, spelled out.
+[ADR 0096](../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) defines one IR
+and VM with extensible dialects. TypeScript is the only shipped dialect today.
+Each judged scenario **that runs an RLM session** therefore has one row served
+in `typescript`. The machine-readable inventory is
+[`judged-matrix.toml`](judged-matrix.toml), whose top-level `language` key names
+the dialect these rows exercise. Future dialects own their semantics and
+coverage; they need not duplicate another dialect's scenarios.
 
 Each row still gets a fresh session id, data directory, ports, trace offset, and artifact
-directory. Freshness was never only about telling two dialects apart: a carried-over store
-serves a previous row's processes, leases and trace offsets, which is mislabeled evidence
-whatever the row is pinned to.
+directory. A carried-over store serves a previous row's processes, leases and
+trace offsets, which is mislabeled evidence.
 
 Each emitted row carries a `label`, which is both its artifact directory and a claim its
-evidence has to support. `typescript` says the row opened an RLM session and pinned it. A
+evidence has to support. `typescript` says the row opened an RLM session served in TypeScript. A
 scenario that **opens no RLM session** can make no such claim; those sit in
 `no_rlm_session_only` and emit one row each labelled `standard` — the mode, not a
 language. A standard-mode host using `LashCore::standard_builder` is one example; the
@@ -95,7 +95,7 @@ on exactly that.
 A row's execution model is a **claim about what the row is testing**, not a uniform quality
 floor. The earlier blanket `gpt-5.6-sol` execution floor bought a frontier model for rows
 whose every gate is a row count, an id, or a byte comparison — evidence any competent driver
-produces identically. `runbooks/parity-matrix.toml` therefore carries a `tier` and the
+produces identically. `runbooks/judged-matrix.toml` therefore carries a `tier` and the
 concrete `model` slug per scenario, and the emitted shard carries both on every row.
 
 - **`deterministic`** — the row makes **no provider network call**. A scripted or in-process
@@ -117,12 +117,12 @@ Four rules keep the tiers honest:
 1. **The tier is not a licence to weaken a gate.** If a gate only passes at `frontier`, the
    row is `frontier`; do not retune the answer key downward to fit a cheaper driver.
 2. **Record the served model from the row's own evidence**, never from the environment — the
-   same rule the language pin already carries. Any substitution (a slug that is unavailable, a
+   same rule the language label already carries. Any substitution (a slug that is unavailable, a
    tier raised mid-row after a repeated model failure) is recorded on the row's scorecard with
    the reason.
 3. **A tier change is a matrix change.** Running a row at a model the matrix does not name for
    it produces mislabeled evidence in the same way a carried-over data directory does. Move
-   the scenario's tier in `parity-matrix.toml` first, in its own commit, with the reason.
+   the scenario's tier in `judged-matrix.toml` first, in its own commit, with the reason.
 4. **A row served by the dev provider is `deterministic`, or says which phases are not.** The
    model-slug check reads only the matrix, so it cannot see a row whose every phase is
    answered in-process while its tier buys a real driver: the slug is never requested, and the
@@ -132,7 +132,7 @@ Four rules keep the tiers honest:
    refuses the rest.
 
 Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
-and only the residue is funded: `parity-matrix.toml` records that split per scenario in
+and only the residue is funded: `judged-matrix.toml` records that split per scenario in
 `deterministic_phases`. A companion shared by two scenarios
 (`agent-workbench-attachment-usage-gate` serves both `workbench-attachments` and
 `workbench-usage-ledger`) is run **once per battery** and cited by both rows; re-running it

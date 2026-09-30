@@ -5,7 +5,7 @@ These three live-model scenarios belong to the scripted deterministic layer gove
 then the checked-in shell oracle alone decides pass or fail. They are not browser journeys
 and receive no agent judgement.
 
-They are three separate rows, one per scenario, and `parity-matrix.toml`'s
+They are three separate rows, one per scenario, and `judged-matrix.toml`'s
 `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and
 `rlm-smoke-config-contract-edit` are the inventory a shard counts. Read the single
 `rlm-smoke` line in `RULES.md`'s coverage matrix as a description of the gate, never as a

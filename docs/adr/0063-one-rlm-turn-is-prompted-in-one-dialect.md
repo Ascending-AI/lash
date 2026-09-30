@@ -1,172 +1,66 @@
-# One RLM turn is prompted in one dialect
+# 0063: One RLM turn is prompted in its dialect
 
 ## Status
 
-Superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-(FIG-3016, 2026-09-13). See "What 0096 kept" at the end of this ADR.
+Partially superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
+The paired-language evidence and pinning obligations are superseded. The
+multi-dialect prompt architecture remains accepted, clarified by Sam's
+FIG-4276 ruling on 2026-09-30.
 
-## Context
+## Retained prompt contract
 
-The RLM protocol grew up with exactly one execution language, so its prompt was
-written in that language's words everywhere: the cell tag, the print call, the
-finish form, the noun for a unit of code, the call path under which a tool is
-offered. Adding a second dialect made the execution section dialect-aware and
-left every fragment assembled around it — bound variables, read-only variables,
-tool documentation, budget escalation, the final-answer instruction, the
-`continue_as` doc, the truncation notices, the retry copy — speaking the first
-dialect. A TypeScript session was therefore told, in one prompt, to write
-`<typescript>` cells and that its variables were "already bound in lashlang" and
-should be read "in `<lashlang>` blocks".
+Every shared RLM prompt fragment uses the selected dialect's vocabulary.
+`DialectPromptVocabulary` supplies the language name, cell tags, cell noun,
+print call, finish forms and continue-as examples. Bound variables, read-only
+variables, retries, budget advice and finalization must describe the source
+that the model can actually write. Cell-delimiter advice is specific to the
+selected dialect and exists only on the cell channel.
 
-That is not a cosmetic defect. A model cannot follow both instructions; the
-judged battery caught one spending reasoning tokens reconciling the
-contradiction, and the failure mode in production is worse than a visible error:
-the model follows whichever half it believes, the turn succeeds, and the row's
-evidence carries a label its content disagrees with.
+TypeScript is the only shipped dialect today. The retained prompt walker
+checks its assembled fragments, including host surfaces and tool signatures,
+against the retired authored-language markers. It keeps explicit carve-outs
+for IR and VM identifiers. A new dialect supplies its own vocabulary,
+signatures, schema spelling and prompt evidence; it need not match another
+dialect's behavior. ADR 0096 records the extension contract and the current
+TypeScript-specific prompt adapters that still need generalization.
 
-The reverse direction exists too, and it is the one nobody looks for. The
-TypeScript lowerer resolves `Date.now()` and `Math.random()` through a host
-module named `__typescript_runtime`, bound by
-`lashlang_host_environment_from_tool_catalog` — which builds the host
-environment for *every* dialect, Lashlang included. The prompt's host-environment
-section advertises every typed module operation it finds, so a Lashlang reader
-was handed `await __typescript_runtime.now(any)? -> float`: an internal
-identifier, named for the other dialect, in a section that exists to tell the
-model what it may call.
+The `__` namespace is reserved for internal runtime modules. They are hidden
+from model-visible host-surface documentation. The journaled clock and random
+module is `__lashlang_runtime`, with resource type `lashlang.Runtime` and host
+operation `lashlang.runtime` (FIG-4020), regardless of source dialect.
 
-## Decision
+Tool descriptions and schema prose render verbatim (FIG-4093). A host that
+writes syntax-specific prose owns its consistency with the served dialect.
+There is no cross-language prose ban or prose-token substitution mechanism.
 
-**Every fragment of an assembled RLM prompt is written in the session's own
-dialect, in both directions, and one executable walker enforces it.**
+## Durable identifiers and traces
 
-1. The dialect trait owns the words. `DialectPromptVocabulary` carries the
-   language name, cell tag, cell noun, print call and statement, finish form and
-   continue-as forms; `tool_call_path` resolves each tool under the dialect's own
-   binding. A shared fragment reads its words from the vocabulary rather than
-   spelling one dialect's syntax inline.
-2. The walker (`dialect::prompt_walker_tests`) renders every fragment the crate
-   contributes, for both dialects, and fails on any word belonging to the other
-   one. Bound variables are rendered through the dialect's *own session*, which
-   is the path a served turn uses; rendering them through the renderer directly
-   proved only that the plumbing compiles.
-3. **Substrate identifiers are not model-visible.** An identifier the substrate
-   needs for its own lowering or durability is hidden from the prompt rather
-   than renamed, because renaming moves a durable identity. Modules under the
-   reserved `__` namespace are never advertised by the host-environment section.
-4. Where hiding is impossible because the model genuinely receives the
-   identifier in its data, the spelling is **carved out** — listed explicitly,
-   with its reason, in the walker's `SUBSTRATE_CARVE_OUTS` and here.
-5. **A cell of a registered-but-inactive dialect is recognized, never read as
-   prose.** Extraction knows every registered dialect's tags, executes only the
-   active one's, and names the mismatch on the first iteration. A scanner that
-   knows only the active tags turns a mis-dialected reply into an unbounded
-   re-prompt: the model is asked to finish, answers with the cell it was told to
-   write, and the execution fence never fires because extraction never yields a
-   cell to fence.
+`lashlang_step`, process identity families and `lashlang:effect:...` name the
+IR and VM. They retain their spellings across source dialects. IR module refs
+and source identity use the dialect-neutral atom `lashlang-ir`.
 
-6. **Model-facing tool prose is dialect-neutral, and registration enforces it.**
-   A tool's description and its JSON-Schema `description` strings are authored in
-   the crate that owns the tool — `lash-subagents`, `lash-plugin-process-controls`,
-   any host plugin — and rendered verbatim into the prompt's doc block, so no
-   vocabulary sits between the author and the model and the walker (which sweeps
-   only fragments *this crate* renders) cannot see them. Three `lashlang` strings
-   reached judged TypeScript sessions this way, through `agents.spawn` and
-   `processes.list`. The RLM catalog contribution therefore refuses to register a
-   member whose prose contains **any** registered dialect's identity — its
-   language name or id, its cell tags, its finish form. Neutrality, not
-   foreignness, is the rule: one authored string is served to sessions of every
-   dialect, so naming even the active one is wrong. Prose that genuinely needs a
-   dialect word writes a token (`dialect::TOOL_PROSE_TOKENS`, resolved against
-   the session's vocabulary by `rlm_prompt_tool_docs`), and an unrecognized token
-   is a registration error because it would otherwise reach the model raw. The
-   same measurement caught prose a *lower* crate composes: the deferred-tool
-   advertisement (`lash_lashlang_runtime::catalogue_preview`) advertised
-   `await tools.search({ query: "..." })?` to TypeScript sessions. A crate with
-   no dialect writes no code: the sentence names the argument in prose, and the
-   walker now renders that contribution as one of its fragments. A
-   nested typed shape is the case that forced this: `Type { ... }` is a Lashlang
-   surface the TypeScript lowerer cannot produce, so the clause describing it is
-   not merely foreign-sounding to a TypeScript reader, it is false — the token
-   renders it in one dialect and drops it in the other.
+Cell execution traces name the source dialect in `language`; a compiled
+process body executes IR and keeps the engine's language label. Event names,
+JSONL filenames and graph APIs that name Lashlang continue to name the shared
+machine. Hosts that assemble prompts own the same dialect consistency rule
+for their examples and tutorials.
 
-### The carve-out list
+## Superseded history
 
-| Identifier | Why it may cross dialects | Disposition |
-| --- | --- | --- |
-| `lashlang_step` | The model-visible `history` variable really does contain `kind: "lashlang_step"` in both dialects: `RlmHistoryItem` is one serialized type, and the session-graph event ids are `lashlang_step_<turn>_<iteration>` (`protocol/driver.rs`). A prompt that said `typescript_step` would disagree with the data the model receives — the exact defect class this ADR closes | Carved out. Renaming both sides is a durable payload change, tracked separately |
-| `process:lashlang:v2:blake3:…` | A durable process id, and part of journal identity. Every dialect's processes are compiled against the Lashlang VM substrate, so the substrate's name is in the id. A host can see it through its own work API | Carved out. The *label* half of the same question — what a rendered transcript calls the code — reads the session's recorded dialect instead |
-| `lashlang:effect:…` | The durable effect-id prefix, and part of journal key identity. It names the *engine*, which is the Lashlang VM under every dialect | Carved out, on the same ruling as the process id |
-| `__typescript_runtime` | The module path is embedded in every lowered TypeScript program, including the persisted bodies of durable processes that must still resolve when a worker wakes them after a restart. The host operation ids (`typescript.runtime.now`) reach the effect journal | Hidden, not carved out: nothing about it has to reach a model, so the prompt omits it and the durable identity does not move |
+The original decision coupled two installed languages, registered-but-inactive
+cell recognition, session pinning and paired prompt evidence. Those obligations
+were retired with the authored Lashlang language. The `{{...}}` tool-prose token
+mechanism and its registration guard were removed by FIG-4093. The original
+`__typescript_runtime` spelling was replaced by FIG-4020. None is a requirement
+for future dialects.
 
-## Consequences
+The FIG-2505 process-environment v4-to-v5 window is historical. Current format
+changes follow the pre-1.0 freeze and ADR 0115's 1.0 cut.
 
-- A new prompt fragment must take a vocabulary, or the walker fails the first
-  time the two dialects disagree about it. This is the intended cost.
-- The `__` namespace is reserved for substrate bindings across the lowerer and
-  the host catalog. A host module that a model is meant to call must not use it.
-- A future dialect adds one vocabulary and one marker list; nothing else in the
-  assembly changes. The tool-prose guard reads its markers off the dialect
-  itself, so registering the new dialect widens it by construction.
-- A plugin that wants to describe one dialect's syntax in a tool description
-  cannot. Either the sentence is true in every dialect, or the dialect-specific
-  half moves into the vocabulary behind a token. This is the intended cost, and
-  it is the only reason a `{{…}}` token appears in an authored schema.
-- The carve-out list is a debt register, not a permission. Each row names what
-  would have to change for the entry to disappear.
-- The **trace record's `language` field is the source's dialect**, not the
-  engine's: a TypeScript session's execution records say `typescript`. The
-  event name, the JSONL file name and the graph API keep their Lashlang names,
-  because those describe the substrate and the projection reduces every
-  dialect's events. A process body's own execution records stay `lashlang`:
-  what runs there is the lowered program, whatever the authoring dialect.
-- Hosts assemble prompt copy of their own (the Agent Workbench's tutorials, for
-  instance). This ADR binds the substrate; a host that injects code examples
-  owns the same rule for its own copy, and the reference hosts carry the
-  matching fixture.
+## Executable evidence
 
-### FIG-2505 process-environment family amendment
-
-[ADR 0084](0084-runtime-feedback-position.md) advances the process-environment
-identity family from v4 to v5 for persisted host instruction capabilities.
-This is a format cutover, not a display rename: existing environments must be
-recreated, local loading refuses old or mismatched references, and the remote
-reference decoder accepts only v5. All other journal/effect identity strings
-and this ADR's language carve-outs remain as defined above.
-
-## What 0096 kept
-
-[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
-surface, so there is no second dialect for a fragment to be written in by
-mistake. The defect this ADR closes cannot recur.
-
-**Historical two-dialect rules.** The cross-dialect assertion and the
-registered-but-inactive cell recognition rule are retired because there is
-only one language. `DialectPromptVocabulary`, `tool_call_path`, and the
-single-language prompt walker remain, as the amendment below states. The
-`{{…}}` tool-prose token mechanism, `dialect::TOOL_PROSE_TOKENS`, and the
-registration check that refused prose naming any dialect are retired. Tool
-prose may name TypeScript; FIG-4093 completed that cutover.
-
-Amended 2026-09-24: `DialectPromptVocabulary`, `tool_call_path`, and the prompt
-walker with its `SUBSTRATE_CARVE_OUTS` remain over the single TypeScript
-vocabulary. FIG-4093 completed the prose cutover: `TOOL_PROSE_TOKENS` and
-`validate_dialect_neutral_tool_prose` are gone, and tool prose may name
-TypeScript.
-
-**Alive.** Substrate identifiers are not model-visible: modules under the
-reserved `__` namespace are hidden from the host-environment section rather
-than renamed, because renaming moves durable identity. `lashlang_step`,
-`process:lashlang:v3:…` and `lashlang:effect:…` keep their spellings for the
-same reason; under 0096 they name the IR and VM, which is what they always
-described. Their treatment as cross-dialect debt is historical; the retained
-walker still lists explicit substrate carve-outs so those identities do not
-fail its retired-word check. The trace record's `language`
-field and the Lashlang-named event, JSONL file and graph API are unchanged. A
-host that assembles its own prompt copy still owns the same rule for it.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-The single-TypeScript vocabulary and walker remain; retirement applies to the two-language rules and tool-prose token machinery.
 `no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
 [the walker tests](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
-checks prompt fragments while retaining explicit substrate carve-outs.
+checks TypeScript prompt fragments with the explicit IR/VM carve-outs.
+The extension-session tests in `dialect.rs` exercise vocabulary and delimiter
+selection without changing the IR, VM or execution request.

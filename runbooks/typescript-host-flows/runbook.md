@@ -1,4 +1,4 @@
-# E2E Scenario: TypeScript codemode parity
+# E2E Scenario: TypeScript host flows
 
 > **Read [../RULES.md](../RULES.md) first.** This runbook adds the surface no
 > other row covers: the process lifecycle authored first-shot against the
@@ -12,9 +12,9 @@ Workbench worker restart.
 
 ## The contract this row judges
 
-TypeScript is the only cell language ([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)),
-so "parity" here is not a second dialect: it is parity between what the
-catalogue declares and what the model can author first-shot.
+TypeScript is the only shipped cell dialect today
+([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)).
+This row judges whether the model can author the catalogue's host flows first-shot.
 
 A process is an ordinary uncalled `async` arrow, and every control is a leaf
 tool the catalogue declares
@@ -127,7 +127,7 @@ Require, from the executed cell and the trace:
   There is no dialect or language field on the process artifact itself — the `/api/work`
   process record carries `input.kind = "lashlang"` (the engine kind) and a `process_name`
   lift hash, and no `trace.jsonl` record carries a `dialect`/`language` field — so the
-  artifact inherits the cell's language and is judged through it;
+  artifact is dialect-neutral IR, while the creating cell proves the source dialect;
 * a running handle and a visible waiting state.
 
 Any reach for `defineProcess`, a bare `start(...)`, `wake(...)` or
@@ -163,8 +163,8 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 | Shipped-host aggregate rejection is handled | | `01-promise-*` |
 | `for...of` agent loop completes in order | | `02-for-of-*` |
 | Process is a lifted arrow started through `processes.start` | | `03-suspended-*` |
-| Process artifact and suspended engine are TypeScript | | `03-suspended-*` |
-| Worker restart preserves process id and dialect | | `04-resumed-*` |
+| Creating cell and restored execution state identify TypeScript | | `03-suspended-*` |
+| Worker restart preserves process id and execution state | | `04-resumed-*` |
 | Resume is delivered through `processes.signal` on the held handle | | `04-resumed-*` |
 | Full resumed judged turn finishes correctly | | `04-resumed-judge.json` |
 | No deleted form reached for; hit list recorded | | `fluency-hits.json` |
@@ -175,6 +175,6 @@ conformance tests in `crates/lash-typescript/tests/agent_surface.rs` —
 `uncaught_throw_fails_a_durable_process` and
 `durable_process_resumes_after_shared_promise_batch` — and the worked cells this
 row's contract table quotes are linked in
-`crates/lash-typescript/tests/codemode_parity_examples.rs`, while this live row
+`crates/lash-typescript/tests/host_flow_examples.rs`, while this live row
 covers the host-level aggregate rejection semantics and the lifecycle a model
 has to author unaided.

@@ -15,6 +15,17 @@ impl Dialect for TypeScript {
         LANGUAGE_ID
     }
 
+    fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+        TYPESCRIPT_PROMPT_VOCABULARY
+    }
+
+    fn cell_tags(&self) -> CellTags {
+        CellTags {
+            open: "<typescript>",
+            close: "</typescript>",
+        }
+    }
+
     fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
         lash_typescript::parse(source).map_err(|error| diagnostic(source, error))
     }
@@ -207,6 +218,7 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
         execution_title: "TypeScript execution",
         cell_open_tag: "<typescript>",
         cell_noun: "cell",
+        history_type: "HistoryItem[]",
         print_call: "console.log",
         print_statement_prefix: "console.log(",
         print_statement_suffix: ")",
@@ -469,7 +481,7 @@ impl TypescriptDialect {
     }
 
     pub(crate) fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
-        TYPESCRIPT_PROMPT_VOCABULARY
+        self.language().prompt_vocabulary()
     }
 
     pub(crate) fn tool_call_path(
@@ -531,10 +543,7 @@ impl TypescriptDialect {
     }
 
     pub(crate) fn cell_tags(&self) -> CellTags {
-        CellTags {
-            open: "<typescript>",
-            close: "</typescript>",
-        }
+        self.language().cell_tags()
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {

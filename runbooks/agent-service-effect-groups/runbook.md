@@ -12,7 +12,7 @@ the terminal rank order remains readable through the app.
 
 **Execution class.** Deterministic-only. The path does not open an RLM session and makes no
 provider call, so dialect labels and paid model rows would describe work that never occurs.
-The inventory records this scenario under `deterministic_only`; it adds no dialect-parity
+The inventory records this scenario under `deterministic_only`; it adds no paid judged
 rows and does not change the judged-row arithmetic.
 
 ## Scenario-specific golden rules

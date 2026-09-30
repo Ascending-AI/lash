@@ -856,7 +856,7 @@ pub struct RlmCreateExtras {
 
 /// The RLM options a *single turn* may restate (FIG-1979).
 ///
-/// There is no language choice to restate: TypeScript is the sole RLM dialect
+/// There is currently no language choice to restate: TypeScript is the only shipped RLM dialect
 /// and nothing — a turn bag, a session bag, a create contract — names one.
 ///
 /// Unstated fields are omitted from the wire, not written as `null`: the

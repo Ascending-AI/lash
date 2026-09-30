@@ -1,4 +1,4 @@
-//! The `examples/codemode-parity` cells, linked against a host catalogue.
+//! The `examples/typescript-host-flows` cells, linked against a host catalogue.
 //!
 //! The cells are the public surface's worked examples, so they are the one
 //! place a retired spelling is most expensive and least visible: nothing
@@ -8,12 +8,13 @@
 
 use std::collections::BTreeSet;
 
-const TURN: &str = include_str!("../../../examples/codemode-parity/turn.ts");
-const DURABLE_PROCESS: &str = include_str!("../../../examples/codemode-parity/durable-process.ts");
+const TURN: &str = include_str!("../../../examples/typescript-host-flows/turn.ts");
+const DURABLE_PROCESS: &str =
+    include_str!("../../../examples/typescript-host-flows/durable-process.ts");
 
-/// The catalogue the parity cells are written against: the shipped process
+/// The catalogue the host-flow cells are written against: the shipped process
 /// controls the cells call, plus the one web authority `turn.ts` fetches with.
-fn parity_environment() -> lashlang::LashlangHostEnvironment {
+fn host_environment() -> lashlang::LashlangHostEnvironment {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
         .add_module_operation_contract(
@@ -104,12 +105,12 @@ fn assert_names_no_retired_form(label: &str, source: &str) {
 
 #[test]
 fn the_turn_example_links_against_its_host_catalogue() {
-    lash_typescript::link(TURN, &parity_environment()).expect("turn.ts should link");
+    lash_typescript::link(TURN, &host_environment()).expect("turn.ts should link");
 }
 
 #[test]
 fn the_durable_process_example_links_and_lifts_one_process() {
-    let linked = lash_typescript::link(DURABLE_PROCESS, &parity_environment())
+    let linked = lash_typescript::link(DURABLE_PROCESS, &host_environment())
         .expect("durable-process.ts should link");
     let processes = linked
         .artifact
@@ -148,7 +149,7 @@ fn the_durable_process_example_links_and_lifts_one_process() {
 }
 
 #[test]
-fn neither_parity_example_names_a_retired_form() {
+fn neither_host_flow_example_names_a_retired_form() {
     assert_names_no_retired_form("turn.ts", TURN);
     assert_names_no_retired_form("durable-process.ts", DURABLE_PROCESS);
 }

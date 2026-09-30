@@ -11,7 +11,7 @@ import tomllib
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MATRIX = ROOT / "runbooks" / "parity-matrix.toml"
+MATRIX = ROOT / "runbooks" / "judged-matrix.toml"
 
 
 def parse_shard(value: str) -> tuple[int, int]:
@@ -29,9 +29,10 @@ def row(config: dict[str, object], group: str, scenario: str, label: str) -> dic
     """One judged row, carrying its artifact label and the tier it is funded at.
 
     `label` is the row's artifact directory and the claim its evidence has to
-    support: `typescript` says a pinned RLM session produced it, `standard`
-    says the scenario opened none. It is not a choice — ADR 0096 left one
-    language — which is why it is read off `language` rather than iterated.
+    support: `typescript` says an RLM session served in TypeScript produced it, `standard`
+    says the scenario opened none. TypeScript is the only shipped dialect today
+    (ADR 0096), so the current inventory reads one `language` rather than
+    iterating a paired-language battery.
 
     The tier and model travel *on the row* rather than being looked up by the
     runner, because a row's evidence bundle has to record which model produced

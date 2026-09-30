@@ -36,9 +36,16 @@ pub(crate) struct DialectDiagnostic {
 /// source to a Lashlang [`lashlang::Program`], explains its own refusals, and
 /// spells the host's schemas in its own syntax. No module in this crate calls a
 /// dialect's front end except that dialect's own implementation of this trait.
+/// Shared session code also takes its prompt vocabulary and cell tags here.
+/// Dialects target one IR and VM with independent semantics and evidence;
+/// ADR 0096 records the prompt-adapter and registration work a new one needs.
 pub(crate) trait Dialect: Send + Sync {
     /// The id the dialect names itself by.
     fn language_id(&self) -> &'static str;
+
+    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
+
+    fn cell_tags(&self) -> CellTags;
 
     /// Lowers `source` with no host: enough to read what a cell references
     /// before the host it links against is assembled.
@@ -65,18 +72,18 @@ pub(crate) trait Dialect: Send + Sync {
     fn ensure_tool_call_path_addressable(&self, call_path: &str) -> Result<(), String>;
 }
 
-/// The dialect every RLM session is served in. TypeScript is the only one
-/// (ADR 0096).
+/// The current host's dialect. TypeScript is the only shipped one today;
+/// future registration must select the front end consistently with its prompt
+/// adapter and restored session state (ADR 0096).
 pub(crate) fn rlm_dialect() -> &'static dyn Dialect {
     &TypeScript
 }
 
 /// Everything one execution session needs from the host that opened it.
 ///
-/// The RLM protocol serves one language (ADR 0096), so these are the session's
-/// services rather than a dialect's: what varies between two sessions is the
-/// artifact store, the resolvers, the trace configuration and the transport,
-/// never the language.
+/// These resources are shared by dialects targeting the IR and VM (ADR 0096).
+/// Source semantics belong to `Dialect`; artifact storage, resolvers, trace
+/// configuration, bounds and transport belong to the execution session.
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
@@ -277,6 +284,7 @@ impl DialectSession {
         let opaque = self.state.opaque_bound_variables(exclude);
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();
+        let vocabulary = self.dialect.prompt_vocabulary();
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
@@ -285,7 +293,7 @@ impl DialectSession {
                 &mut cache,
                 &globals,
                 &opaque,
-                DialectPromptVocabulary::default(),
+                vocabulary,
                 renderer.0.as_ref(),
                 &params,
             )
@@ -293,21 +301,9 @@ impl DialectSession {
     }
 }
 
-/// The words and call forms every shared prompt fragment needs.
-///
-/// Prompt copy used to be language-aware only where it was obviously a *cell* —
-/// the execution section, the retry copy, the finalization copy. Everything
-/// else assembled around those (bound variables, read-only variables, tool
-/// docs, budget escalation, the final-answer instruction) hardcoded the retired
-/// surface's syntax, so a TypeScript session was told, in the same prompt, to
-/// write `<typescript>` cells and that its variables were "bound in lashlang".
-/// A model cannot follow both; the judged battery caught one spending reasoning
-/// tokens reconciling the contradiction.
-///
-/// One struct rather than a dozen scattered literals, so a new fragment has an
-/// obvious place to read its words from and
-/// `no_cross_dialect_text_in_the_assembled_prompt` has one source of truth to
-/// check against.
+/// The words and call forms shared prompt fragments take from their dialect.
+/// Session code passes the selected vocabulary explicitly. The prompt walker
+/// and extension-session tests check that syntax matches the served front end.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DialectPromptVocabulary {
     /// How the prompt names the language in prose.
@@ -318,6 +314,8 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) cell_open_tag: &'static str,
     /// What the prompt calls one unit of code.
     pub(crate) cell_noun: &'static str,
+    /// The history collection's type, as the dialect spells it in prompts.
+    pub(crate) history_type: &'static str,
     /// The call that prints a value for inspection.
     pub(crate) print_call: &'static str,
     /// `console.log(x)`, ready to take a value expression.
@@ -334,8 +332,8 @@ pub(crate) struct DialectPromptVocabulary {
 }
 
 impl Default for DialectPromptVocabulary {
-    /// TypeScript's words, because they are the only ones a session can be
-    /// served (ADR 0096).
+    /// The current host's default. Shared session code reads its selected
+    /// dialect's vocabulary explicitly.
     fn default() -> Self {
         crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY
     }
@@ -356,6 +354,141 @@ mod tests {
     use super::*;
 
     const SEED: u64 = 0x5_2c03;
+
+    struct ExtensionFixture;
+
+    impl Dialect for ExtensionFixture {
+        fn language_id(&self) -> &'static str {
+            "extension-fixture"
+        }
+
+        fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
+            DialectPromptVocabulary {
+                language_name: "Extension fixture",
+                cell_open_tag: "<fixture>",
+                history_type: "FixtureHistory",
+                ..typescript::TYPESCRIPT_PROMPT_VOCABULARY
+            }
+        }
+
+        fn cell_tags(&self) -> CellTags {
+            CellTags {
+                open: "<fixture>",
+                close: "</fixture>",
+            }
+        }
+
+        fn parse(&self, _source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
+            Err(DialectDiagnostic {
+                kind: lash_core::CellFailureKind::Program,
+                message: "fixture syntax error".to_string(),
+                span: None,
+                rendered: "fixture syntax error".to_string(),
+            })
+        }
+
+        fn parse_cell(
+            &self,
+            source: &str,
+            _host: &lashlang::LashlangHostEnvironment,
+        ) -> Result<lashlang::Program, DialectDiagnostic> {
+            self.parse(source)
+        }
+
+        fn tool_signature(
+            &self,
+            call_path: &str,
+            _input_schema: &serde_json::Value,
+            _output_schema: &serde_json::Value,
+        ) -> String {
+            call_path.to_string()
+        }
+
+        fn ensure_tool_call_path_addressable(&self, _call_path: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn extension_session_bound_variables_use_its_vocabulary() {
+        let mut session = DialectSession::new(
+            &ExtensionFixture,
+            lash_lashlang_runtime::LashlangSurface::default(),
+            test_dialect_services(),
+        );
+        session
+            .patch_globals(
+                &RlmGlobalsPatchPluginBody {
+                    set_default: [("answer".to_string(), serde_json::json!(42))]
+                        .into_iter()
+                        .collect(),
+                },
+                &BTreeSet::new(),
+            )
+            .expect("bind a value to render through the session");
+        let prompt = session
+            .prepare_bound_variables_prompt(&BTreeSet::new(), lash_render::RenderParams::default())
+            .expect("render the extension session's bindings")
+            .render();
+        assert!(prompt.contains("bound in Extension fixture"), "{prompt}");
+        assert!(prompt.contains("`<fixture>`"), "{prompt}");
+        assert!(!prompt.contains("TypeScript"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn extension_session_parse_feedback_uses_its_cell_delimiter() {
+        for channel in [
+            crate::plugin::RlmChannel::Cell,
+            crate::plugin::RlmChannel::NativeTool,
+        ] {
+            let mut services = test_dialect_services();
+            services.channel = channel;
+            let mut session = DialectSession::new(
+                &ExtensionFixture,
+                lash_lashlang_runtime::LashlangSurface::default(),
+                services,
+            );
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the extension cell's handler");
+            let response = session
+                .execute(
+                    lash_core::testing::code_execution_context(crate::testing::double_ports(
+                        &double, &handler,
+                    )),
+                    ExecRequest {
+                        code: "invalid fixture source".to_string(),
+                    },
+                    crate::projection::RlmProjectedBindings::default(),
+                )
+                .await
+                .expect("report the extension's parse failure");
+            handler
+                .close()
+                .await
+                .expect("close the extension cell's handler");
+            let feedback = response
+                .error
+                .expect("the fixture refuses the source")
+                .message;
+            assert!(feedback.contains("fixture syntax error"), "{feedback}");
+            assert!(!feedback.contains("</typescript>"), "{feedback}");
+            match channel {
+                crate::plugin::RlmChannel::Cell => assert!(
+                    feedback.contains("standalone `</fixture>` line"),
+                    "{feedback}"
+                ),
+                crate::plugin::RlmChannel::NativeTool => assert!(
+                    !feedback.contains("standalone delimiter line"),
+                    "{feedback}"
+                ),
+            }
+        }
+    }
 
     /// The channel reaches the parse diagnostic through the production session
     /// seam, not just through the formatter's own argument: the session reads

@@ -3,7 +3,7 @@
 //! The corpus laws run over all of them (FIG-3599): the Node differential
 //! table, the Test262 slice, the Node session corpus (each cell, linked
 //! against the globals its earlier cells bound), the workflow-graph goldens
-//! and the codemode-parity cells. A new corpus joins here, or the laws do not
+//! and the typescript-host-flows cells. A new corpus joins here, or the laws do not
 //! see it.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
@@ -40,7 +40,7 @@ impl CorpusProgram {
     }
 
     /// The host every corpus links against: the harness's catalogue, the
-    /// operations the goldens and the parity cells call, and the program's
+    /// operations the goldens and the host-flow cells call, and the program's
     /// session globals.
     pub(crate) fn environment(&self) -> LashlangHostEnvironment {
         let mut environment = lashlang::testing::harness::test_environment();
@@ -93,7 +93,7 @@ pub(crate) fn all() -> Vec<CorpusProgram> {
     programs.extend(test262());
     programs.extend(sessions());
     programs.extend(goldens());
-    programs.extend(codemode_parity());
+    programs.extend(host_flows());
     programs.extend(teaching());
     let ids = programs
         .iter()
@@ -268,19 +268,21 @@ fn goldens() -> Vec<CorpusProgram> {
     programs
 }
 
-fn codemode_parity() -> Vec<CorpusProgram> {
+fn host_flows() -> Vec<CorpusProgram> {
     [
         (
             "turn",
-            include_str!("../../../../examples/codemode-parity/turn.ts"),
+            include_str!("../../../../examples/typescript-host-flows/turn.ts"),
         ),
         (
             "durable-process",
-            include_str!("../../../../examples/codemode-parity/durable-process.ts"),
+            include_str!("../../../../examples/typescript-host-flows/durable-process.ts"),
         ),
     ]
     .into_iter()
-    .map(|(name, source)| CorpusProgram::new(format!("codemode-parity:{name}"), source.to_string()))
+    .map(|(name, source)| {
+        CorpusProgram::new(format!("typescript-host-flows:{name}"), source.to_string())
+    })
     .collect()
 }
 

@@ -10,11 +10,10 @@ whether the agent can turn live web results into a finished, source-backed answe
 entering a repeated execution-error loop. The judged subject is web grounding: whether
 search output becomes parsed values a user can trust, not whether a language works.
 
-**History.** This scenario was authored as a two-dialect comparison and lived at
-`runbooks/workbench-weather-dialects`. [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
-retired the second dialect, so it is now one TypeScript row and the directory is
-`runbooks/workbench-weather`. Every grounding, value, conversion and error-loop gate below
-is unchanged; only the comparison framing is gone.
+This scenario exercises TypeScript today, over the shared IR and VM
+([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)).
+Its grounding, value, conversion and error-loop gates concern this host flow;
+future dialects own their semantics and evidence.
 
 **Real tokens.** The row uses OpenRouter and the keyless Parallel Search MCP web tools. Current
 conditions and exact prose vary. Gate the turn on its terminal outcome, successful tool

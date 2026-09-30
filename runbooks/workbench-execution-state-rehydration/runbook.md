@@ -250,7 +250,7 @@ Save the execution trace as `04-recall-exec.json`, save `/api/state` as
 ## Phase 5 — Repeat the whole scenario on PostgreSQL
 
 Tear the SQLite stack down, then run Phases 0–4 again on the PostgreSQL stack with a fresh
-data directory, a **second port taken from this row's own allocation in the parity matrix and
+data directory, a **second port taken from this row's own allocation in the judged matrix and
 the RULES.md port budget** (never a port another row may hold — two concurrent rows that both
 "pick a fresh port" can collide), and a new run id. Save the second pass's artifacts under a
 `postgres/` prefix. Require both passes to reach the same verdict on every gate; record

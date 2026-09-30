@@ -4,11 +4,11 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# The codemode parity cells are linked by
-# `crates/lash-typescript/tests/codemode_parity_examples.rs` with `include_str!`,
+# The TypeScript host-flow cells are linked by
+# `crates/lash-typescript/tests/host_flow_examples.rs` with `include_str!`,
 # so they are compile inputs of that test target.
 filegroup(
-    name = "codemode_parity_cells",
-    srcs = glob(["codemode-parity/*.ts"]),
+    name = "typescript_host_flow_cells",
+    srcs = glob(["typescript-host-flows/*.ts"]),
     visibility = ["//visibility:public"],
 )

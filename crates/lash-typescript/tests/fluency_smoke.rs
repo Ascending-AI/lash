@@ -263,7 +263,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         finish(await running);
         "#,
         // `for...of` over data a tool returned: the dialect's flagship v1 guard,
-        // and the shape Phase 2 of the parity runbook asks a model to write.
+        // and the shape Phase 2 of the host-flow runbook asks a model to write.
         // The body calls a helper, which the guard permits — only mutating,
         // aliasing or passing the iterable is refused.
         r#"
