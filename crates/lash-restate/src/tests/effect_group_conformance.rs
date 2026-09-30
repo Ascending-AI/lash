@@ -305,6 +305,7 @@ struct WitnessExecutors {
 struct WitnessRoute {
     executions: Arc<AtomicUsize>,
     label: &'static str,
+    release: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl WitnessExecutors {
@@ -319,8 +320,23 @@ impl WitnessExecutors {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
                 child.invocation.effect_replay_key().to_owned(),
-                WitnessRoute { executions, label },
+                WitnessRoute {
+                    executions,
+                    label,
+                    release: None,
+                },
             );
+    }
+
+    fn hold(&self, child: &RuntimeEffectEnvelope) -> Arc<tokio::sync::Notify> {
+        let release = Arc::new(tokio::sync::Notify::new());
+        self.staged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(child.invocation.effect_replay_key())
+            .expect("the held witness child was staged")
+            .release = Some(Arc::clone(&release));
+        release
     }
 }
 
@@ -340,6 +356,9 @@ impl GroupExecutors for WitnessExecutors {
             .get(envelope.invocation.effect_replay_key())
             .cloned()?;
         Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
+            if let Some(release) = &route.release {
+                release.notified().await;
+            }
             route.executions.fetch_add(1, Ordering::SeqCst);
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
                 value: serde_json::json!({ "witness": route.label }),
@@ -1433,10 +1452,10 @@ impl LiveConformanceHarness {
         assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
     }
 
-    /// FIG-3709: a settled child leaves nothing open on the deployment. Each
+    /// FIG-3709: a settled child leaves nothing open for its group. Each
     /// dispatched child watches its cancel wait through an ingress call of
     /// its own; the index ends that wait as `Settled` when it seats the
-    /// child's settlement, so once every child settled the deployment drains
+    /// child's settlement, so once every child settled the group's invocations drain
     /// without the group closing or retiring.
     pub(super) async fn run_settled_children_release_their_cancel_watches_witness(&self) {
         let ingress = RestateIngressClient::new(self.connection.clone());
@@ -1447,10 +1466,39 @@ impl LiveConformanceHarness {
         let children = [witness_child(&group_key, 0), witness_child(&group_key, 1)];
         let shape = witness_shape(&group_key, &children);
         let executions = Arc::new(AtomicUsize::new(0));
-        for child in &children {
+        let mut releases = Vec::new();
+        let mut registrations = Vec::new();
+        let mut targets = vec![
+            format!("EffectGroupIndex/{group_key}/"),
+            format!("EffectGroupDispatch/{group_key}/"),
+            format!(
+                "LashDurableWaitIndex/{}/",
+                crate::durable_wait::durable_wait_index_key_for_scope(&shape.wait_scope)
+            ),
+        ];
+        let mut waits = vec![ready_wait_request(&shape.wait_scope, &group_key).unwrap()];
+        for (position, child) in children.iter().enumerate() {
             witness_executors.stage(child, Arc::clone(&executions), "settled-cancel-watch");
+            releases.push(witness_executors.hold(child));
+            let cancel = cancel_wait_request(
+                &shape.wait_scope,
+                &group_key,
+                child.invocation.effect_replay_key(),
+            )
+            .unwrap();
+            registrations.push(arm_wait_registration_witness(&cancel.key));
+            waits.push(cancel);
+            waits.push(admit_wait_request(&shape.wait_scope, &group_key, position).unwrap());
+            waits.push(
+                rank_wait_request(&shape.wait_scope, &group_key, position as u64 + 1).unwrap(),
+            );
         }
-        let before = open_invocations(&self.admin).await;
+        for wait in &waits {
+            targets.push(format!(
+                "LashDurableWaitWorkflow/{}/",
+                RestateDurableWaitAddress::for_key(&wait.key).workflow_key
+            ));
+        }
 
         let opened: EffectGroupOpenResponse = ingress
             .call_lash_object(
@@ -1483,6 +1531,18 @@ impl LiveConformanceHarness {
             )
             .await
             .expect("the dispatcher submission is accepted");
+        for registration in registrations {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(30), registration)
+                    .await
+                    .expect("the child's cancel watch registers before its body finishes")
+                    .expect("the registration witness remains live"),
+                RestateDurableWaitRegistration::Registered,
+            );
+        }
+        for release in releases {
+            release.notify_one();
+        }
         for rank in 1..=2 {
             assert_eq!(
                 await_group_wait(
@@ -1495,19 +1555,50 @@ impl LiveConformanceHarness {
         }
         assert_eq!(executions.load(Ordering::SeqCst), 2, "each child runs once");
 
+        // Other laws share this server. Hold an unrelated wait that registered
+        // after the group's children settled, as a prior deployment's retry can.
+        let foreign_key = crate::durable_wait::restate_await_event_key(
+            &ExecutionScope::runtime_operation(witness_key("foreign-cancel-watch")),
+            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                "unrelated-wait",
+            )),
+        )
+        .expect("the unrelated wait key derives");
+        let foreign_address = RestateDurableWaitAddress::for_key(&foreign_key);
+        let foreign_registered = arm_wait_registration_witness(&foreign_key);
+        ingress
+            .send_lash_workflow(
+                "LashDurableWaitWorkflow",
+                &foreign_address.workflow_key,
+                "await_resolution",
+                &RestateDurableWaitAwaitRequest {
+                    key: foreign_key.clone(),
+                    deadline: None,
+                },
+            )
+            .await
+            .expect("the unrelated wait submission is accepted");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(30), foreign_registered)
+                .await
+                .expect("the unrelated wait registers")
+                .expect("the registration witness remains live"),
+            RestateDurableWaitRegistration::Registered,
+        );
+
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             let still_open = open_invocations(&self.admin)
                 .await
                 .into_iter()
-                .filter(|(id, _)| !before.contains_key(id))
+                .filter(|(_, target)| targets.iter().any(|prefix| target.starts_with(prefix)))
                 .collect::<Vec<_>>();
             if still_open.is_empty() {
                 break;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "the deployment did not drain after every child settled; still open: {still_open:?}"
+                "the group did not drain after every child settled; still open: {still_open:?}"
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -1524,6 +1615,45 @@ impl LiveConformanceHarness {
                 "a settled child's cancel wait ends as settled, not cancelled"
             );
         }
+
+        let foreign_target = format!(
+            "LashDurableWaitWorkflow/{}/await_resolution",
+            foreign_address.workflow_key
+        );
+        assert!(
+            open_invocations(&self.admin)
+                .await
+                .values()
+                .any(|target| target == &foreign_target),
+            "the unrelated wait remains open while the settled group drains"
+        );
+        ingress
+            .call_lash_workflow::<_, lash_core::ResolveOutcome>(
+                "LashDurableWaitWorkflow",
+                &foreign_address.workflow_key,
+                "resolve",
+                &crate::durable_wait::RestateDurableWaitResolveRequest {
+                    key: foreign_key.clone(),
+                    resolution: Resolution::Cancelled,
+                },
+            )
+            .await
+            .expect("the unrelated wait is released after the drain proof");
+        assert_eq!(
+            ingress
+                .call_lash_workflow::<_, Resolution>(
+                    "LashDurableWaitWorkflow",
+                    &foreign_address.workflow_key,
+                    "await_resolution",
+                    &RestateDurableWaitAwaitRequest {
+                        key: foreign_key,
+                        deadline: None
+                    },
+                )
+                .await
+                .expect("the released unrelated wait finishes"),
+            Resolution::Cancelled,
+        );
 
         ingress
             .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
