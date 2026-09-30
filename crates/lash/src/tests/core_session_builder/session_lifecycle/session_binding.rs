@@ -150,7 +150,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         .request_cancel(crate::TurnCancelRequest::new(
             crate::TurnAddress::new(
                 "owner-preserved",
-                lash_core::drive::physical_turn_of(&turn_id, 0),
+                lash_core::store::PhysicalTurn::derive_turn_id(&turn_id, 0),
             ),
             "resume-owner-probe",
             Some("test".to_string()),

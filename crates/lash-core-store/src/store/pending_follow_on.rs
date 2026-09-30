@@ -57,22 +57,23 @@ pub struct PendingFollowOn {
 }
 
 impl PendingFollowOn {
-    /// The follow-on of the physical turn `current_turn_id` switching to
+    /// The follow-on of physical turn `physical_ordinal` of `root` switching to
     /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
     /// is the shape the logical run's root resolved under, recorded so a
     /// recovered follow-on inherits it (FIG-3877).
     pub fn after_switch(
-        current_turn_id: &TurnId,
+        root: &TurnId,
+        physical_ordinal: u64,
         frame_id: FrameNodeId,
         task: impl Into<String>,
         options: Option<crate::ProtocolTurnOptions>,
         chain_depth: u32,
         resolved: Option<crate::run_spec::ResolvedRun>,
     ) -> Result<Self, StoreError> {
-        let (root, index) = PhysicalTurn::split_turn_id(current_turn_id);
-        let next = StoreError::checked_monotonic_increment("follow_on_physical_index", index)?;
+        let next =
+            StoreError::checked_monotonic_increment("follow_on_physical_index", physical_ordinal)?;
         Ok(Self {
-            follow_on_turn_id: PhysicalTurn::derive_turn_id(&root, next),
+            follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
             frame_id,
             task: task.into(),
             options: options.map(Box::new),
@@ -350,6 +351,7 @@ mod tests {
     fn follow_on_ids_count_physical_turns_from_the_root() {
         let first = PendingFollowOn::after_switch(
             &TurnId::from("root"),
+            0,
             FrameNodeId::new("f").expect("frame"),
             "t",
             None,
@@ -359,7 +361,8 @@ mod tests {
         .expect("first");
         assert_eq!(first.follow_on_turn_id, TurnId::from("root:agent-frame:1"));
         let second = PendingFollowOn::after_switch(
-            &first.follow_on_turn_id,
+            &TurnId::from("root"),
+            1,
             FrameNodeId::new("g").expect("frame"),
             "t",
             None,
@@ -370,6 +373,34 @@ mod tests {
         assert_eq!(second.follow_on_turn_id, TurnId::from("root:agent-frame:2"));
         assert_eq!(second.root_turn_id(), TurnId::from("root"));
         assert_eq!(second.physical_index(), 2);
+    }
+
+    #[test]
+    fn suffix_shaped_host_roots_keep_their_follow_on_identity() {
+        for host in [
+            "job",
+            "job:agent-frame:1",
+            "job:agent-frame:01",
+            "job:agent-frame:+1",
+        ] {
+            let root = TurnId::from(host);
+            let first = PendingFollowOn::after_switch(
+                &root,
+                0,
+                FrameNodeId::new("f").expect("frame"),
+                "t",
+                None,
+                1,
+                None,
+            )
+            .expect("switch");
+            assert_eq!(
+                first.follow_on_turn_id,
+                PhysicalTurn::derive_turn_id(&root, 1),
+                "{host}"
+            );
+            assert_eq!(first.root_turn_id(), root);
+        }
     }
 
     #[test]

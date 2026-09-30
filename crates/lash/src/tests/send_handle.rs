@@ -1427,6 +1427,239 @@ async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Resu
     Ok(())
 }
 
+async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session = fixture
+        .core
+        .session("exact-host-settlement")
+        .created()
+        .await
+        .open()
+        .await?;
+    let input = TurnInput::text("only once");
+    let first = session.send(input.clone()).id(host_id).await?;
+    let input_id = first.input_id().clone();
+    assert_eq!(first.outcome().await?.root, Some(host_id.into()));
+    let durable = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        session.root(host_id).outcome(),
+    )
+    .await
+    .expect("the exact host root settles")?;
+    assert_eq!(durable.root, Some(host_id.into()));
+    assert_eq!(durable.status, crate::TurnStatus::Answered);
+    let retry = session.send(input).id(host_id).await?;
+    assert_eq!(retry.input_id(), &input_id);
+    let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
+        .await
+        .expect("the settled host id answers its retry")?;
+    assert_eq!(retried.root, Some(host_id.into()));
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+    assert!(
+        matches!(session.attach_id(host_id).cancel().await?, crate::CancelReceipt::AlreadySettled { root } if root.as_str() == host_id)
+    );
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(Notify::new());
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
+        .provider({
+            let calls = Arc::clone(&calls);
+            let release = Arc::clone(&release);
+            crate::testing::TestProvider::builder()
+                .kind("exact-host-frame-switch")
+                .complete(move |_| {
+                    let call = calls.fetch_add(1, Ordering::SeqCst);
+                    let release = Arc::clone(&release);
+                    async move {
+                        if call == 0 {
+                            return Ok(text_response(&typescript_block(
+                                r#"await control.continue_as({ task: "follow on" });"#,
+                            )));
+                        }
+                        release.notified().await;
+                        Ok(text_response(&typescript_block(
+                            r#"finish("finished follow on");"#,
+                        )))
+                    }
+                })
+                .build()
+                .into_handle()
+        })
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("exact-host-switch")
+        .created()
+        .await
+        .open()
+        .await?;
+    let root_handle = session.root(host_id);
+    let handle = session
+        .send(TurnInput::text("switch frames"))
+        .id(host_id)
+        .await?;
+    let input_id = handle.input_id().clone();
+    reaches(&calls, 2, "the root runs its second physical turn").await;
+    let root = lash_core::TurnId::from(host_id);
+    let follow_on = lash_core::store::PhysicalTurn::derive_turn_id(&root, 1);
+    assert_eq!(
+        session
+            .durable()
+            .send_parts()
+            .await?
+            .store
+            .root_of_input(&input_id)
+            .await?,
+        Some(root.clone())
+    );
+
+    // Publish distinguishable activity on both of this root's turns and on
+    // spellings that a suffix parser could confuse with them.
+    let markers = [
+        root.clone(),
+        follow_on.clone(),
+        "unrelated".into(),
+        if host_id == "job" {
+            "job-other:agent-frame:2".into()
+        } else {
+            "job:agent-frame:2".into()
+        },
+        format!("{host_id}:agent-frame:01").into(),
+        format!("{host_id}:agent-frame:+1").into(),
+    ];
+    let activities: Vec<_> = markers
+        .iter()
+        .map(|turn| {
+            lash_core::TurnActivity::independent(lash_core::TurnEvent::TurnStarted {
+                turn_id: turn.clone(),
+            })
+        })
+        .collect();
+    let prepared = core
+        .live_replay_store
+        .prepare_publication(
+            &session.session_id(),
+            lash_core::SessionRevision::new(0),
+            markers
+                .iter()
+                .zip(&activities)
+                .map(|(turn, activity)| {
+                    lash_core::LiveReplayEventDraft::new(
+                        Some(turn.to_string()),
+                        lash_core::SessionObservationEventPayload::TurnActivity(activity.clone()),
+                    )
+                })
+                .collect(),
+        )
+        .expect("prepare root membership markers");
+    core.live_replay_store
+        .publish_prepared(prepared)
+        .expect("publish root membership markers");
+
+    let mut input_events = handle.events();
+    let mut root_events = root_handle.events();
+    let input_stream = tokio::spawn(async move {
+        let mut events = Vec::new();
+        while let Some(event) = input_events.next().await {
+            events.push(event.expect("input activity"));
+        }
+        events
+    });
+    let root_stream = tokio::spawn(async move {
+        let mut events = Vec::new();
+        while let Some(event) = root_events.next().await {
+            events.push(event.expect("root activity"));
+        }
+        events
+    });
+    let expected_status = if cancel {
+        let receipt = handle.cancel().origin("exact-host-root-law").await?;
+        assert!(
+            matches!(&receipt, crate::CancelReceipt::Requested { root: requested, .. } if requested == root),
+            "{receipt:?}"
+        );
+        crate::TurnStatus::Cancelled
+    } else {
+        release.notify_one();
+        crate::TurnStatus::Answered
+    };
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), handle.outcome())
+        .await
+        .expect("the exact root answers across the frame switch")?;
+    assert_eq!(outcome.root, Some(root.clone()));
+    assert_eq!(outcome.status, expected_status);
+    for stream in [input_stream, root_stream] {
+        let events = tokio::time::timeout(std::time::Duration::from_secs(3), stream)
+            .await
+            .expect("the root's activity stream finishes")
+            .expect("stream task");
+        for (index, activity) in activities.iter().enumerate() {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.id == activity.id)
+                    .count(),
+                usize::from(index < 2),
+                "only the exact root's physical turns contribute activity: {host_id}, {}",
+                markers[index]
+            );
+        }
+        let started: Vec<_> = events
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash_core::TurnEvent::TurnStarted { turn_id } => Some(turn_id),
+                _ => None,
+            })
+            .collect();
+        assert!(started.contains(&&root));
+        assert!(started.contains(&&follow_on));
+    }
+    let durable = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        session.root(root.clone()).outcome(),
+    )
+    .await
+    .expect("durable resolution follows the exact root's follow-on")?;
+    assert_eq!(durable.root, Some(root));
+    assert_eq!(durable.status, expected_status);
+    Ok(())
+}
+
+macro_rules! exact_host_root_laws {
+    ($name:ident, $host:literal) => {
+        mod $name {
+            use super::*;
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn settlement() -> Result<()> {
+                exact_host_root_settlement($host).await
+            }
+            #[cfg(feature = "rlm")]
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn frame_switch() -> Result<()> {
+                exact_host_root_frame_switch($host, false).await
+            }
+            #[cfg(feature = "rlm")]
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn cancellation() -> Result<()> {
+                exact_host_root_frame_switch($host, true).await
+            }
+        }
+    };
+}
+
+mod exact_host_roots {
+    use super::*;
+    exact_host_root_laws!(plain, "job");
+    exact_host_root_laws!(canonical_suffix, "job:agent-frame:1");
+    exact_host_root_laws!(leading_zero_suffix, "job:agent-frame:01");
+    exact_host_root_laws!(signed_suffix, "job:agent-frame:+1");
+}
+
 macro_rules! send_handle_laws {
     ($engine:ident) => {
         mod $engine {

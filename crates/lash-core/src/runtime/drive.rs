@@ -576,26 +576,6 @@ pub async fn run_admitted_root_reporting(
         .map(RootReport::from)
 }
 
-/// The root a physical turn belongs to, and its ordinal within the root: a
-/// root's turns are the root itself, then `{root}:agent-frame:{n}`
-/// ([`PhysicalTurn::derive_turn_id`](crate::store::PhysicalTurn::derive_turn_id)).
-#[must_use]
-pub fn root_of_physical_turn(turn: &TurnId) -> (TurnId, u64) {
-    if let Some((root, ordinal)) = turn.as_str().rsplit_once(":agent-frame:")
-        && let Ok(ordinal) = ordinal.parse::<u64>()
-        && ordinal > 0
-    {
-        return (TurnId::from(root), ordinal);
-    }
-    (turn.clone(), 0)
-}
-
-/// Physical turn `ordinal` of `root`.
-#[must_use]
-pub fn physical_turn_of(root: &TurnId, ordinal: u64) -> TurnId {
-    crate::store::PhysicalTurn::derive_turn_id(root, ordinal)
-}
-
 /// The disposition of a runtime error that ends a drive attempt, by its cause
 /// (FIG-3575). A live fault recorded nothing, so the engine retries the
 /// attempt, whether or not the identical call is declared safe to repeat:

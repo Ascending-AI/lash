@@ -581,6 +581,9 @@ impl LashRuntime {
                 &self.state,
                 &assembled.outcome,
                 &trace_turn_id,
+                self.drive_root
+                    .as_ref()
+                    .map_or(&trace_turn_id, |run| run.root()),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -652,6 +655,9 @@ impl LashRuntime {
             &self.state,
             prepared.outcome(),
             &trace_turn_id,
+            self.drive_root
+                .as_ref()
+                .map_or(&trace_turn_id, |run| run.root()),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {

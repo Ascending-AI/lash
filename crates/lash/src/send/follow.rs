@@ -16,11 +16,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use lash_core::drive::{physical_turn_of, root_of_physical_turn};
 use lash_core::engine::{DriveAbort, DriveOutcome, DriveRequestId};
 use lash_core::facade_support::LiveReplayGap;
 use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
+use lash_core::store::PhysicalTurn;
 use lash_core::{
     InputId, LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome,
     LiveReplaySubscription, SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
@@ -146,7 +146,7 @@ impl Adoption {
     fn adopts(&self, turn: &TurnId) -> bool {
         self.root
             .as_ref()
-            .is_some_and(|root| root_of_physical_turn(turn).0 == *root)
+            .is_some_and(|root| PhysicalTurn::physical_ordinal_of(root, turn).is_some())
     }
 
     /// Adopt `root`, releasing the buffered activity of its turns.
@@ -175,15 +175,12 @@ impl Adoption {
                 let Some(turn) = event.turn_id.as_ref() else {
                     return false;
                 };
-                if self.root.is_none()
-                    && let Subject::Input(receipt) = &self.subject
-                    && let TurnEvent::QueuedInputAccepted { applications } = &activity.event
-                    && applications
-                        .iter()
-                        .any(|application| application.input_id == receipt.input_id)
-                {
-                    self.adopt(root_of_physical_turn(turn).0, tap).await;
-                }
+                // An application wakes resolution through the input's durable
+                // binding. Its physical turn's spelling cannot name the root.
+                let applied = self.root.is_none()
+                    && matches!((&self.subject, &activity.event),
+                        (Subject::Input(receipt), TurnEvent::QueuedInputAccepted { applications })
+                        if applications.iter().any(|application| application.input_id == receipt.input_id));
                 if self.adopts(turn) {
                     self.deliver(activity.clone(), tap).await;
                 } else if self.root.is_none() {
@@ -192,7 +189,7 @@ impl Adoption {
                     }
                     self.buffered.push_back((turn.clone(), activity.clone()));
                 }
-                false
+                applied
             }
             SessionObservationEventPayload::Committed { .. }
             | SessionObservationEventPayload::QueueChanged { .. } => true,
@@ -334,7 +331,7 @@ impl TerminalWait {
         );
         let address = TurnAddress::new(
             ctx.parts.session_id.clone(),
-            physical_turn_of(root, self.ordinal),
+            PhysicalTurn::derive_turn_id(root, self.ordinal),
         );
         let pause = self.pause.take();
         self.wait = Some(Box::pin(async move {

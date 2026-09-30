@@ -501,7 +501,10 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
     );
     let receipt = source_driver
         .request_cancel(crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(id, lash_core::drive::physical_turn_of(&cancel_root, 0)),
+            crate::TurnAddress::new(
+                id,
+                lash_core::store::PhysicalTurn::derive_turn_id(&cancel_root, 0),
+            ),
             "matrix-source-probe",
             None,
         ))

@@ -606,9 +606,9 @@ mod tests {
 
     #[test]
     fn physical_turn_ids_count_on_from_the_root_deterministically() {
-        let first = next_physical_turn_id(&TurnId::from("root-turn")).expect("first");
+        let first = next_physical_turn_id(&TurnId::from("root-turn"), 0).expect("first");
         assert_eq!(first, "root-turn:agent-frame:1");
-        let second = next_physical_turn_id(&first).expect("second");
+        let second = next_physical_turn_id(&TurnId::from("root-turn"), 1).expect("second");
         assert_eq!(second, "root-turn:agent-frame:2");
         assert_eq!(
             crate::store::PhysicalTurn::split_turn_id(&second),

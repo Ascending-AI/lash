@@ -187,6 +187,7 @@ pub(super) fn follow_on_after_turn(
     state: &RuntimeSessionState,
     outcome: &TurnOutcome,
     turn_id: &TurnId,
+    root: &TurnId,
 ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
     let TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
@@ -200,8 +201,16 @@ pub(super) fn follow_on_after_turn(
         .filter(|owed| owed.is_turn(turn_id))
         .map_or(0, |owed| owed.chain_depth)
         .saturating_add(1);
+    let physical_ordinal = crate::store::PhysicalTurn::physical_ordinal_of(root, turn_id)
+        .ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!("physical turn `{turn_id}` does not belong to root `{root}`"),
+            )
+        })?;
     crate::store::PendingFollowOn::after_switch(
-        turn_id,
+        root,
+        physical_ordinal,
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
         task.clone(),
         Some(state.effective_protocol_turn_options().clone()),
@@ -476,6 +485,30 @@ impl LashRuntime {
         } else {
             supplied_trace_turn_id
         };
+        let logical_root = self
+            .drive_root
+            .as_ref()
+            .map(|run| run.root().clone())
+            .or_else(|| {
+                self.state
+                    .pending_follow_on
+                    .as_deref()
+                    .filter(|owed| owed.is_turn(&turn_trace_turn_id))
+                    .map(|owed| owed.root_turn_id())
+            })
+            .unwrap_or_else(|| turn_trace_turn_id.clone());
+        let mut physical_ordinal = crate::store::PhysicalTurn::physical_ordinal_of(
+            &logical_root,
+            &turn_trace_turn_id,
+        )
+        .ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "physical turn `{turn_trace_turn_id}` does not belong to root `{logical_root}`"
+                ),
+            )
+        })?;
         // An admission never mixes run specs, so the head input's spec is the
         // root's; a root of wakes runs the default spec, and a follow-on the
         // shape its parent root recorded on the pending fact (FIG-3877).
@@ -704,6 +737,7 @@ impl LashRuntime {
             // on the resident head.
             if let Some(owed) = self.state.pending_follow_on.as_deref().cloned() {
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
+                physical_ordinal = owed.physical_index();
                 // A late crash may replay this root after its follow-on has
                 // committed. In that case the first frame's recorded commit
                 // fixes the follow-on index; loading the newer head would
@@ -751,8 +785,9 @@ impl LashRuntime {
                 });
             };
             follow_on_turns += 1;
-            turn_trace_turn_id = next_physical_turn_id(&turn_trace_turn_id)
+            turn_trace_turn_id = next_physical_turn_id(&logical_root, physical_ordinal)
                 .map_err(super::runtime_error_from_store_commit)?;
+            physical_ordinal += 1;
             let mut input = TurnInput::items(Vec::new());
             input.turn_context = follow_turn_context.clone();
             follow_on_rows = Some(withheld.clone());
@@ -776,9 +811,12 @@ pub(super) fn follow_on_input(
     (input, owed.options.as_deref().cloned())
 }
 
-/// The next physical turn of the logical run `current` belongs to.
-pub(super) fn next_physical_turn_id(current: &TurnId) -> Result<TurnId, crate::StoreError> {
-    let (root, index) = crate::store::PhysicalTurn::split_turn_id(current);
-    let next = crate::StoreError::checked_monotonic_increment("physical_turn_index", index)?;
-    Ok(crate::store::PhysicalTurn::derive_turn_id(&root, next))
+/// The physical turn after `physical_ordinal` within the known logical `root`.
+pub(super) fn next_physical_turn_id(
+    root: &TurnId,
+    physical_ordinal: u64,
+) -> Result<TurnId, crate::StoreError> {
+    let next =
+        crate::StoreError::checked_monotonic_increment("physical_turn_index", physical_ordinal)?;
+    Ok(crate::store::PhysicalTurn::derive_turn_id(root, next))
 }

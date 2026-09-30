@@ -6,9 +6,9 @@
 
 use std::time::Duration;
 
-use lash_core::drive::{physical_turn_of, root_of_physical_turn};
 use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
+use lash_core::store::PhysicalTurn;
 use lash_core::{InputId, TurnId};
 
 use super::{ParkedTurn, SendParts, StalledDelivery};
@@ -101,15 +101,10 @@ async fn stalled_delivery(parts: &SendParts, input: &InputId) -> Result<Option<S
 
 /// Resolve a logical root.
 pub(super) async fn resolve_root(parts: &SendParts, root: &TurnId) -> Result<Resolution> {
-    resolve_from_turn(parts, root).await
-}
-
-/// Follow `turn`'s root from `turn` to its final physical turn: a frame
-/// switch continues the root in its next physical turn.
-async fn resolve_from_turn(parts: &SendParts, turn: &TurnId) -> Result<Resolution> {
-    let (root, mut ordinal) = root_of_physical_turn(turn);
+    let root = root.clone();
+    let mut ordinal = 0_u64;
     loop {
-        let physical = physical_turn_of(&root, ordinal);
+        let physical = PhysicalTurn::derive_turn_id(&root, ordinal);
         match terminal_of(parts, &physical).await? {
             Some(TurnTerminal::Committed {
                 outcome: TurnOutcome::AgentFrameSwitch { .. },
@@ -197,7 +192,7 @@ async fn park_of(parts: &SendParts, root: &TurnId) -> Result<Option<ParkedTurn>>
         Err(error) => return Err(store_error(error)),
     };
     Ok(park
-        .filter(|park| park.turn_id == *root || root_of_physical_turn(&park.turn_id).0 == *root)
+        .filter(|park| PhysicalTurn::physical_ordinal_of(root, &park.turn_id).is_some())
         .map(|park| ParkedTurn {
             session_id: park.session_id,
             root: root.clone(),

@@ -2,7 +2,6 @@
 //! withdrawn; an input whose root runs has the root cancelled cooperatively
 //! through its cancellation gate (ADR 0039).
 
-use lash_core::drive::physical_turn_of;
 use lash_core::facade_support::{
     TurnAddress, TurnCancelMode, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
     TurnWorkDriver,
@@ -10,6 +9,7 @@ use lash_core::facade_support::{
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
 };
+use lash_core::store::PhysicalTurn;
 use lash_core::{InputId, TurnId};
 
 use super::resolve::{self, Resolution};
@@ -103,7 +103,7 @@ async fn cancel_root(
     // turns that has not committed.
     let mut ordinal = 0_u64;
     let turn = loop {
-        let turn = physical_turn_of(root, ordinal);
+        let turn = PhysicalTurn::derive_turn_id(root, ordinal);
         let committed = parts
             .store
             .turn_is_committed(&TurnAddress::new(parts.session_id.clone(), turn.clone()))
