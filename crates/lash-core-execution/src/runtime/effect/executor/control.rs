@@ -608,7 +608,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
 
     /// Read the group's settlement at `rank` without advancing any caller
     /// cursor (ADR 0099 §8): the recorded terminal and the child's durable
-    /// identity, or `None` when fewer than `rank` children have settled. The
+    /// identity, or `None` until every rank up to `rank` has seated — a rank
+    /// is reserved at its child's commit and may seat before a lower one, but
+    /// no read is served past an unseated rank (FIG-4308). The
     /// incorporation prefix record reads the journal through this seam —
     /// consumption order belongs to the handle, but an incorporated prefix is
     /// an opener fact that must not move a cursor to read.
@@ -658,9 +660,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// Commit one group child's final record at the §4 linearization point —
     /// the durable half of the child's final-attempt boundary.
     ///
-    /// This is the write ADR 0099 §5's commit order rides on: the CAS that
-    /// moves the child `pending → committed`, the allocation of its durable
-    /// `commit_seq`, and the persistence of `drain_input` — the sealed data a
+    /// This is the write ADR 0099 §5's decision order rides on: the CAS that
+    /// moves the child `pending → committed`, the reservation of its durable
+    /// settlement `rank`, and the persistence of `drain_input` — the sealed data a
     /// recovery needs to finish the drain and projection rather than re-run
     /// the attempt — as **one decision under the substrate's own
     /// serialization**. Store backends run it inside a transaction fenced on
@@ -670,8 +672,8 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// cancel decision can never slip between an advisory read and the commit
     /// it was supposed to guard.
     ///
-    /// Returns [`EffectGroupChildCommitOutcome::Committed`] with the allocated
-    /// position, [`AlreadyCommitted`] with the recorded winner's position and
+    /// Returns [`EffectGroupChildCommitOutcome::Committed`] with the reserved
+    /// rank, [`AlreadyCommitted`] with the recorded winner's rank and
     /// drain input on an idempotent retry, or [`CancelDecided`] when the
     /// cancel disposition owns the point — in which case the caller writes
     /// nothing of its own.
@@ -693,13 +695,16 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
-    /// Wait at the durable §5 barrier: resolve once no committed sibling
-    /// below `commit_seq` in `group_key` still owes its drain.
+    /// Wait at the durable §5 barrier: resolve once every committed sibling
+    /// ranked below `rank` in `group_key` has seated, or retirement released
+    /// the wait.
     ///
-    /// Drains are admitted in final-commit order, so the caller emits its
-    /// nested semantic commands only once this resolves. The barrier is
-    /// lifted by a sibling's drain, never by time, and the wait is the
-    /// engine's durable wake for the blocking sibling seats. Nothing here sleeps
+    /// A child with intents to drain emits its nested semantic commands only
+    /// once this resolves, so drains are admitted in rank order. The barrier
+    /// is lifted by siblings' seats, never by time, and the wait is the
+    /// engine's durable wake for each blocking sibling's seat. A retirement
+    /// release is not proof of seating: the semantic-admission fence still
+    /// refuses any intent under a retired group. Nothing here sleeps
     /// on a clock. The default refuses on the same grounds as
     /// [`commit_group_child_final`](Self::commit_group_child_final): a
     /// controller that cannot answer the durable barrier cannot order drains
@@ -707,9 +712,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
-        let _ = (group_key, commit_seq);
+        let _ = (group_key, rank);
         Err(super::effect_groups_unsupported("durable drain barrier"))
     }
 

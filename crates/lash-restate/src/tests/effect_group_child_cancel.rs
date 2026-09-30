@@ -241,8 +241,7 @@ fn index_answer(handler: &str) -> Option<serde_json::Value> {
         .expect("encode the resolution"),
         "commit_child" => serde_json::json!({
             "type": "committed",
-            "commit_seq": 0,
-            "blocking_positions": [],
+            "rank": 1,
         }),
         "put" => serde_json::json!({ "type": "written" }),
         "record_settlement" => serde_json::json!({ "type": "recorded", "rank": 1 }),

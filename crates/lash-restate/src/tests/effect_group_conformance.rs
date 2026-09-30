@@ -36,9 +36,9 @@ use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
     EffectGroupMembership, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupProbeAdoptResponse,
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
-    EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
-    EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordSettlementRequest,
+    EffectGroupRecordSettlementResponse, EffectGroupRegisterDispatchRequest,
+    EffectGroupRegisterDispatchResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
     EffectGroupShape, EffectGroupWaitResolution, RestateDurableWaitAddress,
     RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration, RestateEffectHost,
     RestateIngressClient,
@@ -1099,30 +1099,18 @@ impl LiveConformanceHarness {
             .expect("a stand-in invocation is accepted")
             .as_str()
             .to_owned();
-        let recorded: EffectGroupRecordDispatchResponse = ingress
+        let registered: EffectGroupRegisterDispatchResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
-                "record_dispatch",
-                &EffectGroupRecordDispatchRequest {
-                    dispatched: [(0, child_invocation.clone())].into_iter().collect(),
-                },
-            )
-            .await
-            .expect("the dispatch records the child");
-        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
-        let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "register_children",
-                &crate::EffectGroupRegisterRequest {
+                "register_dispatch",
+                &EffectGroupRegisterDispatchRequest {
                     addresses: [(0, child_invocation)].into_iter().collect(),
                 },
             )
             .await
             .expect("the dispatch registers the child");
-        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
         assert_eq!(
             self.host
                 .peek_await_event(&wait_key)
@@ -1255,26 +1243,12 @@ impl LiveConformanceHarness {
         tokio::time::timeout(Duration::from_secs(10), parked_on_admission.notified())
             .await
             .expect("the child parks on its admission before the dispatch records it");
-        let recorded: EffectGroupRecordDispatchResponse = ingress
+        let registered: EffectGroupRegisterDispatchResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
-                "record_dispatch",
-                &EffectGroupRecordDispatchRequest {
-                    dispatched: [(0, child_invocation.as_str().to_owned())]
-                        .into_iter()
-                        .collect(),
-                },
-            )
-            .await
-            .expect("the dispatch records the admitting child");
-        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
-        let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "register_children",
-                &crate::EffectGroupRegisterRequest {
+                "register_dispatch",
+                &EffectGroupRegisterDispatchRequest {
                     addresses: [(0, child_invocation.as_str().to_owned())]
                         .into_iter()
                         .collect(),
@@ -1282,7 +1256,7 @@ impl LiveConformanceHarness {
             )
             .await
             .expect("the dispatch registers the admitting child");
-        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
         let closed: crate::EffectGroupCloseResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -1331,16 +1305,20 @@ impl LiveConformanceHarness {
         RestateIngressClient::new(self.connection.clone())
     }
 
+    /// The rank counter's exhaustion is a terminal refusal at the §4 point,
+    /// where a rank is reserved (FIG-4308): the commit is refused, nothing is
+    /// reserved, and the index stays readable.
     pub(super) async fn rank_allocator_exhaustion(&self) {
         use crate::effect_group::{
-            EffectGroupChildCommitState, EffectGroupLifecycle, EffectGroupStateLiveRecord,
-            EffectGroupStateRecord,
+            EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupLifecycle,
+            EffectGroupStateLiveRecord, EffectGroupStateRecord,
         };
         use std::collections::BTreeMap;
         let key = witness_key("rank-exhaustion");
         let child = witness_child(&key, 0);
         let shape = witness_shape(&key, std::slice::from_ref(&child));
         let membership = witness_membership(std::slice::from_ref(&child));
+        let replay_key = shape.replay_keys[0].clone();
         let record = EffectGroupStateRecord {
             shape_digest: shape.digest(&membership).expect("shape digest"),
             dispatch_route: "EffectGroupDispatch".to_string(),
@@ -1349,11 +1327,7 @@ impl LiveConformanceHarness {
                 live: EffectGroupStateLiveRecord {
                     shape,
                     next_rank: u64::MAX,
-                    next_commit_seq: 2,
-                    commit_states: BTreeMap::from([(
-                        0,
-                        EffectGroupChildCommitState::Committed { commit_seq: 1 },
-                    )]),
+                    commit_states: BTreeMap::new(),
                     settlements: BTreeMap::new(),
                     settled_positions: BTreeMap::new(),
                 },
@@ -1364,17 +1338,16 @@ impl LiveConformanceHarness {
         for _ in 0..2 {
             let result = self
                 .ingress()
-                .call_lash_object::<_, EffectGroupRecordSettlementResponse>(
+                .call_lash_object::<_, EffectGroupCommitChildResponse>(
                     "EffectGroupIndex",
                     &key,
-                    "record_settlement",
-                    &EffectGroupRecordSettlementRequest {
-                        position: 0,
-                        terminal: EffectGroupSettlementTerminal::Cancelled,
+                    "commit_child",
+                    &EffectGroupCommitChildRequest {
+                        replay_key: replay_key.clone(),
                     },
                 )
                 .await;
-            let error = result.expect_err("rank exhaustion is terminal, never a wrapped seat");
+            let error = result.expect_err("rank exhaustion is terminal, never a wrapped rank");
             assert!(
                 error.to_string().contains("exhausted settlement ranks"),
                 "{error}"
@@ -1392,7 +1365,7 @@ impl LiveConformanceHarness {
                     },
                 )
                 .await
-                .expect("the refused allocation leaves the index readable");
+                .expect("the refused reservation leaves the index readable");
             assert!(
                 matches!(read, EffectGroupReadRankResponse::NotSettled),
                 "{read:?}"
@@ -2123,20 +2096,20 @@ async fn run_design_witnesses(
     tokio::time::timeout(Duration::from_secs(10), first_admit.notified())
         .await
         .expect("child reaches NotYetRecorded before dispatcher redrive");
-    let recorded: EffectGroupRecordDispatchResponse = ingress
+    let registered: EffectGroupRegisterDispatchResponse = ingress
         .call_lash_object(
             "EffectGroupIndex",
             &admission_group,
-            "record_dispatch",
-            &EffectGroupRecordDispatchRequest {
-                dispatched: [(0, child_invocation.as_str().to_owned())]
+            "register_dispatch",
+            &EffectGroupRegisterDispatchRequest {
+                addresses: [(0, child_invocation.as_str().to_owned())]
                     .into_iter()
                     .collect(),
             },
         )
         .await
-        .expect("dispatcher redrive records mapping");
-    assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
+        .expect("dispatcher redrive registers the mapping");
+    assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
     assert_eq!(
         await_group_wait(
             &ingress,
@@ -2144,7 +2117,7 @@ async fn run_design_witnesses(
         )
         .await,
         EffectGroupWaitResolution::Admit,
-        "record-before-register retains the ADMIT notification"
+        "the registration retains the ADMIT notification"
     );
     assert_eq!(
         await_group_wait(
@@ -2272,7 +2245,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             dispatch_route: "EffectGroupDispatch".to_owned()
         }
     );
-    let mut commit_seqs = Vec::new();
+    let mut ranks = Vec::new();
     for child in &children {
         let committed: EffectGroupCommitChildResponse = ingress
             .call_lash_object(
@@ -2285,19 +2258,17 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             )
             .await
             .expect("drained-wake witness child commits");
-        let EffectGroupCommitChildResponse::Committed { commit_seq, .. } = committed else {
+        let EffectGroupCommitChildResponse::Committed { rank } = committed else {
             panic!("drained-wake witness child commits fresh, got {committed:?}");
         };
-        commit_seqs.push(commit_seq);
+        ranks.push(rank);
     }
     let blockers: EffectGroupDrainBlockersResponse = ingress
         .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "drain_blockers",
-            &EffectGroupDrainBlockersRequest {
-                commit_seq: commit_seqs[1],
-            },
+            &EffectGroupDrainBlockersRequest { rank: ranks[1] },
         )
         .await
         .expect("drained-wake witness reads the barrier");
@@ -2365,7 +2336,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
                     "EffectGroupIndex",
                     &stale_group,
                     "drain_blockers",
-                    &EffectGroupDrainBlockersRequest { commit_seq: 1 },
+                    &EffectGroupDrainBlockersRequest { rank: 1 },
                 )
                 .await;
             match probed {

@@ -268,11 +268,11 @@ impl RuntimeEffectController for RecordingEffectController<'_> {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
             .controller()
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 }

@@ -710,15 +710,16 @@ pub enum EffectGroupChildCommitOutcome {
     /// The replay key names no group child: an ordinary effect, which takes
     /// the process-local drain path and owes no durable discharge.
     Ungrouped,
-    /// The final record won the §4 point: `commit_state` is `committed`, the
-    /// commit position `commit_seq` is allocated, and the drain input is
-    /// durable. The caller may drain once every lower commit position has
-    /// drained.
+    /// The final record won the §4 point: `commit_state` is `committed` and
+    /// the point reserved the child's settlement `rank`, its durable place in
+    /// the group's decision order, which its seat publishes once the drain
+    /// and projection are done. A caller with intents to drain may drain once
+    /// every lower-ranked committed sibling has seated.
     Committed {
         /// The group the row resolved to.
         group_key: String,
-        /// The child's durable position in the group's final-commit order.
-        commit_seq: u64,
+        /// The rank the §4 point reserved for the child.
+        rank: u64,
     },
     /// The point already holds this child's final record — a crashed or
     /// retried executor reaching the boundary again. `drain_input` is the
@@ -727,8 +728,8 @@ pub enum EffectGroupChildCommitOutcome {
     AlreadyCommitted {
         /// The group the row resolved to.
         group_key: String,
-        /// The winning commit's durable position.
-        commit_seq: u64,
+        /// The rank the winning commit reserved.
+        rank: u64,
         /// The drain input the winning commit recorded.
         drain_input: Option<String>,
     },
@@ -739,9 +740,7 @@ pub enum EffectGroupChildCommitOutcome {
     CancelDecided {
         /// The group the row resolved to.
         group_key: String,
-        /// The position the cancel decision seated the child at: the
-        /// settlement rank `decide_cancel` allocated, not a commit-order
-        /// position — a cancel-decided row carries no `commit_seq`.
-        commit_seq: u64,
+        /// The rank the cancel decision seated the child at.
+        rank: u64,
     },
 }

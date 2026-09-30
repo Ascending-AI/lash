@@ -767,7 +767,7 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _group_key: String,
-        _commit_seq: u64,
+        _rank: u64,
     ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
     where
         'ctx: 'run,
@@ -1473,13 +1473,13 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
                     group_key: String,
-                    commit_seq: u64,
+                    rank: u64,
                 ) -> crate::JournaledFuture<'run, EffectGroupDrainBlockersResponse>
                 where
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .drain_blockers(EffectGroupDrainBlockersRequest { commit_seq })
+                        .drain_blockers(EffectGroupDrainBlockersRequest { rank })
                         .call();
                     Box::pin(async move { call.await.map(Reply::into_body) })
                 }

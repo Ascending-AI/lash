@@ -2206,7 +2206,7 @@ pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+async fn group_rank_allocator_refuses_exhaustion_without_a_reservation() {
     let harness = effect_group_conformance::LiveConformanceHarness::start_on(
         effect_group_conformance::HarnessServer::in_process(),
     )
@@ -2217,7 +2217,7 @@ async fn group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
-async fn live_group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+async fn live_group_rank_allocator_refuses_exhaustion_without_a_reservation() {
     let harness = effect_group_conformance::LiveConformanceHarness::start().await;
     harness.rank_allocator_exhaustion().await;
     harness.finish().await;

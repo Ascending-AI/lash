@@ -533,7 +533,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _group_key: String,
-        _commit_seq: u64,
+        _rank: u64,
     ) -> Pin<
         Box<
             dyn Future<

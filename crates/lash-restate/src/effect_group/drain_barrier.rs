@@ -1,7 +1,7 @@
-//! The §5 barrier on the engine's own wake: which lower-commit siblings still
-//! hold a drain, the drained wake each resolves when it seats, and what that
-//! wake's resolution means to the drain parked on it. A held drain parks on
-//! the last-committed unseated sibling's wake instead of polling the index.
+//! The §5 barrier on the engine's own wake: which lower-ranked committed
+//! siblings still owe their seats, the drained wake each resolves when it
+//! seats, and what that wake's resolution means to the drain parked on it. A
+//! held drain parks on those siblings' wakes instead of polling the index.
 //! Split from the index handlers so the handler file keeps its line budget.
 
 use super::*;
@@ -37,32 +37,31 @@ pub(crate) fn drained_wait_lifted(
     }
 }
 
-/// The committed sibling below `below` that still owes its seat and
-/// committed last — the §5 barrier as the index sees it, reduced to the one
-/// wake it needs (FIG-4088).
+/// Every committed sibling ranked below `below` that still owes its seat —
+/// the §5 barrier as the index sees it (FIG-4308).
 ///
-/// The barrier is transitive. Commit sequences are allocated in order, so every
-/// sibling that committed below the last blocker had committed when that
-/// blocker's own barrier was read, and the blocker seats only once each of
-/// them has seated or the group retired, which lifts every barrier. Its
-/// drained wake therefore resolves exactly when the whole barrier lifts.
-/// Parking on every blocker instead cost each drain a wait per lower sibling,
-/// quadratic in the width.
+/// Every one is named, not only the last: a child that declared no intent and
+/// won its own commit seats without waiting on anyone, so its seat covers no
+/// lower sibling, and a barrier that named only the last blocker would lift
+/// while a lower one was still unseated. The waiter issues these waits
+/// together, so the barrier costs one round trip whatever its size. The
+/// barrier lifts once all of them have seated, or retirement releases the
+/// wait. A cancel-decided sibling never blocks: its decision seats it.
 pub(super) fn blocking_positions(live: &EffectGroupStateLiveRecord, below: u64) -> Vec<usize> {
-    live.commit_states
+    let mut blockers = live
+        .commit_states
         .iter()
         .filter_map(|(position, state)| match state {
-            EffectGroupChildCommitState::Committed { commit_seq }
-                if *commit_seq < below && !live.settled_positions.contains_key(position) =>
+            EffectGroupChildCommitState::Committed { rank }
+                if *rank < below && !live.settled_positions.contains_key(position) =>
             {
-                Some((*commit_seq, *position))
+                Some((*rank, *position))
             }
             _ => None,
         })
-        .max()
-        .map(|(_, position)| position)
-        .into_iter()
-        .collect()
+        .collect::<Vec<_>>();
+    blockers.sort_unstable();
+    blockers.into_iter().map(|(_, position)| position).collect()
 }
 
 #[cfg(test)]
@@ -79,39 +78,42 @@ mod tests {
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             next_rank: 1,
-            next_commit_seq: 1,
             commit_states: commits
                 .iter()
-                .map(|&(position, commit_seq)| {
-                    (
-                        position,
-                        EffectGroupChildCommitState::Committed { commit_seq },
-                    )
+                .map(|&(position, rank)| {
+                    (position, EffectGroupChildCommitState::Committed { rank })
                 })
                 .collect(),
             settlements: BTreeMap::new(),
             settled_positions: seated
                 .iter()
-                .enumerate()
-                .map(|(rank, &position)| (position, rank as u64 + 1))
+                .map(|&position| {
+                    let rank = commits
+                        .iter()
+                        .find(|(committed, _)| *committed == position)
+                        .map_or(0, |(_, rank)| *rank);
+                    (position, rank)
+                })
                 .collect(),
         }
     }
 
     #[test]
-    fn the_barrier_is_the_last_committed_unseated_sibling_below() {
-        // Positions and commit order differ: position 4 committed first,
-        // position 1 last among those below sequence 5.
+    fn the_barrier_is_every_unseated_committed_sibling_below_in_rank_order() {
+        // Positions and ranks differ: position 4 committed first, position 1
+        // last among those below rank 5.
         let live = live_record(&[(4, 1), (0, 2), (3, 3), (1, 4), (2, 5)], &[]);
-        assert_eq!(blocking_positions(&live, 5), vec![1]);
+        assert_eq!(blocking_positions(&live, 5), vec![4, 0, 3, 1]);
         assert_eq!(blocking_positions(&live, 2), vec![4]);
         assert_eq!(blocking_positions(&live, 1), Vec::<usize>::new());
     }
 
     #[test]
-    fn a_seated_sibling_no_longer_blocks() {
-        let live = live_record(&[(4, 1), (0, 2), (3, 3), (1, 4), (2, 5)], &[1, 3]);
-        assert_eq!(blocking_positions(&live, 5), vec![0]);
+    fn a_seated_sibling_no_longer_blocks_even_out_of_rank_order() {
+        // Rank 4 seated before ranks 2 and 3: the lower unseated ones still
+        // block, because a seat no longer waits on the siblings below it.
+        let live = live_record(&[(4, 1), (0, 2), (3, 3), (1, 4), (2, 5)], &[1, 4]);
+        assert_eq!(blocking_positions(&live, 5), vec![0, 3]);
         let live = live_record(&[(4, 1), (0, 2)], &[4, 0]);
         assert_eq!(blocking_positions(&live, 3), Vec::<usize>::new());
     }

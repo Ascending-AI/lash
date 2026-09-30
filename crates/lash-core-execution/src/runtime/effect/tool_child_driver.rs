@@ -44,10 +44,10 @@
 //! # What the driver does not do
 //!
 //! It holds no in-process drain slot. §5 orders sibling drains by a durable
-//! per-group final-commit order: §4 commits the child's final at the child's
-//! terminal — its final attempt's boundary or its resolved completion — and
-//! §5 admits its drain by the recorded `commit_seq`, which orders it against
-//! every sibling without a process-local gate.
+//! per-group rank: §4 commits the child's final at the child's terminal — its
+//! final attempt's boundary or its resolved completion — and reserves its
+//! rank, and §5 admits a drain with intents by that rank, which orders it
+//! against every sibling without a process-local gate.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
@@ -79,7 +79,7 @@ use crate::{
 };
 
 /// The deployment wiring a tool child needs and its request deliberately does
-/// not record (ADR 0099 §3, amendment 3).
+/// not record (ADR 0099 §3, item 3).
 ///
 /// One value per host, held by the resolver and handed to every child it
 /// routes. Three things, and each is here because the request could not carry
@@ -935,7 +935,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
 /// recorded at group open, with the child's admitted manifest pinned at its
 /// own id.
 ///
-/// ADR 0099 §3 amendment 1: "An ungranted call pins its admitted manifest. A
+/// ADR 0099 §3 item 1: "An ungranted call pins its admitted manifest. A
 /// reopen may not consult the live Tool Catalog" *for it* — a tool whose
 /// retry policy or argument projection changed between admission and
 /// recovery would otherwise make a recovered child behave unlike the child
@@ -1044,8 +1044,8 @@ fn admitted_tool_drift(
 /// a child takes no in-process slot because the durable group owns the order —
 /// its final commits at the child's terminal — its final attempt's boundary
 /// or its resolved completion — against its own replay row (`child`), and
-/// its drain is admitted by the recorded `commit_seq` barrier before the
-/// first declared intent runs.
+/// a drain with intents is admitted by the barrier on its reserved rank
+/// before the first declared intent runs.
 async fn run_tool_child<'run>(
     host: &ToolChildHost,
     opener: &ChildOpenerContext,

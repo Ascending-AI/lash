@@ -53,24 +53,22 @@ pub enum EffectGroupProbeAdoptResponse {
     Retired,
 }
 
+/// What registering a dispatch's children did (FIG-4308): the whole
+/// position-to-invocation map and the move to ready are one index step.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRecordDispatchResponse {
-    Recorded,
-    Duplicate,
-    DispatchMismatch,
-    NotPreparing,
-    UnknownGroup,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupRegisterResponse {
+pub enum EffectGroupRegisterDispatchResponse {
+    /// The map is recorded and the group is ready: every ADMIT wake and READY
+    /// were resolved.
     Registered,
+    /// The group is already ready under this same map, so a redriven
+    /// registration re-resolves the same wakes and changes nothing.
     AlreadyRegistered,
-    RegistrationMismatch,
+    /// The group already closed under this same map.
     AlreadyClosed,
+    /// The map does not name exactly the group's positions, disagrees with
+    /// the one recorded, or the group has no adopted dispatcher to register.
+    Mismatch,
     UnknownGroup,
     Retired,
 }
@@ -137,18 +135,18 @@ pub struct EffectGroupCommitChildRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupCommitChildResponse {
-    /// This child's final won the §4 point: `commit_seq` is its durable
-    /// position in the group's final-commit order and `blocking_positions`
-    /// the committed siblings below it whose seats are still owed — the §5
-    /// barrier the child's drain and settlement wait behind.
+    /// This child's final won the §4 point, and `rank` is the settlement
+    /// rank the point reserved for it: its durable place in the group's
+    /// decision order, which its seat publishes (FIG-4308).
     Committed {
-        commit_seq: u64,
-        blocking_positions: Vec<usize>,
+        rank: u64,
     },
-    /// The commit already landed (idempotent redrive): the recorded position
-    /// and whichever lower siblings still owe their seats.
+    /// The commit already landed, in this invocation or an earlier one: the
+    /// reserved rank, and every committed sibling below it that still owes
+    /// its seat — the §5 barrier a seat that cannot know what the winning
+    /// commit declared waits behind before it publishes.
     AlreadyCommitted {
-        commit_seq: u64,
+        rank: u64,
         blocking_positions: Vec<usize>,
     },
     /// The cancel disposition won first; the child's final journals nothing.
@@ -160,11 +158,11 @@ pub enum EffectGroupCommitChildResponse {
     Retired,
 }
 
-/// The §5 barrier read: which siblings committed below `commit_seq` still owe
-/// their settlement seats.
+/// The §5 barrier read: which siblings committed at a rank below `rank` still
+/// owe their settlement seats.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupDrainBlockersRequest {
-    pub commit_seq: u64,
+    pub rank: u64,
 }
 
 /// The §5 barrier as the index sees it for one committed child.
@@ -174,7 +172,8 @@ pub enum EffectGroupDrainBlockersResponse {
     /// No sibling below the caller still owes its seat. An absent or retired
     /// group holds no committed children, so it answers this too.
     Admitted,
-    /// These lower-commit siblings still owe their seats. Each resolves its
+    /// These lower-ranked committed siblings — every one of them — still owe
+    /// their seats. Each resolves its
     /// drained wake under the group's retained `wait_scope` when it seats, so
     /// the caller builds the wake keys from the scope the index resolves them
     /// under rather than re-deriving it.
@@ -272,15 +271,9 @@ pub struct EffectGroupAdoptRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupRecordDispatchRequest {
+pub struct EffectGroupRegisterDispatchRequest {
     /// Every child's invocation id by position: a dispatch records the whole
-    /// group in one call (FIG-4088).
-    #[serde(with = "btree_map_as_pairs")]
-    pub dispatched: BTreeMap<usize, String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupRegisterRequest {
+    /// group, and makes it ready, in one call (FIG-4088, FIG-4308).
     #[serde(with = "btree_map_as_pairs")]
     pub addresses: BTreeMap<usize, String>,
 }

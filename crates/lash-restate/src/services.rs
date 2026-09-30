@@ -575,10 +575,8 @@ lash_clients! {
             -> crate::effect_group::EffectGroupOpenResponse;
         probe_and_adopt(crate::effect_group::EffectGroupAdoptRequest)
             -> crate::effect_group::EffectGroupProbeAdoptResponse;
-        record_dispatch(crate::effect_group::EffectGroupRecordDispatchRequest)
-            -> crate::effect_group::EffectGroupRecordDispatchResponse;
-        register_children(crate::effect_group::EffectGroupRegisterRequest)
-            -> crate::effect_group::EffectGroupRegisterResponse;
+        register_dispatch(crate::effect_group::EffectGroupRegisterDispatchRequest)
+            -> crate::effect_group::EffectGroupRegisterDispatchResponse;
         register_refusal(crate::effect_group::EffectGroupRefusalRequest)
             -> crate::effect_group::EffectGroupRegisterRefusalResponse;
         admit_child(crate::effect_group::EffectGroupAdmissionRequest)

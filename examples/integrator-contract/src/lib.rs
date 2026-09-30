@@ -497,7 +497,7 @@ impl RuntimeEffectController for Integrator {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }

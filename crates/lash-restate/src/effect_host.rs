@@ -1464,25 +1464,18 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
         Ok(match response {
-            crate::effect_group::EffectGroupCommitChildResponse::Committed {
-                commit_seq, ..
-            } => Outcome::Committed {
-                group_key,
-                commit_seq,
-            },
+            crate::effect_group::EffectGroupCommitChildResponse::Committed { rank } => {
+                Outcome::Committed { group_key, rank }
+            }
             crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
-                commit_seq,
-                ..
+                rank, ..
             } => Outcome::AlreadyCommitted {
                 group_key,
-                commit_seq,
+                rank,
                 drain_input: None,
             },
             crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
-                Outcome::CancelDecided {
-                    group_key,
-                    commit_seq: rank,
-                }
+                Outcome::CancelDecided { group_key, rank }
             }
             crate::effect_group::EffectGroupCommitChildResponse::UnknownChild => {
                 return Err(group_shape_error(format!(
@@ -1505,11 +1498,12 @@ impl RuntimeEffectController for RestateEffectHostController {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         // The §5 barrier on the engine's own wake, over ingress: the index
-        // names the last-committed unseated sibling, whose durable drained
-        // wake covers every lower-commit sibling by transitivity.
+        // names every committed sibling ranked below `rank` that has not
+        // seated, and the barrier lifts once each drained wake resolves —
+        // seated, or released by retirement.
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
             .call_lash_object::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
@@ -1518,7 +1512,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     .service(LashService::EffectGroupState),
                 group_key,
                 "drain_blockers",
-                &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },
+                &crate::effect_group::EffectGroupDrainBlockersRequest { rank },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?

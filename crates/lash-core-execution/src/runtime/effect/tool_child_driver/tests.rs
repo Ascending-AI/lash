@@ -225,7 +225,7 @@ fn the_child_keeps_its_recorded_agent_frame() {
     );
 }
 
-/// Ruling 1 (ADR 0099 §3 amendment 1): a reopen may not consult the live Tool
+/// Ruling 1 (ADR 0099 §3 item 1): a reopen may not consult the live Tool
 /// Catalog *for the recorded call*. The lent catalog holds a *different* tool
 /// with a *different* retry policy, so a rebind that kept it wholesale would
 /// run the child under a policy it was never admitted with — or fail to

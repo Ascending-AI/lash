@@ -299,10 +299,25 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     namespace: crate::RestateNamespace,
     /// The ranks this controller's run reads served (FIG-4088).
     read_ahead: group_read::GroupReadAhead,
+    /// The ranks this controller's own §4 commits reserved (FIG-4308).
+    commit_receipts: group_commit::GroupCommitReceipts,
     _ctx: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
+    /// The rank this controller's own §4 commit of the child at
+    /// `scope_id`/`replay_key` in `group_key` reserved, if one of its commits
+    /// was answered `Committed` or `AlreadyCommitted` (FIG-4308). It is a
+    /// receipt for that commit, never proof that the child's drain finished.
+    pub(crate) fn group_child_commit_receipt(
+        &self,
+        group_key: &str,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Option<u64> {
+        self.commit_receipts.rank(group_key, scope_id, replay_key)
+    }
+
     pub fn new(context: C, authority_id: RestateAuthorityId) -> Self {
         Self::with_options(
             context,
@@ -325,6 +340,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
             read_ahead: group_read::GroupReadAhead::default(),
+            commit_receipts: group_commit::GroupCommitReceipts::default(),
             _ctx: PhantomData,
         }
     }
@@ -966,19 +982,23 @@ where
         lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
-        group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await
+        let (scope_id, replay_key) = (commit.scope_id.clone(), commit.replay_key.clone());
+        let outcome =
+            group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await?;
+        self.commit_receipts.keep(scope_id, replay_key, &outcome);
+        Ok(outcome)
     }
 
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         group_commit::await_group_child_drain_admission(
             &self.context,
             &self.namespace,
             group_key,
-            commit_seq,
+            rank,
         )
         .await
     }
