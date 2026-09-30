@@ -84,11 +84,10 @@ surface exactly when the direction it serves makes it load-bearing:
 
 Direct-use scanning is as non-normative here as it is for types, and more
 dangerous: a member can have no caller in this repository and still be the one
-thing an implementor must call. `TurnContext`'s prompt mutators remain on the
-facade turn builder; `TurnContextTransform::transform` receives and returns a
-`PreparedContext` and never sees `&mut TurnContext`. `set_prompt_layer` remains
-inherent for `lash-remote-protocol`, while the other prompt mutators belong to
-the facade seam.
+thing an implementor must call. `TurnContextTransform::transform` receives and
+returns a `PreparedContext` and never sees `&mut TurnContext`. `TurnContext`
+holds only runtime correlation. Its retired prompt mutators and facade seam
+are deleted; per-send prompts live in durable `RunSpec` overrides (FIG-4226).
 
 Members that are not integrator surface get one of two homes, chosen by who
 holds the receiver:

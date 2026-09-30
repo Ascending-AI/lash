@@ -21,7 +21,7 @@ use futures_util::future::BoxFuture;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
 use lash_core::{RunSpec, TurnId};
 
-use super::{HandleShared, SendHandle, SendTarget, refuse_live_turn_context};
+use super::{HandleShared, SendHandle, SendTarget};
 use crate::error::Result;
 use crate::support::TurnInput;
 
@@ -102,7 +102,6 @@ impl SendBatchBuilder {
         }
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
-            refuse_live_turn_context(&input)?;
             // As for one send: the host id names the root, and an input sent
             // without one gets a fresh id.
             let id = id

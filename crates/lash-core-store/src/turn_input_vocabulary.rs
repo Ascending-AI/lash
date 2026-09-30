@@ -1074,59 +1074,14 @@ impl TurnInput {
         self
     }
 }
-/// How a running turn treats durable queued work.
-///
-/// Written as one fact: an automatic drain may keep admitting checkpoint
-/// batches as it runs, while a Selected Queued-Work Drain is closed over the
-/// host-pinned batch-id set — checkpoint pull-in is forbidden and the pinned
-/// composition's cost bound is enforced. The remaining flag combinations are
-/// unrepresentable.
-#[derive(Clone, Copy)]
-enum QueuedWorkDrainMode {
-    Automatic,
-    Selected,
-}
-#[derive(Clone)]
+/// Process-local runtime correlation carried through a turn's execution contexts.
+#[derive(Clone, Default)]
 pub struct TurnContext {
-    prompt: crate::PromptLayer,
     runtime_correlation: Option<Arc<dyn Any + Send + Sync>>,
-    queued_work_drain: QueuedWorkDrainMode,
-}
-impl Default for TurnContext {
-    fn default() -> Self {
-        Self {
-            prompt: crate::PromptLayer::default(),
-            runtime_correlation: None,
-            queued_work_drain: QueuedWorkDrainMode::Automatic,
-        }
-    }
 }
 impl TurnContext {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn mark_selected_queued_work_drain(&mut self) {
-        self.queued_work_drain = QueuedWorkDrainMode::Selected;
-    }
-
-    pub fn enforces_selected_queued_work_cost_bound(&self) -> bool {
-        matches!(self.queued_work_drain, QueuedWorkDrainMode::Selected)
-    }
-
-    pub fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
-        match self.queued_work_drain {
-            QueuedWorkDrainMode::Automatic => default_limit,
-            QueuedWorkDrainMode::Selected => 0,
-        }
-    }
-
-    pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
-        self.prompt = prompt;
-    }
-
-    pub fn prompt_layer(&self) -> &crate::PromptLayer {
-        &self.prompt
     }
 
     /// Installs one live runtime-owned correlation value.
@@ -1157,32 +1112,9 @@ impl TurnContext {
         }
     }
 }
-impl facade_ops::TurnContextFacadeOps for TurnContext {
-    fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
-        self.prompt.template = Some(template);
-    }
-
-    fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
-        self.prompt.add_contribution(contribution);
-    }
-
-    fn replace_prompt_slot(
-        &mut self,
-        slot: crate::PromptSlot,
-        contributions: impl IntoIterator<Item = crate::PromptContribution>,
-    ) {
-        self.prompt.replace_slot(slot, contributions);
-    }
-
-    fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
-        self.prompt.clear_slot(slot);
-    }
-}
 impl fmt::Debug for TurnContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TurnContext")
-            .field("has_prompt_layer", &(!self.prompt.is_empty()))
-            .finish()
+        f.debug_struct("TurnContext").finish_non_exhaustive()
     }
 }
 
@@ -1193,28 +1125,6 @@ pub struct TurnActivityId(pub Arc<str>);
 impl TurnActivityId {
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
-    }
-}
-
-pub mod facade_ops {
-
-    /// Facade-internal operations for [`TurnContext`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait TurnContextFacadeOps {
-        fn set_prompt_template(&mut self, template: crate::PromptTemplate);
-
-        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
-
-        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
-        fn replace_prompt_slot(
-            &mut self,
-            slot: crate::PromptSlot,
-            contributions: impl IntoIterator<Item = crate::PromptContribution>,
-        );
-
-        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot);
     }
 }
 

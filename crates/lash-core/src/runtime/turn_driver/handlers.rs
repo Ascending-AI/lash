@@ -2,50 +2,6 @@ use super::*;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
-    /// Refuse a selected drain whose model-context cost Lash cannot bound.
-    ///
-    /// FIG-1313: this seam once also refused any selected drain whose complete
-    /// conservative projection (prompt, tools, retained history, and the queued
-    /// rows together) exceeded the window. That hardwired guard was a law no
-    /// ordinary turn had to obey, and it wedged every host under roughly 28k
-    /// tokens: the queue could never drain even one row. Drain size is now a
-    /// host policy ([`QueuedDrainPolicy`](crate::QueuedDrainPolicy), defaulting
-    /// to one row per drain) and the irreducible residue — a single row larger
-    /// than the whole window — is refused as a typed outcome at admission time.
-    /// Everything in between is the provider's judgement, exactly as for an
-    /// ordinary turn.
-    ///
-    /// What remains here is the one cost Lash genuinely cannot project: an
-    /// external or provider-file attachment, whose model-context weight is not
-    /// bounded by any bytes Lash can measure.
-    fn ensure_queued_work_cost_is_bounded(&self, request: &LlmRequest) -> Result<(), RuntimeError> {
-        if self.pending_queued.is_empty()
-            || !self.turn_context.enforces_selected_queued_work_cost_bound()
-        {
-            return Ok(());
-        }
-        // Attachment *resolution* is deliberately not performed here: it only
-        // materializes stored bytes, leaving `attachments` — the sources this
-        // guard reads — untouched. Since FIG-1313 removed the projected-request
-        // token comparison, resolving would buy nothing but store reads and a
-        // new failure mode on the selected-drain path.
-        if request.attachments().iter().any(|source| {
-            matches!(
-                source,
-                crate::AttachmentSource::ExternalUrl { .. }
-                    | crate::AttachmentSource::ProviderFile { .. }
-            )
-        }) {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::QueuedWork,
-                "cannot safely admit queued work with an external or provider-file attachment: \
-                 its model-context cost is not bounded by the projected request",
-            ));
-        }
-
-        Ok(())
-    }
-
     fn handle_machine_response(
         &self,
         machine: &mut TurnMachine,
@@ -132,7 +88,6 @@ impl RuntimeTurnDriver<'_> {
                 },
             );
         }
-        self.ensure_queued_work_cost_is_bounded(&request)?;
         let crate::runtime::RuntimeLlmCallOutcome {
             result,
             text_streamed,

@@ -172,22 +172,6 @@ impl SendTarget {
     }
 }
 
-/// Refuse process-local turn context before anything is accepted: it cannot
-/// survive durable acceptance (the same rule the remote boundary enforces).
-/// Everything a send shapes its root with is durable data on its
-/// [`RunSpec`](lash_core::RunSpec).
-fn refuse_live_turn_context(input: &TurnInput) -> Result<()> {
-    let what = if !input.turn_context.prompt_layer().is_empty() {
-        Some("a live per-turn prompt; set it with `SendBuilder::prompt_layer`")
-    } else {
-        None
-    };
-    match what {
-        Some(what) => Err(EmbedError::from(SendError::LiveTurnContext { what })),
-        None => Ok(()),
-    }
-}
-
 /// Refuse a spec whose provider route this host cannot serve before the
 /// input is accepted: the same verdict a config command meets at its drain
 /// (D3 §3.3, FIG-3877). A spec that touches neither `provider_id` nor
@@ -368,7 +352,6 @@ impl SendBuilder {
             ingress,
             run_spec,
         } = self;
-        refuse_live_turn_context(&input)?;
         let context = target.context().await?;
         // The host id names the root; the drive runs the root's turns under
         // it, so the input carries no turn id of its own. An input sent

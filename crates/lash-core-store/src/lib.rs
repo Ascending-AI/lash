@@ -78,6 +78,8 @@ pub(crate) use lash_core_llm::model::ModelSpec;
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_sansio::AcceptedInjectedTurnInput;
+#[cfg(test)]
+pub(crate) use lash_sansio::PromptContribution;
 pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
 pub(crate) use lash_sansio::llm::types::{
     AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
@@ -91,9 +93,9 @@ pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest
 pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
     CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, Message,
-    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
-    PromptContribution, PromptLayer, SessionAppendNode, SessionId, TokenUsage, TurnId,
-    TurnOutputSource, render_turn_causes_prompt, shared_parts,
+    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId, PromptLayer,
+    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, render_turn_causes_prompt,
+    shared_parts,
 };
 
 pub(crate) type SessionHistoryRecord =
@@ -203,6 +205,7 @@ pub(crate) use input_normalization::NormalizedItem;
 pub use lash_sansio as sansio;
 pub(crate) use lash_sansio::llm::capability::ReasoningSelection;
 pub(crate) use lash_sansio::llm::types::LlmCallRecord;
+#[cfg(test)]
 pub(crate) use lash_sansio::session_model::prompt::{PromptSlot, PromptTemplate};
 pub(crate) use process_identity::process_wake_turn_cause;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;

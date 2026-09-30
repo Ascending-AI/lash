@@ -1,0 +1,11 @@
+error[E0599]: no method named `set_prompt_layer` found for struct `TurnContext` in the current scope
+ --> tests/ui/turn_context_has_no_prompt_or_drain_state.rs:3:13
+  |
+3 |     context.set_prompt_layer(lash::prompt::PromptLayer::new());
+  |             ^^^^^^^^^^^^^^^^ method not found in `TurnContext`
+
+error[E0599]: no method named `mark_selected_queued_work_drain` found for struct `TurnContext` in the current scope
+ --> tests/ui/turn_context_has_no_prompt_or_drain_state.rs:4:13
+  |
+4 |     context.mark_selected_queued_work_drain();
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `TurnContext`

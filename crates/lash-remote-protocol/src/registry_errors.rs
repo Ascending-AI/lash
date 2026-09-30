@@ -91,8 +91,6 @@ pub enum RemoteProtocolError {
     InvalidAttachmentData { id: String, message: String },
     #[error("invalid attachment reference `{id}`: {message}")]
     InvalidAttachmentRef { id: String, message: String },
-    #[error("turn input is not remote-safe: {0}")]
-    NonRemoteSafeTurnInput(String),
     #[error("remote tool grant `{tool_name}` is missing required binding `{binding}`")]
     MissingToolBinding { tool_name: String, binding: String },
     #[error("invalid remote tool grant `{tool_name}`: {message}")]

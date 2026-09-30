@@ -16,7 +16,6 @@ impl PreparedExecutionEnvironment {
         &self,
         core_prompt: &PromptLayer,
         session_prompt: &PromptLayer,
-        turn_prompt: &PromptLayer,
         prompt_cache: Option<Arc<PromptCache>>,
     ) -> PreparedPrompt {
         let mut capability_prompt = PromptLayer::new();
@@ -33,7 +32,6 @@ impl PreparedExecutionEnvironment {
             &self.prompt,
             core_prompt,
             session_prompt,
-            turn_prompt,
         ]);
         let prompt_contributions = self
             .tool_catalog
@@ -159,7 +157,6 @@ impl RuntimeTurnDriver<'_> {
         let prepared_prompt = execution_environment.build_prompt(
             &self.host.core.prompt.prompt,
             &policy.prompt,
-            self.turn_context.prompt_layer(),
             Some(self.session.prompt_cache()),
         );
         self.trace_prompt_built(protocol_iteration, &prepared_prompt.system_prompt);

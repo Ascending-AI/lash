@@ -1,6 +1,4 @@
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_sansio::{ProcessId, SessionId, TurnId};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -143,18 +141,30 @@ fn a_turn_request_carries_its_protocol_turn_options_as_its_run_spec() {
 }
 
 #[test]
-fn a_per_turn_prompt_layer_is_refused_at_the_remote_boundary() {
-    // A per-turn prompt lives in the process-local turn context, which a
-    // durable acceptance does not carry: the wire has no field for it.
-    let mut prompt = lash_core::PromptLayer::new();
-    prompt.add_contribution(lash_core::PromptContribution::guidance("Guide", "remote"));
-    let mut input = lash_core::TurnInput::text("a");
-    input.turn_context.set_prompt_layer(prompt);
-    let error = RemoteTurnInput::try_from(input).expect_err("a per-turn prompt is refused");
+fn turn_input_remote_conversion_drops_runtime_correlation() {
+    struct Correlation;
+
+    let mut input = lash_core::TurnInput::text("remote words");
+    input.trace_turn_id = Some(TurnId::from("remote-attempt"));
+    input.turn_context.set_runtime_correlation(Correlation);
+    let retained = input.clone();
+    let remote = RemoteTurnInput::try_from(input).expect("runtime correlation stays local");
+    let decoded = lash_core::TurnInput::try_from(remote).expect("remote input converts back");
     assert!(
-        matches!(&error, RemoteProtocolError::NonRemoteSafeTurnInput(message)
-            if message.contains("prompt")),
-        "{error:?}"
+        matches!(&decoded.items[..], [lash_core::InputItem::Text { text }] if text == "remote words")
+    );
+    assert_eq!(decoded.trace_turn_id, Some(TurnId::from("remote-attempt")));
+    assert!(
+        decoded
+            .turn_context
+            .runtime_correlation::<Correlation>()
+            .is_none()
+    );
+    assert!(
+        retained
+            .turn_context
+            .runtime_correlation::<Correlation>()
+            .is_some()
     );
 }
 

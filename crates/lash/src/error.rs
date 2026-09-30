@@ -189,15 +189,6 @@ impl EmbedError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SendError {
-    /// The input carries process-local turn context (a protocol extension,
-    /// live plugin inputs, a per-turn prompt) that cannot cross
-    /// durable acceptance. Nothing was accepted. Session configuration is the
-    /// durable home of a prompt or a model.
-    #[error("{what} is process-local and cannot cross durable acceptance")]
-    LiveTurnContext {
-        /// What the input carried.
-        what: &'static str,
-    },
     /// [`output`](crate::SendHandle::output) was asked for the settled turn of
     /// an input that has none: its root parked, or the input was withdrawn
     /// before it ran. [`outcome`](crate::SendHandle::outcome) answers these
@@ -368,7 +359,7 @@ impl EmbedError {
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. } => true,
-            Self::Send(error) => matches!(**error, SendError::LiveTurnContext { .. }),
+            Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) => err.is_terminal(),

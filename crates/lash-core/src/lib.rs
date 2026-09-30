@@ -382,7 +382,6 @@ pub mod facade_support {
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
-    pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {

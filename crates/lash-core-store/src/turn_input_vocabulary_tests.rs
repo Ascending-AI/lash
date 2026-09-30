@@ -1,5 +1,62 @@
 use super::*;
 
+#[test]
+fn runtime_correlation_is_shared_by_clones_and_cleared_only_by_its_owner() {
+    struct Correlation(String);
+    struct OtherCorrelation;
+
+    let mut context = TurnContext::new();
+    context.set_runtime_correlation(Correlation("process-a".to_string()));
+    let cloned = context.clone();
+    let original = context.runtime_correlation::<Correlation>().unwrap();
+    let shared = cloned.runtime_correlation::<Correlation>().unwrap();
+    assert!(std::ptr::eq(original, shared));
+    assert_eq!(shared.0, "process-a");
+    assert!(context.runtime_correlation::<OtherCorrelation>().is_none());
+
+    context.clear_runtime_correlation::<OtherCorrelation>();
+    assert!(context.runtime_correlation::<Correlation>().is_some());
+    context.clear_runtime_correlation::<Correlation>();
+    assert!(context.runtime_correlation::<Correlation>().is_none());
+    assert_eq!(
+        cloned.runtime_correlation::<Correlation>().unwrap().0,
+        "process-a"
+    );
+}
+
+#[test]
+fn durable_turn_input_drops_runtime_correlation_and_attempt_identity() {
+    struct Correlation;
+
+    let mut input = TurnInput::text("accepted words");
+    input.trace_turn_id = Some(crate::TurnId::from("attempt-a"));
+    input.turn_context.set_runtime_correlation(Correlation);
+    let durable = input.durable_projection();
+    assert!(durable.trace_turn_id.is_none());
+    assert!(
+        durable
+            .turn_context
+            .runtime_correlation::<Correlation>()
+            .is_none()
+    );
+    assert!(matches!(&durable.items[..], [InputItem::Text { text }] if text == "accepted words"));
+    assert!(
+        input
+            .turn_context
+            .runtime_correlation::<Correlation>()
+            .is_some()
+    );
+
+    let decoded: TurnInput = serde_json::from_value(serde_json::to_value(&input).unwrap()).unwrap();
+    assert!(
+        decoded
+            .turn_context
+            .runtime_correlation::<Correlation>()
+            .is_none()
+    );
+    assert!(matches!(&decoded.items[..], [InputItem::Text { text }] if text == "accepted words"));
+}
+
 fn active() -> TurnInputIngress {
     TurnInputIngress::active_turn("turn-a", TurnInputCheckpointBoundary::AfterWork)
 }

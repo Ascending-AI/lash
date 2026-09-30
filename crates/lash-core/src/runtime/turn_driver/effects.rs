@@ -401,15 +401,12 @@ impl RuntimeTurnDriver<'_> {
             self.drive_root.as_ref(),
         ) {
             (Some(store), Some(fence), Some(root)) => {
-                let mut policy = self
+                let policy = self
                     .host
                     .core
                     .durability
                     .queued_work_batching
                     .admission_policy(self.policy.context_window_tokens());
-                policy.max_rows = self
-                    .turn_context
-                    .checkpoint_queued_work_limit(policy.max_rows);
                 store
                     .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
                         fence: fence.clone(),

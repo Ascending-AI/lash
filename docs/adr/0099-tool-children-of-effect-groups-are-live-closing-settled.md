@@ -433,11 +433,11 @@ host-installed wiring as the tool implementation behind it, and is not
 recorded. The same holds for the registries, the session services, the event
 sender and the clock.
 
-**4. Turn context is never recorded.** `TurnContext` holds a turn's prompt
-layer and its live runtime correlation, and has no `Serialize`. It is not
-carried, and this costs nothing: a tool reads nothing from it. A send refuses a
-live per-turn prompt, the runtime correlation is the runtime's own, and process
-runners construct their tool dispatch with `TurnContext::default()`. The live
+**4. Turn context is never recorded.** `TurnContext` holds only live runtime
+correlation and has no `Serialize`. The request carries no correlation; process
+runners construct their tool dispatch with `TurnContext::default()`. Per-send
+prompts live in durable `RunSpec` overrides, and the retired live prompt and
+selected-drain fields are deleted (FIG-4226). The live
 plugin inputs a tool once read through `ToolContext::plugin_input` are deleted
 (ADR 0101 A6, FIG-3837). So the request records no turn-context payload and
 needs no refusal.

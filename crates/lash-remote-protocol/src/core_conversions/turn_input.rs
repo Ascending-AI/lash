@@ -153,21 +153,11 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::TurnInput) -> Result<Self, Self::Error> {
-        // `turn_context` has private internals and is inspected through
-        // accessors below; new TurnContext fields are not guarded here.
         let lash_core::TurnInput {
             items,
             trace_turn_id,
-            turn_context,
+            turn_context: _,
         } = value;
-        // A per-turn prompt layer lives in the process-local turn context and
-        // cannot survive durable acceptance; the replacement is the send's
-        // run spec (FIG-3838).
-        if !turn_context.prompt_layer().is_empty() {
-            return Err(RemoteProtocolError::NonRemoteSafeTurnInput(
-                "per-turn prompt layers cannot cross a remote boundary".to_string(),
-            ));
-        }
         Ok(Self {
             items: items
                 .into_iter()
