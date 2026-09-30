@@ -14,10 +14,6 @@
 //! `outcome`. Removing that field from the masked commit reproduces each old
 //! digest; every other committed byte is unchanged.
 //!
-//! The two cancelled pins were re-pinned for ADR 0114 (FIG-433): a stopped
-//! turn's commit named its sealed partial in a new field. Removing that field
-//! from the masked commit reproduced each old digest.
-//!
 //! The two cancelled pins were re-pinned for ADR 0116 (FIG-4054): `batch` is
 //! protocol sugar, so the test protocol registers no `batch` tool and the
 //! committed tool state, which recorded that registration, is now empty. The

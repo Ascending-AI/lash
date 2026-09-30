@@ -4,7 +4,7 @@ use crate::session_sql::session_sql;
 
 /// End every frame in `left` (the frames the commit leaves) in the commit's
 /// transaction: fence it and upsert its `Ended` cleanup with no carries
-/// (ADR 0113 §3.1, Lane G amendment). A transition first carries its
+/// (ADR 0113 §3.1). A transition first carries its
 /// artifacts out of its `ended` frame, one of `left`, into the successor,
 /// and gates every cleanup on its execution; without one the cleanups are
 /// ungated. The referrer locks of every ended frame and the successor are

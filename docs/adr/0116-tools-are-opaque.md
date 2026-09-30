@@ -6,11 +6,9 @@ Accepted 2026-09-29 (FIG-3562). It pins the end state and the four lanes
 that build it (§10). The lanes land directly on `main`, and each keeps the
 workspace compiling. There is no integration branch. It is consistent with
 [ADR 0112](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md),
-[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) and
-[ADR 0114](0114-a-stopped-turns-partial-output-is-sealed-durably-and-returned-to-the-host.md),
-whose cutovers are in flight on `fig-1628/cutover`, `fig-4031/referrers` and
-`fig-433/stopped-partials`. §10 carves this arc's files out of their lane
-globs. Nothing below describes current behaviour unless it cites today's
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md),
+Artifact storage follows ADR 0113; `fig-1628/cutover` follows ADR 0112.
+§10 carves this arc's files out of ADR 0112's lane globs. Nothing below describes current behaviour unless it cites today's
 code. Every citation was checked at `5436e99e02`.
 
 The rulings on FIG-3562 (Sam, 2026-09-29) are binding:
@@ -211,8 +209,7 @@ consumes:
 
 Amended 2026-09-29 (FIG-4113,
 [ADR 0122](0122-a-stopped-turns-uncommitted-tail-lives-only-on-the-live-stream.md)):
-ADR 0114's `progress()` sink is deleted with the capture it wrote to. A tool's
-output reaches the host only with its completed call.
+A tool's output reaches the host only with its completed call.
 
 `DeferredToolResolver` and `link_with_deferred_resolution`
 (`crates/lash-lashlang-runtime/src/deferred.rs:1-15,82-111`) are link-time,
@@ -1084,8 +1081,7 @@ This commit adds a dated "Amendment (FIG-3562, 2026-09-29)" note to
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md),
 [ADR 0105](0105-the-drive-is-deterministic-workflow-code.md),
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md),
-[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md) and
-[ADR 0114](0114-a-stopped-turns-partial-output-is-sealed-durably-and-returned-to-the-host.md).
+and [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 Four more ADRs describe the replaced system in passing and get the same note:
 [ADR 0059](0059-before-tool-call-directives-compose-monotonically.md),
 [ADR 0074](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md),
@@ -1183,16 +1179,10 @@ PostgreSQL process registries, `envelope.rs`'s seal and cancel-work keys).
   3. `kiln clippy` is green.
   4. The §6 grep restricted to S's owned paths prints nothing.
 - Edges: B SOFT; `batch_of_spawns_overlaps`'s width-64 case lands after B.
-  `fig-4031/referrers` SOFT: ADR 0113's lane R owns `process/model.rs` and
-  its lane X owns `triggers/**`, `intent_executor.rs`, `group.rs` and the
-  process registries. S writes only its named regions there, and the branch
-  rebases over them. `fig-1628/cutover` SOFT: the branch rebases.
-  `fig-433/stopped-partials` SOFT.
+  `fig-1628/cutover` SOFT: the branch rebases.
 
 **D — deletion cutover.** Owns: `crates/lash-core-execution/src/tool_provider/**`
-(except ADR 0114's `progress` region of `tool_provider.rs`, §10.4, since
-deleted by ADR 0122, and the `enqueue_wake_delivery` region of
-`process_events.rs`);
+(except the `enqueue_wake_delivery` region of `process_events.rs`);
 `crates/lash-core-execution/src/tool_registry/**`;
 `crates/lash-core-execution/src/plugin/{registry.rs,registrar.rs,runtime_impl.rs}`;
 `crates/lash-core-execution/src/tool_dispatch.rs`;
@@ -1229,14 +1219,8 @@ Regions: §10.4.
   3. The §6 grep restricted to D's owned paths and D's §10.4 regions prints
      nothing.
 - Edges: B HARD (the standard batch must be off the orchestrating lane). S
-  HARD (`spawn_agent` must be off it). `fig-433/stopped-partials` SOFT: ADR
-  0114's lane R owns `tool_provider.rs` and puts `progress()` on
-  `AttemptContext`. D makes `ToolContext` crate-private and keeps its
-  `progress_reporter` field and `ToolProgressSink`; whichever lands second
-  rebases. (ADR 0122 has since deleted both.) `fig-4031/referrers` SOFT: ADR 0113's lane R owns `control.rs` and
-  `layered_host.rs`; D removes only the independent-work region. Its
-  `tool_child_driver/tests.rs` edits are carried as a region.
-  `fig-1628/cutover` SOFT: its branch touches `tool_provider.rs`,
+  HARD (`spawn_agent` must be off it). `fig-1628/cutover` SOFT: its branch
+  touches `tool_provider.rs`,
   `tool_provider/process_events.rs` and five `crates/lash/tests/ui/` files,
   and rebases over D.
 
@@ -1259,49 +1243,47 @@ still reaches, in the region the grep names, and the benign rewording in
 
 #### 10.3 Carve-outs from the in-flight cutovers
 
-ADR 0112's lanes glob whole crates (its §15). ADR 0113 §8 and ADR 0114 §8
-name files and regions. The files §10.2 gives B, S and D outright are carved
-out of those globs: the ADR 0112, 0113 and 0114 lanes do not edit them. The
-integrations of `fig-1628/cutover`, `fig-4031/referrers` and
-`fig-433/stopped-partials` rebase over `main` and resolve against this arc's
-changes there. Files an in-flight cutover owns by name stay with it, and this
-arc writes only the regions in §10.4.
+ADR 0112's lanes glob whole crates (its §15). The files §10.2 gives B, S
+and D outright are carved out of those globs: the ADR 0112 lanes do not edit
+them. The integration of `fig-1628/cutover` rebases over `main` and resolves
+against this arc's changes there. Files an in-flight cutover owns by name
+stay with it, and this arc writes only the regions in §10.4.
 
 #### 10.4 Shared files and regions
 
 | Shared file | Owner | FIG-3562 lane and region |
 |---|---|---|
-| `crates/lash-core-execution/src/tool_provider.rs` | ADR 0114 lane R | D: everything except the `progress` accessor, `progress_reporter`, `ToolProgressReporter`, `ToolProgressSink` and `ProgressRefused`, which were 0114's and are deleted by ADR 0122 (FIG-4113) |
+| `crates/lash-core-execution/src/tool_provider.rs` | none | D: everything |
 | `crates/lash-core-execution/src/tool_provider/process_events.rs` | ADR 0112 runtime | D: remove `ToolProcessEventClient`; `enqueue_wake_delivery` is untouched |
-| `crates/lash-core-execution/src/session/tool_execution.rs` | ADR 0114 lane R | D: the orchestrating and internal branches and the activation filter |
-| `crates/lash-core-execution/src/session/tool_execution/batch.rs` | ADR 0114 lane R | D: prose naming body callers |
-| `crates/lash-core-execution/src/session/tool_execution/group.rs` | ADR 0113 lane X | S: pending completion support for `DeclaredStart` (`:398-431`) |
-| `crates/lash-core-execution/src/runtime/process/model.rs` | ADR 0113 lane R | S: `SessionTurn`'s `output_contract` becomes `result`, and `SessionTurnResult` |
-| `crates/lash-core-execution/src/triggers/router.rs` and `triggers/router/tests.rs` | ADR 0113 lane X | S: the `SessionTurn` fingerprint arm |
+| `crates/lash-core-execution/src/session/tool_execution.rs` | none | D: the orchestrating and internal branches and the activation filter |
+| `crates/lash-core-execution/src/session/tool_execution/batch.rs` | none | D: prose naming body callers |
+| `crates/lash-core-execution/src/session/tool_execution/group.rs` | none | S: pending completion support for `DeclaredStart` (`:398-431`) |
+| `crates/lash-core-execution/src/runtime/process/model.rs` | none | S: `SessionTurn`'s `output_contract` becomes `result`, and `SessionTurnResult` |
+| `crates/lash-core-execution/src/triggers/router.rs` and `triggers/router/tests.rs` | none | S: the `SessionTurn` fingerprint arm |
 | `crates/lash-core-execution/src/runtime/process/testing/registration_refusals.rs`, `src/session.rs:158-175` | ADR 0112 runtime | S: the `output_contract` construction sites |
-| `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs` | ADR 0113 lane X | S: the declared-start launch entry beside `execute_final_tool_intents` |
+| `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs` | none | S: the declared-start launch entry beside `execute_final_tool_intents` |
 | `crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs` | this arc (D) | S: `await_child_completion`'s arming and cancel paths (`:1510-1601`); D: the rest |
-| `crates/lash-core-execution/src/runtime/effect/tool_child_driver/tests.rs` | ADR 0113 lane R edits it | D: remove the forwarder (`:1228-1233`) and the orchestrating cases |
-| `crates/lash-core-execution/src/runtime/effect/envelope.rs` | ADR 0114 lane R (C0 region) | S: the `launch:seal` and `cancel-work` replay keys; D: prose at `:404` |
-| `crates/lash-core-execution/src/runtime/effect/executor/control.rs`, `layered_host.rs` | ADR 0113 lane R | D: remove `drive_independent_effect_work` and `IndependentEffectWork` |
+| `crates/lash-core-execution/src/runtime/effect/tool_child_driver/tests.rs` | none | D: remove the forwarder (`:1228-1233`) and the orchestrating cases |
+| `crates/lash-core-execution/src/runtime/effect/envelope.rs` | none | S: the `launch:seal` and `cancel-work` replay keys; D: prose at `:404` |
+| `crates/lash-core-execution/src/runtime/effect/executor/control.rs`, `layered_host.rs` | none | D: remove `drive_independent_effect_work` and `IndependentEffectWork` |
 | `crates/lash-core-execution/src/runtime/effect/executor/control/scope.rs`, `executor.rs`, `mod.rs`, `runtime/mod.rs` | ADR 0112 runtime | D: prose and export lines |
 | `crates/lash-core-execution/src/lib.rs`, `crates/lash-core/src/lib.rs`, `crates/lash-core/src/runtime/mod.rs` | ADR 0112 runtime | B, S, D: their export lines |
 | `crates/lash-core/src/testing/runtime_helpers.rs` | ADR 0112 readers | D: orchestrating helpers |
-| `crates/lash-sansio/src/lib.rs` | ADR 0114 lane R (C0 region) | B: plan type exports; D: the `ToolActivation` export |
-| `crates/lash-sqlite-store/src/process_registry/**`, `crates/lash-postgres-store/src/postgres/process_registry/**`, their schemas | ADR 0113 lanes S and P; ADR 0112 SQLite and PostgreSQL | S: the consumer hold column, its prune check and its release statement |
-| `crates/lash-lashlang-runtime/src/{replay_run.rs,replay_commands.rs,replay_run_tests.rs,cell_bindings.rs,lib.rs,lib_tests.rs}` | ADR 0113 lane X | D: the orchestrating row shape and prose; the `Internal` filter |
-| `crates/lash-protocol-rlm/src/{driver.rs,control_tools.rs}`, `src/executor/state/tests.rs` | ADR 0112 runtime; ADR 0113 lane F (`executor/**`) | D: activation lines and `ToolContext` test constructors |
+| `crates/lash-sansio/src/lib.rs` | none | B: plan type exports; D: the `ToolActivation` export |
+| `crates/lash-sqlite-store/src/process_registry/**`, `crates/lash-postgres-store/src/postgres/process_registry/**`, their schemas | ADR 0112 SQLite and PostgreSQL | S: the consumer hold column, its prune check and its release statement |
+| `crates/lash-lashlang-runtime/src/{replay_run.rs,replay_commands.rs,replay_run_tests.rs,cell_bindings.rs,lib.rs,lib_tests.rs}` | none | D: the orchestrating row shape and prose; the `Internal` filter |
+| `crates/lash-protocol-rlm/src/{driver.rs,control_tools.rs}`, `src/executor/state/tests.rs` | ADR 0112 runtime | D: activation lines and `ToolContext` test constructors |
 | `crates/lash-remote-protocol/src/{tools.rs,core_conversions/tools.rs}` | ADR 0112 runtime | D: the activation field |
 | `crates/lash-plugin-process-controls/src/lib.rs` | none | D: the test helper at `:582-596` |
 | `crates/lash-restate/src/controller/scope_recording.rs` | ADR 0112 runtime | D: remove the forwarder |
 | `crates/lash-restate/src/tests/conformance_and_poison.rs` | ADR 0112 runtime | B and S: live registrations; D: the orchestration factory at `:317-339` |
 | `crates/lash-restate/src/tests/{journal_cut_runner.rs,effect_group_conformance.rs,process_start_replay_on_the_double.rs,turn_laws_on_the_double.rs}`, `src/effect_group/dispatch.rs`, `src/tests.rs` | ADR 0112 runtime | D: orchestrating cases and prose; B and S: `mod` lines |
-| `crates/lash-conformance/src/conformance/{mod.rs,registration_macro_support.rs,turn_runner.rs,segment_redrive.rs,turn_crash_matrix/seam_controllers.rs,process_registry/registration.rs}`, `src/macros.rs` | ADR 0112 readers (ADR 0113 lane K and ADR 0114 lane S hold macro blocks) | B and S: their `mod` lines and macro blocks; B: the group-capable runner; D: the orchestrating and independent-work cases and the start-key retarget |
+| `crates/lash-conformance/src/conformance/{mod.rs,registration_macro_support.rs,turn_runner.rs,segment_redrive.rs,turn_crash_matrix/seam_controllers.rs,process_registry/registration.rs}`, `src/macros.rs` | ADR 0112 readers | B and S: their `mod` lines and macro blocks; B: the group-capable runner; D: the orchestrating and independent-work cases and the start-key retarget |
 | `crates/lash-sim/tests/possession_conservation.rs` | ADR 0112 readers | D |
-| `crates/lash/src/lib.rs` | ADR 0112 runtime (ADR 0113 R and ADR 0114 H hold export regions) | S: `DeclaredStart` exports; D: the `lash::tools` removals |
+| `crates/lash/src/lib.rs` | ADR 0112 runtime | S: `DeclaredStart` exports; D: the `lash::tools` removals |
 | `crates/lash/src/tests/agent_scenarios/harness.rs`, `src/tests/turn_streaming.rs` | ADR 0112 runtime | B: the non-standard batch installer; D: orchestrating cases |
 | `crates/lash/tests/integration/integrator_facade.rs`, `tests/triggers_evidence.rs` | ADR 0112 readers | D |
-| `crates/lash/BUILD.bazel` | ADR 0112 runtime (ADR 0113 K and ADR 0114 H hold targets) | S and D: `ui_fixtures` entries |
+| `crates/lash/BUILD.bazel` | ADR 0112 runtime | S and D: `ui_fixtures` entries |
 | `.github/workflows/ci.yml`, `.pre-commit-config.yaml`, `scripts/push-gate.sh`, `scripts/test_confidence_gate_ci_contract.py` | none | D: the lint wiring |
 | `runbooks/process-operations/runbook.md`, `examples/agent-workbench/README.md` | ADR 0112 readers | S: the spawn row; D: the `ToolContext` passage |
 

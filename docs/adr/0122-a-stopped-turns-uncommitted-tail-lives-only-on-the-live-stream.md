@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4113). Supersedes
-[ADR 0114](0114-a-stopped-turns-partial-output-is-sealed-durably-and-returned-to-the-host.md)
-and keeps its publish-after-commit decision (its §4.3, step 5). It builds on
+Accepted 2026-09-29 (FIG-4113). A stopped turn publishes its terminal only
+after the accepted commit. It builds on
 the stop semantics of
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
 the bounded live replay of
@@ -17,20 +16,11 @@ Sam's ruling on audit G14 (2026-09-29) binds this decision:
 - Checkpoints are frequent. A host that wants output streamed after the last
   checkpoint consumes the live stream and may resubmit it as ordinary input.
   Lash keeps no durable record of it and never feeds it back.
-- The capture of ADR 0114 is removed, with its follow-ups FIG-4069 and
-  FIG-4071, and so is the observer's discard of lagging deltas on a
-  cancellation.
 
 ## Context
 
-ADR 0114 sealed a stopped turn's uncommitted output into a durable, typed
-partial. It needed a fourth store segment with four tables on each backend,
-a capture writer on every model call and tool attempt that persisted each
-batch before publishing it, a seal fenced into the stop's commit, a tool
-progress sink, provider tool-input events, a lost-root seal and host reads.
-The tail it kept is short, because a turn checkpoints at every protocol
-iteration, and a host already receives every byte of it live. After FIG-4114
-a host can also find it exactly: it is everything after the last
+A turn checkpoints at every protocol iteration. The host receives the
+uncommitted tail live and can identify it as everything after the last
 `CheckpointRecorded` marker.
 
 ## Decision
@@ -78,8 +68,7 @@ a host can also find it exactly: it is everything after the last
 
 6. **Stops stay typed.** `TurnStop`, its cancellation evidence with mode and
    iteration, and `RootTerminalCause` (including `SubstrateLost {
-   cancelled_by }` and `Refused`) carry why a turn or root stopped. ADR
-   0114's `StopReason` projection is deleted.
+   cancelled_by }` and `Refused`) carry why a turn or root stopped.
 
 ## What is deleted
 

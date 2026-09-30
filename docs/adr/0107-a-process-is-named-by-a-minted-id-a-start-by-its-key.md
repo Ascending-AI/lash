@@ -179,5 +179,5 @@ staged there. After its row commits, a start that staged under `Start(key)`
 checks for the fence and, if it finds one, holds its content under
 `ProcessRecord(id)` itself. A row that committed before the fence, after the
 refusing start read the key, is held by the cleanup executor when it applies
-`Start(key)`'s end (ADR 0113, FIG-4130 amendment); the refusing start no
+`Start(key)`'s end (ADR 0113 §3.3); the refusing start no
 longer reads the registry again.

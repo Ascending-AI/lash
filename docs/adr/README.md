@@ -159,7 +159,6 @@ The generated region below is checked against the live filenames and headings.
 | 0111 | [A deployment namespace prefixes every Restate name lash binds or calls](0111-a-deployment-namespace-prefixes-every-restate-name.md) |
 | 0112 | [The store is multi-session, and a session is resident from its current frame](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md) |
 | 0113 | [Artifacts are kept alive only by their referrers](0113-artifacts-are-kept-alive-only-by-their-referrers.md) |
-| 0114 | [A stopped turn's partial output is sealed durably and returned to the host](0114-a-stopped-turns-partial-output-is-sealed-durably-and-returned-to-the-host.md) |
 | 0115 | [The 1.0 binary carries its half of every upgrade](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) |
 | 0116 | [Tools are opaque, batch is sugar, and a spawn is a declared start](0116-tools-are-opaque.md) |
 | 0117 | [Lash names every tool call](0117-lash-names-every-tool-call.md) |

@@ -91,7 +91,7 @@ fn commit_frame_transition_tx(
 }
 
 /// End each frame in `left`: fence it and upsert its `Ended` cleanup with no
-/// carries, gated on `gate` (ADR 0113 §3.1, Lane G amendment).
+/// carries, gated on `gate` (ADR 0113 §3.1).
 fn end_frames_tx(
     tx: &rusqlite::Connection,
     session_id: &SessionId,

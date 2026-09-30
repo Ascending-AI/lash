@@ -117,7 +117,7 @@ impl FrameTransition {
 
 /// Every frame a commit leaves, in the order it left them: the prior head's
 /// frame, then each frame whose open the commit appends, except the frame
-/// the new head holds (ADR 0113 §3.1, Lane G amendment). A store ends all of
+/// the new head holds (ADR 0113 §3.1). A store ends all of
 /// them in the commit's transaction, whether or not a [`FrameTransition`]
 /// rides the commit, so no frame outlives the commit that leaves it.
 #[must_use]
