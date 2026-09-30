@@ -33,6 +33,8 @@ use sqlx::PgPool;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
+mod provider_watch;
+
 /// The Restate workflow every load operation runs as.
 pub const LOAD_WORKFLOW: &str = "E2eLoadWorkflow";
 /// Names the checked-in workload every process of a run generates from.

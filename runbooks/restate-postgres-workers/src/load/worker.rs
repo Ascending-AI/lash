@@ -285,9 +285,14 @@ impl LoadWorker {
                 .iter()
                 .any(|queued| queued.during_active_turn);
         if needs_running_root {
-            wait_for_provider_receipt(&self.witness, &operation)
-                .await
-                .map_err(terminal_chain)?;
+            super::provider_watch::wait_for_provider_receipt(
+                &self.core,
+                &self.witness,
+                main.receipt(),
+                &operation,
+            )
+            .await
+            .map_err(terminal_chain)?;
         }
         let mut queued = Vec::new();
         for input in plan
@@ -693,25 +698,6 @@ fn input_outcome(outcome: lash::SendOutcome) -> InputOutcome {
         final_value,
         outcome: settled,
     }
-}
-
-/// Wait until the provider receipted a request for `operation`.
-async fn wait_for_provider_receipt(witness: &PgPool, operation: &str) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(120);
-    while Instant::now() < deadline {
-        let asked: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM witness_provider_receipts WHERE workflow_id = $1)",
-        )
-        .bind(operation)
-        .fetch_one(witness)
-        .await
-        .with_context(|| format!("poll the provider receipt of `{operation}`"))?;
-        if asked {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    anyhow::bail!("the provider was never asked for `{operation}`")
 }
 
 #[cfg(test)]
