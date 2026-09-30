@@ -93,7 +93,7 @@ crate::statements! {
 
         /// Retire generation `?2`'s armed condemnation of `?1` once the bytes
         /// are gone. The digest returns to `Free` holding no upload evidence,
-        /// because condemning it already cleared every manifest row.
+        /// because condemning it already deleted the upload evidence.
         delete_armed = "DELETE FROM attachment_condemnations
              WHERE attachment_id = ?1 AND sweep_generation = ?2 AND phase = 'deleting'";
 

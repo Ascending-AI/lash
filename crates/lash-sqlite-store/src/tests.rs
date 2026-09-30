@@ -609,9 +609,7 @@ async fn live_attachment_refs_reads_the_catalog() {
         lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
             &store,
             &lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::Session(
-                    (&SessionId::from("sess-1")).clone(),
-                ),
+                lash_core_execution::ArtifactReferrer::Session(SessionId::from("sess-1")),
             )
             .expect("claim"),
             std::slice::from_ref(&attachment_id),

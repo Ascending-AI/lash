@@ -133,7 +133,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     let held = SessionAttachmentStore::new(
         Arc::clone(&attachments),
         session.clone(),
-        lash_core_execution::RuntimeOwner::Session((&session_id).clone().into()),
+        lash_core_execution::RuntimeOwner::Session(session_id.clone()),
     )
     .put(b"held by a committed turn".to_vec(), octet_meta())
     .await

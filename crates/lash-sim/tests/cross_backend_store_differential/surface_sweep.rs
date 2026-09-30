@@ -313,13 +313,17 @@ fn unknown_attachment_id() -> AttachmentId {
     AttachmentId::parse(UNKNOWN_ATTACHMENT_ID).expect("the unknown-attachment id must parse")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the session referrer always permits an unguarded claim"
+)]
 fn unknown_attachment_write(session_id: &SessionId) -> lash_core::AttachmentWrite {
     lash_core::AttachmentWrite {
         attachment_id: unknown_attachment_id(),
         claim: lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::Session(
             session_id.clone(),
         ))
-        .expect("claim"),
+        .expect("the session referrer permits an unguarded claim"),
     }
 }
 

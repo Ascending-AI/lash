@@ -761,7 +761,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         if contains_ref {
             lash_core_execution::AttachmentReferrers::forget_attachment_ref(
                 &*store,
-                &intent().claim.referrer(),
+                intent().claim.referrer(),
                 &attachment_id,
             )
             .await
@@ -849,7 +849,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
         &*live_store,
         &lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::Session((&request.session_id).clone()),
+            lash_core_execution::ArtifactReferrer::Session(request.session_id.clone()),
         )
         .expect("claim"),
         std::slice::from_ref(&attachment.id),
