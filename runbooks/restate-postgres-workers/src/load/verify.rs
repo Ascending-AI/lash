@@ -5,7 +5,8 @@
 //! workers read.
 
 use super::{
-    CancelOutcome, DeleteReport, LoadContext, LoadRequest, LoadResponse, ReportedStatus, TurnReport,
+    CancelOutcome, DeleteReport, InputOutcome, LoadContext, LoadRequest, LoadResponse,
+    ReportedStatus, TurnReport,
 };
 use anyhow::{Context, Result};
 use lash_perf::workload::{OperationId, TurnPlan};
@@ -303,6 +304,8 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
         }
     };
 
+    let answered_inputs = answered_inputs(&evidence);
+
     // Turns, and everything a turn drives.
     let mut answered: BTreeMap<(u64, u64), (TurnPlan, TurnReport)> = BTreeMap::new();
     let mut planned_effects = BTreeSet::new();
@@ -390,7 +393,7 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
                 },
             );
         }
-        verify_queued(&evidence, &plan, &report, &mut note);
+        verify_queued(&evidence, &answered_inputs, &plan, &report, &mut note);
         verify_host_processes(&plan, &report, &mut note);
         if status == ReportedStatus::Answered {
             for call in plan.tool_batches.iter().flatten() {
@@ -475,6 +478,7 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
 
 fn verify_queued(
     evidence: &Evidence<'_>,
+    answered_inputs: &BTreeMap<String, AnsweredInput>,
     plan: &TurnPlan,
     report: &TurnReport,
     note: &mut impl FnMut(&'static str, Result<(), String>),
@@ -514,26 +518,92 @@ fn verify_queued(
                 },
             );
         } else {
-            // An input accepted while a root runs may be applied at one of
-            // its checkpoints: lash then answers it under that root, whose
-            // own receipts witness the model call.
-            let folded =
-                queued.outcome.root.is_some() && queued.outcome.root == report.outcome.root;
             note(
                 "queued-inputs",
                 if status == ReportedStatus::Answered
-                    && (evidence.receipted(key, "load_queued") || folded)
+                    && (evidence.receipted(key, "load_queued")
+                        || answered_by_a_receipted_input(
+                            evidence,
+                            answered_inputs,
+                            key,
+                            &queued.outcome,
+                        ))
                 {
                     Ok(())
                 } else {
                     Err(format!(
-                        "queued input `{key}` ended {status:?} with provider receipts {:?}",
+                        "queued input `{key}` ended {status:?} under root {:?} with final value {} and provider receipts {:?}",
+                        queued.outcome.root,
+                        queued.outcome.final_value,
                         evidence.receipts.get(key)
                     ))
                 },
             );
         }
     }
+}
+
+/// An input a root answered, as its operation's terminal reported it.
+struct AnsweredInput {
+    root: String,
+    /// The provider scenario that receipts a model call made for this input.
+    scenario: &'static str,
+}
+
+/// Every input a turn operation reported Answered under a known root, by its
+/// key: the turn's own input and each of its queued inputs.
+fn answered_inputs(evidence: &Evidence<'_>) -> BTreeMap<String, AnsweredInput> {
+    let mut inputs = BTreeMap::new();
+    for ((operation, subject), _) in evidence.sent.range(("turn", "")..("turn\u{1}", "")) {
+        let Ok(LoadResponse::Turn(report)) = evidence.response(operation, subject) else {
+            continue;
+        };
+        let turn = (report.operation.as_str(), &report.outcome, "load_turn");
+        let queued = report
+            .queued
+            .iter()
+            .map(|queued| (queued.key.as_str(), &queued.outcome, "load_queued"));
+        for (key, outcome, scenario) in std::iter::once(turn).chain(queued) {
+            if let (ReportedStatus::Answered, Some(root)) = (outcome.status, &outcome.root) {
+                inputs.insert(
+                    key.to_owned(),
+                    AnsweredInput {
+                        root: root.clone(),
+                        scenario,
+                    },
+                );
+            }
+        }
+    }
+    inputs
+}
+
+/// Whether `key`, which has no model call of its own, was answered by
+/// another input's receipted model call.
+///
+/// One root answers every input it admitted (ADR 0101 §5.2): an idle root
+/// admits the open prefix of accepted inputs, up to the turn-input admission
+/// bound, and a running root admits inputs at its checkpoints. The driver's
+/// sessions are open-loop, so a later turn's input can wait beside an earlier
+/// turn's queued input and share its root. The provider serves that root's
+/// call for the latest load marker its request carries, and the served cell
+/// finishes with that input's key, so only that input is receipted. `key` is
+/// then witnessed by the input its root's cell finished with: answered under
+/// the same root, with the provider receipt of its own model call.
+fn answered_by_a_receipted_input(
+    evidence: &Evidence<'_>,
+    answered_inputs: &BTreeMap<String, AnsweredInput>,
+    key: &str,
+    outcome: &InputOutcome,
+) -> bool {
+    let (Some(root), Some(answering)) = (outcome.root.as_deref(), outcome.finished_operation())
+    else {
+        return false;
+    };
+    answering != key
+        && answered_inputs.get(answering).is_some_and(|input| {
+            input.root == root && evidence.receipted(answering, input.scenario)
+        })
 }
 
 fn verify_host_processes(
@@ -793,7 +863,7 @@ mod tests {
     use super::*;
     use crate::load::{
         CronSetupReport, CronTickReport, DeletionOutcome, HostProcessReport, InputOutcome,
-        QueuedReport, actor_session_id, cron_session_id,
+        QueuedReport, actor_session_id, cron_session_id, turn_id_for,
     };
     use serde_json::json;
 
@@ -1187,5 +1257,135 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("coverage incomplete"))
         );
+    }
+
+    /// Two answered queued inputs of one actor's answered turns, in their
+    /// plans' order.
+    fn queued_pair(load: &LoadContext) -> (String, String) {
+        let generator = load.generator(RUN).expect("generator");
+        for actor in 0..u64::from(load.workload.spec().sessions) {
+            let answered: Vec<String> = (0..lash_perf::workload::SMOKE_TURNS_PER_SESSION)
+                .map(|ordinal| generator.plan(actor, ordinal).expect("plan"))
+                .filter(|plan| !plan.cancel)
+                .flat_map(|plan| plan.queued_inputs)
+                .filter(|input| !input.cancel)
+                .map(|input| input.idempotency_key)
+                .collect();
+            if let [first, second, ..] = answered.as_slice() {
+                return (first.clone(), second.clone());
+            }
+        }
+        panic!("the smoke workload plans two answered queued inputs in one session");
+    }
+
+    /// Point the reported outcome of input `key` (a turn's own input or one
+    /// of its queued inputs) at `root`, answered by the cell of `operation`.
+    fn answer(snapshot: &mut WitnessSnapshot, key: &str, root: &str, operation: &str) {
+        let answered = json!({ "operation": operation, "synthetic": true });
+        for event in &mut snapshot.events {
+            if event.operation != "turn" || event.phase != "terminal" {
+                continue;
+            }
+            let response = &mut event.detail["response"];
+            if response["operation"] == key {
+                response["outcome"]["root"] = json!(root);
+                response["outcome"]["final_value"] = answered;
+                return;
+            }
+            if let Some(queued) = response["queued"]
+                .as_array_mut()
+                .and_then(|queued| queued.iter_mut().find(|queued| queued["key"] == key))
+            {
+                queued["outcome"]["root"] = json!(root);
+                queued["outcome"]["final_value"] = answered;
+                return;
+            }
+        }
+        panic!("no reported outcome for `{key}`");
+    }
+
+    fn unreceipt(snapshot: &mut WitnessSnapshot, key: &str) {
+        snapshot.receipts.retain(|(receipted, _)| receipted != key);
+    }
+
+    /// FIG-4249: one root answers every input it admitted (ADR 0101 §5.2),
+    /// and the provider receipts its one model call under the latest input
+    /// the request carries. The earlier input has no receipt of its own; its
+    /// root's cell finished with the later input's key, which was answered
+    /// under the same root and receipted.
+    #[test]
+    fn a_queued_input_answered_by_a_receipted_input_of_its_root_is_witnessed() {
+        let load = smoke();
+        let base = ideal(&load, lash_perf::workload::SMOKE_TURNS_PER_SESSION);
+        let (earlier, later) = queued_pair(&load);
+
+        let mut shared = base.clone();
+        let root = turn_id_for(&earlier);
+        answer(&mut shared, &earlier, &root, &later);
+        answer(&mut shared, &later, &root, &later);
+        unreceipt(&mut shared, &earlier);
+        let shared = verdict(&shared);
+        assert!(shared.passed(), "{:?}", shared.lines());
+
+        // An input applied at a checkpoint of its own turn's root, which
+        // then finished with the turn's cell.
+        let (id, _) = OperationId::parse(&earlier).expect("a queued key");
+        let turn = id.key();
+        let mut folded = base.clone();
+        let root = turn_id_for(&turn);
+        answer(&mut folded, &turn, &root, &turn);
+        answer(&mut folded, &earlier, &root, &turn);
+        unreceipt(&mut folded, &earlier);
+        let folded = verdict(&folded);
+        assert!(folded.passed(), "{:?}", folded.lines());
+    }
+
+    /// Nothing but a receipted model call of the same root witnesses an
+    /// answered input that has no receipt of its own.
+    #[test]
+    fn a_queued_input_without_a_receipted_answer_of_its_root_is_a_violation() {
+        let load = smoke();
+        let base = ideal(&load, lash_perf::workload::SMOKE_TURNS_PER_SESSION);
+        let (earlier, later) = queued_pair(&load);
+        let root = turn_id_for(&earlier);
+        let mut shared = base.clone();
+        answer(&mut shared, &earlier, &root, &later);
+        answer(&mut shared, &later, &root, &later);
+        unreceipt(&mut shared, &earlier);
+
+        let mut other_root = shared.clone();
+        answer(&mut other_root, &later, &turn_id_for(&later), &later);
+        assert!(violated(&verdict(&other_root), "queued-inputs"));
+
+        let mut unreceipted = shared.clone();
+        unreceipt(&mut unreceipted, &later);
+        assert!(violated(&verdict(&unreceipted), "queued-inputs"));
+
+        let mut rootless = shared.clone();
+        for event in &mut rootless.events {
+            for queued in event.detail["response"]["queued"]
+                .as_array_mut()
+                .into_iter()
+                .flatten()
+            {
+                if queued["key"] == earlier.as_str() {
+                    queued["outcome"]["root"] = Value::Null;
+                }
+            }
+        }
+        assert!(violated(&verdict(&rootless), "queued-inputs"));
+
+        let mut self_answered = shared.clone();
+        answer(&mut self_answered, &earlier, &root, &earlier);
+        assert!(violated(&verdict(&self_answered), "queued-inputs"));
+
+        let mut unanswered = shared;
+        answer(
+            &mut unanswered,
+            &earlier,
+            &root,
+            "an operation no input reported",
+        );
+        assert!(violated(&verdict(&unanswered), "queued-inputs"));
     }
 }
