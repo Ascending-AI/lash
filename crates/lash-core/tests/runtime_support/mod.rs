@@ -100,6 +100,75 @@ pub(crate) async fn settle_pending_session_command(
     ));
 }
 
+/// Apply a host head write as the session's drive does (FIG-4202): submit
+/// `command` to `runtime`'s command lane, run the runtime's own next drive
+/// on `double`, which applies it at the turn boundary, and answer the typed
+/// outcome it settled with.
+pub(crate) async fn apply_host_command(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    command: lash_core::runtime::SessionCommand,
+    request: &str,
+) -> lash_core::runtime::SessionCommandOutcome {
+    use lash_core::testing::TestTurnDrive as _;
+
+    let receipt = runtime
+        .submit_session_command(command, request)
+        .await
+        .expect("submit the host command");
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::queue_drain(
+            lash_core::SessionId::from(runtime.session_id()),
+            request,
+        ))
+        .await
+        .expect("open the host command's drive handler");
+    runtime
+        .drive_next_root(
+            request,
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                handler.scoped(),
+            ),
+        )
+        .await
+        .expect("the drive applies the host command");
+    handler
+        .close()
+        .await
+        .expect("close the host command's drive handler");
+    match runtime
+        .settle_session_command(receipt)
+        .await
+        .expect("read the host command's settlement")
+    {
+        lash_core::runtime::SessionCommandSettlement::Applied { outcome, .. } => outcome,
+        other => panic!("the host command settles applied: {other:?}"),
+    }
+}
+
+/// [`apply_host_command`] for an append: the append's typed outcome.
+pub(crate) async fn apply_host_append(
+    runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
+    request: lash_core::AppendSessionNodesRequest,
+) -> lash_core::AppendSessionNodesOutcome {
+    let key = request.operation_id.clone();
+    match Box::pin(apply_host_command(
+        runtime,
+        double,
+        lash_core::runtime::SessionCommand::AppendSessionNodes {
+            request: Box::new(request),
+        },
+        &key,
+    ))
+    .await
+    {
+        lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome } => outcome,
+        other => panic!("an append settles with its own outcome: {other:?}"),
+    }
+}
+
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =

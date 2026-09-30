@@ -549,6 +549,18 @@ pub enum StoreError {
         session_id: SessionId,
         batch_id: BatchId,
     },
+    /// A head write that presented no drive fence found the session head
+    /// owned by a drive (FIG-4202): a bound root, an owed follow-on, or an
+    /// open session command a drive applies at its next boundary. Nothing
+    /// was written. A host moves the head through a session command instead,
+    /// and a dirty park answers busy and keeps its runtime.
+    #[error(
+        "session `{session_id}`'s head is owned by {owner}; a head write outside the drive is refused"
+    )]
+    SessionHeadOwned {
+        session_id: SessionId,
+        owner: super::SessionHeadOwner,
+    },
     /// A storage operation fenced by a drive presented a fence that is not
     /// the session's current drive epoch: a later admission superseded it
     /// (ADR 0105 §2). Nothing was written.
@@ -938,6 +950,7 @@ impl StoreError {
             | Self::IngressSettlementDuplicate { .. }
             | Self::IngressSettlementUnfenced { .. }
             | Self::SessionCommandWithdrawn { .. }
+            | Self::SessionHeadOwned { .. }
             | Self::StaleDriveFence { .. }
             | Self::RootAlreadyTerminal { .. }
             | Self::RootInputWithdrawn { .. }
@@ -1054,6 +1067,7 @@ impl StoreError {
             Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",
             Self::IngressSettlementUnfenced { .. } => "IngressSettlementUnfenced",
             Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
+            Self::SessionHeadOwned { .. } => "SessionHeadOwned",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
             Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
             Self::RootInputWithdrawn { .. } => "RootInputWithdrawn",

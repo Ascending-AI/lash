@@ -681,7 +681,10 @@ impl LoadWorker {
             match self.core.session(session_id.clone()).open().await {
                 Err(error) => break Some(format!("{error:?}")),
                 Ok(session) => {
-                    session.close().await.map_err(turn_handler_error)?;
+                    session
+                        .close()
+                        .await
+                        .map_err(|refused| turn_handler_error(refused.into()))?;
                     if deletion != DeletionOutcome::Closing
                         || started.elapsed() >= CLOSING_DELETE_WAIT
                     {

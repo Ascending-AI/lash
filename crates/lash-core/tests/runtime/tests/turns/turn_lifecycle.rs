@@ -879,15 +879,28 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
     let colliding_frame_key =
         lash_core::FrameKey::from_caller_material("caller-named-existing-frame")
             .expect("non-empty caller material");
-    let opened = runtime
-        .open_agent_frame(
-            lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
-                colliding_frame_key,
-                lash_core::AgentFrameReason::initial(),
+    // A host's frame open is a session command the runtime's next drive
+    // applies (FIG-4202).
+    let opened = match Box::pin(crate::runtime_support::apply_host_command(
+        &mut runtime,
+        &double,
+        lash_core::runtime::SessionCommand::OpenAgentFrame {
+            request: Box::new(
+                lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
+                    colliding_frame_key,
+                    lash_core::AgentFrameReason::initial(),
+                ),
             ),
-        )
-        .await
-        .expect("pre-open caller-named frame");
+        },
+        "pre-open-caller-named-frame",
+    ))
+    .await
+    {
+        lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
+            outcome: lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome },
+        } => outcome,
+        other => panic!("pre-open caller-named frame: {other:?}"),
+    };
     assert!(opened.opened, "caller-named collision target must exist");
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
         executor: Arc::clone(&executor),

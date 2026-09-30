@@ -283,7 +283,6 @@ pub mod facade_support {
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
-    pub use crate::runtime::ParkedSession;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
@@ -376,6 +375,7 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::turn_control_binding_id_for_scope;
+    pub use crate::runtime::{ParkRefused, ParkedSession};
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};

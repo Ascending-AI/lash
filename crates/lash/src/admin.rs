@@ -318,22 +318,18 @@ impl SessionAdmin {
     }
 
     async fn append_messages(&self, messages: Vec<PluginMessage>) -> Result<()> {
-        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
-            Box::pin(
-                runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
-                    operation_id: uuid::Uuid::new_v4().to_string(),
-                    nodes: messages
-                        .into_iter()
-                        .map(lash_core::SessionAppendNode::message)
-                        .collect(),
-                    requires_ancestor_node_id: None,
-                }),
-            )
-            .await
-            .map(|_| ())
-            .map_err(Into::into)
-        }))
+        Box::pin(
+            self.append_session_nodes(lash_core::AppendSessionNodesRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                nodes: messages
+                    .into_iter()
+                    .map(lash_core::SessionAppendNode::message)
+                    .collect(),
+                requires_ancestor_node_id: None,
+            }),
+        )
         .await
+        .map(|_| ())
     }
 
     async fn append_plugin_body(
@@ -341,19 +337,15 @@ impl SessionAdmin {
         plugin_type: impl Into<String>,
         body: serde_json::Value,
     ) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            Box::pin(
-                runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
-                    operation_id: uuid::Uuid::new_v4().to_string(),
-                    nodes: vec![lash_core::SessionAppendNode::plugin(plugin_type, body)],
-                    requires_ancestor_node_id: None,
-                }),
-            )
-            .await
-            .map(|_| ())
-            .map_err(Into::into)
-        })
+        Box::pin(
+            self.append_session_nodes(lash_core::AppendSessionNodesRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                nodes: vec![lash_core::SessionAppendNode::plugin(plugin_type, body)],
+                requires_ancestor_node_id: None,
+            }),
+        )
         .await
+        .map(|_| ())
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -611,119 +603,6 @@ impl SessionAdmin {
             .map_err(Into::into)
     }
 
-    async fn run_plugin_command_raw(
-        &self,
-        name: &str,
-        args: serde_json::Value,
-    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        let session_id = SessionId::from(self.runtime.observe().session_id());
-        let writer = self.runtime.writer();
-        let mut runtime = writer.lock().await;
-        let operation_scope = lash_core::ExecutionScope::runtime_operation(
-            lash_core::store::mint_facade_operation_id(
-                &session_id,
-                lash_core::store::FacadePluginOperation::Command,
-                name,
-            ),
-        );
-        let receipt = runtime
-            .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
-            .await;
-        // The receipt and its observations land first. Retirement failures
-        // are surfaced: the committed lifecycle fence remains pending durable
-        // cleanup and the retained-evidence sweep can resume it.
-        if let Ok(receipt) = &receipt {
-            self.record_plugin_operation_observations(
-                &receipt.events,
-                &receipt.pending_turn_inputs,
-            );
-            self.runtime.publish_from(&runtime);
-        }
-        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
-            .await?;
-        Ok(receipt?)
-    }
-
-    async fn run_plugin_task_raw_with_cancel(
-        &self,
-        name: &str,
-        args: serde_json::Value,
-        cancellation_token: CancellationToken,
-    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        let session_id = SessionId::from(self.runtime.observe().session_id());
-        let writer = self.runtime.writer();
-        let mut runtime = writer.lock().await;
-        let scope_id = lash_core::store::mint_facade_operation_id(
-            &session_id,
-            lash_core::store::FacadePluginOperation::Task,
-            name,
-        );
-        let operation_scope = lash_core::ExecutionScope::runtime_operation(scope_id);
-        let scoped_effect_controller = runtime
-            .effect_host()
-            .scoped_static(
-                lash_core::AdmittedScope::new(operation_scope.clone()),
-            )
-            .map_err(EmbedError::Runtime)?
-            .ok_or_else(|| {
-                EmbedError::Plugin(lash_core::PluginError::Session(
-                    "plugin task execution requires an effect host that can create a static runtime-operation scope".to_string(),
-                ))
-            })?;
-        let receipt = runtime
-            .run_plugin_task(
-                name,
-                args,
-                Some(session_id),
-                scoped_effect_controller,
-                cancellation_token,
-            )
-            .await;
-        // Receipt and observations first, retirement after, on success and
-        // failure alike: see `run_plugin_command_raw`.
-        if let Ok(receipt) = &receipt {
-            self.record_plugin_operation_observations(
-                &receipt.events,
-                &receipt.pending_turn_inputs,
-            );
-            self.runtime.publish_from(&runtime);
-        }
-        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
-            .await?;
-        Ok(receipt?)
-    }
-
-    /// Retire a facade-minted runtime-operation scope once its receipt has
-    /// been recorded. The retirement is gated on the store's own quiescence
-    /// proof: the receipt returning is not proof that nothing runs under the
-    /// scope (a run-to-completion group may still be draining, a promise may
-    /// still be awaited), so a live scope is left as it is. Its durable owner
-    /// is the retained-evidence reclaim sweep (ADR 0067): the receipt is
-    /// durable, so "receipt recorded and quiescent" is re-derived from the
-    /// store at sweep time, which no process-local queue survives a restart
-    /// to do. Any other failure is returned while its durable retirement
-    /// evidence remains pending.
-    async fn retire_operation_scope(
-        &self,
-        effect_host: &Arc<dyn lash_core::EffectHost>,
-        operation_scope: lash_core::ExecutionScope,
-    ) -> Result<()> {
-        match retire_facade_operation_scope(effect_host, &operation_scope).await {
-            // The scope's execution referrer ends when the engine answers
-            // its journal settled; the artifact-cleanup relay severs its
-            // edges then (ADR 0113 §3.7).
-            Ok(FacadeScopeRetirement::Retired) => {}
-            Ok(FacadeScopeRetirement::Deferred) => {
-                tracing::debug!(
-                    scope = %operation_scope.id(),
-                    "facade operation scope still has live effects; left to the reclaim sweep"
-                );
-            }
-            Err(err) => return Err(err),
-        }
-        Ok(())
-    }
-
     fn record_plugin_operation_observations(
         &self,
         events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],
@@ -767,7 +646,7 @@ impl SessionAdmin {
                         format!("compact-context:{}", uuid::Uuid::new_v4()),
                     ))
                     .await
-                    .map(SubmittedCompaction::Queued)
+                    .map(SubmittedCommand::Queued)
                     .map_err(EmbedError::Runtime);
                 }
                 let host = runtime.effect_host();
@@ -779,16 +658,18 @@ impl SessionAdmin {
                     .map_err(EmbedError::Runtime)?;
                 Box::pin(runtime.compact_storeless_context(instructions, controller))
                     .await
-                    .map(SubmittedCompaction::Applied)
+                    .map(SubmittedCommand::Applied)
                     .map_err(EmbedError::Runtime)
             })
             .await?;
         let outcome = match submitted {
-            SubmittedCompaction::Applied(outcome) => outcome,
-            SubmittedCompaction::Queued(receipt) => {
+            SubmittedCommand::Applied(outcome) => outcome,
+            SubmittedCommand::Queued(receipt) => {
                 match Box::pin(self.await_command_settlement(receipt, None)).await? {
-                    lash_core::runtime::SessionCommandSettlement::Compaction {
-                        outcome, ..
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::CompactContext { outcome },
+                        ..
                     } => outcome,
                     settlement => return Err(unsettled_command_error(settlement)),
                 }
@@ -1248,6 +1129,46 @@ pub struct SessionCommandAdmin {
 }
 
 impl SessionCommandAdmin {
+    /// Submit `command` to the session's command lane under a stable
+    /// `idempotency_key` and return its durable receipt, before it applies
+    /// (FIG-4202). The session's drive applies it at a turn boundary; a
+    /// resubmission under the same key names the same command. Await its
+    /// outcome with [`Self::settle`], from this handle or any other that holds
+    /// the receipt.
+    pub async fn submit(
+        &self,
+        command: lash_core::facade_support::SessionCommand,
+        idempotency_key: impl Into<String>,
+    ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
+        self.control
+            .submit_session_command(command, idempotency_key)
+            .await
+    }
+
+    /// Await the settlement of the command `receipt` names, reattaching by
+    /// its receipt (FIG-4202): applied with its typed outcome, a refusal
+    /// among them; cancelled when it was withdrawn; or pending, with the
+    /// receipt, when the settlement deadline passes first. Dropping this
+    /// await withdraws nothing: the command stays durable and settles.
+    pub async fn settle(
+        &self,
+        receipt: lash_core::facade_support::SessionCommandReceipt,
+    ) -> Result<lash_core::runtime::SessionCommandSettlement> {
+        Box::pin(self.control.await_command_settlement(receipt, None)).await
+    }
+
+    /// Withdraw the command `receipt` names (FIG-4202). A command no drive
+    /// has admitted is withdrawn transactionally and never applies; one a
+    /// drive already read, or that already settled, answers
+    /// [`SessionCommandWithdrawal::AlreadyAdmitted`] and settles as that
+    /// drive applies it.
+    pub async fn withdraw(
+        &self,
+        receipt: &lash_core::facade_support::SessionCommandReceipt,
+    ) -> Result<SessionCommandWithdrawal> {
+        self.control.withdraw_session_command(receipt).await
+    }
+
     /// The command drains asynchronously and recomputes the surface from live sources, so it
     /// takes no generation guard — any generation observed at enqueue time could legitimately
     /// have advanced by drain time.
@@ -1301,6 +1222,21 @@ pub struct SessionProcessAdmin {
 
 mod process_admin;
 
+mod host_commands;
+use host_commands::{HostPluginOperation, SubmittedCommand, unsettled_command_error};
+
+/// What withdrawing a submitted session command did (FIG-4202).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionCommandWithdrawal {
+    /// No drive had admitted the command: it is withdrawn, transactionally,
+    /// and never applies.
+    Withdrawn,
+    /// A drive already read the command, or it already settled: the
+    /// withdrawal lost the race, and the command settles as that drive
+    /// applies it.
+    AlreadyAdmitted,
+}
+
 #[derive(Clone)]
 /// Facade handle for session state administration.
 pub struct SessionStateAdmin {
@@ -1322,7 +1258,43 @@ impl SessionStateAdmin {
         plugin_type: impl Into<String>,
         body: serde_json::Value,
     ) -> Result<()> {
-        self.control.append_plugin_body(plugin_type, body).await
+        Box::pin(self.control.append_plugin_body(plugin_type, body)).await
+    }
+
+    /// Append `request`'s nodes to the session graph and await the append's
+    /// settlement (FIG-4202).
+    ///
+    /// The session's bound turn owns its head, so the append is a session
+    /// command its drive applies at the next turn boundary, after everything
+    /// a running turn commits. The request's `operation_id` is its
+    /// idempotency key. It answers
+    /// [`StaleBranch`](lash_core::AppendSessionNodesOutcome::StaleBranch)
+    /// when its required ancestor left the active path, and a
+    /// [`SessionError::SessionCommandPending`](crate::support::SessionError::SessionCommandPending)
+    /// with its receipt when the drive has not applied it by the settlement
+    /// deadline; the append stays durable and applies later.
+    pub async fn append_session_nodes(
+        &self,
+        request: lash_core::AppendSessionNodesRequest,
+    ) -> Result<lash_core::AppendSessionNodesOutcome> {
+        Box::pin(self.control.append_session_nodes(request)).await
+    }
+
+    /// Open `request`'s frame durably and await the open's settlement
+    /// (FIG-4202): a session command, keyed by `idempotency_key`, that the
+    /// session's drive opens and commits at the next turn boundary,
+    /// restarting its live interpreter from the frame's seed. A refused open
+    /// answers its typed runtime error.
+    pub async fn open_agent_frame(
+        &self,
+        request: lash_core::OpenAgentFrameRequest,
+        idempotency_key: impl Into<String>,
+    ) -> Result<lash_core::OpenAgentFrameOutcome> {
+        Box::pin(
+            self.control
+                .open_agent_frame(request, idempotency_key.into()),
+        )
+        .await
     }
 
     /// Replaces resident state WITHOUT durable publication; test and recovery
@@ -1375,37 +1347,6 @@ impl SessionStateAdmin {
     }
 }
 
-/// Retire a runtime-operation scope the facade minted for exactly one plugin
-/// operation. The scope id carries a fresh UUID no caller ever sees, so once
-/// the operation's receipt is back (or its failure is) nothing can replay
-/// under it: its effect journal, groups, and await-event promises are
-/// unreachable and go in one transaction, and the scope fence keeps a late
-/// worker from reopening it (FIG-2499, FIG-2500). Caller-supplied scopes are
-/// never handed here — they stay the caller's to retire.
-enum FacadeScopeRetirement {
-    Retired,
-    Deferred,
-}
-
-async fn retire_facade_operation_scope(
-    effect_host: &Arc<dyn lash_core::EffectHost>,
-    operation_scope: &lash_core::ExecutionScope,
-) -> Result<FacadeScopeRetirement> {
-    let Some(retirement) = lash_core::EffectJournalRetirement::for_scope(operation_scope) else {
-        return Ok(FacadeScopeRetirement::Retired);
-    };
-    match effect_host
-        .retire_effect_journal(retirement.when_quiescent())
-        .await
-    {
-        Ok(_) => Ok(FacadeScopeRetirement::Retired),
-        Err(err) if err.code == lash_core::RuntimeErrorCode::EffectScopeNotQuiescent => {
-            Ok(FacadeScopeRetirement::Deferred)
-        }
-        Err(err) => Err(EmbedError::Runtime(err)),
-    }
-}
-
 #[derive(Clone)]
 pub struct PluginOperations {
     pub(crate) control: SessionAdmin,
@@ -1435,10 +1376,13 @@ impl PluginOperations {
         &self,
         args: Op::Args,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<Op::Output>> {
-        let receipt = self
-            .control
-            .run_plugin_command_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
-            .await?;
+        let receipt = Box::pin(self.control.run_plugin_operation(
+            HostPluginOperation::Command,
+            Op::NAME,
+            encode_plugin_args::<Op>(args)?,
+            CancellationToken::new(),
+        ))
+        .await?;
         Ok(lash_core::facade_support::PluginOperationReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
@@ -1451,7 +1395,13 @@ impl PluginOperations {
         name: &str,
         args: serde_json::Value,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        self.control.run_plugin_command_raw(name, args).await
+        Box::pin(self.control.run_plugin_operation(
+            HostPluginOperation::Command,
+            name,
+            args,
+            CancellationToken::new(),
+        ))
+        .await
     }
 
     pub async fn run_task<Op: lash_core::facade_support::PluginTask>(
@@ -1468,14 +1418,13 @@ impl PluginOperations {
         args: Op::Args,
         cancellation_token: CancellationToken,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<Op::Output>> {
-        let receipt = self
-            .control
-            .run_plugin_task_raw_with_cancel(
-                Op::NAME,
-                encode_plugin_args::<Op>(args)?,
-                cancellation_token,
-            )
-            .await?;
+        let receipt = Box::pin(self.control.run_plugin_operation(
+            HostPluginOperation::Task,
+            Op::NAME,
+            encode_plugin_args::<Op>(args)?,
+            cancellation_token,
+        ))
+        .await?;
         Ok(lash_core::facade_support::PluginOperationReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
@@ -1499,9 +1448,13 @@ impl PluginOperations {
         args: serde_json::Value,
         cancellation_token: CancellationToken,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        self.control
-            .run_plugin_task_raw_with_cancel(name, args, cancellation_token)
-            .await
+        Box::pin(self.control.run_plugin_operation(
+            HostPluginOperation::Task,
+            name,
+            args,
+            cancellation_token,
+        ))
+        .await
     }
 }
 
@@ -1570,32 +1523,6 @@ impl ProtocolAdmin {
         self.control
             .apply_protocol_session_extension(extension)
             .await
-    }
-}
-
-/// An administrative compaction as its submission left it: queued on a
-/// store-backed session's command lane, or applied directly on a storeless
-/// one.
-enum SubmittedCompaction {
-    Queued(lash_core::runtime::SessionCommandReceipt),
-    Applied(lash_core::runtime::CompactContextOutcome),
-}
-
-/// The error a command's caller answers when its settlement is not one its
-/// command applies with: still pending, withdrawn, rejected before
-/// acceptance, or another command's settlement shape.
-fn unsettled_command_error(settlement: lash_core::runtime::SessionCommandSettlement) -> EmbedError {
-    match settlement {
-        lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-            EmbedError::Session(SessionError::SessionCommandPending(receipt))
-        }
-        lash_core::runtime::SessionCommandSettlement::Cancelled(receipt) => {
-            EmbedError::Session(SessionError::SessionCommandCancelled(receipt))
-        }
-        lash_core::runtime::SessionCommandSettlement::Rejected(error) => EmbedError::Runtime(error),
-        settlement => EmbedError::Session(SessionError::Protocol(format!(
-            "a session command settled with another command's settlement: {settlement:?}"
-        ))),
     }
 }
 

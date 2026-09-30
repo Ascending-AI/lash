@@ -104,7 +104,7 @@ pub mod usage;
 
 pub use crate::admin::{
     AdvancedToolAdmin, Completions, CoreTriggerAdmin, PluginOperations, SessionCommandAdmin,
-    SessionTriggerAdmin, ToolAdmin,
+    SessionCommandWithdrawal, SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{
     DeploymentDrainStatus, GenerationDrainStatus, LashCore, LashCoreBuilder, SessionClosing,
@@ -126,6 +126,7 @@ pub use crate::send::{
 };
 pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
+    SessionParkRefused,
 };
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
@@ -178,6 +179,13 @@ pub use lash_core::{
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
+// A host's head write is a session command it submits, settles and may
+// withdraw (FIG-4202): the settlement and the typed outcomes it carries.
+pub use lash_core::runtime::{
+    CompactContextOutcome, OpenAgentFrameCommandOutcome, PluginOperationCommandOutcome,
+    SessionCommandOutcome, SessionCommandSettlement,
+};
+pub use lash_core::store::SessionHeadOwner;
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one [`StoreSet`] (ADR 0104).
 /// [`LashCore::builder`] requires one; the engine crates behind the
@@ -210,7 +218,7 @@ pub mod prelude {
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
         SessionCreateRequest, SessionCreation, SessionDeleteReport, SessionDeletion,
-        SessionListFilter, SessionRelationKind, SessionSpec, SessionStartPoint,
+        SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
         SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
         TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
         TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
@@ -494,7 +502,7 @@ pub mod persistence {
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
         ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentSettle,
-        RefusedRootEnd, RootCommittedOutcome, RootIntentRefused, RootIntentRequest, RootStore,
+        RootCommittedOutcome, RootEnd, RootIntentRefused, RootIntentRequest, RootStore,
         RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootVerb,
         TurnCommitId,
     };

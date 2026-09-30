@@ -129,9 +129,11 @@ pub(super) async fn resolve_root(parts: &SendParts, root: &TurnId) -> Result<Res
             Some(refusal)
         }
         // An operator's end, the session's deletion or a lost run carries no
-        // answer of its own.
+        // answer of its own, and a command root answers no send: its
+        // commands settle through their own receipts.
         Some(
-            RootTerminalCause::OperatorCancelled { .. }
+            RootTerminalCause::CommandsApplied
+            | RootTerminalCause::OperatorCancelled { .. }
             | RootTerminalCause::Forked { .. }
             | RootTerminalCause::SessionDeleted { .. }
             | RootTerminalCause::SubstrateLost { .. },

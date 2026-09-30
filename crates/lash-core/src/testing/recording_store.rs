@@ -327,7 +327,7 @@ impl RuntimeStoreDecorator for RecordingStore {
         root: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<crate::store::RefusedRootEnd, StoreError> {
+    ) -> Result<crate::store::RootEnd, StoreError> {
         let hook = self.before_next_end_refused_root.lock_recover().take();
         if let Some(hook) = hook {
             hook().await;
@@ -525,7 +525,7 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
         root: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<crate::store::RefusedRootEnd, StoreError> {
+    ) -> Result<crate::store::RootEnd, StoreError> {
         self.record(fence.session())
             .end_refused_root(fence, root, refusal, at_ms)
             .await

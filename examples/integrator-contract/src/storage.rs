@@ -514,7 +514,15 @@ impl RootStore for Integrator {
         root: &TurnId,
         refusal: &RuntimeError,
         at_ms: u64,
-    ) -> Result<RefusedRootEnd, StoreError> {
+    ) -> Result<RootEnd, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn end_command_root(
+        &self,
+        fence: &DriveFence,
+        root: &TurnId,
+        at_ms: u64,
+    ) -> Result<RootEnd, StoreError> {
         unreachable!("external signature witness")
     }
     async fn root_of_input(

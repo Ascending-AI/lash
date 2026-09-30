@@ -266,6 +266,9 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
         crate::OperationId::turn(&request.session_id, &owed.follow_on_turn_id, "final"),
     );
     terminal.pending_follow_on = None;
+    // The follow-on's terminal is its drive's commit: it presents the drive's
+    // fence, as every head write while commands are open must (FIG-4202).
+    terminal.drive_fence = Some(Box::new(lease.clone()));
     store
         .commit_runtime_state(terminal)
         .await

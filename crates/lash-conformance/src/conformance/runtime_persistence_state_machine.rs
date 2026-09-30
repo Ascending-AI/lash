@@ -1063,6 +1063,16 @@ async fn commit_operation(
         }));
     }
 
+    // The bound turn owns the head (FIG-4202): while a root is unfinished its
+    // drive makes the head's commits, under its live fence; a commit outside
+    // every drive onto an existing head is refused.
+    if ending.is_none()
+        && model.root.is_some()
+        && let Some(fence) = model.current_fence.as_ref()
+    {
+        commit.drive_fence = Some(Box::new(fence.clone()));
+    }
+    let owned_by_root = commit.drive_fence.is_none() && model.has_session && model.root.is_some();
     let before = session_snapshot(store).await?;
     let committed_envelope = commit.clone();
     let result = store.commit_runtime_state(commit).await;
@@ -1076,6 +1086,17 @@ async fn commit_operation(
         }
         assert_snapshot_unchanged(store, before, "stale expected-head rejection").await?;
         shape[RunShapeCounter::StaleHeadRejections] += 1;
+        return Ok(());
+    }
+    if owned_by_root {
+        model.staged_usage = staged_usage;
+        model.staged_usage_operation = staged_usage_operation;
+        if !matches!(result, Err(StoreError::SessionHeadOwned { .. })) {
+            return Err(format!(
+                "a commit outside the drive was not refused while a root is bound: {result:?}"
+            ));
+        }
+        assert_snapshot_unchanged(store, before, "a head write the bound root owns").await?;
         return Ok(());
     }
 

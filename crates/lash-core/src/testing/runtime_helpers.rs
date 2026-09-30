@@ -199,6 +199,201 @@ pub fn append_message(state: &mut impl ReadModelStateMut, message: Message) {
     state.append_message(message);
 }
 
+/// Apply a host head write as a session's drive does (FIG-4202), for a test
+/// that runs no engine: enqueue `command` on the session's command lane in
+/// `store` under `idempotency_key`, seal a fresh admission on `store` as a
+/// command root's seal does, drain the command lane under that fence on
+/// `runtime`, and answer the typed outcome the command settled with.
+///
+/// # Errors
+///
+/// The submission, the seal, the drain or the settlement read failed, or the
+/// command did not settle applied.
+pub async fn apply_host_command(
+    runtime: &mut LashRuntime,
+    store: &dyn crate::RuntimeStore,
+    command: SessionCommand,
+    idempotency_key: &str,
+) -> Result<SessionCommandOutcome, RuntimeError> {
+    let session_id = SessionId::from(runtime.session_id());
+    let (receipt, fence) =
+        submit_host_command(store, &session_id, command, idempotency_key).await?;
+    let applied_here = drain_host_commands(runtime, &fence, None)
+        .await?
+        .contains(&receipt.batch_id);
+    settle_host_command(runtime, receipt, applied_here).await
+}
+
+/// Submit a host's session command as its submission records it (FIG-4202),
+/// for a test that runs no engine: enqueue `command` on session
+/// `session_id`'s command lane in `store` under `idempotency_key`, and seal
+/// a fresh admission as a command root's seal does. Answers the command's
+/// receipt and the sealed fence its drain presents.
+///
+/// # Errors
+///
+/// The submission or the seal failed.
+pub async fn submit_host_command(
+    store: &dyn crate::RuntimeStore,
+    session_id: &SessionId,
+    command: SessionCommand,
+    idempotency_key: &str,
+) -> Result<(crate::SessionCommandReceipt, crate::store::DriveFence), RuntimeError> {
+    // Enqueued through the store: a test that runs no engine has no ingress
+    // relay to deliver it.
+    let source_key = command.source_key(idempotency_key);
+    let batch = store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                session_id.clone(),
+                crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                command,
+            )
+            .with_source_key(source_key.clone()),
+        )
+        .await
+        .map_err(|error| {
+            RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
+        })?;
+    let receipt = crate::SessionCommandReceipt {
+        session_id: session_id.clone(),
+        batch_id: batch.batch_id,
+        source_key,
+    };
+    let observed = store.drive_epoch(session_id).await.map_err(|error| {
+        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
+    })?;
+    let admission = crate::store::AdmissionId::new(format!(
+        "host-command:{idempotency_key}:{}",
+        uuid::Uuid::new_v4()
+    ));
+    match store
+        .seal_drive_epoch(
+            session_id,
+            &admission,
+            observed.epoch,
+            &crate::store::RootStartNonce::new(uuid::Uuid::new_v4().to_string()),
+        )
+        .await
+        .map_err(|error| {
+            RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
+        })? {
+        crate::store::DriveEpochSeal::Sealed(fence) => Ok((receipt, fence)),
+        other => Err(RuntimeError::new(
+            RuntimeErrorCode::StoreCommitSuperseded,
+            format!("the host command's seal did not land: {other:?}"),
+        )),
+    }
+}
+
+/// Drain the session's command lane on `runtime` under `fence` until it is
+/// empty, as a command root does, on `controller` when one is given: the
+/// controller a tier's handler lends, for an effect host that runs effects
+/// only in a handler. A replay of that handler reads back the runs its
+/// journal recorded. Answers the batches each drain applied.
+///
+/// # Errors
+///
+/// A drain failed.
+pub async fn drain_host_commands(
+    runtime: &mut LashRuntime,
+    fence: &crate::store::DriveFence,
+    controller: Option<&crate::ScopedEffectController<'_>>,
+) -> Result<Vec<crate::BatchId>, RuntimeError> {
+    let mut drained = Vec::new();
+    loop {
+        let next = match controller {
+            Some(controller) => {
+                runtime
+                    .drain_next_session_command_with_cancellation(
+                        fence,
+                        tokio_util::sync::CancellationToken::new(),
+                        controller,
+                    )
+                    .await?
+            }
+            None => runtime.drain_next_session_command(fence).await?,
+        };
+        let Some(next) = next else {
+            return Ok(drained);
+        };
+        drained.push(next.batch_id);
+    }
+}
+
+/// Read the typed outcome the command `receipt` names settled with. A
+/// command another runtime applied (`applied_here` false) leaves `runtime`
+/// to adopt the head that runtime committed.
+///
+/// # Errors
+///
+/// The settlement read failed, or the command did not settle applied.
+pub async fn settle_host_command(
+    runtime: &mut LashRuntime,
+    receipt: crate::SessionCommandReceipt,
+    applied_here: bool,
+) -> Result<SessionCommandOutcome, RuntimeError> {
+    match runtime.settle_session_command(receipt).await? {
+        SessionCommandSettlement::Applied { outcome, .. } => {
+            if !applied_here {
+                runtime
+                    .refresh_session_graph_from_store()
+                    .await
+                    .map_err(|error| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
+                    })?;
+            }
+            Ok(outcome)
+        }
+        other => Err(RuntimeError::new(
+            RuntimeErrorCode::SessionCommandRun,
+            format!("the host command did not settle applied: {other:?}"),
+        )),
+    }
+}
+
+/// [`apply_host_command`] for an append: the append's typed outcome.
+///
+/// # Errors
+///
+/// As [`apply_host_command`], or the append failed to apply.
+pub async fn apply_host_append(
+    runtime: &mut LashRuntime,
+    store: &dyn crate::RuntimeStore,
+    request: AppendSessionNodesRequest,
+) -> Result<AppendSessionNodesOutcome, RuntimeError> {
+    let key = request.operation_id.clone();
+    append_outcome(
+        apply_host_command(
+            runtime,
+            store,
+            SessionCommand::AppendSessionNodes {
+                request: Box::new(request),
+            },
+            &key,
+        )
+        .await?,
+    )
+}
+
+/// The append outcome a host append's command settled with.
+///
+/// # Errors
+///
+/// The append failed to apply, or the command settled as another command.
+pub fn append_outcome(
+    outcome: SessionCommandOutcome,
+) -> Result<AppendSessionNodesOutcome, RuntimeError> {
+    match outcome {
+        SessionCommandOutcome::AppendSessionNodes { outcome } => Ok(outcome),
+        SessionCommandOutcome::Failed { code, message } => Err(RuntimeError::new(code, message)),
+        other => Err(RuntimeError::new(
+            RuntimeErrorCode::SessionCommandRun,
+            format!("an append settled with another command's outcome: {other:?}"),
+        )),
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct RecordingSink {
     pub events: Arc<Mutex<Vec<SessionStreamEvent>>>,
@@ -402,12 +597,17 @@ pub async fn advance_session_head(
         }
     };
     change(&mut state);
-    crate::SessionCommitStore::commit_runtime_state(
-        store,
-        crate::RuntimeCommit::persisted_state_for_test(&state, usage_deltas),
-    )
-    .await
-    .expect("commit the advanced head");
+    // The bound turn owns the head (FIG-4202): a writer that moves it while
+    // a root is bound presents the root's own drive fence, as a second
+    // execution of that root would. Before the first seal nothing owns it.
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, usage_deltas);
+    commit.drive_fence = crate::store::current_drive_fence(store, &session_id)
+        .await
+        .expect("read the session's drive fence")
+        .map(Box::new);
+    crate::SessionCommitStore::commit_runtime_state(store, commit)
+        .await
+        .expect("commit the advanced head");
     crate::SessionCommitStore::load_session_head_meta(store, &session_id)
         .await
         .expect("read the advanced head")

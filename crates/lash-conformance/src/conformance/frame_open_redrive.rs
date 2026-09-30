@@ -73,6 +73,8 @@ mod followup;
 pub use followup::*;
 mod superseded_root;
 pub use superseded_root::*;
+mod host_commands;
+pub use host_commands::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -697,6 +699,9 @@ struct LawParts {
     store: Arc<dyn crate::RuntimeStore>,
     protocol: Arc<dyn FrameLawProtocol>,
     compaction: LawCompaction,
+    /// Plugins a law adds beside the protocol's and the compaction's: the
+    /// host-command laws' plugin operations and terminal callback.
+    host_plugins: Vec<Arc<dyn PluginFactory>>,
 }
 
 #[expect(
@@ -779,6 +784,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
                     .plugins()
                     .into_iter()
                     .chain(compaction)
+                    .chain(parts.host_plugins.iter().cloned())
                     .collect(),
             );
     let builder = if law.storeless {
@@ -1019,6 +1025,7 @@ impl LawSession {
                 store: Arc::clone(&store),
                 protocol,
                 compaction: LawCompaction::default(),
+                host_plugins: Vec::new(),
             },
             store,
             session_id,
@@ -1047,12 +1054,25 @@ impl LawSession {
     /// as `submit_session_command` records it: the command's batch, which
     /// the next drive applies at its turn boundary (FIG-4201). The law
     /// submits through the store so the submission itself drives nothing.
+    async fn submit_compaction(&self, key: &str) -> crate::SessionCommandReceipt {
+        self.submit_command(
+            crate::SessionCommand::CompactContext { instructions: None },
+            key,
+        )
+        .await
+    }
+
+    /// Submits `command` to the session's command lane under `key`, as
+    /// [`Self::submit_compaction`] submits a compaction (FIG-4202).
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn submit_compaction(&self, key: &str) -> crate::SessionCommandReceipt {
-        let command = crate::SessionCommand::CompactContext { instructions: None };
+    async fn submit_command(
+        &self,
+        command: crate::SessionCommand,
+        key: &str,
+    ) -> crate::SessionCommandReceipt {
         let source_key = command.source_key(format!("{}-{key}", self.prefix));
         let batch = self
             .store
@@ -1065,7 +1085,7 @@ impl LawSession {
                 .with_source_key(source_key.clone()),
             )
             .await
-            .expect("accept the compaction command");
+            .expect("accept the session command");
         crate::SessionCommandReceipt {
             session_id: self.session_id.clone(),
             batch_id: batch.batch_id,
@@ -1073,24 +1093,39 @@ impl LawSession {
         }
     }
 
-    /// How the compaction `receipt` names settled: its batch's completion
-    /// receipt, read from the store; `None` while it is unsettled.
+    /// How the command `receipt` names settled: its batch's completion
+    /// receipt's outcome, read from the store; `None` while it is unsettled
+    /// (or once it was withdrawn).
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
+    async fn command_outcome(
+        &self,
+        receipt: &crate::SessionCommandReceipt,
+    ) -> Option<crate::SessionCommandOutcome> {
+        self.store
+            .queued_work_batch_completion(&self.session_id, receipt.batch_id.as_str())
+            .await
+            .expect("read the command's completion")
+            .map(|completion| {
+                completion
+                    .command_outcome
+                    .expect("a settled host command carries its outcome")
+            })
+    }
+
+    /// How the compaction `receipt` names settled: its batch's completion
+    /// receipt, read from the store; `None` while it is unsettled.
     async fn compaction_outcome(
         &self,
         receipt: &crate::SessionCommandReceipt,
     ) -> Option<crate::CompactContextOutcome> {
-        self.store
-            .queued_work_batch_completion(&self.session_id, receipt.batch_id.as_str())
+        self.command_outcome(receipt)
             .await
-            .expect("read the compaction's completion")
-            .map(|completion| {
-                completion
-                    .compact_context_outcome
-                    .expect("a settled compaction carries its outcome")
+            .map(|outcome| match outcome {
+                crate::SessionCommandOutcome::CompactContext { outcome } => outcome,
+                other => panic!("a settled compaction carries its outcome, not {other:?}"),
             })
     }
 
@@ -1581,8 +1616,8 @@ macro_rules! frame_open_protocol_redrive_tests {
 }
 
 /// Register the execution-state frame-open laws (FIG-4110, F5; FIG-4134)
-/// over a protocol with live execution state: a pressure frame, a staged
-/// open and administrative compactions with and without a store each restart
+/// over a protocol with live execution state: a pressure frame, a host's
+/// commanded frame open and administrative compactions with and without a store each restart
 /// the live interpreter. The fixture hands back what
 /// [`frame_open_protocol_redrive_tests`]'s does.
 #[macro_export]
@@ -1598,7 +1633,7 @@ macro_rules! frame_open_execution_state_tests {
             .await;
         }
         $crate::frame_open_execution_state_tests!(@path [$(#[$attr])*] $fixture;
-            (a_staged_open_restarts_the_live_execution_state, Staged),
+            (a_host_frame_open_restarts_the_live_execution_state, HostOpen),
             (a_compaction_restarts_the_live_execution_state, Compact),
             (a_storeless_compaction_restarts_the_live_execution_state, StorelessCompact));
     };
@@ -1630,11 +1665,16 @@ macro_rules! frame_open_execution_state_tests {
 /// production standard compactor and its overflow recovery across the crash
 /// matrix, a session deleted and a fork made during an open, an empty seed,
 /// a refused frame commit, and pressure hooks sharing an id; FIG-4200's root
-/// whose held pressure frame another runtime overtakes, ending typed on the
-/// drive loop and the engine path, uninterrupted, across a crash before its
-/// end and on a fresh journal; and a root resumed on a fresh journal after
-/// its own pressure frame committed, which continues from that frame on both
-/// paths (FIG-4201). The fixture hands back a guard, a prefix, the tier's
+/// whose held pressure frame a writer holding its fence overtakes, ending
+/// typed on the drive loop and the engine path, uninterrupted and across a
+/// crash before its end; a root resumed on a fresh journal after its own
+/// pressure frame committed, which continues from that frame on both paths
+/// (FIG-4201); and FIG-4202's host commands: an append, a plugin command and
+/// task, and a frame open, each waiting for the bound turn and applied once
+/// at the boundary across a crash after the lane read, before the commit and
+/// after it, a terminal callback's append that never deadlocks, a
+/// recoverable busy park, and a withdrawal before admission. The fixture
+/// hands back a guard, a prefix, the tier's
 /// effect host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 #[macro_export]
@@ -1698,13 +1738,9 @@ macro_rules! frame_open_redrive_tests {
             (a_superseded_root_ends_typed_on_the_drive_loop, DriveLoop, None),
             (a_superseded_root_ends_typed_on_the_drive_loop_across_a_crash_before_its_end,
                 DriveLoop, CrashBeforeEnd),
-            (a_superseded_root_ends_typed_on_the_drive_loop_on_a_fresh_journal,
-                DriveLoop, FreshJournal),
             (a_superseded_root_ends_typed_on_the_engine_path, Engine, None),
             (a_superseded_root_ends_typed_on_the_engine_path_across_a_crash_before_its_end,
-                Engine, CrashBeforeEnd),
-            (a_superseded_root_ends_typed_on_the_engine_path_on_a_fresh_journal,
-                Engine, FreshJournal));
+                Engine, CrashBeforeEnd));
         $crate::frame_open_redrive_tests!(@own [$(#[$attr])*] $fixture;
             (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_drive_loop,
                 DriveLoop),
@@ -1714,8 +1750,62 @@ macro_rules! frame_open_redrive_tests {
             compact_with_production_compactor_crash_matrix,
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,
-            a_refused_frame_commit_leaves_nothing_visible);
+            a_refused_frame_commit_leaves_nothing_visible,
+            terminal_callback_append_does_not_deadlock,
+            dirty_park_while_busy_is_recoverable_and_loses_nothing,
+            command_cancellation_before_admission_withdraws_it);
+        $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
+            (host_append_waits_for_the_bound_turn,
+                host_append_waits_for_the_bound_turn, None),
+            (host_append_crashed_after_its_lane_read_applies_once,
+                host_append_waits_for_the_bound_turn, Some(AfterLaneRead)),
+            (host_append_crashed_before_its_commit_applies_once,
+                host_append_waits_for_the_bound_turn, Some(BeforeCommit)),
+            (host_append_crashed_after_its_commit_applies_once,
+                host_append_waits_for_the_bound_turn, Some(AfterCommit)),
+            (host_plugin_command_applies_at_the_boundary,
+                host_plugin_command_applies_at_the_boundary, None),
+            (host_plugin_command_crashed_after_its_lane_read_applies_once,
+                host_plugin_command_applies_at_the_boundary, Some(AfterLaneRead)),
+            (host_plugin_command_crashed_before_its_commit_applies_once,
+                host_plugin_command_applies_at_the_boundary, Some(BeforeCommit)),
+            (host_plugin_command_crashed_after_its_commit_applies_once,
+                host_plugin_command_applies_at_the_boundary, Some(AfterCommit)),
+            (host_frame_open_applies_at_the_boundary,
+                host_frame_open_applies_at_the_boundary, None),
+            (host_frame_open_crashed_after_its_lane_read_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(AfterLaneRead)),
+            (host_frame_open_crashed_before_its_commit_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(BeforeCommit)),
+            (host_frame_open_crashed_after_its_commit_opens_once,
+                host_frame_open_applies_at_the_boundary, Some(AfterCommit)));
     };
+    (@commanded [$($attrs:tt)*] $fixture:block; ($name:ident, $law:ident, None) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, None).await;
+        }
+        $crate::frame_open_redrive_tests!(@commanded [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@commanded [$($attrs:tt)*] $fixture:block; ($name:ident, $law:ident, Some($crash:ident)) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(
+                prefix,
+                host,
+                stores,
+                runner,
+                Some($crate::registration_macro_support::HostCommandCrash::$crash),
+            )
+            .await;
+        }
+        $crate::frame_open_redrive_tests!(@commanded [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@commanded [$($attrs:tt)*] $fixture:block;) => {};
     (@crashed [$($attrs:tt)*] $fixture:block; ($name:ident, $law:ident, $crash:ident) $(, $rest:tt)*) => {
         $($attrs)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

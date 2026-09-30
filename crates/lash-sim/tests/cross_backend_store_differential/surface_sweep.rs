@@ -125,6 +125,10 @@ pub(super) enum SurfaceMethod {
     /// of the sweep's drain root: its refusal's end, then nothing more
     /// (FIG-4018).
     EndRefusedRoot,
+    /// [`RootStore::end_command_root`](lash_core::store::RootStore::end_command_root)
+    /// of a command root run under the sweep's lease: its end with the
+    /// commands-applied cause, then the recorded end again (FIG-4202).
+    EndCommandRoot,
     /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
     /// of the sweep's next-turn input.
     RootBinding,
@@ -253,6 +257,7 @@ impl SurfaceMethod {
             Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
             Self::EndLostRoot => "surface:end_lost_root",
             Self::EndRefusedRoot => "surface:end_refused_root",
+            Self::EndCommandRoot => "surface:end_command_root",
             Self::RootBinding => "surface:root_binding",
             Self::RootOfInput => "surface:root_of_input",
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
@@ -603,7 +608,7 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
 /// nothing (FIG-4018).
 pub(super) fn refused_root_end_case() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::RefusedRootEnd,
+        name: CaseName::RootEnd,
         operations: vec![
             StoreOperation::Commit {
                 label: "seed_refused_root_graph",
@@ -633,6 +638,8 @@ pub(super) fn refused_root_end_case() -> GeneratedCase {
             surface(SurfaceMethod::EndRefusedRoot),
             surface(SurfaceMethod::EndLostRoot),
             surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::EndCommandRoot),
+            surface(SurfaceMethod::EndCommandRoot),
             surface(SurfaceMethod::NonTerminalRootsPage),
         ],
     }
@@ -1387,15 +1394,33 @@ impl BackendRunner {
                     .end_refused_root(&lease_fence, &root, &refusal, 1)
                     .await?
                 {
-                    lash_core::store::RefusedRootEnd::Ended(terminal) => {
+                    lash_core::store::RootEnd::Ended(terminal) => {
                         format!("ended={:?}", terminal.kind)
                     }
-                    lash_core::store::RefusedRootEnd::AlreadyEnded(terminal) => {
+                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
                         format!("already_ended={:?}", terminal.kind)
                     }
-                    lash_core::store::RefusedRootEnd::Superseded => "superseded".to_string(),
-                    lash_core::store::RefusedRootEnd::Unknown => "ended=none".to_string(),
+                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
+                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
                 }
+            }
+            SurfaceMethod::EndCommandRoot => {
+                let root = lash_core::TurnId::from(format!("drive-commands:{session_id}-surface"));
+                let end = match store.end_command_root(&lease_fence, &root, 1).await? {
+                    lash_core::store::RootEnd::Ended(terminal) => {
+                        format!("ended={:?}/{:?}", terminal.kind, terminal.cause)
+                    }
+                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
+                        format!("already_ended={:?}/{:?}", terminal.kind, terminal.cause)
+                    }
+                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
+                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
+                };
+                let recorded = store
+                    .root_terminal(&session_id, &root)
+                    .await?
+                    .map(|terminal| format!("{:?}", terminal.kind));
+                format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RootBinding => {
                 let input = lash_core::InputId::from(format!("{session_id}:input"));

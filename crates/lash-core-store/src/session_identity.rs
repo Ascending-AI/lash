@@ -248,7 +248,7 @@ impl AgentFrameRecord {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OpenAgentFrameRequest {
     pub frame_key: crate::FrameKey,
     pub reason: AgentFrameReason,
@@ -269,7 +269,7 @@ impl OpenAgentFrameRequest {
         self
     }
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAgentFrameOutcome {
     pub frame_node_id: String,
     pub opened: bool,

@@ -696,7 +696,10 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     ))
     .await
     .map_err(AppError::runtime)?;
-    session.close().await.map_err(AppError::session_open)?;
+    session
+        .close()
+        .await
+        .map_err(|refused| AppError::session_open(refused.into()))?;
     state.trace_for_session(
         &session_id,
         "mail.tool_catalog.refresh_enqueued",

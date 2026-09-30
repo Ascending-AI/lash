@@ -4,47 +4,12 @@
 //! no types live here and no public API is changed.
 
 use crate::SessionId;
-#[cfg(test)]
-use crate::plugin::PluginSessionRequest;
 use std::sync::Arc;
 
 use crate::{PluginOperationInvokeError, SessionError};
 
 use super::LashRuntime;
-use super::state::{
-    RuntimeSessionState, append_session_nodes_to_state_with_clock, boundary_operation,
-    derive_graph_commit_node_ids,
-};
-
-/// How the durable half of `append_session_nodes` failed.
-///
-/// The caller holds the pre-append state and owns the rollback: `StaleBranch`
-/// and `RolledBack` restore the protocol session, `Passthrough` does not.
-enum AppendFailure {
-    /// The commit found the required ancestor inactive; after the protocol
-    /// session is restored the caller answers `StaleBranch`, not an error.
-    StaleBranch { required_node_id: crate::NodeId },
-    /// The durable commit did not land; the caller restores the protocol
-    /// session and surfaces `error`, appending the restore failure to the
-    /// error's context when the restore itself fails.
-    RolledBack(SessionError),
-    /// Outside the rollback contract — commit-envelope construction fails
-    /// before the store is touched, or a post-commit step fails after the
-    /// commit landed. Propagates untouched.
-    Passthrough(SessionError),
-}
-
-/// Append `suffix` to a session error's caller-visible context.
-fn append_session_error_context(error: SessionError, suffix: &str) -> SessionError {
-    match error {
-        SessionError::Store { context, source } => SessionError::Store {
-            context: format!("{context}{suffix}"),
-            source,
-        },
-        SessionError::Protocol(message) => SessionError::Protocol(format!("{message}{suffix}")),
-        error => error,
-    }
-}
+use super::state::{append_session_nodes_to_state_with_clock, boundary_operation};
 
 impl LashRuntime {
     /// The fleet-format generation this runtime's durable writers emit — the
@@ -65,7 +30,7 @@ impl LashRuntime {
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn set_persisted_state(
         &mut self,
-        state: RuntimeSessionState,
+        state: super::state::RuntimeSessionState,
     ) -> Result<(), SessionError> {
         let mut installed_tool_restore = None;
         if let Some(session) = self.session.as_ref() {
@@ -121,25 +86,27 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Runs a lane-less host append between turn drivers, never concurrently with a running turn.
-    pub async fn append_session_nodes(
+    /// Append `request`'s nodes to a storeless runtime's session graph.
+    ///
+    /// A storeless runtime has no durable head and no drive: its `&mut self`
+    /// serializes the append with every turn it runs, so the append applies
+    /// at once. A store-backed session's head is owned by its bound turn, so
+    /// its host appends are
+    /// [`SessionCommand::AppendSessionNodes`](crate::SessionCommand::AppendSessionNodes)
+    /// commands its drive applies at a turn boundary (FIG-4202); calling this
+    /// on one is refused with [`RuntimeErrorCode::SessionCommandRequired`](crate::RuntimeErrorCode::SessionCommandRequired).
+    pub async fn append_storeless_session_nodes(
         &mut self,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, SessionError> {
-        self.reload_invalidated_resident_session_state_for_session()
-            .await?;
+        self.refuse_store_backed_host_write("append_session_nodes")
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         if request.operation_id.trim().is_empty() {
             return Err(SessionError::Protocol(
                 "session graph append requires a non-empty stable operation_id".to_string(),
             ));
         }
-        self.refresh_session_graph_from_store().await?;
-        let history_store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store());
-        if history_store.is_none()
-            && let Some(required_node_id) = request.requires_ancestor_node_id.as_ref()
+        if let Some(required_node_id) = request.requires_ancestor_node_id.as_ref()
             && !self
                 .state
                 .session_graph
@@ -154,24 +121,6 @@ impl LashRuntime {
             &request.operation_id,
             "append-session-nodes",
         );
-        let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
-            operation.clone(),
-            request.requires_ancestor_node_id.as_deref(),
-            &request.nodes,
-        )
-        .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        let state_before_append = self.state.clone();
-        // The plugin append below patches the live execution with the request's
-        // seed and globals events. A rollback restores the protocol session to
-        // the committed execution, and the resident body of that state is
-        // discarded after every commit, so the live executor is captured here,
-        // before the append touches it, as the rollback view's snapshot
-        // (FIG-2521). One hydrated copy, alive for the append only.
-        let execution_before_append = if history_store.is_some() {
-            self.hydrated_live_execution_state().await?
-        } else {
-            None
-        };
         let draft_namespace = operation
             .storage_key()
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
@@ -192,57 +141,6 @@ impl LashRuntime {
                 .await?;
         }
         self.stamp_live_plugin_state();
-        if let Some(store) = history_store {
-            // Boxed at this seam: the append commit future carries a whole
-            // runtime commit and would push this future past the
-            // large-future bound.
-            return match Box::pin(self.commit_appended_nodes(
-                store,
-                &state_before_append,
-                node_ids,
-                operation,
-                append_stamp,
-            ))
-            .await
-            {
-                Ok(outcome) => Ok(outcome),
-                // The commit found the required ancestor inactive: after the
-                // protocol session is restored this answers `StaleBranch`, not
-                // an error — that asymmetry is deliberate.
-                Err(AppendFailure::StaleBranch { required_node_id }) => match self
-                    .restore_protocol_session_from_state(
-                        state_before_append,
-                        execution_before_append,
-                    )
-                    .await
-                {
-                    Ok(()) => {
-                        Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id })
-                    }
-                    Err(rollback_err) => Err(SessionError::Protocol(format!(
-                        "append requires inactive ancestor `{required_node_id}`; failed to \
-                         restore protocol session: {rollback_err}"
-                    ))),
-                },
-                Err(AppendFailure::RolledBack(error)) => {
-                    let error = match self
-                        .restore_protocol_session_from_state(
-                            state_before_append,
-                            execution_before_append,
-                        )
-                        .await
-                    {
-                        Ok(()) => error,
-                        Err(rollback_err) => append_session_error_context(
-                            error,
-                            &format!("; failed to restore protocol session: {rollback_err}"),
-                        ),
-                    };
-                    Err(error)
-                }
-                Err(AppendFailure::Passthrough(error)) => Err(error),
-            };
-        }
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: self
@@ -254,213 +152,23 @@ impl LashRuntime {
         })
     }
 
-    /// The durable half of [`Self::append_session_nodes`]: derive, commit, and
-    /// settle an already-applied in-memory append.
-    ///
-    /// Owns no protocol-session rollback — the caller holds the pre-append
-    /// state and restores it for every `StaleBranch`/`RolledBack` failure, so
-    /// the undo sequence is written exactly once. `Passthrough` failures sit
-    /// outside that contract: commit-envelope construction fails before the
-    /// store is touched, and post-commit steps fail after the commit landed.
-    async fn commit_appended_nodes(
-        &mut self,
-        store: crate::store::SessionStore,
-        state_before_append: &RuntimeSessionState,
-        node_ids: Vec<crate::NodeId>,
-        operation: crate::OperationId,
-        append_stamp: crate::RuntimeTurnCommitStamp,
-    ) -> Result<crate::AppendSessionNodesOutcome, AppendFailure> {
-        let requested_node_count = node_ids.len();
-        let mut graph = self.state.pending_graph_commit();
-        let node_id_mapping = match graph.derive_node_ids(&self.state.session_id, &operation) {
-            Ok(mapping) => mapping,
-            Err(source) => {
-                return Err(AppendFailure::RolledBack(SessionError::Store {
-                    context: "failed to derive persisted session graph node identities".to_string(),
-                    source,
-                }));
-            }
-        };
-        let persisted_node_ids = node_id_mapping
-            .iter()
-            .map(|(_, derived)| derived.clone())
-            .collect::<Vec<_>>();
-        let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
-            .len()
-            .saturating_sub(requested_node_count)..]
-            .to_vec();
-        let locally_derived_leaf_node_id = graph
-            .leaf_node_id()
-            .cloned()
-            .unwrap_or_else(|| crate::NodeId::new(String::new()));
-        let mut commit =
-            crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-                &self.state,
-                graph,
-                &[],
-                operation,
-                self.host.core.durability.commit_budget,
-                self.fleet_format(),
-            )
-            .map_err(|err| AppendFailure::Passthrough(SessionError::Protocol(err.to_string())))?;
-        commit.turn_commit = append_stamp;
-        commit.debug_assert_append_envelope_scope();
-        let _pre_commit_phase = super::RuntimeNamedPhase::begin(
-            self.turn_phase_probe.clone(),
-            "session_graph_append.pre_commit",
-        );
-        // Lane-less public runtime operation: callers append between turn
-        // drivers, so this handle owns no retained execution guard.
-        //
-        // Structurally excluded from `state::commit_in_lane_context`: this site
-        // is strictly lane-less (never carries a `DriveFence`) and
-        // interleaves in-memory protocol session rollback
-        // (`restore_protocol_session_from_state`) on commit failure or
-        // `AppendAncestorNotActive` stale-branch response.
-        let result = match store.commit_runtime_state_verified(commit).await {
-            Ok(result) => result,
-            Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
-                return Err(AppendFailure::StaleBranch { required_node_id });
-            }
-            Err(err) => {
-                return Err(AppendFailure::RolledBack(super::session_commit_error(
-                    "failed to persist runtime state",
-                    err,
-                )));
-            }
-        };
-        let receipt_replayed = result.receipt_replayed;
-        let committed_leaf_node_id = result.committed_leaf_node_id.clone();
-        let node_ids = if receipt_replayed {
-            match super::state::receipt_append_node_ids(&result, requested_node_count) {
-                Ok(node_ids) => node_ids,
-                Err(source) => {
-                    return Err(AppendFailure::RolledBack(SessionError::Store {
-                        context: "append receipt contains an invalid stored node-id result"
-                            .to_string(),
-                        source,
-                    }));
-                }
-            }
-        } else {
-            locally_derived_node_ids
-        };
-        if receipt_replayed {
-            let mut durable_state = state_before_append.clone();
-            if let Err(source) =
-                crate::store::refresh_session_window(&store, &mut durable_state).await
-            {
-                return Err(AppendFailure::RolledBack(SessionError::Store {
-                    context: "failed to refresh resident state after append receipt replay"
-                        .to_string(),
-                    source,
-                }));
-            }
-            self.restore_protocol_session_from_state(durable_state, None)
-                .await
-                .map_err(AppendFailure::Passthrough)?;
-        } else {
-            super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
-                .map_err(|source| {
-                    AppendFailure::Passthrough(SessionError::Store {
-                        context: "failed to apply persisted session graph node identities"
-                            .to_string(),
-                        source,
-                    })
-                })?;
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
+    /// Refuse a direct host head write on a store-backed runtime (FIG-4202):
+    /// its bound turn owns the head, so the write is a session command.
+    pub(super) fn refuse_store_backed_host_write(
+        &self,
+        operation: &'static str,
+    ) -> Result<(), crate::RuntimeError> {
+        if self.is_store_backed() {
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCommandRequired,
+                format!(
+                    "a store-backed session's head is owned by its bound turn: submit \
+                     `{operation}` as a session command, which its drive applies at a turn \
+                     boundary"
+                ),
+            ));
         }
-        Ok(crate::AppendSessionNodesOutcome::Appended {
-            node_ids,
-            leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
-        })
-    }
-
-    /// Adopt `state` as the resident state and restore the protocol session to
-    /// it.
-    ///
-    /// `state` is the resident state from before the append, so adopting it
-    /// reinstates the checkpoint components and their persisted-leaf
-    /// bookkeeping exactly as the append found them. Whether the last commit
-    /// released its execution bodies (store-backed) or kept them resident
-    /// (storeless), the restore view carries `execution_before_append`, the
-    /// live executor's capture from before the append, and the protocol
-    /// session rebuilds the committed execution instead of keeping what the
-    /// failed append applied (FIG-2521). The
-    /// capture is then staged over the reinstated set through
-    /// [`RuntimeSessionState::stage_restored_execution_state`]: leaves the set
-    /// already holds keep their durable refs, so the next commit sends only
-    /// genuinely changed components.
-    async fn restore_protocol_session_from_state(
-        &mut self,
-        state: RuntimeSessionState,
-        execution_before_append: Option<crate::plugin::HydratedExecutionState>,
-    ) -> Result<(), SessionError> {
-        // Receipt replay and append rollback adopt a whole replacement state;
-        // the install reasserts the per-open `PreservePersisted` claim so the
-        // stamp below cannot export the unreconciled registry (FIG-3353).
-        self.install_resident_state(state);
-        let state_for_restore = self.state.clone();
-        let mut restored_capture = None;
-        if let Some(session) = self.session.as_mut() {
-            let protocol_session = Arc::clone(session.plugins().protocol_session());
-            let session_id = state_for_restore.session_id.clone();
-            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore);
-            if let Some(snapshot) = execution_before_append {
-                restored_capture = Some(snapshot.clone());
-                view.execution_state = Ok(Some(snapshot));
-            }
-            protocol_session
-                .restore_session(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    view,
-                )
-                .await?;
-        }
-        if let Some(snapshot) = restored_capture {
-            self.state
-                .stage_restored_execution_state(snapshot)
-                .map_err(|source| SessionError::Store {
-                    context: "failed to stage the rolled-back execution-state components"
-                        .to_string(),
-                    source,
-                })?;
-        }
-        self.stamp_live_plugin_state();
         Ok(())
-    }
-
-    /// Roll a plugin runtime-event append back. Those events never reach the
-    /// protocol session, so the live execution is still the state the append
-    /// found and serves as the rollback view's snapshot (FIG-2521).
-    async fn rollback_plugin_runtime_event_append(
-        &mut self,
-        state_before_append: RuntimeSessionState,
-    ) -> Result<(), SessionError> {
-        let execution = self.hydrated_live_execution_state().await?;
-        self.restore_protocol_session_from_state(state_before_append, execution)
-            .await
-    }
-
-    /// The code executor's complete live execution state, or `None` when the session has no
-    /// code executor.
-    async fn hydrated_live_execution_state(
-        &mut self,
-    ) -> Result<Option<crate::plugin::HydratedExecutionState>, SessionError> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(None);
-        };
-        let Some(code_executor) = session.plugins().code_executor() else {
-            return Ok(None);
-        };
-        let session_id = self.state.session_id.clone();
-        code_executor
-            .hydrated_execution_state(crate::plugin::ProtocolSessionContext::new(
-                session,
-                &session_id,
-            ))
-            .await
     }
 
     pub async fn apply_protocol_session_extension(
@@ -605,17 +313,22 @@ impl LashRuntime {
             .await
     }
 
-    /// Runs a lane-less plugin command between turn drivers, never concurrently with a running turn.
-    pub async fn run_plugin_command(
+    /// Run plugin command `name` on a storeless runtime.
+    ///
+    /// A storeless runtime has no durable head and no drive, so the command
+    /// runs at once, under `&mut self`. A store-backed session runs host
+    /// plugin commands as
+    /// [`SessionCommand::RunPluginCommand`](crate::SessionCommand::RunPluginCommand)
+    /// at a turn boundary (FIG-4202); calling this on one is refused with
+    /// [`RuntimeErrorCode::SessionCommandRequired`](crate::RuntimeErrorCode::SessionCommandRequired).
+    pub async fn run_storeless_plugin_command(
         &mut self,
         name: &str,
         args: serde_json::Value,
         session_id: Option<SessionId>,
-        operation_scope: crate::ExecutionScope,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
-        self.reload_invalidated_resident_session_state()
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        self.refuse_store_backed_host_write("run_plugin_command")
+            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -635,23 +348,23 @@ impl LashRuntime {
                 manager.process_service(),
             )
             .await?;
-        let (events, pending_turn_inputs) = self
-            .apply_plugin_operation_effects(
-                &plugin_id,
-                outcome.events,
-                outcome.directives,
-                operation_scope,
-            )
-            .await?;
+        let events = self.apply_storeless_plugin_operation_effects(
+            &plugin_id,
+            outcome.events,
+            &outcome.directives,
+        )?;
         Ok(crate::PluginOperationReceipt {
             output: outcome.output,
             events,
-            pending_turn_inputs,
+            pending_turn_inputs: Vec::new(),
         })
     }
 
-    /// Runs a lane-less plugin task between turn drivers, never concurrently with a running turn.
-    pub async fn run_plugin_task(
+    /// Run plugin task `name` on a storeless runtime, under
+    /// `scoped_effect_controller`; see [`Self::run_storeless_plugin_command`].
+    /// A store-backed session runs it as
+    /// [`SessionCommand::RunPluginTask`](crate::SessionCommand::RunPluginTask).
+    pub async fn run_storeless_plugin_task(
         &mut self,
         name: &str,
         args: serde_json::Value,
@@ -659,16 +372,14 @@ impl LashRuntime {
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
-        self.reload_invalidated_resident_session_state()
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        self.refuse_store_backed_host_write("run_plugin_task")
+            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
                 "runtime session not available".to_string(),
             ));
         };
-        let operation_scope = scoped_effect_controller.execution_scope().clone();
         let (plugin_id, outcome) = session
             .plugins()
             .run_plugin_task(
@@ -684,34 +395,33 @@ impl LashRuntime {
                 cancellation_token,
             )
             .await?;
-        let (events, pending_turn_inputs) = self
-            .apply_plugin_operation_effects(
-                &plugin_id,
-                outcome.events,
-                outcome.directives,
-                operation_scope,
-            )
-            .await?;
+        let events = self.apply_storeless_plugin_operation_effects(
+            &plugin_id,
+            outcome.events,
+            &outcome.directives,
+        )?;
         Ok(crate::PluginOperationReceipt {
             output: outcome.output,
             events,
-            pending_turn_inputs,
+            pending_turn_inputs: Vec::new(),
         })
     }
 
-    async fn apply_plugin_operation_effects(
+    /// Fold a storeless plugin operation's runtime events into the session
+    /// graph. A storeless runtime has no durable queue, so an operation that
+    /// queues turns is refused.
+    fn apply_storeless_plugin_operation_effects(
         &mut self,
         plugin_id: &str,
         events: Vec<crate::PluginRuntimeEvent>,
-        directives: Vec<crate::PluginRuntimeDirective>,
-        operation_scope: crate::ExecutionScope,
-    ) -> Result<
-        (
-            Vec<crate::PluginOwned<crate::PluginRuntimeEvent>>,
-            Vec<crate::PendingTurnInput>,
-        ),
-        PluginOperationInvokeError,
-    > {
+        directives: &[crate::PluginRuntimeDirective],
+    ) -> Result<Vec<crate::PluginOwned<crate::PluginRuntimeEvent>>, PluginOperationInvokeError>
+    {
+        if !directives.is_empty() {
+            return Err(PluginOperationInvokeError::Failed(
+                "a storeless runtime has no durable queue to queue a plugin's turn on".to_string(),
+            ));
+        }
         let owned_events = events
             .into_iter()
             .map(|event| crate::PluginOwned {
@@ -732,293 +442,24 @@ impl LashRuntime {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            self.stamp_live_plugin_state();
-            self.append_plugin_runtime_event_nodes(&nodes, operation_scope.clone())
-                .await?;
-        }
-        self.stamp_live_plugin_state();
-        self.persist_plugin_operation_state_if_needed(operation_scope)
-            .await?;
-
-        let mut pending_turn_inputs = Vec::new();
-        for directive in directives {
-            match directive {
-                crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {
-                    let pending = self
-                        .enqueue_turn_input(input, crate::TurnInputIngress::NextTurn, source_key)
-                        .await
-                        .map_err(|err| {
-                            PluginOperationInvokeError::Failed(format!(
-                                "failed to queue plugin turn request: {err}"
-                            ))
-                        })?;
-                    pending_turn_inputs.push(pending);
-                }
-            }
-        }
-
-        Ok((owned_events, pending_turn_inputs))
-    }
-
-    async fn append_plugin_runtime_event_nodes(
-        &mut self,
-        nodes: &[crate::SessionAppendNode],
-        operation_scope: crate::ExecutionScope,
-    ) -> Result<(), PluginOperationInvokeError> {
-        let operation = crate::OperationId::new(operation_scope, "append-plugin-runtime-events");
-        let state_before_append = self.state.clone();
-        let draft_namespace = operation.storage_key().map_err(|err| {
-            PluginOperationInvokeError::Failed(format!(
-                "failed to encode plugin runtime event identity: {err}"
-            ))
-        })?;
-        append_session_nodes_to_state_with_clock(
-            &mut self.state,
-            nodes,
-            &draft_namespace,
-            self.host.core.clock.as_ref(),
-        );
-        if let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        {
-            let mut graph = self.state.pending_graph_commit();
-            let persisted_node_ids =
-                match derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation) {
-                    Ok(node_ids) => node_ids,
-                    Err(err) => {
-                        let mut context =
-                            format!("failed to derive plugin runtime event identity: {err}");
-                        if let Err(rollback_err) = self
-                            .rollback_plugin_runtime_event_append(state_before_append.clone())
-                            .await
-                        {
-                            context.push_str(&format!(
-                                "; failed to restore protocol session: {rollback_err}"
-                            ));
-                        }
-                        return Err(PluginOperationInvokeError::Failed(context));
-                    }
-                };
-            let commit =
-                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-                    &self.state,
-                    graph,
-                    &[],
-                    operation,
-                    self.host.core.durability.commit_budget,
-                self.fleet_format(),
-                )
-                .map_err(|err| {
-                    PluginOperationInvokeError::Failed(format!(
-                        "failed to hash plugin runtime events: {err}"
-                    ))
-                })?;
-            // Lane-less host plugin-operation boundary. In-turn lifecycle
-            // graph appends use `session_manager::graph` and carry an explicit
-            // borrowed guard instead of reaching this runtime-owned path.
-            let result = match store.commit_runtime_state_verified(commit).await {
-                Ok(result) => result,
-                Err(err) => {
-                    let persistence_error =
-                        format!("failed to persist plugin runtime events: {err}");
-                    if let Err(rollback_err) = self
-                        .rollback_plugin_runtime_event_append(state_before_append)
-                        .await
-                    {
-                        return Err(PluginOperationInvokeError::Failed(format!(
-                            "{persistence_error}; failed to restore protocol session: \
-                             {rollback_err}"
-                        )));
-                    }
-                    return Err(PluginOperationInvokeError::Failed(persistence_error));
-                }
-            };
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
-        }
-        Ok(())
-    }
-
-    async fn persist_plugin_operation_state_if_needed(
-        &mut self,
-        operation_scope: crate::ExecutionScope,
-    ) -> Result<(), PluginOperationInvokeError> {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return Ok(());
-        };
-        self.stamp_live_plugin_state();
-        let operation = crate::OperationId::new(
-            operation_scope,
-            crate::store::PLUGIN_OPERATION_STATE_RECEIPT_KEY,
-        );
-        let fleet_format = self.fleet_format();
-        let (commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+            let operation = boundary_operation(
+                &self.state.session_id,
+                &uuid::Uuid::new_v4().to_string(),
+                "append-plugin-runtime-events",
+            );
+            let draft_namespace = operation.storage_key().map_err(|err| {
+                PluginOperationInvokeError::Failed(format!(
+                    "failed to encode plugin runtime event identity: {err}"
+                ))
+            })?;
+            append_session_nodes_to_state_with_clock(
                 &mut self.state,
-                &[],
-                operation,
-                self.host.core.durability.commit_budget,
-                fleet_format,
-            )
-            .map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
-                    "failed to identify plugin operation state: {err}"
-                ))
-            })?;
-        // Lane-less host plugin-operation snapshot. Turn-scoped service calls
-        // are classified at the session-manager call sites instead.
-        let result = store
-            .commit_runtime_state_verified(commit)
-            .await
-            .map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
-                    "failed to persist plugin operation state: {err}"
-                ))
-            })?;
-        self.state.apply_persisted_commit_result(result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod plugin_state_boundary_tests {
-    use super::*;
-    use crate::plugin::{PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin};
-    use crate::testing::checkpoint_observer::{
-        CheckpointComponentWriteKind, CheckpointWriteCollector, ObservedDeploymentStore,
-    };
-
-    #[derive(Clone, Default)]
-    struct MockPlugin(Arc<std::sync::OnceLock<crate::PluginStateStore>>);
-    impl PluginFactory for MockPlugin {
-        fn id(&self) -> &'static str {
-            "event-state"
+                &nodes,
+                &draft_namespace,
+                self.host.core.clock.as_ref(),
+            );
         }
-        fn build(
-            &self,
-            _: &PluginSessionContext,
-        ) -> Result<Arc<dyn SessionPlugin>, crate::PluginError> {
-            Ok(Arc::new(self.clone()))
-        }
-    }
-    impl SessionPlugin for MockPlugin {
-        fn id(&self) -> &'static str {
-            "event-state"
-        }
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), crate::PluginError> {
-            self.0.set(reg.state()).expect("one session");
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
-        let collector = CheckpointWriteCollector::default();
-        let backend = crate::testing::memory_store_backend().await;
-        let factory: Arc<dyn crate::DeploymentStore> = Arc::new(ObservedDeploymentStore::new(
-            backend.session_store_factory(),
-            collector.clone(),
-        ));
-        let policy = crate::SessionPolicy {
-            model: crate::ModelSpec::builder("plugin-state-model")
-                .context_window_tokens(4096)
-                .build()
-                .unwrap(),
-            ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
-        };
-        let store = crate::runtime::admit_session_view(
-            &factory,
-            &crate::SessionStoreCreateRequest {
-                owning_process_id: None,
-                session_id: "event-state".into(),
-                relation: crate::SessionRelation::Root,
-                config: policy.clone().into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
-                pending_observer_intents: vec![],
-            },
-        )
-        .await
-        .unwrap();
-        let fixture = MockPlugin::default();
-        let mut factories = crate::testing::test_standard_protocol_factories();
-        factories.push(Arc::new(fixture.clone()));
-        let plugins = crate::PluginHost::new(factories)
-            .build_session(PluginSessionRequest::creation(
-                "event-state",
-                Default::default(),
-            ))
-            .unwrap();
-        let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-            backend,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        ));
-        let runtime_services = crate::PersistentRuntimeServices::new(
-            plugins,
-            store,
-            std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-            std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-        );
-        let mut runtime = LashRuntime::from_persistent_embedded_state(
-            policy.clone(),
-            runtime_host,
-            runtime_services,
-            RuntimeSessionState {
-                session_id: "event-state".into(),
-                ..RuntimeSessionState::new(policy)
-            },
-            crate::testing::runtime_lease_owner(),
-        )
-        .await
-        .unwrap();
-        let before = collector.events().len();
-        fixture
-            .0
-            .get()
-            .unwrap()
-            .set("value", serde_json::json!(42))
-            .unwrap();
-        runtime
-            .apply_plugin_operation_effects(
-                "event-state",
-                vec![crate::PluginRuntimeEvent::Status {
-                    key: "state".into(),
-                    label: "written".into(),
-                    detail: None,
-                }],
-                vec![],
-                crate::ExecutionScope::runtime_operation("event-write"),
-            )
-            .await
-            .unwrap();
-        let bodyless = runtime.export_persistence_state();
-        fixture
-            .0
-            .get()
-            .unwrap()
-            .set("value", serde_json::json!(99))
-            .unwrap();
-        runtime.apply_persistence_state(bodyless).unwrap();
-        assert_eq!(
-            fixture.0.get().unwrap().get("value"),
-            Some(serde_json::json!(99)),
-            "reapplying the resident checkpoint must preserve newer live writes"
-        );
-        let events = collector.events();
-        let first_boundary = &events[before];
-        assert!(
-            first_boundary.components.iter().any(|component| matches!(
-                &component.kind, CheckpointComponentWriteKind::PluginState { state }
-                    if state.plugins["event-state"].values["value"] == serde_json::json!(42)
-            )),
-            "the event commit, not a later repair commit, must carry the accepted plugin write"
-        );
+        self.stamp_live_plugin_state();
+        Ok(owned_events)
     }
 }

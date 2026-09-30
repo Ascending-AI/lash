@@ -534,7 +534,12 @@ impl SessionGraphScenario {
         };
         let operation_id = self.next_operation_id("append");
         let live = self.live.get(&slot).expect("ensured live session");
-        let mut runtime = property_runtime(live.store.store(), &live.request).await?;
+        let runtime = property_runtime(live.store.store(), &live.request).await?;
+        // The plugin-facing service writes straight through the store's
+        // append path: nothing drives this session, so nothing owns its head.
+        let service = runtime
+            .session_graph_service()
+            .map_err(|error| error.to_string())?;
         let nodes = (0..usize::from(node_count.max(1)))
             .map(|ordinal| {
                 crate::SessionAppendNode::plugin(
@@ -543,13 +548,14 @@ impl SessionGraphScenario {
                 )
             })
             .collect();
-        let result = Box::pin(
-            runtime.append_session_nodes(crate::AppendSessionNodesRequest {
+        let result = Box::pin(service.append_session_nodes(
+            &live.request.session_id,
+            crate::AppendSessionNodesRequest {
                 operation_id,
                 nodes,
                 requires_ancestor_node_id: required.clone(),
-            }),
-        )
+            },
+        ))
         .await
         .map_err(|error| error.to_string())?;
 

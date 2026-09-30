@@ -43,6 +43,7 @@ pub use runtime_owner::RuntimeOwner;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
+pub mod session_append;
 pub mod session_catalog;
 pub mod session_graph;
 pub(crate) mod session_graph_cache;
@@ -131,9 +132,9 @@ pub use process_identity::process_id_for_test;
 pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
-    AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+    QueuedWorkKind, QueuedWorkPayload, SessionCommand, SessionCommandOutcome,
     TurnLaneAdmissionPolicy,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
@@ -267,8 +268,6 @@ pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
 pub(crate) use turn_input_vocabulary::TurnInputCompletionData;
 #[allow(unused_imports)]
 pub(crate) use turn_input_vocabulary::{TurnInputAdmissionMode, ingress_message_id};
-
-pub(crate) use turn_input_vocabulary::TurnActivityId;
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::plugin`.
 pub(crate) mod plugin {

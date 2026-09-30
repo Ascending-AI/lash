@@ -217,7 +217,15 @@ impl LashRuntime {
     /// §4): every leading command, each commit fenced by the root's seal,
     /// until the command lane is empty. The root admits no turn. An
     /// administrative compaction runs here, lent the root's controller,
-    /// which it rescopes to the command's own scope (FIG-4201).
+    /// which it rescopes to the command's own scope (FIG-4201), and so do a
+    /// host's append, plugin operation and frame open (FIG-4202).
+    ///
+    /// Once the lane is empty the root ends like any other root: the store
+    /// writes its [`CommandsApplied`](crate::store::RootTerminalCause::CommandsApplied)
+    /// terminal, which arms its scope close, so the root's journal is
+    /// retired (FIG-4202). The end is an idempotent store write: a replay
+    /// finds it written, and a run a later admission superseded writes
+    /// nothing, leaving the lane to that admission.
     pub(super) async fn run_commands_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -259,6 +267,18 @@ impl LashRuntime {
                     return Err(drive_abort(Some(&root), error));
                 }
             }
+        }
+        let store = self.drive_store()?;
+        let end = store
+            .end_command_root(fence, &root, self.host.core.clock.timestamp_ms())
+            .await
+            .map_err(|error| {
+                DriveAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
+            })?;
+        if end.terminal().is_some()
+            && let Some(run) = self.drive_root.as_mut()
+        {
+            run.mark_terminal_written();
         }
         // The outcome is the admission's, never what this execution found:
         // a redelivery finds the lane its first execution already applied,

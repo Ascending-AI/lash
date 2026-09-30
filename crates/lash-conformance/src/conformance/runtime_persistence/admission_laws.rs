@@ -588,10 +588,11 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
 }
 
 /// FIG-3927 N6: the command lane is bindless. A command row is settled only
-/// by the fenced commit that applied it: a host withdrawal that wins the race
-/// refuses the applying commit whole (`SessionCommandWithdrawn`) and nothing
-/// is written. A command is never bound to a root, by a root's admission or
-/// its checkpoint.
+/// by the fenced commit that applied it. A host withdraws a command until a
+/// drive's fenced read of the lane admits it (FIG-4202); a commit that names
+/// a withdrawn command is refused whole (`SessionCommandWithdrawn`) and
+/// nothing is written, and a read command is no longer withdrawn. A command
+/// is never bound to a root, by a root's admission or its checkpoint.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -604,28 +605,19 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         batch_ids: vec![batch.batch_id.clone()],
     };
 
-    // A withdrawal that wins the race refuses the applying commit.
+    // A withdrawal before any drive read the command removes it, and a
+    // commit that names it anyway is refused with nothing written.
     let withdrawn = store
         .enqueue_queued_work(queued_session_command_draft(&session, "withdrawn"))
         .await
         .expect("enqueue the withdrawn command");
-    let run = store
-        .open_session_command_run(&fence)
-        .await
-        .expect("open the command run");
-    assert_eq!(
-        run.iter()
-            .map(|batch| batch.batch_id.clone())
-            .collect::<Vec<_>>(),
-        vec![withdrawn.batch_id.clone()]
-    );
     assert!(
         store
             .cancel_queued_work_batch(&session, withdrawn.batch_id.as_str())
             .await
             .expect("withdraw the command")
             .is_some(),
-        "an open command is withdrawable"
+        "a command no drive read is withdrawable"
     );
     let before = durable_ingress(&store, &session).await;
     let refused = store
@@ -645,11 +637,30 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         "a refused command commit writes nothing"
     );
 
-    // A command no one withdrew is settled by the commit that applied it.
+    // The lane's read admits the command (FIG-4202): a withdrawal no longer
+    // reaches it, and the commit that applies it settles it.
     let applied = store
         .enqueue_queued_work(queued_session_command_draft(&session, "applied"))
         .await
         .expect("enqueue the applied command");
+    let run = store
+        .open_session_command_run(&fence)
+        .await
+        .expect("open the command run");
+    assert_eq!(
+        run.iter()
+            .map(|batch| batch.batch_id.clone())
+            .collect::<Vec<_>>(),
+        vec![applied.batch_id.clone()]
+    );
+    assert!(
+        store
+            .cancel_queued_work_batch(&session, applied.batch_id.as_str())
+            .await
+            .expect("try to withdraw the read command")
+            .is_none(),
+        "a command the lane read is admitted, and no longer withdrawn"
+    );
     store
         .commit_runtime_state(applying_commands(
             head_commit(&store, &session).await,

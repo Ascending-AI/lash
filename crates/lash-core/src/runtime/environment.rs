@@ -97,6 +97,48 @@ impl ParkedSession {
     }
 }
 
+/// A park or close [`LashRuntime::park`] did not complete (FIG-4202). It
+/// hands the runtime back with its resident state and its pending usage as
+/// they were, so nothing the runtime held is lost: the host keeps using it,
+/// or parks it again.
+pub struct ParkRefused {
+    pub runtime: Box<crate::LashRuntime>,
+    pub error: Box<crate::SessionError>,
+}
+
+impl ParkRefused {
+    /// The drive that owns the session head, when the refusal is a busy
+    /// one: a dirty park's flush met a bound root, an owed follow-on or an
+    /// open session command (FIG-4202). The same park succeeds once that
+    /// owner's boundary passes.
+    #[must_use]
+    pub fn busy_owner(&self) -> Option<&crate::store::SessionHeadOwner> {
+        match self.error.as_ref() {
+            crate::SessionError::Store {
+                source: crate::StoreError::SessionHeadOwned { owner, .. },
+                ..
+            } => Some(owner),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for ParkRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ParkRefused")
+            .field("session_id", &self.runtime.session_id())
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+impl From<ParkRefused> for crate::SessionError {
+    fn from(refused: ParkRefused) -> Self {
+        *refused.error
+    }
+}
+
 /// Fluent builder for `RuntimeEnvironment`.
 pub struct RuntimeEnvironmentBuilder {
     env: RuntimeEnvironment,

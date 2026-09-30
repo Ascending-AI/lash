@@ -131,7 +131,7 @@ mod tests {
                 failure_evidence: commit.failure_evidence.clone(),
                 outcome: commit.outcome.clone(),
                 pending_follow_on: None,
-                compact_context_outcome: commit.compact_context_outcome.clone(),
+                command_outcome: commit.command_outcome.clone(),
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
                 receipt_replayed: self.replayed,

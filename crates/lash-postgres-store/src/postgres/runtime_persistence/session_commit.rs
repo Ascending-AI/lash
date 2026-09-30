@@ -554,6 +554,38 @@ impl PostgresStore {
                 }
             }
         }
+        // The bound turn owns the head (FIG-4202): a write outside every
+        // drive is refused while a root, an owed follow-on or an open command
+        // owns it. The drive epoch's row lock, taken before the head's in the
+        // order a fenced commit takes them, serializes the read with every
+        // admission, which is fenced. A replayed receipt above answered its
+        // first outcome already; the plan's own refusals (a follow-on the
+        // commit would drop, a moved head) answer before the ownership's.
+        let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
+            commit.drive_fence.is_some(),
+            existing.is_some(),
+        ) {
+            match super::drive_epoch::drive_epoch_locked_tx(&mut tx, &commit.session_id).await {
+                Ok(_) | Err(StoreError::DriveEpochUnavailable { .. }) => {}
+                Err(error) => return Err(error),
+            }
+            let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(
+                pending_follow_on_tx(&mut tx, &commit.session_id, false)
+                    .await?
+                    .as_ref(),
+                commit.pending_follow_on.as_ref(),
+            );
+            Some(
+                crate::session_roots::head_ownership_facts_conn(
+                    &mut tx,
+                    &commit.session_id,
+                    owed_follow_on,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         if commit.interrupted_turn_cancel_intent.is_some()
             && commit.turn_cancel_closure_settlement.is_none()
         {
@@ -830,6 +862,9 @@ impl PostgresStore {
             occupied_node_ids,
             existing_pending_follow_on,
         })?;
+        if let Some(facts) = head_ownership {
+            lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
+        }
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",
             plan.actual_head_revision(),

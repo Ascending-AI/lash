@@ -97,9 +97,23 @@ root to its current owner. A park, unknown commit outcome or retryable live
 fault ends no root. A later epoch adopts existing root terminal evidence,
 L-S6, rather than replacing it with a new commit.
 
+The session head has one owner at a time: the unfinished root, from its
+admission until its terminal; an owed follow-on; or the command lane while a
+session command is open, sealed command roots included. A head-changing write
+that does not present the owner's current fence is refused in its own
+transaction, on SQLite and PostgreSQL alike, with the typed, retryable
+`StoreError::SessionHeadOwned`, which names the owner. A host's head write from
+outside a turn is therefore a session command the drive applies at a turn
+boundary (ADR 0101 §4), and a terminal callback writes under its ended root's
+fence. A root commit can still meet a moved head when another writer presents
+the same fence, such as a second execution of the root. That commit ends its
+root with `StoreCommitSuperseded` and never wedges; the redrive that reloads
+the head is a new root.
+
 Evidence: `crates/lash-core/src/runtime/drive/admission.rs:94`,
 `crates/lash-core/src/runtime/root_start.rs:1`,
 `crates/lash-core-store/src/store/drive_fence.rs:185`,
+`crates/lash-core-store/src/store/head_ownership.rs:1`,
 `crates/lash-core/src/runtime/drive/root.rs:103`,
 `crates/lash-core/src/runtime/drive/root.rs:346`,
 `crates/lash-core/src/runtime/drive/root.rs:800`,

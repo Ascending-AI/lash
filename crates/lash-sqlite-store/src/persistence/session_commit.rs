@@ -684,6 +684,31 @@ impl SqliteStore {
                             .as_ref()
                             .and_then(|meta| meta.pending_follow_on.clone()),
                     })?;
+                    // The bound turn owns the head (FIG-4202): a write
+                    // outside every drive is refused while a root, an owed
+                    // follow-on or an open command owns it. A replayed
+                    // receipt above answered its first outcome already, and
+                    // the plan's own refusals (a follow-on the commit would
+                    // drop, a moved head) answer first.
+                    if lash_core_execution::store::head_write_needs_ownership(
+                        commit.drive_fence.is_some(),
+                        existing.is_some(),
+                    ) {
+                        let facts = crate::session_roots::head_ownership_facts_conn(
+                            tx,
+                            &commit.session_id,
+                            lash_core_execution::store::follow_on_owning_the_head(
+                                existing
+                                    .as_ref()
+                                    .and_then(|meta| meta.pending_follow_on.as_ref()),
+                                commit.pending_follow_on.as_ref(),
+                            ),
+                        )?;
+                        lash_core_execution::store::require_unowned_head(
+                            &commit.session_id,
+                            facts,
+                        )?;
+                    }
                     let sql_head_revision = sql_monotonic_counter_value(
                         "session_head_revision",
                         plan.actual_head_revision(),

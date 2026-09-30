@@ -114,6 +114,20 @@ impl LashRuntime {
         self.install_resident_state(state);
     }
 
+    /// Test hook: records `usage` on the runtime's shared pending usage
+    /// ledger under `source` and `model`, as a host-side model call outside
+    /// every turn does, so the runtime holds pending usage its next park
+    /// flushes.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn record_pending_usage_for_test(
+        &self,
+        source: &str,
+        model: &str,
+        usage: &crate::TokenUsage,
+    ) {
+        session_manager::record_token_usage_shared(&self.shared_token_ledger, source, model, usage);
+    }
+
     /// Publish the resident authority to the live plugin session.
     fn publish_resident_authority(&self) {
         let Some(session) = self.session.as_ref() else {
@@ -927,9 +941,9 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
-        self.persist_materialized_protocol_config()
-            .await
-            .map_err(runtime_error_from_session_command_refresh)?;
+        // The options this runtime's open materialized apply first, as a
+        // command of their own (FIG-4202).
+        Box::pin(self.submit_materialized_protocol_config(&store)).await?;
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
@@ -1051,10 +1065,11 @@ impl LashRuntime {
             // no edge that needs the patch re-published residently.
             // Reapplying it here would overwrite a newer settled head
             // with this command's older values, resident-only.
-            Ok(match completion.compact_context_outcome {
-                // An administrative compaction answers what it settled as,
-                // on whichever runtime applied it (FIG-4201).
-                Some(outcome) => crate::runtime::SessionCommandSettlement::Compaction {
+            Ok(match completion.command_outcome {
+                // A command that settles with an outcome answers what it
+                // settled as, on whichever runtime applied it (FIG-4201,
+                // FIG-4202).
+                Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
                     receipt: handle.receipt,
                     outcome,
                 },
@@ -1165,8 +1180,9 @@ impl LashRuntime {
     /// The command lane takes no binding. The run's rows are read open and
     /// their obligations acknowledged delivered in one fenced write, and the
     /// commit that applies the run settles them, predicated on each row still
-    /// being open. A host withdrawal in between refuses that commit, which
-    /// applies nothing, and the lane is read again.
+    /// being open. The read admits the run (FIG-4202): a host withdrawal
+    /// after it is refused, so the commit's predicate is a backstop, and a
+    /// commit it refuses applies nothing and the lane is read again.
     ///
     /// The resident session is reloaded outside any recorded step, so its
     /// outcome never decides what the root journals (FIG-4346): a reload that
@@ -1311,14 +1327,72 @@ impl LashRuntime {
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
-        if let [crate::SessionCommand::CompactContext { instructions }] = commands.as_slice() {
-            return Box::pin(self.apply_compact_context_command(
-                instructions.clone(),
-                completion,
-                drive_fence,
-                effect_controller,
-            ))
-            .await;
+        // A command that settles with an outcome applies alone, under its
+        // own scope, in the commit that settles it (FIG-4201, FIG-4202).
+        match commands.as_slice() {
+            [crate::SessionCommand::CompactContext { instructions }] => {
+                return Box::pin(self.apply_compact_context_command(
+                    instructions.clone(),
+                    completion,
+                    drive_fence,
+                    effect_controller,
+                ))
+                .await;
+            }
+            [
+                crate::SessionCommand::AppendSessionNodes { .. }
+                | crate::SessionCommand::RunPluginCommand { .. }
+                | crate::SessionCommand::RunPluginTask { .. }
+                | crate::SessionCommand::OpenAgentFrame { .. },
+            ] => {
+                drop(RuntimeNamedPhase::begin(
+                    self.turn_phase_probe.clone(),
+                    super::host_commands::SESSION_COMMAND_APPLYING_PHASE,
+                ));
+                // A host command applies against the boundary's committed
+                // head, whichever runtime committed it last (FIG-4202).
+                self.adopt_committed_head().await?;
+            }
+            _ => {}
+        }
+        match commands.as_slice() {
+            [crate::SessionCommand::AppendSessionNodes { request }] => {
+                return Box::pin(self.apply_append_session_nodes_command(
+                    request.as_ref().clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::RunPluginCommand { name, args }] => {
+                return Box::pin(self.apply_plugin_operation_command(
+                    super::host_commands::HostPluginOperation::Command,
+                    name.clone(),
+                    args.clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::RunPluginTask { name, args }] => {
+                return Box::pin(self.apply_plugin_operation_command(
+                    super::host_commands::HostPluginOperation::Task,
+                    name.clone(),
+                    args.clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            [crate::SessionCommand::OpenAgentFrame { request }] => {
+                return Box::pin(self.apply_open_agent_frame_command(
+                    request.as_ref().clone(),
+                    completion,
+                    drive_fence,
+                ))
+                .await;
+            }
+            _ => {}
         }
         let effect_controller = effect_controller.controller();
         let has_durable_store = self
@@ -1419,14 +1493,22 @@ impl LashRuntime {
                     crate::SessionCommand::ApplyConfigPatch { .. } => {
                         unreachable!("config commands use the cloned publication path")
                     }
-                    // The drive's command lane applies a persisted compaction
-                    // before this point; only a storeless runtime's inline
-                    // command reaches here, and it compacts directly.
-                    crate::SessionCommand::CompactContext { .. } => {
+                    // The drive's command lane applies a persisted command
+                    // that settles with an outcome before this point; only a
+                    // storeless runtime's inline command reaches here, and a
+                    // storeless runtime writes its head directly.
+                    command @ (crate::SessionCommand::CompactContext { .. }
+                    | crate::SessionCommand::AppendSessionNodes { .. }
+                    | crate::SessionCommand::RunPluginCommand { .. }
+                    | crate::SessionCommand::RunPluginTask { .. }
+                    | crate::SessionCommand::OpenAgentFrame { .. }) => {
                         return Err(RuntimeError::new(
-                            RuntimeErrorCode::ContextCompaction,
-                            "a storeless runtime compacts directly through \
-                             `compact_storeless_context`, not through a session command",
+                            RuntimeErrorCode::SessionCommandRequired,
+                            format!(
+                                "a storeless runtime applies `{}` directly, not through a \
+                                 session command",
+                                command.kind()
+                            ),
                         ));
                     }
                 }

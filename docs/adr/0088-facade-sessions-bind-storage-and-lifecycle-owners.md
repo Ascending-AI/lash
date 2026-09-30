@@ -39,6 +39,22 @@ configuration belongs to runtime materialization, rather than serialized turn
 input. Exact-session work ports and lifecycle operations retain their binding
 instead of rediscovering storage from a receiving core.
 
+### Park and close
+
+The bound turn owns the session head, so park and close never commit a
+whole-session snapshot beside the drive. A session whose runtime holds nothing
+unpersisted parks and closes without writing. A dirty one (plugin state, graph
+nodes, or pending usage no commit carried yet) adopts the durable head and then
+flushes. While a root is bound, a follow-on is owed, or a session command is
+open, the store refuses that flush in its own transaction as
+`StoreError::SessionHeadOwned`, naming the owner. The refusal is typed and
+recoverable: `LashSession::park` and `close` answer `SessionParkRefused` and
+the runtime's `park` answers `ParkRefused`. Each names the busy owner and hands
+the session back with its runtime, resident state, and pending usage intact.
+The host keeps using the session, or parks it again once the owner's boundary
+passes. A park refused because another handle still shares the runtime
+(`SessionStillInUse`) leaves that handle in place.
+
 ### Administration
 
 Catalog administration is separate from an opened session. Deletion uses the
@@ -73,5 +89,6 @@ owns external deployment composition.
 
 - `crates/lash/src/session.rs:152-169,247-275,518-541` separates create and existing-session resolution.
 - `crates/lash/src/session_binding.rs:6-63,150-185` captures owner services and applies them on resume.
+- `crates/lash-core/src/runtime/lifecycle.rs` (`park`, `flush_for_park`) and `crates/lash-core/src/runtime/environment.rs` (`ParkRefused`) make a busy park recoverable.
 - `crates/lash-core/src/runtime/session_administration.rs:104-153` issues the paired deletion context.
 - `crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs` pins lifecycle-owner behavior.

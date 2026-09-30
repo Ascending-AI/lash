@@ -186,12 +186,13 @@ pub use turn_queue::SessionCommandSettlement;
 pub use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
-    PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority,
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-    QueuedWorkPayload, SessionCommand, SessionCommandPayload, SessionCommandReceipt,
-    TurnLaneAdmissionPolicy, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    OpenAgentFrameCommandOutcome, PROCESS_WAKE_MERGE_KEY, PluginOperationCommandOutcome,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    SessionCommandOutcome, SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy,
+    TurnWorkPayload, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 pub use usage::{
     LedgerUsageOutcome, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,

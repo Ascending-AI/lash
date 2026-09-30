@@ -346,7 +346,7 @@ impl LashRuntime {
             };
             commit.drive_fence = Some(Box::new(drive_fence.clone()));
             commit.applied_commands = Some(completion.clone());
-            commit.compact_context_outcome = Some(outcome);
+            commit.command_outcome = Some(super::SessionCommandOutcome::CompactContext { outcome });
             let error = match store.commit_runtime_state_verified(commit).await {
                 Ok(result) => {
                     staged

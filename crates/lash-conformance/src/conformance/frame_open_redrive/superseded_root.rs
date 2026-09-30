@@ -1,18 +1,24 @@
 //! FIG-4200: a root overtaken by another writer ends typed on every drive
 //! path.
 //!
-//! A root's pressure hook holds its journaled summary while another runtime
-//! appends to the session, a lane-less head write that no drive fence stops
-//! (FIG-4010). The pressure frame's commit then meets the moved head. The
-//! root can never commit on the base it was admitted on, so it ends
-//! `Refused(StoreCommitSuperseded)` whichever drive path ran it: the drive
-//! loop (a queued drain) or an engine's own root attempt. It never parks, its
-//! input is answered with the refusal, and the next drive admits a new root.
+//! The bound turn owns the session head (FIG-4202): the store refuses every
+//! lane-less head write while a root is bound, so no host write overtakes
+//! it. The race that remains is between writers presenting the root's own
+//! drive fence, such as a second execution of the same root. Here a root's
+//! pressure hook holds its journaled summary while such a writer moves the
+//! head under the root's fence. The pressure frame's commit then meets the
+//! moved head. The root can never commit on the base it was admitted on, so
+//! it ends `Refused(StoreCommitSuperseded)` whichever drive path ran it: the
+//! drive loop (a queued drain) or an engine's own root attempt. It never
+//! parks, its input is answered with the refusal, and the next drive admits
+//! a new root. That typed loss is the ownership rule's backstop.
 //!
-//! The end holds across a crash before it is written (the redrive replays the
-//! journal, meets the same moved head and writes it) and on a fresh journal
-//! (a new drive resumes the unfinished root, and its live inspection finds
-//! the head overtaken).
+//! The end holds across a crash before it is written: the redrive replays the
+//! journal, meets the same moved head and writes it. A drive that resumes
+//! the unfinished root on a fresh journal finds the head moved only under
+//! the root's own fence, which is the root's own writing, and continues from
+//! it (FIG-4202); [`a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame`]
+//! holds that.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -43,13 +49,11 @@ pub enum SupersededRootRecovery {
     /// The execution dies right before it writes the end; the tier redrives
     /// it on the journal it left.
     CrashBeforeEnd,
-    /// The execution fails to write the end and its journal is gone; a new
-    /// drive resumes the unfinished root on a fresh journal.
-    FreshJournal,
 }
 
-/// The note another runtime appends while the root's pressure hook holds.
-const OVERTAKING_NOTE: &str = "a note another runtime appended mid-root";
+/// The note a writer holding the root's fence appends while the root's
+/// pressure hook holds.
+const OVERTAKING_NOTE: &str = "a note another writer appended mid-root";
 
 /// How one drive of the law ended: `Ok` for a root that committed.
 type DriveEnd = Result<(), crate::RuntimeError>;
@@ -157,56 +161,44 @@ impl LawSession {
 
     /// Appends [`OVERTAKING_NOTE`] through another runtime: a lane-less
     /// head write, run in a runtime operation of its own on the tier.
+    /// Moves the head under the bound root's own drive fence, as a second
+    /// execution of the root would: a lane-less write is refused while the
+    /// root is bound (FIG-4202), so the fence is what lets this one land.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn append_from_another_runtime(&self) {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let parts = self.parts.clone();
-        let attempt: crate::ConformanceTurnAttempt = Arc::new(move |_scope| {
-            let parts = parts.clone();
-            let tx = tx.clone();
-            Box::pin(async move {
-                let mut writer = build_runtime(&parts, None).await;
-                let appended = Box::pin(writer.append_session_nodes(
-                    crate::AppendSessionNodesRequest {
-                        operation_id: "superseded-root-overtaking-append".to_string(),
-                        nodes: vec![crate::SessionAppendNode::message(
-                            crate::PluginMessage::text(
-                                crate::MessageRole::Assistant,
-                                OVERTAKING_NOTE,
-                            ),
-                        )],
-                        requires_ancestor_node_id: None,
-                    },
-                ))
-                .await
-                .map(|_| ());
-                let _ = tx.send(appended);
-                crate::ConformanceTurnEnd::Settled
-            })
-        });
-        tokio::time::timeout(
-            std::time::Duration::from_secs(90),
-            self.runner.run_turn(
-                admit(crate::ExecutionScope::runtime_operation(format!(
-                    "{}-overtaking-append",
-                    self.prefix
-                ))),
-                attempt,
-            ),
-        )
-        .await
-        .expect("the append ends");
-        rx.recv()
+    async fn overtake_under_the_roots_fence(&self) {
+        let fence = crate::store::current_drive_fence(self.store.as_ref(), &self.session_id)
             .await
-            .expect("the tier ran the append")
-            .expect("another runtime's lane-less append lands");
+            .expect("read the session's drive fence")
+            .expect("the bound root sealed the session");
+        let mut state =
+            crate::conformance::helpers::load_window_state(&self.store, &self.session_id)
+                .await
+                .expect("read the session head")
+                .expect("the session committed");
+        state.append_active_conversation_messages(&[crate::Message {
+            id: "superseded-root-overtaking-note".to_string(),
+            role: crate::MessageRole::Assistant,
+            parts: vec![crate::Part::text(
+                "superseded-root-overtaking-note.p0".to_string(),
+                OVERTAKING_NOTE.to_string(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        }]);
+        let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.drive_fence = Some(Box::new(fence));
+        self.store
+            .commit_runtime_state(commit)
+            .await
+            .expect("a writer holding the root's fence moves the head");
     }
 }
 
-/// A root whose held pressure frame another runtime's lane-less append
+/// A root whose held pressure frame a writer holding its own drive fence
 /// overtakes ends `Refused(StoreCommitSuperseded)` on `path`, recovered as
 /// `recovery` says: one terminal, its input answered, no park, the summary
 /// requested once, and the next drive admits a new root that commits.
@@ -273,16 +265,11 @@ pub async fn a_superseded_root_ends_typed_on_every_drive_path(
                 Box::pin(async { panic!("injected crash before the refused root's end") })
             }))
         }
-        SupersededRootRecovery::FreshJournal => {
-            recording.fail_next_end_refused_root(crate::StoreError::Backend(
-                "injected store fault on the refused root's end".to_string(),
-            ));
-        }
     }
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let overtaken = async {
         match recovery {
-            SupersededRootRecovery::None | SupersededRootRecovery::FreshJournal => {
+            SupersededRootRecovery::None => {
                 law.runner
                     .run_turn(
                         law.drive_scope("root-2"),
@@ -306,28 +293,13 @@ pub async fn a_superseded_root_ends_typed_on_every_drive_path(
         std::time::Duration::from_secs(90),
         futures_util::future::join(
             overtaken,
-            hold.while_held(law.append_from_another_runtime()),
+            hold.while_held(law.overtake_under_the_roots_fence()),
         ),
     )
     .await
     .expect("the overtaken root's drive ends");
     let first_end = rx.recv().await.expect("the tier ran the overtaken drive");
-    let refused = match recovery {
-        SupersededRootRecovery::None | SupersededRootRecovery::CrashBeforeEnd => {
-            first_end.expect_err("the overtaken root is refused")
-        }
-        SupersededRootRecovery::FreshJournal => {
-            let fault = first_end.expect_err("the end's store fault fails the drive");
-            assert_ne!(
-                fault.code,
-                crate::RuntimeErrorCode::StoreCommitSuperseded,
-                "a store fault on the end is the attempt's live fault: {fault:?}"
-            );
-            law.drive_on("root-2-fresh-journal", path)
-                .await
-                .expect_err("the resumed root is refused on its fresh journal")
-        }
-    };
+    let refused = first_end.expect_err("the overtaken root is refused");
     assert_eq!(
         refused.code,
         crate::RuntimeErrorCode::StoreCommitSuperseded,

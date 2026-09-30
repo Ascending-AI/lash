@@ -295,321 +295,72 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
     assert!(dead_epoch.epoch() > 0);
 }
 
-/// Holds the first two writers to reach `session_graph_append.pre_commit`
-/// until both have arrived, so their head CAS attempts genuinely overlap.
-///
-/// `begin_named` is a synchronous callback on a tokio worker, so the rendezvous
-/// is a bounded watchdog rather than a `std::sync::Barrier`: a barrier has no
-/// timeout, and if both spawned appends were ever served by one worker the test
-/// would hang CI forever instead of failing. Overshooting the deadline is a real
-/// defect in the gate (the overlap it exists to prove did not happen), so it
-/// panics and turns the test red.
-struct AppendPreCommitBarrier {
-    pub(super) arrivals: std::sync::atomic::AtomicUsize,
-}
-
-impl AppendPreCommitBarrier {
-    pub(super) const OVERLAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
-    pub(super) const OVERLAP_POLL: std::time::Duration = std::time::Duration::from_millis(1);
-
-    pub(super) fn new() -> Self {
-        Self {
-            arrivals: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-}
-
-impl lash::runtime::RuntimeTurnPhaseProbe for AppendPreCommitBarrier {
-    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
-
-    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
-
-    fn begin_named(&self, phase: &str) {
-        if phase != "session_graph_append.pre_commit"
-            || self
-                .arrivals
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                >= 2
-        {
-            return;
-        }
-        let deadline = std::time::Instant::now() + Self::OVERLAP_DEADLINE;
-        while self.arrivals.load(std::sync::atomic::Ordering::SeqCst) < 2 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "only one writer reached session_graph_append.pre_commit within {:?}; the append \
-                 race never overlapped",
-                Self::OVERLAP_DEADLINE
-            );
-            std::thread::sleep(Self::OVERLAP_POLL);
-        }
-    }
-}
-
-/// FIG-1133 Phase 6 gate: both live writers stage from the same graph and are
-/// held at the pre-commit boundary. One wins the first head CAS; the loser
-/// observes that exact conflict, refreshes, and appends without loss or partial
-/// publication.
+/// FIG-4202: a host append is a session command the drive applies at a turn
+/// boundary, so two live writers' appends and a workbench reply commit made
+/// at the same moment never race a head CAS: each is queued, applied in
+/// order and settled, and none surfaces a conflict for its host to repair.
+/// The reply commit's stable message id makes it land exactly once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn two_live_writers_rebase_appends_into_durable_graph_order() {
+async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() {
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-concurrent-append")
-        .complete_error("the append gate must not call the provider")
+        .complete_error("the append race must not call the provider")
         .build()
         .into_handle();
     let double = crate::tests::test_double_backend(0).await;
     let state = queued_send_test_state(&double, provider).await;
     let session_id = state.current_session_id();
-    let left = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open left append writer");
-    let right = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open right append writer");
-    let barrier = Arc::new(AppendPreCommitBarrier::new());
-    let probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe> = barrier;
-    left.set_turn_phase_probe(Arc::clone(&probe)).await;
-    right.set_turn_phase_probe(probe).await;
-
-    let left_task = tokio::spawn(async move {
-        let first = left
-            .admin()
-            .state()
-            .append_messages(vec![lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::Assistant,
-                "fig1133-concurrent-left",
-            )])
-            .await;
-        (left, first)
-    });
-    let right_task = tokio::spawn(async move {
-        let first = right
-            .admin()
-            .state()
-            .append_messages(vec![lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::Assistant,
-                "fig1133-concurrent-right",
-            )])
-            .await;
-        (right, first)
-    });
-    let (left_result, right_result) = tokio::join!(left_task, right_task);
-    let (left, left_result) = left_result.expect("left append task");
-    let (right, right_result) = right_result.expect("right append task");
-    assert_eq!(
-        [left_result.is_ok(), right_result.is_ok()]
-            .into_iter()
-            .filter(|won| *won)
-            .count(),
-        1
-    );
-    let left_lost = left_result.is_err();
-    let conflict = if left_lost {
-        left_result.expect_err("left writer loses the first CAS")
-    } else {
-        right_result.expect_err("right writer loses the first CAS")
-    };
-    // The loser must retain the *typed* conflict, not a rendered string: a host
-    // is told to refresh and retry from this outcome, and string matching cannot
-    // distinguish it from any other commit failure.
-    let lash::EmbedError::Session(lash::SessionError::Store {
-        source: lash::persistence::StoreError::HeadRevisionConflict { expected, actual },
-        ..
-    }) = &conflict
-    else {
-        panic!("the CAS loser must surface a typed HeadRevisionConflict, got {conflict:?}");
-    };
-    assert_eq!(*expected, 0);
-    assert_eq!(*actual, 1);
-    assert_eq!(
-        conflict.to_string(),
-        "runtime session error: failed to persist runtime state: store head revision conflict: expected 0, actual 1"
-    );
-    let (loser, missing_text) = if left_lost {
-        (left, "fig1133-concurrent-left")
-    } else {
-        (right, "fig1133-concurrent-right")
-    };
-    loser
-        .admin()
-        .state()
-        .append_messages(vec![lash::plugins::PluginMessage::text(
-            lash::messages::MessageRole::Assistant,
-            missing_text,
-        )])
-        .await
-        .expect("CAS loser refreshes and commits its append");
-
-    let fresh = crate::created_session(&state.core, session_id)
-        .await
-        .open()
-        .await
-        .expect("reopen durable append graph");
-    let ordered = fresh
-        .read_view()
-        .messages()
-        .iter()
-        .map(lash::message_text)
-        .filter(|text| text.starts_with("fig1133-concurrent-"))
-        .collect::<Vec<_>>();
-    assert!(
-        ordered == vec!["fig1133-concurrent-left", "fig1133-concurrent-right"]
-            || ordered == vec!["fig1133-concurrent-right", "fig1133-concurrent-left"],
-        "both literal appends must appear exactly once in durable graph order: {ordered:?}"
-    );
-}
-
-/// Parks the first `parks` writers reaching `session_graph_append.pre_commit`
-/// until the test has committed a competing head advance for each one and
-/// released it, so every parked attempt loses its head CAS by construction
-/// (FIG-3925).
-///
-/// `arrivals` counts writers reaching the phase; `released` counts the parked
-/// attempts the driver has let go. Like [`AppendPreCommitBarrier`] the gate
-/// spins rather than awaits: `begin_named` is synchronous on a tokio worker,
-/// and an overlap that never forms must fail the test, not hang it.
-struct QueuedInputHeadConflictGate {
-    parks: usize,
-    arrivals: std::sync::atomic::AtomicUsize,
-    released: std::sync::atomic::AtomicUsize,
-}
-
-impl QueuedInputHeadConflictGate {
-    fn new(parks: usize) -> Self {
-        Self {
-            parks,
-            arrivals: std::sync::atomic::AtomicUsize::new(0),
-            released: std::sync::atomic::AtomicUsize::new(0),
-        }
+    let mut writers = Vec::new();
+    for _ in 0..3 {
+        writers.push(
+            crate::created_session(&state.core, session_id.clone())
+                .await
+                .open()
+                .await
+                .expect("open an appending writer"),
+        );
     }
-}
-
-impl lash::runtime::RuntimeTurnPhaseProbe for QueuedInputHeadConflictGate {
-    fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
-
-    fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
-
-    fn begin_named(&self, phase: &str) {
-        if phase != "session_graph_append.pre_commit" {
-            return;
-        }
-        let arrival = self
-            .arrivals
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if arrival >= self.parks {
-            return;
-        }
-        let deadline = std::time::Instant::now() + AppendPreCommitBarrier::OVERLAP_DEADLINE;
-        while self.released.load(std::sync::atomic::Ordering::SeqCst) <= arrival {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "no competing head advance released parked append {arrival} within {:?}",
-                AppendPreCommitBarrier::OVERLAP_DEADLINE,
-            );
-            std::thread::sleep(AppendPreCommitBarrier::OVERLAP_POLL);
-        }
-    }
-}
-
-/// FIG-3925: the workbench's reply commit is a lane-less append that runs
-/// after its root settled, and the session's engine may commit the queued
-/// next-turn input between the commit's state read and its head CAS —
-/// `store head revision conflict: expected N, actual N+1`, which the live E2E
-/// saw surface as a terminal 500 about one run in five. The commit must
-/// reload the session and retry the conflict rather than report it.
-///
-/// The gate parks every `session_graph_append.pre_commit` the committing
-/// session runs, and each park is released only after a competing writer has
-/// advanced the durable head — the same interleaving the live law races, made
-/// deterministic. A retry that keeps appending through the stale session
-/// loses every attempt; reloading the session must converge the commit.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_commit_reloads_past_queued_input_head_conflicts() {
-    let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-reply-commit-conflict")
-        .complete_error("the reply-commit gate drives no turn")
-        .build()
-        .into_handle();
-    let double = crate::tests::test_double_backend(0).await;
-    let state = queued_send_test_state(&double, provider).await;
-    let session_id = state.current_session_id();
-    let follower = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open the reply-committing session");
-    let engine = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open the competing engine writer");
-    // One injected conflict for each attempt the bounded retry may make: a
-    // loop that keeps appending on the session it already holds loses every
-    // one; the fix's reload converges after the first loss.
-    let gate = Arc::new(QueuedInputHeadConflictGate::new(
-        crate::SESSION_OPEN_MAX_ATTEMPTS,
-    ));
-    let probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe> = gate.clone();
-    follower.set_turn_phase_probe(probe).await;
-
-    let driver_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let bump_driver = {
-        let gate = Arc::clone(&gate);
-        let driver_done = Arc::clone(&driver_done);
+    let reply_writer = writers.pop().expect("reply writer");
+    let right = writers.pop().expect("right writer");
+    let left = writers.pop().expect("left writer");
+    let append = |writer: lash::LashSession, text: &'static str| {
         tokio::spawn(async move {
-            let mut bumped = 0usize;
-            loop {
-                let waiting = gate
-                    .arrivals
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    .min(gate.parks)
-                    .saturating_sub(bumped);
-                if waiting == 0 {
-                    if driver_done.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
-                    }
-                    tokio::time::sleep(AppendPreCommitBarrier::OVERLAP_POLL).await;
-                    continue;
-                }
-                engine
-                    .admin()
-                    .state()
-                    .append_messages(vec![lash::plugins::PluginMessage::text(
-                        lash::messages::MessageRole::Assistant,
-                        format!("fig3925-engine-commit-{bumped}"),
-                    )])
-                    .await
-                    .expect("the competing engine commit advances the head");
-                gate.released
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                bumped += 1;
-            }
-            bumped
+            writer
+                .admin()
+                .state()
+                .append_messages(vec![lash::plugins::PluginMessage::text(
+                    lash::messages::MessageRole::Assistant,
+                    text,
+                )])
+                .await
         })
     };
-
-    let turn_id = TurnId::from("fig3925-queued-input-race");
+    let left_task = append(left, "fig4202-concurrent-left");
+    let right_task = append(right, "fig4202-concurrent-right");
+    let turn_id = TurnId::from("fig4202-reply-commit");
     let reply_id = crate::workbench_turn_assistant_message_id(&turn_id);
-    let commit = crate::commit_assistant_transcript(
-        &follower,
-        &turn_id,
-        "the settled assistant reply".to_string(),
-        None,
-        || crate::open_session_with_bounded_retry(&state, &session_id, "turn.reply_commit"),
-        |event, payload| state.trace_for_session(&session_id, event, payload),
-    )
-    .await;
-    driver_done.store(true, std::sync::atomic::Ordering::SeqCst);
-    let bumped = bump_driver.await.expect("engine bump driver");
-    assert!(
-        bumped >= 1,
-        "the precondition must hold: the engine committed between the reply commit's read and its append"
-    );
-    commit.expect("the reply commit must reload and retry past head conflicts");
+    let reply_task = {
+        let turn_id = turn_id.clone();
+        tokio::spawn(async move {
+            crate::commit_assistant_transcript(
+                &reply_writer,
+                &turn_id,
+                "the settled assistant reply".to_string(),
+                None,
+            )
+            .await
+        })
+    };
+    let (left_result, right_result, reply_result) = tokio::join!(left_task, right_task, reply_task);
+    left_result
+        .expect("left append task")
+        .expect("the left append settles applied");
+    right_result
+        .expect("right append task")
+        .expect("the right append settles applied");
+    reply_result
+        .expect("reply commit task")
+        .expect("the reply commit settles applied");
 
     let fresh = crate::created_session(&state.core, session_id)
         .await
@@ -617,23 +368,26 @@ async fn reply_commit_reloads_past_queued_input_head_conflicts() {
         .await
         .expect("reopen the durable session");
     let messages = fresh.read_view();
-    let replies = messages
+    let appended = messages
         .messages()
         .iter()
-        .filter(|message| message.id == reply_id)
-        .count();
-    assert_eq!(
-        replies, 1,
-        "the reply commits exactly once across its retries"
+        .map(lash::message_text)
+        .filter(|text| text.starts_with("fig4202-concurrent-"))
+        .collect::<Vec<_>>();
+    assert!(
+        appended == vec!["fig4202-concurrent-left", "fig4202-concurrent-right"]
+            || appended == vec!["fig4202-concurrent-right", "fig4202-concurrent-left"],
+        "both appends appear exactly once in durable graph order: {appended:?}"
     );
-    for arrival in 0..bumped {
-        assert!(
-            messages.messages().iter().any(|message| {
-                lash::message_text(message) == format!("fig3925-engine-commit-{arrival}")
-            }),
-            "engine commit {arrival} must be durable"
-        );
-    }
+    assert_eq!(
+        messages
+            .messages()
+            .iter()
+            .filter(|message| message.id == reply_id)
+            .count(),
+        1,
+        "the reply commit lands exactly once"
+    );
 }
 
 /// A provider whose first call parks until released, so a turn can be held

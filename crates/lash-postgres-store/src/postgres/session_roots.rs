@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RefusedRootEnd, RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
+    RootAdmission, RootEnd, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
     RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
     decide_root_terminal_write, refused_run_owns_root, root_binding_conflict, stored_intent_kind,
     stored_intent_state,
@@ -347,7 +347,7 @@ pub(crate) async fn end_refused_root_tx(
     root: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
-) -> Result<RefusedRootEnd, StoreError> {
+) -> Result<RootEnd, StoreError> {
     let target = lash_core_execution::engine::RootRef {
         session: fence.session().clone(),
         root: root.clone(),
@@ -364,14 +364,14 @@ pub(crate) async fn end_refused_root_tx(
             Err(error) => return Err(error),
         };
     match unanswered_root_tx(tx, &target).await? {
-        UnansweredRoot::Ended(terminal) => Ok(RefusedRootEnd::AlreadyEnded(*terminal)),
-        UnansweredRoot::Unknown => Ok(RefusedRootEnd::Unknown),
+        UnansweredRoot::Ended(terminal) => Ok(RootEnd::AlreadyEnded(*terminal)),
+        UnansweredRoot::Unknown => Ok(RootEnd::Unknown),
         UnansweredRoot::Open => {
             let current = current.ok_or_else(|| StoreError::DriveEpochUnavailable {
                 session_id: target.session.clone(),
             })?;
             if !refused_run_owns_root(&target.session, fence, &current)? {
-                return Ok(RefusedRootEnd::Superseded);
+                return Ok(RootEnd::Superseded);
             }
             write_unanswered_root_end_tx(tx, &target, at_ms, |_| RootTerminalCause::Refused {
                 code: refusal.code.clone(),
@@ -379,9 +379,42 @@ pub(crate) async fn end_refused_root_tx(
                 refusal_cause: refusal.cause.clone(),
             })
             .await
-            .map(RefusedRootEnd::Ended)
+            .map(RootEnd::Ended)
         }
     }
+}
+
+/// The command root whose run under `fence` applied the session's command
+/// lane until it was empty ends (FIG-4202): its row opens and its terminal
+/// is written in one transaction, arming its scope close, once the run is
+/// shown to still own the session's drive epoch.
+pub(crate) async fn end_command_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &TurnId,
+    at_ms: u64,
+) -> Result<RootEnd, StoreError> {
+    let session = fence.session();
+    // The drive epoch's row lock first, in the order a fenced commit takes
+    // it (see `end_refused_root_tx`).
+    let current =
+        crate::runtime_persistence::drive_epoch::drive_epoch_locked_tx(tx, session).await?;
+    if let Some(terminal) = root_terminal_conn(&mut *tx, session, root).await? {
+        return Ok(RootEnd::AlreadyEnded(terminal));
+    }
+    if !refused_run_owns_root(session, fence, &current)? {
+        return Ok(RootEnd::Superseded);
+    }
+    let terminal = RootTerminal {
+        session_id: session.clone(),
+        root: root.clone(),
+        kind: RootTerminalCause::CommandsApplied.kind(),
+        cause: RootTerminalCause::CommandsApplied,
+        head_revision: None,
+        at_ms,
+    };
+    write_root_terminal_conn(&mut *tx, &terminal).await?;
+    Ok(RootEnd::Ended(terminal))
 }
 
 /// Where a root no commit answered stands.
@@ -532,6 +565,39 @@ pub(crate) async fn unfinished_root_conn(
         })
     })
     .transpose()
+}
+
+/// What owns session `session_id`'s head, read in a head commit's
+/// transaction (FIG-4202): its unfinished root, the follow-on its head owes
+/// (`owed_follow_on`, read with the head) and its earliest open session
+/// command.
+pub(crate) async fn head_ownership_facts_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    owed_follow_on: Option<TurnId>,
+) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
+    let unfinished_root = unfinished_root_conn(conn, session_id)
+        .await?
+        .map(|unfinished| unfinished.root);
+    let row: (Option<i64>, Option<i64>, Option<i64>, Option<i64>) = sqlx::query_as(
+        crate::turn_ingress::turn_ingress_sql()
+            .family
+            .pending_session_work_ordering
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(lash_core_execution::QueuedWorkKind::Control.as_str())
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(lash_core_execution::store::HeadOwnershipFacts {
+        unfinished_root,
+        owed_follow_on,
+        open_command: row
+            .1
+            .map(|seq| u64_from_sql("QueuedWorkBatch", "enqueue_seq", seq))
+            .transpose()?,
+    })
 }
 
 /// `root`'s recorded admission, read on `conn`: `None` for a root with no
@@ -1036,11 +1102,25 @@ impl RootStore for PostgresStore {
         root: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
-    ) -> Result<RefusedRootEnd, StoreError> {
+    ) -> Result<RootEnd, StoreError> {
         lash_core_execution::store::validate_session_id(fence.session())?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let end = end_refused_root_tx(&mut tx, fence, root, refusal, at_ms).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(end)
+    }
+
+    async fn end_command_root(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+        root: &TurnId,
+        at_ms: u64,
+    ) -> Result<RootEnd, StoreError> {
+        lash_core_execution::store::validate_session_id(fence.session())?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
+        let end = end_command_root_tx(&mut tx, fence, root, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
     }

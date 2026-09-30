@@ -592,44 +592,63 @@ impl LashRuntime {
         .await
     }
 
-    pub(super) async fn persist_materialized_protocol_config(
+    /// Submit the protocol turn options this runtime's open materialized
+    /// (FIG-2479) to the session's command lane, ahead of the command about
+    /// to be submitted, when they differ from the durable ones.
+    ///
+    /// The bound turn owns the session head (FIG-4202), so the materialized
+    /// options are never written beside the drive: they are a config patch
+    /// the drive applies at a turn boundary, in order, before the command
+    /// that follows. The patch is keyed by the options it records, so a
+    /// resubmission names the same command.
+    pub(super) async fn submit_materialized_protocol_config(
         &mut self,
-    ) -> Result<(), SessionError> {
+        store: &crate::store::SessionStore,
+    ) -> Result<(), RuntimeError> {
         if !self.materialized_protocol_config_dirty {
             return Ok(());
         }
-        let Some(store) = self.services.store.clone() else {
-            return Ok(());
-        };
-        self.stamp_live_plugin_state();
-        let operation = super::state::boundary_operation(
-            &self.state.session_id,
-            "protocol-materialization",
-            "record-config",
-        );
         let fleet_format = self.fleet_format();
-        let (mut commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
-                &mut self.state,
-                &[],
-                operation,
-                self.host.core.durability.commit_budget,
-                fleet_format,
-            )
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        // Stamp last: the semantic-boundary identity hashes the commit's
-        // canonical request content, so it must ride the final config.
-        commit
-            .stamp_semantic_boundary()
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = store
-            .commit_runtime_state_verified(commit)
-            .await
-            .map_err(|source| {
-                session_commit_error("failed to record protocol configuration", source)
+        let options = self
+            .state
+            .protocol_turn_options
+            .restamped_for_fleet(fleet_format);
+        let options_json =
+            lash_core_ids::stable_hash::stable_json_string(&options).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::SessionCommandRun,
+                    format!("failed to identify the materialized protocol options: {error}"),
+                )
             })?;
-        self.state.apply_persisted_commit_result(result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
+        let options_hash = lash_core_ids::stable_hash::blake3_hex(
+            "lash-protocol-materialization/v1",
+            options_json.as_bytes(),
+        );
+        let command = crate::SessionCommand::ApplyConfigPatch {
+            patch: Box::new(super::ApplyConfigPatch {
+                base_config_revision: self.state.config_revision,
+                protocol_turn_options: Some(options),
+                ..super::ApplyConfigPatch::for_fleet(fleet_format)
+            }),
+        };
+        let source_key = command.source_key(format!(
+            "protocol-materialization:{}:{options_hash}",
+            self.state.config_revision
+        ));
+        let enqueued = store
+            .enqueue_queued_work(
+                crate::QueuedWorkBatchDraft::new(
+                    self.state.session_id.clone(),
+                    crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                    command,
+                )
+                .with_source_key(source_key),
+            )
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        self.ingress_relay()
+            .deliver_admitted(enqueued.batch_id.as_str())
+            .await;
         self.materialized_protocol_config_dirty = false;
         Ok(())
     }
@@ -639,21 +658,86 @@ impl LashRuntime {
     /// [`LashRuntime::resume`]. This is the webserver-embedder parking
     /// primitive: the handle holds only the session id, policy, and store
     /// reference — no graph nodes, no plugin session, no HTTP client.
-    pub async fn park(mut self) -> Result<ParkedSession, SessionError> {
-        let store = self.services.store.clone().ok_or_else(|| {
+    ///
+    /// A park that cannot complete hands the runtime back
+    /// ([`ParkRefused`]), with its resident state and its pending usage as
+    /// they were: nothing it held is lost. The bound turn owns the session
+    /// head (FIG-4202), so a dirty park while a drive owns the head (a bound
+    /// root, an owed follow-on or an open session command) is refused busy
+    /// in the flush's own transaction, and the host parks again once that
+    /// owner's boundary passes. A clean park writes nothing and is never
+    /// busy.
+    pub async fn park(mut self) -> Result<ParkedSession, ParkRefused> {
+        let store = match self.park_store() {
+            Ok(store) => store,
+            Err(error) => {
+                return Err(ParkRefused {
+                    runtime: Box::new(self),
+                    error: Box::new(error),
+                });
+            }
+        };
+        if let Err(error) = Box::pin(self.flush_for_park()).await {
+            return Err(ParkRefused {
+                runtime: Box::new(self),
+                error: Box::new(error),
+            });
+        }
+        Ok(self.into_parked(store))
+    }
+
+    /// The handle a park returns, once [`Self::flush_for_park`] landed: the
+    /// session id, policy and store reference, and the lease facts a resume
+    /// checks.
+    pub fn parked_handle(self) -> Result<ParkedSession, SessionError> {
+        let store = self.park_store()?;
+        Ok(self.into_parked(store))
+    }
+
+    fn into_parked(self, store: crate::store::SessionStore) -> ParkedSession {
+        ParkedSession {
+            session_id: self.state.session_id.clone(),
+            store,
+            policy: self.state.effective_policy().clone(),
+            runtime_lease_owner: self.runtime_lease_owner,
+            runtime_lease_executor_id: self.runtime_lease_executor_id,
+        }
+    }
+
+    fn park_store(&self) -> Result<crate::store::SessionStore, SessionError> {
+        self.services.store.clone().ok_or_else(|| {
             SessionError::Protocol(
                 "park() requires a persistent runtime (store is not set)".to_string(),
             )
-        })?;
+        })
+    }
+
+    /// Persist a park's dirty state: the non-consuming half of
+    /// [`Self::park`] (FIG-4202).
+    ///
+    /// A flush that does not land leaves the runtime as it was, its resident
+    /// state and its pending usage included: the store refuses it typed
+    /// ([`StoreError::SessionHeadOwned`](crate::StoreError::SessionHeadOwned))
+    /// while a drive owns the session head, and the same flush lands once
+    /// that owner's boundary passes. A head that moved since this runtime
+    /// last read it is adopted first, so the flush never commits an old
+    /// whole-session snapshot over it; the pending usage, held apart from the
+    /// head, rides the flush whatever moved. A clean runtime writes nothing.
+    pub async fn flush_for_park(&mut self) -> Result<(), SessionError> {
+        self.park_store()?;
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
+        self.adopt_committed_head()
+            .await
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+        let store = self.park_store()?;
         self.stamp_live_plugin_state();
-        let session_id = self.state.session_id.clone();
-        let policy = self.state.effective_policy().clone();
         // Under the settled-state contract every durable mutation commits at
-        // its own boundary (turn final commit, config updates, queued-work
-        // drains), so a runtime between boundaries already equals its last
-        // commit. Flushing is only needed when the state has never been
-        // persisted, has accepted plugin writes, or has pending graph nodes; an unconditional commit
-        // here would bump the head revision on every park/close, disturbing
+        // its own boundary (turn final commit, session commands), so a runtime
+        // between boundaries already equals its last commit. Flushing is only
+        // needed when the state has never been persisted, has accepted plugin
+        // writes, or has pending graph nodes; an unconditional commit here
+        // would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
         // FIG-2765: pending usage rows are durable content too. A reconciliation
         // correction that never reaches the store turns a recovered charge back
@@ -666,69 +750,64 @@ impl LashRuntime {
             .iter()
             .map(|pending| pending.entry.clone())
             .collect::<Vec<_>>();
-        if self.state.checkpoint_ref.is_none()
-            || self.state.plugin_state_is_dirty()
-            || !self.state.pending_graph_commit().nodes().is_empty()
-            || !pending_usage.is_empty()
+        if self.state.checkpoint_ref.is_some()
+            && !self.state.plugin_state_is_dirty()
+            && self.state.pending_graph_commit().nodes().is_empty()
+            && pending_usage.is_empty()
         {
-            let proposed = initial_park_preview(
-                &self.state,
-                &pending_usage,
+            return Ok(());
+        }
+        let proposed = initial_park_preview(
+            &self.state,
+            &pending_usage,
+            self.host.core.durability.commit_budget,
+            self.fleet_format(),
+        )
+        .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        let operation = initial_park_operation(&proposed)
+            .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        // Stage against the final operation so a retried park after an
+        // unknown outcome, or after a busy refusal, reuses byte-identical row
+        // identities.
+        let staged =
+            session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        // The commit is built over a copy: a flush that does not land leaves
+        // the resident state, its usage totals included, as it was.
+        let mut flushed = self.state.clone();
+        for delta in staged.deltas() {
+            flushed
+                .usage
+                .fold_checked(&delta.entry)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        }
+        let fleet_format = self.fleet_format();
+        let (commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
+                &mut flushed,
+                staged.deltas(),
+                operation,
                 self.host.core.durability.commit_budget,
-                self.fleet_format(),
+                fleet_format,
             )
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            let operation = initial_park_operation(&proposed)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            // Stage against the final operation so a retried park after an
-            // unknown outcome reuses byte-identical row identities.
-            let staged =
-                session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
-                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            for delta in staged.deltas() {
-                self.state
-                    .usage
-                    .fold_checked(&delta.entry)
-                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            }
-            let fleet_format = self.fleet_format();
-            let (commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
-                    &mut self.state,
-                    staged.deltas(),
-                    operation,
-                    self.host.core.durability.commit_budget,
-                    fleet_format,
-                )
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            // Lane-less host lifecycle boundary: `park` runs between turns and
-            // owns no retained session-execution guard.
-            let result = store
-                .commit_runtime_state_verified(commit)
-                .await
-                .map_err(|source| {
-                    session_commit_error("failed to persist runtime state", source)
-                })?;
-            // Retire staged rows only against receipt-confirmed identities: an
-            // unknown outcome leaves them staged with their identities intact.
-            let confirmed_usage = result.committed_usage_delta_identities.clone();
-            staged
-                .confirm_identities(&confirmed_usage)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
-        }
-        // Drain pending tombstones if any. Under KeepHistory this is a
-        // no-op (tombstones never get added). Under DropOrphans, a future
-        // orphan-trim path would populate the set for Phase 10's vacuum()
-        // design.
-        Ok(ParkedSession {
-            session_id,
-            store,
-            policy,
-            runtime_lease_owner: self.runtime_lease_owner,
-            runtime_lease_executor_id: self.runtime_lease_executor_id,
-        })
+        // A write outside every drive: the store refuses it while a drive
+        // owns the head (FIG-4202). The staged rows keep their identities
+        // either way, pending in the shared ledger until a flush lands.
+        let result = store
+            .commit_runtime_state_verified(commit)
+            .await
+            .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
+        // Retire staged rows only against receipt-confirmed identities: an
+        // unknown outcome leaves them staged with their identities intact.
+        let confirmed_usage = result.committed_usage_delta_identities.clone();
+        staged
+            .confirm_identities(&confirmed_usage)
+            .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        flushed.apply_persisted_commit_result(result);
+        flushed.mark_node_ids_persisted(persisted_node_ids);
+        self.state = flushed;
+        Ok(())
     }
 
     /// Resume a previously parked session against a shared environment.
@@ -936,7 +1015,7 @@ mod tests {
 
         let error = match Box::pin(runtime.park()).await {
             Ok(_) => panic!("park commit must refuse the retired session"),
-            Err(error) => error,
+            Err(refused) => *refused.error,
         };
         let canonical = crate::StoreError::SessionDeleted {
             session_id: SessionId::from(session_id.to_string()),
@@ -1017,7 +1096,7 @@ mod tests {
 
         let error = match Box::pin(runtime.park()).await {
             Ok(_) => panic!("park commit must surface the injected backend failure"),
-            Err(error) => error,
+            Err(refused) => *refused.error,
         };
 
         assert!(matches!(

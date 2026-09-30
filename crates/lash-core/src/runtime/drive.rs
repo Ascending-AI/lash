@@ -945,7 +945,7 @@ impl LashRuntime {
                 DriveAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
             })?;
         match end {
-            crate::store::RefusedRootEnd::Ended(_) => {
+            crate::store::RootEnd::Ended(_) => {
                 tracing::info!(
                     session_id = %self.state.session_id,
                     root = %run.root,
@@ -955,8 +955,8 @@ impl LashRuntime {
                 );
                 run.mark_terminal_written();
             }
-            crate::store::RefusedRootEnd::AlreadyEnded(_) => run.mark_terminal_written(),
-            crate::store::RefusedRootEnd::Superseded => {
+            crate::store::RootEnd::AlreadyEnded(_) => run.mark_terminal_written(),
+            crate::store::RootEnd::Superseded => {
                 tracing::info!(
                     session_id = %self.state.session_id,
                     root = %run.root,
@@ -965,7 +965,7 @@ impl LashRuntime {
                     "a refused run a later admission superseded leaves its root to that admission"
                 );
             }
-            crate::store::RefusedRootEnd::Unknown => {}
+            crate::store::RootEnd::Unknown => {}
         }
         Ok(())
     }

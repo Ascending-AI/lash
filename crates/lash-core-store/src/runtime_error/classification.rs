@@ -94,6 +94,10 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => Retryable,
             // the park's redrive settles within a tick; the identical admission then proceeds.
             Self::SessionRedriveUnsettled => Retryable,
+            // the owning drive releases the head at its boundary; the identical write then lands.
+            Self::SessionHeadOwned => Retryable,
+            // the same direct call on a store-backed session is refused the same way.
+            Self::SessionCommandRequired => Terminal,
             // the drive is journaled, so re-running the same turn cedes the same way.
             Self::AcceptedTurnInputCeded => Terminal,
             // the deployment runs no session work; the identical wait is refused identically.

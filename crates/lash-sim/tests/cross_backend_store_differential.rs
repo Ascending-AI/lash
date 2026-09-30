@@ -116,7 +116,7 @@ enum CaseName {
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
     LostRootRecovery,
-    RefusedRootEnd,
+    RootEnd,
     PendingFollowOnRaise,
     RootAdmissionReplay,
     RefusedSurfaceOnDeletedSession,
@@ -170,7 +170,7 @@ impl CaseName {
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
             Self::LostRootRecovery => "lost_root_recovery",
-            Self::RefusedRootEnd => "refused_root_end",
+            Self::RootEnd => "refused_root_end",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
             Self::RootAdmissionReplay => "root_admission_replays_exact_result_after_drive_handoff",
             Self::RefusedSurfaceOnDeletedSession => {

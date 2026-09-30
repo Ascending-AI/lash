@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RefusedRootEnd, RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
+    RootAdmission, RootEnd, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
     RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
     decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
     scope_close_obligation_id, stored_intent_kind, stored_intent_state,
@@ -357,27 +357,57 @@ pub(crate) fn end_refused_root_conn(
     root: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
-) -> Result<RefusedRootEnd, StoreError> {
+) -> Result<RootEnd, StoreError> {
     let target = lash_core_execution::engine::RootRef {
         session: fence.session().clone(),
         root: root.clone(),
     };
     match unanswered_root_conn(tx, &target)? {
-        UnansweredRoot::Ended(terminal) => Ok(RefusedRootEnd::AlreadyEnded(*terminal)),
-        UnansweredRoot::Unknown => Ok(RefusedRootEnd::Unknown),
+        UnansweredRoot::Ended(terminal) => Ok(RootEnd::AlreadyEnded(*terminal)),
+        UnansweredRoot::Unknown => Ok(RootEnd::Unknown),
         UnansweredRoot::Open => {
             let current = crate::persistence::drive_epoch_conn(tx, &target.session)?;
             if !refused_run_owns_root(&target.session, fence, &current)? {
-                return Ok(RefusedRootEnd::Superseded);
+                return Ok(RootEnd::Superseded);
             }
             write_unanswered_root_end_conn(tx, &target, at_ms, |_| RootTerminalCause::Refused {
                 code: refusal.code.clone(),
                 message: refusal.message.clone(),
                 refusal_cause: refusal.cause.clone(),
             })
-            .map(RefusedRootEnd::Ended)
+            .map(RootEnd::Ended)
         }
     }
+}
+
+/// The command root whose run under `fence` applied the session's command
+/// lane until it was empty ends (FIG-4202): its row opens and its terminal
+/// is written in one transaction, arming its scope close, once the run is
+/// shown to still own the session's drive epoch.
+pub(crate) fn end_command_root_conn(
+    tx: &Connection,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &TurnId,
+    at_ms: u64,
+) -> Result<RootEnd, StoreError> {
+    let session = fence.session();
+    if let Some(terminal) = root_terminal_conn(tx, session, root)? {
+        return Ok(RootEnd::AlreadyEnded(terminal));
+    }
+    let current = crate::persistence::drive_epoch_conn(tx, session)?;
+    if !refused_run_owns_root(session, fence, &current)? {
+        return Ok(RootEnd::Superseded);
+    }
+    let terminal = RootTerminal {
+        session_id: session.clone(),
+        root: root.clone(),
+        kind: RootTerminalCause::CommandsApplied.kind(),
+        cause: RootTerminalCause::CommandsApplied,
+        head_revision: None,
+        at_ms,
+    };
+    write_root_terminal_conn(tx, &terminal)?;
+    Ok(RootEnd::Ended(terminal))
 }
 
 /// Where a root no commit answered stands.
@@ -513,6 +543,38 @@ pub(crate) fn unfinished_root_conn(
         })
     })
     .transpose()
+}
+
+/// What owns session `session_id`'s head, read in a head commit's
+/// transaction (FIG-4202): its unfinished root, the follow-on its head owes
+/// (`owed_follow_on`, read with the head) and its earliest open session
+/// command.
+pub(crate) fn head_ownership_facts_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    owed_follow_on: Option<TurnId>,
+) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
+    let unfinished_root = unfinished_root_conn(conn, session_id)?.map(|unfinished| unfinished.root);
+    let open_command: Option<i64> = conn
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .pending_session_work_ordering
+                .sql(),
+            params![
+                session_id.as_str(),
+                lash_core_execution::QueuedWorkKind::Control.as_str()
+            ],
+            |row| row.get(1),
+        )
+        .map_err(sqlite_error)?;
+    Ok(lash_core_execution::store::HeadOwnershipFacts {
+        unfinished_root,
+        owed_follow_on,
+        open_command: open_command
+            .map(|seq| stored_u64("QueuedWorkBatch", seq))
+            .transpose()?,
+    })
 }
 
 /// `root`'s recorded admission, read on `conn`: `None` for a root with no
@@ -1077,13 +1139,28 @@ impl RootStore for crate::SqliteStore {
         root: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
-    ) -> Result<RefusedRootEnd, StoreError> {
+    ) -> Result<RootEnd, StoreError> {
         lash_core_execution::store::validate_session_id(fence.session())?;
         let fence = fence.clone();
         let root = root.clone();
         let refusal = refusal.clone();
         self.conn
             .write_flow(move |tx| commit(end_refused_root_conn(tx, &fence, &root, &refusal, at_ms)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn end_command_root(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+        root: &TurnId,
+        at_ms: u64,
+    ) -> Result<RootEnd, StoreError> {
+        lash_core_execution::store::validate_session_id(fence.session())?;
+        let fence = fence.clone();
+        let root = root.clone();
+        self.conn
+            .write_flow(move |tx| commit(end_command_root_conn(tx, &fence, &root, at_ms)))
             .await
             .map_err(sqlite_error)?
     }

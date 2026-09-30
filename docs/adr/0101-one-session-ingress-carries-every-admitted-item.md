@@ -93,11 +93,15 @@ Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
 Commands apply at idle or after a logical root finishes, ahead of fresh
 turn-lane roots. They do not apply mid-turn, at checkpoints, or between the
 physical turns of one logical run. An owed follow-on and an unfinished root
-retain precedence. A checkpoint does not treat an open command as a barrier.
+retain precedence; a parked root whose redrive is unsettled holds the command
+lane as it holds inputs, with the typed, retryable `SessionRedriveUnsettled`,
+because the unfinished root owns the head. A checkpoint does not treat an open
+command as a barrier.
 
 Commands are not admitted turn rows. The drive selects the leading command run
-and settles it in the applying commit; withdrawal before that commit refuses
-it. Adjacent config patches coalesce within the command bound. Other commands
+and settles it in the applying commit. The drive's fenced read of the run is
+the commands' admission: it delivers each row's obligation, and a withdrawal
+reaches a command only before that read. Adjacent config patches coalesce within the command bound. Other commands
 apply alone. Each turn retains its recorded config snapshot through checkpoints
 and follow-ons. A command can therefore change the config used by an input
 queued before it. A host requiring an earlier config waits for the input's
@@ -110,9 +114,43 @@ with settlement in one commit. Its typed outcome is `Opened`,
 cannot open another frame. A storeless runtime serializes direct compaction
 through its mutable runtime access.
 
+Every host head write from outside a turn is a command applied against the
+boundary's resident head: an append (`AppendSessionNodes`), a plugin command
+(`RunPluginCommand`) or task (`RunPluginTask`), and a durable frame open
+(`OpenAgentFrame`). A store-backed runtime refuses the direct calls with
+`SessionCommandRequired`; only a storeless runtime applies them directly. Each
+applies alone and settles in the one commit that makes its head write. An
+append lands its nodes, or settles `StaleBranch` when its required ancestor
+left the active path. A plugin's code runs only after admission; its services
+join the command as in-turn services join a turn, so its graph appends, usage,
+runtime events, plugin state, and queued turns ride the command's commit, and a
+task journals its effects under the command's own queue-drain scope. A frame
+open opens its frame and restarts the live interpreter from the seed. A command
+that cannot apply, including one whose commit exceeds the commit budget,
+settles with its typed refusal, so the lane never waits on it.
+
+Every command settles as a typed `SessionCommandOutcome` carried by its
+commit's receipt, so a submitter on any runtime reads
+`SessionCommandSettlement::Applied { receipt, outcome }`. A host submits with a
+stable idempotency key and gets a durable receipt
+(`SessionCommandAdmin::submit`); a resubmission under the key while the command
+is open names the same command. `settle` answers `Applied`, `Cancelled`, or
+`Pending` with the receipt when the drive has not applied the command by the
+deadline, and a host reattaches by the receipt. The convenience calls
+(`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
+operations, `compact_context`) submit and await. Dropping an await does not
+withdraw the command; `withdraw` does, transactionally, and answers
+`AlreadyAdmitted` once a drive read it. The runtime writer is never held while
+a settlement is awaited. A command root, once it drained the lane, writes its
+`RootTerminalCause::CommandsApplied` terminal and arms its scope close, so its
+journal is retired like a turn root's.
+
 Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
 `crates/lash-core/src/runtime/session_api.rs:1375`,
-`crates/lash-core/src/runtime/compact_context.rs:1`, and
+`crates/lash-core/src/runtime/compact_context.rs:1`,
+`crates/lash-core/src/runtime/host_commands.rs:1`,
+`crates/lash-core/src/runtime/drive/root.rs` (`run_commands_root`),
+`crates/lash/src/admin/host_commands.rs:1`, and
 `crates/lash-core-store/src/store/mod.rs:1590`.
 
 ### 5. Ordering and composition

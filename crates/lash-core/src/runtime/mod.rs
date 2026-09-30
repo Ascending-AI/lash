@@ -7,6 +7,9 @@ mod assembly;
 mod builder;
 mod compact_context;
 pub use compact_context::COMPACT_CONTEXT_COMMITTED_PHASE;
+pub use host_commands::{
+    SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE, SESSION_COMMAND_STAGED_PHASE,
+};
 mod compaction_base;
 pub use lash_core_execution::runtime::attachment_delivery;
 #[cfg(feature = "testing")]
@@ -34,6 +37,7 @@ mod environment;
 mod error;
 mod frame_definition_carry;
 mod frame_open;
+mod host_commands;
 mod observation_publisher;
 mod turn_settlement;
 use lash_core_execution::runtime::host;
@@ -222,7 +226,7 @@ pub use effect::{
     TurnControlBindingIdError, effect_groups_unsupported, refuse_unhonored_group_membership,
     turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
-pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
+pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{
@@ -364,12 +368,13 @@ pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
-    PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority,
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-    QueuedWorkPayload, SessionCommand, SessionCommandPayload, SessionCommandReceipt,
-    TurnLaneAdmissionPolicy, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    OpenAgentFrameCommandOutcome, PROCESS_WAKE_MERGE_KEY, PluginOperationCommandOutcome,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    SessionCommandOutcome, SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy,
+    TurnWorkPayload, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 use usage::nonzero_usage;
 pub use usage::{

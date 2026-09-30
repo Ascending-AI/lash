@@ -254,10 +254,30 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
         .await
         .expect_err("a side write may not drop the fact");
     assert!(matches!(error, StoreError::FollowOnPending { .. }));
-    store
-        .commit_runtime_state(commit_as(&state, operation, Some(owed.clone())))
+    // The owed follow-on owns the head (FIG-4202): a side write outside
+    // every drive is refused even when it carries the fact, and one beside
+    // the drive, presenting its fence, commits.
+    let error = store
+        .commit_runtime_state(commit_as(&state, operation.clone(), Some(owed.clone())))
         .await
-        .expect("a side write carrying the fact unchanged commits");
+        .expect_err("a side write outside every drive is refused while the follow-on is owed");
+    assert!(
+        matches!(
+            error,
+            StoreError::SessionHeadOwned {
+                owner: crate::store::SessionHeadOwner::FollowOn { ref follow_on },
+                ..
+            } if *follow_on == owed.follow_on_turn_id
+        ),
+        "{error:?}"
+    );
+    let fence = seal_drive_fence_for_test(&store, &session(), "follow-on-side-write").await;
+    let mut beside_the_drive = commit_as(&state, operation, Some(owed.clone()));
+    beside_the_drive.drive_fence = Some(Box::new(fence));
+    store
+        .commit_runtime_state(beside_the_drive)
+        .await
+        .expect("a side write beside the drive carrying the fact unchanged commits");
     assert_eq!(
         loaded_conformance_state(&store, &session())
             .await

@@ -666,14 +666,6 @@ impl LashRuntime {
             }
         };
         let commit_effects = admissions.commit_effects(prepared.outcome(), pending_follow_on);
-        // A physical turn the logical run continues after — a frame switch,
-        // or withheld work a follow-on turn drives — keeps its drive for the
-        // observers of its commit; a final one leaves them drive-less.
-        let continues_run = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. })
-            || admissions.carries_follow_on_work(matches!(
-                prepared.outcome(),
-                TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-            ));
         let settlement_trace = self.drive_root.as_ref().map(|root| {
             commit_effects.ingress_settlement.clone().into_ingress(
                 root.root().clone(),
@@ -823,13 +815,18 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        let post_commit_drive_fence = drive_fence.filter(|_| continues_run);
+        // The commit's observers write under its drive's fence, a final
+        // commit's included (FIG-4202): they run at the root's boundary, so a
+        // write they make is the owner's own, never one outside the drive
+        // that waits on the drive's settlement and deadlocks it. A later
+        // admission that sealed since refuses such a write typed, with
+        // nothing written.
         match self
             .emit_turn_persisted_event(
                 &delivery.turn,
                 scoped_effect_controller,
                 &trace_turn_id,
-                post_commit_drive_fence,
+                drive_fence,
             )
             .await
         {

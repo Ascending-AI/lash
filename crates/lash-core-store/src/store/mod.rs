@@ -27,6 +27,7 @@ mod fleet_format;
 mod fork_plan;
 pub mod generation_drain;
 mod graph_commit;
+mod head_ownership;
 pub mod history;
 #[cfg(test)]
 mod history_gate_tests;
@@ -124,6 +125,10 @@ pub use fleet_format::{
     upcast_json_record, upcaster,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
+pub use head_ownership::{
+    HeadOwnershipFacts, SessionHeadOwner, follow_on_owning_the_head, head_write_needs_ownership,
+    require_unowned_head,
+};
 pub use history::{
     FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
     HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
@@ -159,15 +164,11 @@ pub use queued_work::{
 };
 pub use realization::commit_runtime_state_verified;
 pub use recovery_leader::*;
-pub use retention::{
-    FACADE_PLUGIN_COMMAND_OPERATION_TAG, FACADE_PLUGIN_TASK_OPERATION_TAG, FacadePluginOperation,
-    PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,
-    is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
-};
+pub use retention::{RetentionBound, RetentionReport};
 pub use root::{
     AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-    InMemoryRootLedger, RefusedRootEnd, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
-    RootCommittedOutcome, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
+    InMemoryRootLedger, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
+    RootCommittedOutcome, RootEnd, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
     RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal,
     TurnCommitId, UnfinishedRoot, decide_root_terminal_write, refused_run_owns_root,
     root_binding_conflict,
@@ -638,7 +639,7 @@ impl RuntimeCommit {
             turn_commit: _,
             ingress,
             applied_commands,
-            compact_context_outcome,
+            command_outcome,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
             interrupted_turn_input_turn_id,
@@ -651,7 +652,7 @@ impl RuntimeCommit {
         debug_assert!(
             ingress.is_none()
                 && applied_commands.is_none()
-                && compact_context_outcome.is_none()
+                && command_outcome.is_none()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -727,10 +728,9 @@ impl RuntimeCommit {
                 .applied_commands
                 .as_ref()
                 .is_some_and(|commands| !commands.batch_ids.is_empty());
-        if self.compact_context_outcome.is_some() && self.applied_commands.is_none() {
+        if self.command_outcome.is_some() && self.applied_commands.is_none() {
             return Err(StoreError::Backend(
-                "a commit carrying an administrative compaction's outcome must apply its command"
-                    .to_string(),
+                "a commit carrying a session command's outcome must apply its command".to_string(),
             ));
         }
         if settles_rows && self.drive_fence.is_none() {
@@ -858,7 +858,7 @@ impl RuntimeCommit {
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             ingress: None,
             applied_commands: None,
-            compact_context_outcome: None,
+            command_outcome: None,
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1599,8 +1599,10 @@ pub trait QueuedWorkStore: Send + Sync {
     /// so the lane applies it in one commit. In one transaction fenced by
     /// `fence`, the run's ingress obligations are acknowledged delivered
     /// (ADR 0109 §3). The applying commit settles the rows
-    /// ([`RuntimeCommit::applied_commands`]); a row withdrawn in between
-    /// refuses that commit.
+    /// ([`RuntimeCommit::applied_commands`]). The read admits the run: a
+    /// host withdrawal no longer reaches a delivered command
+    /// ([`Self::cancel_queued_work_batch`]), so plugin code a command runs
+    /// only ever runs for a command that will settle.
     async fn open_session_command_run(
         &self,
         fence: &DriveFence,
@@ -1611,7 +1613,10 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Returns the removed batch when cancellation won the race. Returns `None`
     /// when the batch is missing or a root admitted it; callers must treat
     /// that as "already admitted or completed" and must not restore any stale
-    /// local draft state.
+    /// local draft state. A session command is admitted by the drive's
+    /// fenced read of its run ([`Self::open_session_command_run`]), which
+    /// delivers its obligation: from that read on, the command is being
+    /// applied and a withdrawal returns `None` (FIG-4202).
     ///
     /// Cancelling a process-wake batch is a terminal transition of that wake:
     /// the session's redelivery fence rises to `max(floor, sequence)` in the
@@ -1631,7 +1636,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// has vanished can be classified without mistaking cancellation for
     /// completion. The receipt carries what the command settled as, such as
     /// an administrative compaction's
-    /// [`compact_context_outcome`](RuntimeCommitReceipt::compact_context_outcome)
+    /// [`command_outcome`](RuntimeCommitReceipt::command_outcome)
     /// (FIG-4201).
     async fn queued_work_batch_completion(
         &self,

@@ -57,6 +57,18 @@ pub enum RuntimeErrorCode {
     /// admission is safe to retry and admits the input once the redrive
     /// settles.
     SessionRedriveUnsettled,
+    /// A head write outside every drive found the session head owned
+    /// (FIG-4202): a bound root, an owed follow-on or an open session
+    /// command. Nothing was written. The owner releases the head at its
+    /// boundary, so the identical write is safe to retry then; a host moves
+    /// the head through a session command instead.
+    SessionHeadOwned,
+    /// A host write that moves a store-backed session's head was called
+    /// directly (FIG-4202): the bound turn owns the head, so the write is a
+    /// session command the drive applies at a turn boundary. Submit it with
+    /// `submit_session_command` and await its settlement; only a storeless
+    /// runtime writes directly.
+    SessionCommandRequired,
     /// The journaled initial drive of a turn cannot drive the input that turn
     /// accepted: another claim of the live lease generation holds it; it is no
     /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
@@ -582,6 +594,8 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::SessionRedriveUnsettled => "session_redrive_unsettled",
+            Self::SessionHeadOwned => "session_head_owned",
+            Self::SessionCommandRequired => "session_command_required",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
             Self::SessionWorkUnavailable => "session_work_unavailable",
             Self::TurnExecutionRequiresReconciledToolSurface => {
@@ -836,6 +850,8 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
         Self::SessionRedriveUnsettled,
+        Self::SessionHeadOwned,
+        Self::SessionCommandRequired,
         Self::AcceptedTurnInputCeded,
         Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
@@ -1022,6 +1038,8 @@ impl RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "session_redrive_unsettled" => Self::SessionRedriveUnsettled,
+            "session_head_owned" => Self::SessionHeadOwned,
+            "session_command_required" => Self::SessionCommandRequired,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
             "session_work_unavailable" => Self::SessionWorkUnavailable,
             "turn_execution_requires_reconciled_tool_surface" => {

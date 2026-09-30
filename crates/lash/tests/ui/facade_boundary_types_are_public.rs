@@ -67,7 +67,7 @@ fn persistence_types_are_nameable(
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
         applied_commands: None,
-        compact_context_outcome: None,
+        command_outcome: None,
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,

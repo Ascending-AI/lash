@@ -23,6 +23,7 @@ pub(super) fn session_commit_error(
         | crate::store::StoreError::SessionStateVersionNewerThanRuntime { .. }
         | crate::store::StoreError::SessionStateVersionUnsupported { .. }
         | crate::store::StoreError::HeadRevisionConflict { .. }
+        | crate::store::StoreError::SessionHeadOwned { .. }
         | crate::store::StoreError::AppendOperationIdentityConflict { .. }
         | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
         | crate::store::StoreError::CommitNodeBudgetExceeded { .. }

@@ -962,9 +962,11 @@ pub async fn a_root_crashed_at_its_report_handover_still_closes_its_scope(
 /// A redelivered command root replays its recorded journal (FIG-3893, ADR
 /// 0101 §4): a root that applied the session's queued command dies before
 /// the engine records its end. The redelivered execution replays the same
-/// journal and answers the same outcome; the command applied once, and the
-/// root admitted no turn-lane row, so it has no terminal evidence and no
-/// scope to close.
+/// journal and answers the same outcome, and the command applied once. A
+/// command root ends like any other root (FIG-4202): its end writes its
+/// terminal evidence, `CommandsApplied`, and arms its scope's close, which
+/// runs once, after that evidence is durable, however many executions
+/// replay it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1050,12 +1052,16 @@ pub async fn a_command_roots_redrive_replays_its_recorded_outcome(
     };
     assert!(root.as_str().starts_with("drive-commands:"), "{first:?}");
     assert_eq!(again, first, "the redrive answers the recorded outcome");
+    let ended = terminal(&parts, root)
+        .await
+        .expect("a command root's end writes its terminal evidence");
+    assert_eq!(ended.cause, RootTerminalCause::CommandsApplied);
+    assert_eq!(ended.kind, RootTerminalKind::Answered);
     assert_eq!(
-        terminal(&parts, root).await,
-        None,
-        "a command root admits no turn-lane row and writes no evidence"
+        closes.closes(),
+        vec![(root.clone(), true)],
+        "the command root's scope closed once, after its evidence was durable"
     );
-    assert!(closes.closes().is_empty(), "no root scope was opened");
     assert!(
         parts
             .store
