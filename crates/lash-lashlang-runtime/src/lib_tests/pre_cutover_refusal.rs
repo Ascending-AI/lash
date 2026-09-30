@@ -249,8 +249,7 @@ fn assert_stopped_before_any_effect(run: &RefusedRun) {
 /// the carrier IR. That is deterministic, so the run ends Abandoned with the
 /// shared `ResumeRefused { RetiredGeneration }` terminal, naming the module
 /// ref it refused, instead of retrying a fault that can never clear.
-#[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
+async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law() {
     let stored: serde_json::Value = serde_json::from_slice(MODULE_ARTIFACT_PRE_FIG3571)
         .expect("the predecessor artifact is JSON");
     let decode = lashlang::ModuleArtifact::from_store_bytes(MODULE_ARTIFACT_PRE_FIG3571)
@@ -340,8 +339,7 @@ fn parked_handover(program_hash: String) -> lash_core::SegmentHandover {
 /// A segment the pre-FIG-3571 writer parked carries that build's program
 /// identity, so its handover is refused at the identity fence: the shared
 /// resume refusal, naming the identity it found.
-#[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect() {
+async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law() {
     let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
         .unwrap_or_else(|error| panic!("the parked-segment fixture is JSON: {error}"));
     let recorded = fixture["program_hash"]
@@ -359,8 +357,7 @@ async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_
 /// Behind the identity fence the parked bytes still meet the segment-version
 /// fence: even under a matching identity, a v17 segment is refused with the
 /// shared resume refusal before its continuation is restored.
-#[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect() {
+async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law() {
     let (store, input) = published_sleep_process().await;
     let current = crate::process::lashlang_program_hash(&input);
     let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
@@ -375,4 +372,26 @@ async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_e
             found: format!("lashlang-segment-state-v{parked_version}"),
         },
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retired_process_shapes_refuse_before_registration_or_effects() {
+    pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law().await;
+    pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law().await;
+    pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
+    pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect() {
+    pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect() {
+    pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law().await;
 }

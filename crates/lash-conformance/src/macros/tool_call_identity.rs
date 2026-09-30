@@ -13,7 +13,19 @@ macro_rules! tool_call_identity_tests {
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             repeated_provider_id_across_turns_is_distinct);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            one_turn_commits_history_once_and_never_replaces_existing_nodes);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            fork_inherits_history_without_execution_queues_waits_or_journals);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             same_scope_completion_collision);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            suspended_tool_keeps_turn_and_history_head_until_resolution);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            external_completion_without_observer_writes_nothing);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            tool_restore_policy_survives_every_rebuild_and_rollback);
+        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
+            live_and_durable_queue_paths_share_results_and_capability_refusals);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             tool_identity_survives_unrecorded_effect_crash);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
@@ -32,6 +44,14 @@ macro_rules! tool_call_identity_tests {
             retained_payload_drift_is_refused_before_effects);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             retained_call_identity_refuses_name_arguments_and_authority_drift_before_effects);
+    };
+    (@law [$($attr:tt)*] $fixture:block; fork_inherits_history_without_execution_queues_waits_or_journals) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn fork_inherits_history_without_execution_queues_waits_or_journals() {
+            let (_guard, tier) = $fixture;
+            $crate::registration_macro_support::fork_inherits_history_without_execution_queues_waits_or_journals_on_engine(tier).await;
+        }
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
         $($attr)*

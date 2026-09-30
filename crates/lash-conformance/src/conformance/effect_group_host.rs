@@ -2677,3 +2677,107 @@ async fn until(mut condition: impl FnMut() -> bool) {
     .await
     .expect("the host reaches the awaited state");
 }
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub async fn retired_scope_refuses_every_effect_wait_group_and_resolver_admission<
+    F: Fn() -> Host,
+>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scope = ExecutionScope::runtime_operation(format!("{prefix}-retired-admission"));
+    let controller = host
+        .scoped(admit(scope.clone()))
+        .expect("initial controller");
+    let key = host
+        .await_event_key(
+            &scope,
+            crate::AwaitEventWaitIdentity::tool_completion(crate::ToolCallId::fixture(
+                "before-retirement",
+            )),
+        )
+        .await
+        .expect("mint before retirement");
+    host.retire_effect_journal(
+        crate::EffectJournalRetirement::for_scope(&scope).expect("retirable scope"),
+    )
+    .await
+    .expect("retire scope");
+    assert_eq!(
+        host.resolve_await_event(&key, crate::Resolution::Ok(serde_json::json!("late")))
+            .await
+            .expect("late resolver"),
+        crate::ResolveOutcome::UnknownOrRevoked
+    );
+    assert!(host.peek_await_event(&key).await.is_err());
+    assert!(
+        host.await_await_event(&key, CancellationToken::new(), None)
+            .await
+            .is_err()
+    );
+    assert!(
+        host.await_event_key(
+            &scope,
+            crate::AwaitEventWaitIdentity::tool_completion(crate::ToolCallId::fixture(
+                "after-retirement"
+            ))
+        )
+        .await
+        .is_err()
+    );
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let executed = attempts.clone();
+    let effect = super::effect_host::journaled_conformance_envelope(
+        &scope,
+        "retired-effect",
+        "retired-operation",
+    );
+    assert!(
+        controller
+            .controller()
+            .execute_effect(
+                effect,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    executed.fetch_add(1, Ordering::SeqCst);
+                    Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                        value: serde_json::Value::Null,
+                    })
+                })
+            )
+            .await
+            .is_err()
+    );
+    let group = staged(
+        group(&scope, "retired-group", 1, GroupWakePolicy::All, RUN),
+        vec![counts_then_parks(&attempts)],
+    );
+    assert!(
+        controller
+            .controller()
+            .open_effect_group(group)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        0,
+        "retired effect and group executors are never admitted"
+    );
+    let sibling_scope = ExecutionScope::runtime_operation(format!("{prefix}-surviving-admission"));
+    let sibling = host
+        .await_event_key(
+            &sibling_scope,
+            crate::AwaitEventWaitIdentity::tool_completion(crate::ToolCallId::fixture(
+                "same-position",
+            )),
+        )
+        .await
+        .expect("retirement leaves siblings admissible");
+    assert_eq!(
+        host.resolve_await_event(&sibling, crate::Resolution::Ok(serde_json::Value::Null))
+            .await
+            .expect("sibling resolution"),
+        crate::ResolveOutcome::Accepted
+    );
+}

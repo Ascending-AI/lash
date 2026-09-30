@@ -1300,8 +1300,7 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
 /// on. Nothing is dispatched, so the recorded signal effect never reaches a
 /// fresh registry.
 #[tokio::test]
-pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_at_the_generation_gate()
- {
+pub(super) async fn old_generation_tool_calls_are_never_reminted() {
     const PRE_STAMP: &str = "carries no effect-journal generation";
     const GENERATION_ONE: &str = "carries effect-journal generation 1;";
     const GENERATION_TWO: &str = "carries effect-journal generation 2;";

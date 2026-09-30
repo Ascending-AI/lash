@@ -2181,3 +2181,28 @@ async fn fenced_process_and_trigger_registration_stays_typed() {
     }
     storage.pool().close().await;
 }
+
+lash_conformance::checkpoint_profile_tests!({
+    let Some((guard, storage)) = storage().await else {
+        eprintln!(
+            "PENDING: PostgreSQL identity profile conformance needs LASH_POSTGRES_DATABASE_URL"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let stores = vec![
+        Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
+        Arc::new(storage.store()),
+    ];
+    (guard, stores)
+});
+
+#[tokio::test]
+async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("PENDING: PostgreSQL service not configured");
+        return;
+    };
+    reset(storage.pool()).await;
+    lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(Arc::new(storage.lashlang_artifact_store())).await;
+}

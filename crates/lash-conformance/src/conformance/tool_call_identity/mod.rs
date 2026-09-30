@@ -273,7 +273,11 @@ impl IdentityProbes {
         // The call resolves its own key with its own label: a call that reads
         // another label consumed another call's completion.
         let resolver = Arc::clone(&self.effect_host);
+        let witness = Arc::clone(&self.witness);
         crate::task::spawn(async move {
+            if args.hold {
+                witness.gate.passed().await;
+            }
             let _ = resolver
                 .await_event_resolver()
                 .resolve_await_event(
@@ -667,15 +671,32 @@ impl World {
 
     /// A fresh runtime over the tier's host and stores, loading the session
     /// the earlier executions committed.
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
     pub(crate) async fn runtime(
         &self,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
     ) -> crate::LashRuntime {
-        let (config, factories) = self.host_and_factories();
+        self.runtime_with_tool_open_mode(phase_probe, crate::ToolSurfaceOpenMode::Reconcile)
+            .await
+    }
+
+    pub(crate) async fn runtime_with_tool_open_mode(
+        &self,
+        phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
+        mode: crate::ToolSurfaceOpenMode,
+    ) -> crate::LashRuntime {
+        self.runtime_on_store(phase_probe, mode, self.store().await)
+            .await
+    }
+
+    #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+    pub(crate) async fn runtime_on_store(
+        &self,
+        phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
+        mode: crate::ToolSurfaceOpenMode,
+        store: Arc<dyn crate::RuntimeStore>,
+    ) -> crate::LashRuntime {
+        let (mut config, factories) = self.host_and_factories();
+        config.control.tool_surface_open_mode = mode;
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(self.session_id.clone());
         let mut builder =
@@ -684,12 +705,18 @@ impl World {
                 .with_policy(policy)
                 .with_plugin_host(crate::facade_support::PluginHost::new(factories))
                 .with_store(crate::conformance::helpers::session_view(
-                    &self.store().await,
+                    &store,
                     self.session_id.clone(),
                 ))
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()));
         if let Some(processes) = &self.processes {
             builder = builder.with_process_work(processes.wiring.clone());
+        } else if let Some(registry) = &self.process_registry {
+            let watched = crate::facade_support::watch_process_registry(registry.clone());
+            builder = builder.with_process_work(crate::ProcessWorkWiring::new(
+                watched.clone(),
+                Arc::new(crate::NoProcessWork::new(&watched)),
+            ));
         }
         let mut runtime = Box::pin(builder.build())
             .await

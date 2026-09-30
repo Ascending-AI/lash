@@ -1421,3 +1421,55 @@ fn the_dialect_pins_snapshot_engine_id() {
             .expect("decode snapshot root");
     assert_eq!(root.engine, "typescript");
 }
+
+#[test]
+fn persisted_root_fields_and_encoder_floor_are_pinned() {
+    assert_eq!(
+        ROOT_FIELDS,
+        &[
+            "version",
+            "engine",
+            "state_header",
+            "globals",
+            "deferred_resolutions",
+            "deferred_trigger_resolutions"
+        ]
+    );
+    let root = RlmSnapshotRoot {
+        version: RLM_SNAPSHOT_VERSION,
+        engine: "lashlang".into(),
+        state_header: vec![0, 255],
+        globals: BTreeMap::new(),
+        deferred_resolutions: Default::default(),
+        deferred_trigger_resolutions: Default::default(),
+    };
+    let encoded = rmp_serde::to_vec_named(&root).expect("encode root");
+    assert_eq!(encoded[0], 0x86, "the root is a named six-field map");
+    let decoded: BTreeMap<String, serde::de::IgnoredAny> =
+        rmp_serde::from_slice(&encoded).expect("read named map");
+    assert_eq!(
+        decoded.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "deferred_resolutions",
+            "deferred_trigger_resolutions",
+            "engine",
+            "globals",
+            "state_header",
+            "version"
+        ]
+    );
+    assert!(
+        encoded
+            .windows(5)
+            .any(|bytes| bytes == [0xc4, 2, 0, 255, 0xa7]),
+        "state_header is binary, not an integer array"
+    );
+    let manifest = include_str!("../../../../../Cargo.toml");
+    assert_eq!(
+        manifest
+            .lines()
+            .find(|line| line.starts_with("rmp-serde = ")),
+        Some("rmp-serde = \"1.3.1\""),
+        "the minimum encoder includes the named-map fix"
+    );
+}

@@ -151,3 +151,206 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         );
     }
 }
+
+struct FailingQueuePublication {
+    inner: crate::facade_support::InMemoryLiveReplayStore,
+    fail_prepare: bool,
+    attempts: std::sync::atomic::AtomicUsize,
+}
+impl crate::LiveReplayStore for FailingQueuePublication {
+    fn prepare_publication(
+        &self,
+        session: &SessionId,
+        revision: SessionRevision,
+        events: Vec<crate::LiveReplayEventDraft>,
+    ) -> Result<crate::PreparedLiveReplayPublication, crate::LiveReplayStoreError> {
+        if self.fail_prepare {
+            self.attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(crate::LiveReplayStoreError::Store(
+                "injected queue preparation failure".into(),
+            ));
+        }
+        self.inner.prepare_publication(session, revision, events)
+    }
+    fn publish_prepared(
+        &self,
+        prepared: crate::PreparedLiveReplayPublication,
+    ) -> Result<Vec<Arc<crate::SessionObservationEvent>>, crate::LiveReplayStoreError> {
+        assert!(prepared.events().iter().all(|event| matches!(
+            event.payload,
+            SessionObservationEventPayload::QueueChanged { .. }
+        )));
+        self.attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(crate::LiveReplayStoreError::Store(
+            "injected queue publication failure".into(),
+        ))
+    }
+    fn replay_after_cursor(
+        &self,
+        cursor: &crate::SessionCursor,
+    ) -> Result<LiveReplayOutcome, crate::LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor)
+    }
+    fn subscribe_after_cursor(
+        &self,
+        cursor: &crate::SessionCursor,
+    ) -> Result<LiveReplaySubscribeOutcome, crate::LiveReplayStoreError> {
+        self.inner.subscribe_after_cursor(cursor)
+    }
+    fn current_cursor(
+        &self,
+        session: &SessionId,
+        revision: SessionRevision,
+    ) -> crate::SessionCursor {
+        self.inner.current_cursor(session, revision)
+    }
+    fn trim_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
+        self.inner.trim_session(session)
+    }
+    fn invalidate_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
+        self.inner.invalidate_session(session)
+    }
+}
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub async fn queue_publication_failure_preserves_committed_mutation(backend: crate::Backend) {
+    for fail_prepare in [true, false] {
+        let id = SessionId::from(format!("publication-failure-{fail_prepare}"));
+        let store = backend
+            .session_store_factory()
+            .admit_view(&crate::testing::store_fixtures::session_store_request(
+                &id,
+                "queue-model",
+                crate::SessionRelation::Root,
+            ))
+            .await
+            .expect("admit queue owner");
+        let input = store
+            .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+                id.clone(),
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text("durable mutation"),
+            ))
+            .await
+            .expect("accept input");
+        let replay = Arc::new(FailingQueuePublication {
+            inner: Default::default(),
+            fail_prepare,
+            attempts: Default::default(),
+        });
+        let ops = crate::facade_support::DurableSessionOps::new(
+            id.clone(),
+            lash_core::drive::IngressRelay::over_backend(
+                &backend,
+                Arc::new(crate::NoSessionWork::new()),
+                backend.clock(),
+            ),
+            replay.clone(),
+        );
+        assert!(
+            ops.cancel_pending_turn_input(&store, input.input_id.as_str())
+                .await
+                .expect("publication failure must not fail committed cancel")
+                .is_cancelled()
+        );
+        assert_eq!(
+            replay.attempts.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the injected boundary was reached"
+        );
+        assert!(
+            store
+                .list_pending_turn_inputs()
+                .await
+                .expect("durable queue after publication error")
+                .is_empty()
+        );
+        assert!(
+            !ops.cancel_pending_turn_input(&store, input.input_id.as_str())
+                .await
+                .expect("replayed cancellation")
+                .is_cancelled()
+        );
+        assert_eq!(
+            replay.attempts.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "no event for an absent queue item"
+        );
+    }
+}
+
+#[derive(Default)]
+struct CountingQueueDriver(std::sync::atomic::AtomicUsize);
+#[async_trait::async_trait]
+impl crate::SessionWorkEngine for CountingQueueDriver {
+    fn schedule_drive(&self, _session: &SessionId, _request: crate::engine::DriveRequestId) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn install_session_driver(
+        &self,
+        driver: Arc<dyn crate::SessionDriver>,
+    ) -> Arc<dyn crate::SessionDriver> {
+        driver
+    }
+}
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub async fn absent_or_deleted_durable_operations_emit_no_driver_wake<F, Fut>(
+    backend: crate::Backend,
+    exercise: F,
+) where
+    F: Fn(crate::Backend, SessionId) -> Fut,
+    Fut: std::future::Future<Output = (bool, bool, bool)>,
+{
+    let driver = Arc::new(CountingQueueDriver::default());
+    let backend = crate::testing::runtime_helpers::LayeredBackend::over(backend)
+        .with_session_work(driver.clone())
+        .into_backend();
+    let factory = backend.session_store_factory();
+    for deleted in [false, true] {
+        let id = SessionId::from(format!("no-wake-{deleted}"));
+        if deleted {
+            factory
+                .admit_session(&crate::testing::store_fixtures::session_store_request(
+                    &id,
+                    "queue-model",
+                    crate::SessionRelation::Root,
+                ))
+                .await
+                .expect("admit then delete");
+            factory
+                .delete_session(&id)
+                .await
+                .expect("delete durable session");
+        }
+        assert_eq!(
+            exercise(backend.clone(), id.clone()).await,
+            (false, false, false)
+        );
+        assert_eq!(driver.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(matches!(
+            factory
+                .lookup_session(&id)
+                .await
+                .expect("operations did not create"),
+            crate::SessionLookup::Absent | crate::SessionLookup::Deleted
+        ));
+    }
+    let id = SessionId::from("wake-positive-control");
+    factory
+        .admit_session(&crate::testing::store_fixtures::session_store_request(
+            &id,
+            "queue-model",
+            crate::SessionRelation::Root,
+        ))
+        .await
+        .expect("admit positive control");
+    assert_eq!(exercise(backend, id).await, (true, true, true));
+    assert_eq!(
+        driver.0.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the witness sees real driver asks"
+    );
+}

@@ -318,6 +318,63 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "FIG-4156: process wrapper completion infers Null for a boolean return; output inference needs a design decision"]
+    fn inferred_process_signature_matches_schema_typescript_and_artifact() {
+        let linked = crate::link(
+            "const worker = async (query: string, retries: number): Promise<boolean> => { return true; }; finish(worker);",
+            &lashlang::LashlangHostEnvironment::default(),
+        ).expect("link typed process");
+        let process = linked
+            .artifact
+            .ir()
+            .declarations
+            .iter()
+            .find_map(|declaration| {
+                if let lashlang::Declaration::Process(process) = declaration {
+                    Some(process)
+                } else {
+                    None
+                }
+            })
+            .expect("compiled process declaration");
+        let expected = TypeExpr::Process(lashlang::ProcessType::known(
+            lashlang::ProcessSignature::try_new(
+                vec![
+                    lashlang::ProcessParam {
+                        name: "query".into(),
+                        ty: TypeExpr::Str,
+                    },
+                    lashlang::ProcessParam {
+                        name: "retries".into(),
+                        ty: TypeExpr::Float,
+                    },
+                ],
+                TypeExpr::Bool,
+            )
+            .expect("expected named signature"),
+        ));
+        let inferred = linked
+            .artifact
+            .process_type(&process.name)
+            .expect("inferred output");
+        assert_eq!(inferred, expected);
+        let schema = lashlang::type_expr_to_json_schema(&inferred);
+        assert_eq!(
+            lashlang::json_schema_to_type_expr(&schema).expect("schema signature"),
+            expected
+        );
+        assert_eq!(
+            render_schema_type(&schema),
+            "Process<[query: string, retries: number], boolean>"
+        );
+        let retained = lashlang::ModuleArtifact::from_store_bytes(
+            &linked.artifact.to_store_bytes().expect("encode artifact"),
+        )
+        .expect("decode retained artifact");
+        assert_eq!(retained.process_type(&process.name), Some(expected));
+    }
+
+    #[test]
     fn renders_schema_through_shared_type_engine() {
         let ty = render_schema_type(&json!({
             "type": "object", "additionalProperties": false,

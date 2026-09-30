@@ -250,6 +250,20 @@ mod tests {
     }
 
     #[test]
+    fn retired_identity_domains_and_removed_message_fields_remain_reserved_or_refused() {
+        for domain in [
+            "lash.process-registration-definition",
+            "lash.trigger-delivery-process",
+            "lash.queued-work-claim-lease",
+        ] {
+            assert!(
+                FAMILY_DOMAINS.contains(&domain),
+                "retired family {domain} was released"
+            );
+        }
+    }
+
+    #[test]
     fn durable_identity_family_domains_are_unique() {
         let unique = FAMILY_DOMAINS
             .iter()

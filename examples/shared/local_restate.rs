@@ -353,3 +353,55 @@ fn log_tail(path: &std::path::Path) -> String {
     let lines: Vec<&str> = log.lines().collect();
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
+
+#[cfg(test)]
+mod identity_claim_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires the pinned live restate-server binary"]
+    async fn shared_server_stops_only_after_last_core_drops() {
+        let first = LocalRestateServer::shared("identity-lifetime")
+            .await
+            .expect("start shared server");
+        let second = LocalRestateServer::shared("identity-lifetime")
+            .await
+            .expect("reuse shared server");
+        assert!(Arc::ptr_eq(&first, &second));
+        let pid = first.child.id();
+        let directory = first.base_dir.clone();
+        let weak = Arc::downgrade(&first);
+        let first_core = (first.core("first").expect("first namespace"), first);
+        let second_core = (second.core("second").expect("second namespace"), second);
+        assert_ne!(first_core.0.namespace, second_core.0.namespace);
+        drop(first_core);
+        assert!(
+            weak.upgrade().is_some(),
+            "the second core retains the server"
+        );
+        assert!(PathBuf::from(format!("/proc/{pid}")).exists());
+        let response = reqwest::Client::new()
+            .get(format!("{}/health", second_core.0.admin_url))
+            .send()
+            .await
+            .expect("surviving core server answers");
+        assert!(response.status().is_success());
+        drop(second_core);
+        assert!(
+            weak.upgrade().is_none(),
+            "the shared cache holds no strong owner"
+        );
+        assert!(
+            !PathBuf::from(format!("/proc/{pid}")).exists(),
+            "the last drop waits for the child to stop"
+        );
+        assert!(
+            !directory.exists(),
+            "last drop reclaims its scratch directory"
+        );
+        let fresh = LocalRestateServer::shared("identity-lifetime")
+            .await
+            .expect("a later core starts a new server");
+        assert_ne!(fresh.child.id(), pid);
+    }
+}

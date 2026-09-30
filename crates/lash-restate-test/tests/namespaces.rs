@@ -795,3 +795,67 @@ async fn created_session(
     }
     core.session(session_id)
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the namespaces Restate suite runs it"]
+async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
+    let default = live_backend("NS_A", RestateNamespace::default(), "filter-default")
+        .await
+        .expect("default deployment");
+    let named = live_backend(
+        "NS_B",
+        namespace(&format!("foreign-{}", run_tag("filter"))),
+        "filter-named",
+    )
+    .await
+    .expect("foreign dotted service deployment");
+    let cores = [
+        Arc::new(Core::new("default", Deployment::Live(default.clone()))),
+        Arc::new(Core::new("foreign", Deployment::Live(named.clone()))),
+    ];
+    run_side_by_side(&cores).await;
+    let default_rows = default.invocations().await.expect("default admin list");
+    let named_rows = named.invocations().await.expect("named admin list");
+    assert!(!default_rows.is_empty());
+    assert!(!named_rows.is_empty());
+    for row in &default_rows {
+        assert!(
+            !row.target.split('/').next().expect("service").contains('.'),
+            "foreign row in default namespace: {row:?}"
+        );
+    }
+    for row in &named_rows {
+        assert!(
+            row.target.starts_with(&format!("{}.", named.namespace())),
+            "row outside exact named namespace: {row:?}"
+        );
+    }
+    for row in &default_rows {
+        assert!(!named_rows.iter().any(|foreign| foreign.id == row.id));
+    }
+    for backend in [&default, &named] {
+        let client = lash_restate::RestateAdminClient::new(live_env("RESTATE_ADMIN_URL"));
+        for row in backend.invocations().await.expect("admin filters reached") {
+            let pieces: Vec<_> = row.target.split('/').collect();
+            if pieces.len() != 3 {
+                continue;
+            }
+            let found = client
+                .workflow_invocation_status(pieces[0], pieces[1], pieces[2])
+                .await
+                .expect("qualified lane lookup")
+                .expect("own retained invocation");
+            assert!(
+                backend
+                    .invocations()
+                    .await
+                    .expect("owned rows")
+                    .iter()
+                    .any(|own| own.id == found.id),
+                "a lane lookup keeps the qualified namespace: {found:?}"
+            );
+        }
+    }
+    default.finish().await;
+    named.finish().await;
+}

@@ -2434,3 +2434,56 @@ pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn Deploy
         .await
         .unwrap();
 }
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub async fn attachment_prefix_pin_survives_owner_delete_then_reclaims_after_unpin(
+    factory: Arc<dyn DeploymentStore>,
+    make_bytes: AttachmentBytesFactory,
+) {
+    let owner_id = "pinned-attachment-owner";
+    let owner = create(&factory, owner_id).await;
+    let bytes = make_bytes();
+    let attachment = put(owner.clone(), bytes.clone(), owner_id, 42).await;
+    let mut state = state(owner_id);
+    with_image(&mut state, &attachment);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.committed_attachment_ids = vec![attachment.id.clone()];
+    let receipt = owner
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit attachment prefix");
+    let leaf = receipt.committed_leaf_node_id.expect("prefix leaf");
+    factory.pin(&leaf).await.expect("pin attachment prefix");
+    factory
+        .delete_session(&SessionId::from(owner_id))
+        .await
+        .expect("delete owner");
+    assert_eq!(sweep(&factory, &bytes).await, 0);
+    assert!(
+        factory
+            .live_attachment_refs(u64::MAX)
+            .await
+            .expect("pinned roots")
+            .contains(&attachment.id)
+    );
+    assert!(bytes.get(&attachment.id).await.is_ok());
+    factory
+        .unpin(&leaf)
+        .await
+        .expect("release last prefix root");
+    assert!(
+        !factory
+            .live_attachment_refs(u64::MAX)
+            .await
+            .expect("released roots")
+            .contains(&attachment.id)
+    );
+    assert_eq!(sweep(&factory, &bytes).await, 1);
+    assert!(
+        bytes
+            .head(&attachment.id)
+            .await
+            .expect("reclaimed bytes")
+            .is_none()
+    );
+}

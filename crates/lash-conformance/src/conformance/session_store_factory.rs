@@ -14,6 +14,8 @@ use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 mod admission;
+mod identity_claims;
+pub use identity_claims::*;
 mod owning_process;
 pub use owning_process::session_meta_records_the_process_that_owns_it;
 mod process_successor;
@@ -2413,3 +2415,66 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
 }
 
 pub(crate) use lash_core::testing::store_fixtures::session_store_request;
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixtures establish each result"
+)]
+pub async fn concurrent_session_admissions_preserve_one_relation(
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
+) {
+    let id = SessionId::from("concurrent-relation");
+    let first = session_store_request(
+        &id,
+        "first-model",
+        crate::SessionRelation::Child {
+            parent_session_id: SessionId::from("first-parent"),
+            caused_by: None,
+        },
+    );
+    let second = session_store_request(
+        &id,
+        "second-model",
+        crate::SessionRelation::Child {
+            parent_session_id: SessionId::from("second-parent"),
+            caused_by: None,
+        },
+    );
+    let (left, right) = tokio::join!(
+        factory.admit_session(&first),
+        factory.admit_session(&second)
+    );
+    let winner = match (&left, &right) {
+        (
+            Ok(crate::SessionAdmission::Created),
+            Err(crate::StoreError::SessionRelationMismatch { .. }),
+        ) => &first,
+        (
+            Err(crate::StoreError::SessionRelationMismatch { .. }),
+            Ok(crate::SessionAdmission::Created),
+        ) => &second,
+        _ => panic!("one creator and one refused relation: {left:?}, {right:?}"),
+    };
+    let view = factory
+        .live_view(&id)
+        .await
+        .expect("open winner")
+        .expect("winner exists");
+    let meta = view
+        .load_session_meta()
+        .await
+        .expect("read winner metadata")
+        .expect("metadata exists");
+    assert_eq!(meta.relation, winner.relation);
+    assert_eq!(
+        factory.admit_session(winner).await.expect("winner rebinds"),
+        crate::SessionAdmission::Rebound
+    );
+    assert_eq!(
+        view.load_session_meta()
+            .await
+            .expect("read rebound metadata")
+            .expect("metadata exists"),
+        meta
+    );
+}

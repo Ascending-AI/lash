@@ -1402,3 +1402,7 @@ mod lib_tests;
 mod process_grammar_tests;
 #[cfg(test)]
 mod session_surface_tests;
+
+#[cfg(any(test, feature = "testing"))]
+#[path = "argument_admission_testing.rs"]
+pub mod testing;

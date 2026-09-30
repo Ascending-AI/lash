@@ -95,6 +95,7 @@ macro_rules! runtime_persistence_tests {
             $mode $fixture;
             stores [
             (commit_increments_head_and_round_trips_agent_frames, "root"),
+            (receipt_replay_rehydrates_recorded_node_clocks_and_ids, "root"),
             (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
             (pending_follow_on_is_written_by_its_switch_and_cleared_by_its_terminal, "follow-on"),
             (pending_follow_on_blocks_every_admission_but_its_own, "follow-on"),
@@ -358,6 +359,9 @@ macro_rules! process_registry_tests {
                 (a_start_key_conflict_names_no_retained_process, "start-key-conflict-content-free"),
                 (a_host_retry_with_another_wake_target_conflicts, "host-start-key-wake-target"),
                 (a_host_start_key_after_prune_starts_new_for_any_originator, "host-start-key-after-prune"),
+                (scope_replay_cancel_and_trace_ignore_environment_rebinding, "scope-environment-rebinding"),
+                (remote_start_replay_preserves_recorded_id_key_and_disposition, "remote-start-replay"),
+                (retired_process_shapes_refuse_before_registration_or_effects, "retired-process-shapes"),
                 (keyless_starts_are_always_new, "keyless-starts"),
                 (concurrent_starts_under_one_key_register_one_process, "concurrent-start-key"),
                 (caller_departure_state_machine, "caller-departure"),
@@ -371,6 +375,9 @@ macro_rules! process_registry_tests {
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
+                (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
+                (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
+                (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
                 (a_trigger_delivery_pin_holds_its_row_until_released, "trigger-delivery-pin"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
@@ -579,6 +586,7 @@ macro_rules! effect_group_host_tests {
     };
     (@catalogue [$($attr:tt)*] $fixture:block) => {
         $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; [
+            (retired_scope_refuses_every_effect_wait_group_and_resolver_admission, "retired-admission", wired),
             (cancel_stops_the_losers, "group-cancel", wired),
             (cancel_gives_every_unsettled_child_a_cancellation_terminal, "group-cancel-terminals", wired),
             (a_child_with_no_runner_refuses_the_open_and_refuses_the_retry, "group-no-runner", wired),
@@ -798,6 +806,7 @@ macro_rules! attachment_adoption_tests {
         $crate::attachment_adoption_tests!(@catalogue $fixture;
             bytes [
                 (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
+                (attachment_prefix_pin_survives_owner_delete_then_reclaims_after_unpin, "attachment-prefix-pin"),
                 (concurrent_adoption_deletes_once, "attachment-condemnation-concurrent-adoption"),
             ]
             roots [
@@ -1075,6 +1084,7 @@ macro_rules! trigger_store_reopenable_tests {
     ($fixture:block) => {
         $crate::trigger_store_reopenable_tests!(@catalogue $fixture; [
             (trigger_store_reopenable, "trigger-store-reopenable"),
+            (host_scope_filters_list_cancel_and_deactivate_uniformly, "host-scope-filters"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1441,6 +1451,7 @@ macro_rules! session_store_factory_tests {
         ]);
         $crate::session_store_factory_tests!(@turn_cancel $fixture; [
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
+            (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
             (ingress_follow_on_fork_and_command_coalescing_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
             (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
@@ -1454,6 +1465,7 @@ macro_rules! session_store_factory_tests {
         ]);
         $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
             (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),
+            (fork_inherits_history_without_execution_queues_waits_or_journals, "fork-execution-isolation"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1618,6 +1630,8 @@ macro_rules! process_prune_session_store_tests {
         $crate::process_prune_session_store_tests!(@catalogue $fixture; [
             (process_prune_deletes_owned_session_stores, "process-prune-session-store-cleanup"),
             (a_same_start_key_successor_after_prune_owns_fresh_session_stores, "same-key-successor-after-prune"),
+            (compacted_process_tombstone_never_reopens_derived_sessions, "compacted-derived-sessions"),
+            (reclaim_races_fork_and_unpin_without_using_process_roots, "reclaim-fork-unpin-race"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -2136,13 +2150,49 @@ macro_rules! effect_host_await_event_witness_tests {
 #[macro_export]
 macro_rules! queue_observation_tests {
     ($fixture:block) => {
+        $crate::queue_observation_tests!(@law $fixture; queue_head_read_failure_publishes_recoverable_gap);
+        $crate::queue_observation_tests!(@law $fixture; queue_publication_failure_preserves_committed_mutation);
+        $crate::queue_observation_tests!(@law $fixture; absent_or_deleted_durable_operations_emit_no_driver_wake);
+    };
+    (@law $fixture:block; absent_or_deleted_durable_operations_emit_no_driver_wake) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queue_head_read_failure_publishes_recoverable_gap() {
+        async fn absent_or_deleted_durable_operations_emit_no_driver_wake() {
             let (_guard, backend) = $fixture;
-            $crate::registration_macro_support::queue_head_read_failure_publishes_recoverable_gap(
-                backend,
-            )
-            .await;
+            $crate::registration_macro_support::absent_or_deleted_durable_operations_emit_no_driver_wake(backend,
+                |backend, id| async move {
+                    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+                        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                        .provider(lash_core::testing::runtime_helpers::mock_provider(Vec::new()).into_handle())
+                        .model(lash_core::testing::mock_session_policy().model)
+                        .build(lash_core::testing::runtime_lease_owner()).expect("build durable facade");
+                    let durable = core.session(id).durable().await.expect("noncreating durable handle");
+                    (durable.send(lash::TurnInput::text("driver wake probe")).await.is_ok(),
+                        durable.cancel_pending_turn_input(&lash_core::InputId::from("unknown-input")).await.is_ok(),
+                        durable.cancel_queued_work_batch(&lash_core::BatchId::from("unknown-batch")).await.is_ok())
+                }).await;
+        }
+    };
+    (@law $fixture:block; $law:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, backend) = $fixture;
+            $crate::registration_macro_support::$law(backend).await;
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! checkpoint_profile_tests {
+    ($fixture:block) => {
+        $crate::checkpoint_profile_tests!(@law $fixture; checkpoint_identity_is_independent_of_compression_profile);
+        $crate::checkpoint_profile_tests!(@law $fixture; checkpoint_profile_change_preserves_refs_budget_and_atomic_root_leaves);
+    };
+    (@law $fixture:block; $law:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, stores) = $fixture;
+            $crate::registration_macro_support::$law(stores).await;
         }
     };
 }

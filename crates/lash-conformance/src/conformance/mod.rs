@@ -25,7 +25,9 @@ mod attachment_adoption;
 pub use attachment_adoption::{
     AttachmentBytesFactory, abandoned_attachment_write_recovery_after_cold_reopen,
     attachment_condemnation_enumeration_conformance,
-    attachment_owner_identity_round_trips_conformance, cross_owner_attachment_adoption_conformance,
+    attachment_owner_identity_round_trips_conformance,
+    attachment_prefix_pin_survives_owner_delete_then_reclaims_after_unpin,
+    cross_owner_attachment_adoption_conformance,
 };
 mod attachment_condemnation_recovery;
 pub use attachment_condemnation_recovery::{

@@ -437,6 +437,41 @@ mod tests {
     }
 
     #[test]
+    fn tool_call_position_tags_are_append_only() {
+        assert_eq!(
+            [
+                POSITION_CONTINUATION,
+                POSITION_ITERATION,
+                POSITION_EFFECT_ORDINAL,
+                POSITION_CONTENT_INDEX,
+                POSITION_BATCH_MEMBER,
+                POSITION_CODE_OPENER,
+                POSITION_CODE_CELL,
+                POSITION_CODE_COMMAND,
+                POSITION_CODE_AGGREGATE
+            ],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        );
+        let positions = [
+            ToolCallPosition::Continuation(0),
+            ToolCallPosition::Iteration(0),
+            ToolCallPosition::EffectOrdinal(0),
+            ToolCallPosition::ContentIndex(0),
+            ToolCallPosition::CodeOpener(""),
+            ToolCallPosition::CodeCell(""),
+            ToolCallPosition::CodeCommand(0),
+            ToolCallPosition::CodeAggregate(0),
+        ];
+        let ids =
+            positions.map(|position| ToolCallId::derive(NAMESPACE, turn("tags"), &[position]));
+        assert_eq!(
+            ids.iter().collect::<std::collections::BTreeSet<_>>().len(),
+            8
+        );
+        assert!(!ids.contains(&ToolCallId::derive(NAMESPACE, turn("tags"), &[]).child(0)));
+    }
+
+    #[test]
     fn derivation_is_deterministic_and_pinned() {
         let first = model_call(turn("op-1"), 3);
         assert_eq!(first, model_call(turn("op-1"), 3));

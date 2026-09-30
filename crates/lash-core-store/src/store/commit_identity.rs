@@ -1470,6 +1470,18 @@ pub fn derive_history_node_id(
     operation: &OperationId,
     ordinal: u64,
 ) -> Result<crate::NodeId, StoreError> {
+    let preimage = history_node_preimage(session_id, operation, ordinal)?;
+    Ok(crate::NodeId::new(format!(
+        "n_{}",
+        crate::stable_hash::blake3_hex("lash-history-node/v3", &preimage)
+    )))
+}
+
+fn history_node_preimage(
+    session_id: &SessionId,
+    operation: &OperationId,
+    ordinal: u64,
+) -> Result<Vec<u8>, StoreError> {
     let operation = serde_json::to_value(operation).map_err(|err| {
         StoreError::Backend(format!(
             "failed to serialize node operation identity: {err}"
@@ -1483,8 +1495,28 @@ pub fn derive_history_node_id(
     identity.bytes(session_id.as_bytes());
     identity.bytes(operation.as_bytes());
     identity.bytes(&ordinal.to_be_bytes());
-    Ok(crate::NodeId::new(format!(
-        "n_{}",
-        crate::stable_hash::blake3_hex("lash-history-node/v3", &identity.finish())
-    )))
+    Ok(identity.finish())
+}
+
+#[cfg(test)]
+mod history_node_golden_tests {
+    use super::*;
+
+    #[test]
+    fn history_node_preimage_has_an_independent_frozen_golden() {
+        let operation = OperationId::turn("s", "t", "k");
+        let golden = concat!(
+            "000000000000000173",
+            "0000000000000042",
+            "7b226b6579223a226b222c2273636f7065223a7b2273657373696f6e5f6964223a2273222c227475726e5f6964223a2274222c2274797065223a227475726e227d7d",
+            "00000000000000080000000000000007"
+        );
+        let actual = history_node_preimage(&SessionId::from("s"), &operation, 7)
+            .expect("encode history-node preimage");
+        let hex = actual
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(hex, golden);
+    }
 }

@@ -2377,3 +2377,94 @@ pub async fn fenced_process_and_trigger_registration_stays_typed(
         assert!(!controller.code.is_retryable(), "{port}");
     }
 }
+
+#[expect(clippy::expect_used, reason = "conformance fixture assertions")]
+pub async fn host_scope_filters_list_cancel_and_deactivate_uniformly<F>(make: F)
+where
+    F: Fn() -> ReopenableTriggerStore,
+{
+    let store = make().open;
+    let mut identities = Vec::new();
+    for binding in ["binding", "binding.foreign", "other"] {
+        let owner = crate::TriggerOwnerScope::host(binding).expect("host namespace");
+        let mut draft = sample_draft(
+            &SessionId::from(binding),
+            "shared",
+            "same-source",
+            "same-worker",
+        );
+        draft.wake_target = None;
+        let receipt = mutate(
+            &store,
+            &format!("register-{binding}"),
+            crate::TriggerCommand::Register {
+                owner_scope: owner.clone(),
+                actor: crate::ProcessOriginator::host_scoped(binding),
+                draft,
+            },
+        )
+        .await;
+        identities.push((owner, receipt));
+    }
+    for (index, (owner, receipt)) in identities.iter().enumerate() {
+        let listed = execute(
+            &store,
+            &format!("list-{index}"),
+            crate::TriggerCommand::List {
+                owner_scope: owner.clone(),
+                filter: crate::TriggerSubscriptionFilter::default(),
+            },
+        )
+        .await
+        .expect("host command list");
+        let crate::TriggerCommandOutcome::List { records: rows } = listed else {
+            panic!("list command must return rows");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subscription_id, receipt.subscription_id);
+        if index != 0 {
+            continue;
+        }
+        let disabled = mutate(
+            &store,
+            "disable-host",
+            crate::TriggerCommand::Disable {
+                owner_scope: owner.clone(),
+                actor: crate::ProcessOriginator::host_scoped("binding"),
+                subscription_key: "shared".into(),
+                expected_revision: receipt.revision,
+            },
+        )
+        .await;
+        let rows = store
+            .list_subscriptions(crate::TriggerSubscriptionFilter::default())
+            .await
+            .expect("all after disable");
+        for row in rows {
+            assert_eq!(row.lifecycle.enabled(), row.owner_scope != *owner);
+        }
+        mutate(
+            &store,
+            "delete-host",
+            crate::TriggerCommand::Delete {
+                owner_scope: owner.clone(),
+                actor: crate::ProcessOriginator::host_scoped("binding"),
+                subscription_key: "shared".into(),
+                expected_revision: disabled.revision,
+            },
+        )
+        .await;
+    }
+    for (owner, receipt) in identities.iter().skip(1) {
+        let rows = store
+            .list_subscriptions(crate::TriggerSubscriptionFilter::for_registrant_scope(
+                owner.namespace(),
+            ))
+            .await
+            .expect("foreign rows untouched");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subscription_id, receipt.subscription_id);
+        assert_eq!(rows[0].revision, receipt.revision);
+        assert!(rows[0].lifecycle.enabled());
+    }
+}

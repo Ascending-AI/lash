@@ -188,7 +188,7 @@ compile_data = ["//:host_schemas"]
 [[rule]]
 packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
-compile_data = ["//crates/lash-typescript:session_oracle_corpus"]
+compile_data = ["//crates/lash-typescript:session_oracle_corpus", "//:Cargo.toml"]
 
 # --- Binary and integration-test support -------------------------------------
 

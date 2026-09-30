@@ -1759,3 +1759,5 @@ pub(crate) async fn created_session(
     }
     core.session(session_id)
 }
+
+mod admin_namespace_filters;

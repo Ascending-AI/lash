@@ -148,10 +148,6 @@ impl TestBackend {
 
     /// Fresh handles on the same databases, with options adjusted by
     /// `configure` and on `clock`.
-    #[expect(
-        dead_code,
-        reason = "one conformance root's suite may not hold a storage law that reopens with new options"
-    )]
     pub(crate) async fn reopen_with(
         &self,
         configure: impl FnOnce(SqliteStoreSetOptions) -> SqliteStoreSetOptions,

@@ -31,6 +31,8 @@ impl RuntimePersistenceLeaseTiming {
 
 mod admission_base_retention;
 mod admission_laws;
+mod identity_claims;
+pub use identity_claims::*;
 mod append_receipts;
 mod attachments_and_queue;
 mod checkpoint_admissions;
@@ -55,6 +57,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::attachments_and_queue::*;
     pub use super::checkpoint_admissions::*;
     pub use super::enqueue_sequence_identity::*;
+    pub use super::identity_claims::*;
     pub use super::pending_follow_on::*;
     pub use super::queue_redrive::*;
     pub use super::reopen_and_commit::*;

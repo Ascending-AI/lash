@@ -423,7 +423,13 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 })?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
             .await?;
-        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
+        crate::support::lock_retained_checkpoint_blob_tx(
+            &mut tx,
+            node_id,
+            &source_session_id,
+            &checkpoint_ref,
+        )
+        .await?;
         let live_node = sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.lock_live.sql())
             .bind(node_id)
             .fetch_optional(&mut **tx)
@@ -598,7 +604,13 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 session_id: request.session_id.clone(),
             });
         }
-        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
+        crate::support::lock_retained_checkpoint_blob_tx(
+            &mut tx,
+            &request.node_id,
+            &source_session_id,
+            &checkpoint_ref,
+        )
+        .await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
             session_sql()
                 .graph_postgres

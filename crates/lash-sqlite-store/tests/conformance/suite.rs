@@ -1166,3 +1166,45 @@ lash_conformance::attachment_stalled_retry_tests!({
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
     ((backend, bytes_root), factory, make_bytes, clock)
 });
+
+lash_conformance::checkpoint_profile_tests!({
+    let first = TestBackend::open_with(
+        SUBSTRATE,
+        |mut options| {
+            options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::LowLatency;
+            options
+        },
+        Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+    )
+    .await;
+    let balanced = first
+        .reopen_with(
+            |mut options| {
+                options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::Balanced;
+                options
+            },
+            Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+        )
+        .await;
+    let compact = first
+        .reopen_with(
+            |mut options| {
+                options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::Compact;
+                options
+            },
+            Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+        )
+        .await;
+    let stores = vec![
+        first.store().await as Arc<dyn RuntimeStore>,
+        balanced.store().await,
+        compact.store().await,
+    ];
+    ((first, balanced, compact), stores)
+});
+
+#[tokio::test]
+async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
+}

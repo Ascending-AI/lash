@@ -2440,3 +2440,12 @@ async fn nested_signal_admission_registers_each_process_payload_independently() 
         );
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
+    use lash_core_execution::StoreSet;
+    super::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(
+        memory_store_set().await.module_artifacts(),
+    )
+    .await;
+}

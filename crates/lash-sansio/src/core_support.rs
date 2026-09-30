@@ -531,3 +531,33 @@ mod blake3_domain_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod retired_identity_tests {
+    #[test]
+    fn retired_identity_domains_and_removed_message_fields_remain_reserved_or_refused() {
+        for label in [
+            "lash-rolling-history-compaction/v1",
+            "lash-rolling-history-compaction/v2",
+            "lash-process-env/v4",
+            "lash-process-env/v5",
+            "lash-process-lease/v2",
+        ] {
+            assert!(
+                super::BLAKE3_DOMAINS.contains(&label),
+                "retired label {label} was released"
+            );
+        }
+        for field in ["lifecycle", "attachment_source", "tool_call_id"] {
+            let mut part = serde_json::json!({"id":"m.p0", "kind":"Text", "content":"text"});
+            part[field] = serde_json::json!("retired");
+            let error =
+                serde_json::from_value::<crate::Part>(part).expect_err("removed field refuses");
+            assert!(error.to_string().contains(field), "{error}");
+        }
+        serde_json::from_value::<crate::Part>(
+            serde_json::json!({"id":"m.p0", "kind":"Text", "content":"text"}),
+        )
+        .expect("current shape decodes");
+    }
+}

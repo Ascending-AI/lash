@@ -387,6 +387,28 @@ async fn get_blob_tx(
 // request to roughly one MiB of SHA-256 text plus array framing.
 const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
 
+pub(crate) async fn lock_retained_checkpoint_blob_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+    source_session_id: &SessionId,
+    checkpoint_ref: &str,
+) -> Result<(), StoreError> {
+    match lock_checkpoint_blob_tx(tx, checkpoint_ref, None).await {
+        Err(error @ StoreError::CheckpointRootMissing { .. }) => {
+            if retention_source_holds_checkpoint_tx(tx, node_id, source_session_id, checkpoint_ref)
+                .await?
+            {
+                Err(error)
+            } else {
+                Err(StoreError::ForkPointNotRetained {
+                    node_id: node_id.into(),
+                })
+            }
+        }
+        result => result,
+    }
+}
+
 pub(crate) async fn lock_checkpoint_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &str,
