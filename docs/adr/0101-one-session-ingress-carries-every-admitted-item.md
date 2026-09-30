@@ -790,7 +790,7 @@ kernel still drives in process. It is one wholehog cutover: no aliases,
 no compatibility path for caller-driven turns, and no convenience wrapper that
 runs a turn inline. The evidence, including the design that was not taken, is
 in `/workspace/notes/lash/fig3573-arc/input-lifecycle/`. It amends ADR 0045,
-ADR 0069 (§7 is superseded on landing) and the `CONTEXT.md` glossary; each
+ADR 0069 (§3 and §6) and the `CONTEXT.md` glossary; each
 carries a note pointing here.
 
 ### A1. The ingress is the only way a turn starts
@@ -842,7 +842,7 @@ because no caller-driven turn exists.
   the engine's retry on Restate, the worker's retry budget on SQLite and
   PostgreSQL. A re-drive keeps the same turn id and replays the journal.
 * Lash never settles an attempt on anyone's behalf. With no caller-owned aborted
-  turn, nothing binds an input to an aborted turn (ADR 0069 §7).
+  turn, nothing binds an input to an aborted turn (ADR 0069 §3 and §6).
 
 ### A4. Parked is a generic state of a driver-run turn
 
@@ -916,7 +916,7 @@ crashed. The model only ever sees real committed history.
 * **FIG-3589's surface:** `claim_bound_turn_id`, `claim_bound_receipt_input_id`,
   `PendingTurnInputReadStatus::TurnBound`,
   `PendingTurnInputCancelOutcome::TurnBound`, and the receipt re-drive docs in
-  `crates/lash/src/error.rs` and ADR 0069 §7. With no caller-owned aborted turns,
+  `crates/lash/src/error.rs`. With no caller-owned aborted turns,
   nothing needs them.
 * **Old gates and live inputs:** FIG-3416's durable-admission gate
   (`ensure_durable_effect_input`), the live `protocol_extension`,

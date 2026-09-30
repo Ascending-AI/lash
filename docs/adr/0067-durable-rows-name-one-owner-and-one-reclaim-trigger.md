@@ -2,557 +2,242 @@
 
 ## Status
 
-Amended 2026-09-29 (FIG-4100, FIG-4139): section 6 is implemented as described
-there.
-A sweep adopts and finishes crashed condemnations first, a delete that keeps
-failing stalls typed and retries with capped backoff, and the host lever
-`release_attachment_condemnation` is deleted.
-
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
-[ADR 0023](0023-retention-stays-a-parameterized-host-lever.md) governs retained
-receipts.
-
-Accepted. Ratified on FIG-1494; the six sections of the decision are the six
-rulings recorded there. The trigger-store ownership map was ratified on
-FIG-1507 on 2026-08-21.
-
-Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) adds the `process_definitions` name
-registry, modelled on `trigger_subscriptions` and covered by the same
-ownership axiom. Session-scoped names follow the ADR 0049 frontier;
-host- and platform-scoped tombstones are never collected.
-
-Amended 2026-09-29 (FIG-4174, FIG-4175): the `process_definitions` name
-registry the FIG-2990 amendment added is withdrawn. Process definitions are
-immutable, content-addressed artifacts named by a `ProcessDefinitionId`
-([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md),
-*Definitions are immutable values*). Its two rows leave the ownership map
-below. A definition descriptor has no owner field, name, revision or
-tombstone: like every artifact, its owners are the referrers holding its edges
-and its reclaim trigger is cleanup after the last edge is severed
-([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) §3.6).
-Hosts keep names and versions in their own databases.
-
-Amended 2026-09-14 (FIG-2367): non-fired trigger occurrences gain a host-invoked
-audit-retention cutoff, `TriggerStore::prune_non_fired_occurrences`. Their
-reclaim trigger in the ownership map below is no longer "never": it is that
-lever and nothing else. Every delivery-fan-out retention path — ordinary
-reconciliation and `reclaim_trigger_occurrences` at any cutoff — still cannot
-reach a non-fired row, and the lever still cannot reach a fired one.
-
-The lever mirrors `prune_mutation_receipts`: the host names a cutoff epoch, only
-rows recorded strictly before it are deleted, and the count deleted is returned.
-The reason it is a separate, explicit operation rather than a widening of
-reconciliation is section 2's rule that reclamation is armed by an owner's
-terminal transition, never by age. Audit history has no such transition — its
-owner is the factory, which never terminates — so age is the only predicate
-available, and a predicate that unsafe must be spoken by the host each time it
-runs rather than configured once into a sweep. Nothing in the runtime invokes
-it; the only caller is a host that has decided which audit window it is
-discarding.
-
-The cutoff exists because the non-fired outcome is public
-(`TriggerOccurrenceRequest::with_outcome`, on `lash::triggers` and the remote
-protocol), so a host can record one per tick without a lash change. Today's only
-in-repo producer, the workbench zombie guard, fires once per job and is bounded;
-the first per-tick producer would otherwise grow a table nothing can prune.
-`prune_non_fired_occurrences` is host-local, like `prune_mutation_receipts`: it
-is a `TriggerStore` primitive, not a remote-protocol operation, so the remote
-protocol version is unchanged.
-
-Reclamation reports gained `audit_retained_count` in the same change. Non-fired
-rows were previously counted as `live_fan_out_count`, which reported permanent
-audit history as a stuck delivery fan-out and held every sweep at `Incomplete`
-forever. Retained audit rows are now their own counter and are not a blocker:
-they do not make a sweep incomplete, and a host reads the counter to decide
-whether the cutoff above is worth invoking.
-
-Amended 2026-09-23 (FIG-3540), **not adopted** (ADR 0101's FIG-3540 close-out
-keeps the two row classes): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) replaces the
-pending-input and queued-work row classes with one Session Ingress row class.
-Its owner is the session; its reclaim triggers are owner-delete cascade and
-terminal-state vacuum of tombstones of every kind, where a wake tombstone is
-reclaimable only at or below the redelivery floor. `wake_redelivery_fences`
-stays the side table that survives vacuum. Section 1's rotation-stranded
-turn-input class becomes the rotation-stranded ingress class under the same
-rule.
-
-Amended 2026-09-24 (FIG-3669), **partly implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the owners and reclaim triggers of the
-effect-replay, effect-group and await-event rows, and repair held under the
-session-execution lease. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
+Accepted. The complete typed enumeration witness required by §5 depends on
+open work FIG-4343.
 
 ## Context
 
-Lash's durable state grew one row class at a time, and each class arrived with
-its own answer to "who deletes this, and when". Some rows die with a cascade
-from the session that owns them. Some are vacuumed when the owner reaches a
-terminal state. Some are swept by a host-invoked lever. Several are never
-deleted at all, because nobody asked the question when the table was added.
+A retention policy answers how long data remains. It does not identify whose
+state it is, when its owner releases it, or what evidence permits deletion.
+Without those answers a sweep can delete live data, retain ownerless data
+forever, or present an enumeration failure as a healthy empty pass.
 
-That drift is not a tidiness problem. It produced defects with a common shape:
-
-* **Rows with no owner at all.** Dedup and time-window tables
-  (`tool_intent_submissions` is the canonical one) were reasoned about as
-  caches with a natural expiry rather than as durable rows belonging to
-  something, so they had a retention *policy* and no *owner*. A retention
-  policy answers "how long", never "whose".
-
-* **Timers reaching live rows.** Where reclamation was armed by age rather
-  than by the owner's terminal transition, nothing structural stopped a sweep
-  from condemning a row whose owner was still running. Grace windows made this
-  rare, which is the worst frequency for a correctness bug.
-
-* **Sweeps that could not tell empty from blind.** FIG-1246 was an attachment
-  sweep that read an unenumerable root set as an empty one and deleted live
-  bytes. The enumeration failed; the caller saw `{}`. Nothing in the type
-  distinguished "I looked at everything and there was nothing" from "I got
-  nothing back". FIG-1508's process registry is the same shape, still unwired.
-
-* **Destructive work inside the wrong transaction.** SQLite runs a whole-DB
-  blob sweep inside the session-delete transaction while Postgres does no
-  session-scoped reclaim there at all (FIG-1506). Neither is right: one makes a
-  bounded owner-cascade unboundedly expensive and fail for reasons unrelated to
-  the delete, the other leaks.
-
-* **Failures laundered into clean reports.** A backend that caught its own
-  error and returned an empty report was indistinguishable from a backend with
-  nothing to do, so a sweep that reclaimed nothing for weeks looked healthy.
-
-The unifying observation is that these are not five bugs in five subsystems.
-They are five consequences of never having stated the reclaim model. This ADR
-states it. Every FIG-1494 child specs against the sections below.
-
-The model binds **row classes and owners**, not today's trait names. Shape C
-(FIG-1280) will move where these rows live; it does not change who owns them or
-what arms their reclamation, and this ADR is written to survive that cutover.
+Session and process stores own storage reclamation. The effect host owns
+execution-state retirement. Hosts choose explicit retention horizons and invoke
+factory-wide maintenance. These authorities need one ownership vocabulary.
 
 ## Decision
 
 ### 1. Universal ownership axiom, with no exceptions
 
-**Every durable row class names exactly one owner and exactly one reclaim
-trigger class.**
-
-The owner is one of: session, turn, process, effect group, factory. The trigger
-class is one of: owner-delete cascade, terminal-state vacuum, or drain-armed
-sweep.
-
-No row class may exist without a named owner and a named trigger. "It is small",
-"it expires anyway", and "the host can truncate it" are not answers. A new table
-whose owner and trigger are not stated is not reviewable, and a table that
-cannot name an owner is evidence that the thing it records belongs to something
-that does not exist yet.
-
-The durable reference-edge inventory includes:
-
-| Row class | Exactly-one owner | Reclaim trigger |
-| --- | --- | --- |
-| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. The host-invoked global GC additionally severs the outgoing edges of any root retaining neither a live session head nor a node anchor — content-aliased dead roots outside that cascade — and every such severance completes before any blob delete. |
+Every durable row class names exactly one owner and one reclaim trigger class.
+The owner is the session, turn, process, effect group, factory or exact referrer
+whose obligation the row records. Trigger classes are owner-delete cascade,
+terminal-state vacuum and an explicitly armed reclaim pass. An unowned table
+is a missing domain decision, even if it is small or bounded by age.
 
 #### Reclaim is severance, not sweeping
 
-The trigger classes above sit under an earlier and stronger ruling (FIG-1494,
-2026-08-17), which this section does not relax:
+Singly-owned rows are reclaimed by the operation that severs their ownership.
+They need no reference counting or tracing collector. Receipts and other
+retained evidence remain subject to
+[ADR 0023](0023-retention-stays-a-parameterized-host-lever.md).
 
-> **Reclaim is a transactional consequence of the operation that severs
-> ownership — never a sweep.**
+Multi-referenced data uses exact reference edges. The severing transaction
+checks indexed edge absence before freeing shared data. Stored reference counts
+cannot replace the edges: a count is another state that can drift from the data.
+Artifacts use the referrer-edge contract of
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
-Three rules follow, and they decide which trigger class a row class may name:
+Verification is read-only. Repair is a separate, explicit operation that reports
+its work and may free proven unreachable edges and blobs. `gc_unreachable` is
+that catalog-wide repair lever. Correctness does not depend on a periodic repair
+pass. SQLite's repair first removes unrooted checkpoint projection edges, then
+deletes blobs unreachable from retained roots; PostgreSQL applies its storage predicate
+transactionally. An enumeration failure cannot authorize repair.
 
-1. **Classify every row class as singly-owned or multi-referenced.** Singly-owned
-   classes (turn commits, usage deltas, pending inputs, manifests, lineage,
-   trigger state) get *no reference machinery at all*: the owner's severing
-   transaction reclaims them inline, and every root-set or GC touchpoint they
-   carry today is removed wholehog. Multi-referenced classes (blobs across heads,
-   anchors and artifact refs; fork-shared ancestry nodes; attachment digests) are
-   the only ones a reachability question applies to.
+#### Armed reclamation, defined
 
-2. **Reference edges are data, not stored counts.** A multi-referenced row's
-   deletion is gated by an indexed `NOT EXISTS` over exact edges, evaluated
-   inside the severing transaction — the Nix `Refs(referrer, reference)` shape.
-   Counts drift; edges cannot, because they are the data. The reference graph is
-   a DAG by construction, so edge-gated reclaim is complete and no tracing
-   collector is ever needed for correctness.
+Reclamation is armed by recorded severance or an explicit host retention
+operation. A factory pass is bounded to the evidence its own authority can
+prove; a clock cannot stand in for owner death. Factory-scoped residue and
+shared bytes can require work after the severing transaction commits.
+Attachment condemnations have their own generation-fenced recovery protocol
+under §6. They do not borrow a session-execution lease.
 
-3. **Mark-and-sweep is demoted to the read-only verify/repair tier.**
-   `gc_unreachable` becomes a host-invoked auditor in the
-   `PRAGMA integrity_check` / `nix-store --verify` tier. **Correctness never
-   depends on it running.** A verifier that finds corruption stops and reports;
-   it never "repairs" by freeing.
+A dormant or rotated session is not proof that an active execution ended.
+Storage residue still needs the owner frontier and enumeration evidence that
+justify its reclamation.
 
-So the three trigger classes of this section are not three flavours of sweeping.
-Owner-delete cascade and terminal-state vacuum *are* the severing transaction —
-they are how "never a sweep" is implemented. Drain-armed sweep is the bounded
-exception, and it reclaims only what no single severing transaction can reach:
-factory-scoped residue and multi-referenced rows whose last edge was cut by a
-transaction that has already committed or died. A singly-owned row class that
-names a sweep as its trigger is misclassified, and the fix is to find its
-severing transaction, not to schedule the sweep more often.
+| Reference-edge class | Owner | Reclaim trigger |
+| --- | --- | --- |
+| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The session-owned checkpoint root named by `checkpoint_ref` | Deleting an unreferenced root cascades its edges in the owning transaction. Explicit global repair also severs edges of roots held by neither a session head nor a node anchor before deleting any component blob. |
+| Artifact referrer edge | The exact frame, process, subscription, start, execution or host pin holding it | Severance by that referrer; artifact cleanup can free the descriptor after the last edge disappears. An id stored without an edge retains nothing. |
 
-#### Drain-armed sweep, defined
+### 2. Terminal-before-reclaimable
 
-A **drain-armed sweep** is reclamation armed by a live drain running under the
-session-execution lease it is reclaiming for. It is not a scheduled scan and not
-a background actor: it exists only where a drain is already executing, already
-fenced, and already authorized over exactly those rows.
+Reclamation is armed by the owner's terminal transition or severance. A grace
+period can defer that reclamation; it cannot establish terminality. The host's
+retention bound and relevant projection acknowledgement constrain execution
+of reclaim after eligibility exists. No automatic age rule may delete a live
+owner's continuation.
 
-The constraint is deliberate. A sweep that reached sessions with no live drain
-would need a cross-session repair actor holding no session-execution lease —
-precisely the fencing shape FIG-1573's fix exists to forbid, and "never delegate
-fencing" applies. The sweep stays drain-armed; the gap it leaves is closed by
-naming an owner, not by widening the sweep.
+A fired trigger occurrence belongs to its committed delivery fan-out. A
+zero-match fan-out is complete at ingest; a matched fan-out waits until its
+last delivery ends and the retained delivery rows can be removed. The absence
+of surviving delivery rows authorizes the occurrence cascade.
 
-That gap is a row class in its own right (ruled 2026-08-19 from the FIG-1573
-field confirmation): **turn-input rows owned by sessions that will never drain
-again.** A fingerprint rotation left an old session's `pending_active`
-turn-input row stranded permanently, because the dormant session never drains
-and the repair path is drain-armed. The row is not a continuation defect of any
-live session; it is storage residue, and it is reclaimed as such — *session
-dormant or rotated, and the row in a pre-claim state* is a reclaimable state,
-under the same witnessed-emptiness rule (section 5) as everything else.
-
-### 2. Terminal-before-reclaimable (Amendment 1)
-
-**Reclamation is armed only by the owner's terminal transition.**
-
-A per-class grace delay may *defer* reclamation. It may never *initiate* it. No
-timer may ever reach a non-terminal row: age is a retention knob applied after
-terminality is proven, never a liveness oracle.
-
-Enforcement is structural, not procedural. On the SQL backends the DDL permits a
-row's reclaim-eligibility timestamp to be non-null only in terminal states, via
-a CHECK constraint in River's `finalized_or_finalized_at_null` shape, so the
-invariant is unfalsifiable at the schema level rather than being a property of
-sweep code (FIG-1606 scopes this to SQLite and Postgres). A backend with no DDL
-to carry the constraint — the in-memory store, a future non-SQL substrate —
-demonstrates the same invariant through the conformance law instead: reclaim
-eligibility set on a non-terminal row is red. What is not available is the third
-option of demonstrating it nowhere.
-
-Terminality arms *eligibility*; it is not by itself authority to execute. ADR
-0023 still governs execution for every class a host projector observes: the host
-supplies the `RetentionBound` and the projection watermark, and reclaim never
-runs past an unacknowledged cursor. The two rules compose in one direction only
-— terminal *and* within the host's bound — and this ADR does not supersede or
-amend ADR 0023. Age remains a bound applied only after the owning scope is
-terminal and after the relevant watermark, exactly as 0023 states it.
-
-There are no dedup or time-window carve-outs:
-
-* `tool_intent_submissions` takes its owner from emission scoping — the
-  submission belongs to the emission that produced it (FIG-1599, FIG-1509).
-* A fired trigger occurrence's owner is its delivery fan-out, in both directions.
-  A fired occurrence that matches zero deliveries is terminal at ingest-accounting
-  time and therefore immediately reclaimable. A *matched* fired occurrence becomes
-  reclaimable when its last delivery reaches a terminal state — which is what makes
-  the `trigger_deliveries` cascade stop being inert, since today the parent never
-  dies. An outcome-bearing non-fired occurrence is instead factory-owned durable
-  audit history. It reserves no fan-out and is never armed or selected by either
-  occurrence-retention path; delivery-free does not mean ownerless for this typed
-  row. FIG-1507 specs against both fired arms, while FIG-2316's shared conformance
-  law proves the non-fired audit exemption after both a host cutoff and a deleted
-  session frontier.
+A non-fired occurrence is factory-owned audit history, not a delivery-free fired
+occurrence. Delivery-fan-out retention cannot select it. The explicit
+`TriggerStore::prune_non_fired_occurrences(cutoff_epoch_ms)` operation removes
+only non-fired rows recorded strictly before the host's cutoff. The factory has
+no terminal frontier, so the host states that audit-retention decision each
+time. `audit_retained_count` reports retained audit rows without making a
+completed sweep incomplete.
 
 ### 3. Scope-split trigger topology
 
-**Owner-scoped reclamation runs inline with the owning transaction. Factory-global
-reclamation runs only through host-invoked levers.**
-
-Owner-delete cascade and terminal-state vacuum run in the owner's transaction,
-bounded strictly to the owner's rows: deleting a session reclaims eligible
-session rows but retains receipts under [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md).
-A reclaim error inside that scope
-**fails the delete honestly** rather than leaking silently — if the cascade
-cannot complete, the delete does not claim to have happened.
-
-Factory-global work — anything whose cost scales with the store rather than
-with the owner — runs only when the host invokes a lever. There is no
-commit-triggered auto-sweep configuration in the contract. A commit path that
-occasionally becomes a full sweep is an unbounded latency cliff the host never
-asked for and cannot schedule around.
-
-The FIG-1506 asymmetry resolves in both directions at once: SQLite's whole-DB
-blob sweep moves **out** of the session-delete transaction, and Postgres gains
-session-scoped reclaim **in** it.
+Owner-scoped reclamation runs in the owning transaction. Factory-wide work runs
+only through explicit host-invoked maintenance. Session deletion reclaims its
+eligible rows and unreferenced blobs while retaining protected receipts under
+ADR 0023. A failed cascade fails the delete. A session transaction does not
+silently become a whole-catalog blob sweep.
 
 #### Trigger-store ownership map
 
-Trigger retention is scope-shaped. A session owner can become permanently
-unable to speak through ADR 0049. A host or platform owner has no equivalent
-terminal frontier, so its name fence remains durable.
-
 | Row class and scope | Owner | Reclaim trigger |
-|---|---|---|
-| Process definition descriptor (artifact store; replaces the withdrawn session registry slot and host or platform registry tombstone, FIG-4174) | The referrers holding its edges: frame, process record, subscription revision, start, execution or host pin (ADR 0113) | Artifact cleanup after its last referrer edge is severed. An id held anywhere, including a host's own tables, holds nothing. |
-| Session subscription | Registering session | The ADR 0049 deleted-session frontier. Delivery-retention reconciliation deletes the row in its trigger-store transaction only after witnessing zero remaining deliveries for the subscription. This applies to enabled and tombstoned rows; a tombstone remains the `Revive` CAS fence while its session could still speak. |
-| Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
-| Session mutation receipt | Registering session's replay eligibility | Retained after session deletion under [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md). Only the host's retention decision permits pruning through the internal trigger-store primitive. |
-| Host or platform mutation receipt | Host or platform replay eligibility | Retained until the host invokes an appropriate retention policy. `TriggerStore::prune_mutation_receipts` is an internal primitive, not a public facade lever. |
-| Fired trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match fired occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched fired occurrence waits for its last delivery. |
-| Non-fired trigger occurrence | Factory-owned durable audit history | Never through delivery-fan-out retention. Its typed outcome is the history being retained, including after a scoped session crosses the deleted frontier. The host-invoked `prune_non_fired_occurrences` cutoff (2026-09-14 amendment) is the sole reclaim path, and selects only non-fired rows recorded before an explicit epoch. |
-| Trigger delivery | Deterministic process run | ADR 0021 process retention. This policy is unchanged. |
+| --- | --- | --- |
+| Process definition artifact | Its exact referrers | Cleanup after the last referrer edge is severed. Host names and versions belong in host storage. |
+| Session subscription | Registering session | The deleted-session frontier and zero remaining deliveries. A tombstone remains a `Revive` fence while that session can still speak. |
+| Host or platform subscription tombstone | Host or platform namespace | Permanent name fence; the namespace has no deleted-session frontier or purge lever. |
+| Session mutation receipt | Registering session's replay eligibility | Host-selected retention, including after session deletion. |
+| Host or platform mutation receipt | Namespace replay eligibility | Explicit host retention through the trigger-store primitive. |
+| Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
+| Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
+| Trigger delivery | Process run | Process-retention policy under ADR 0021. |
+| Attachment condemnation | Factory condemnation protocol | Adoption and discharge under §6. |
 
-The owner namespace added to new receipt JSON is not retroactive. Legacy
-successful mutation receipts and non-empty prune receipts already carry a
-typed owner in their record snapshots, so retention extracts that genuine
-owner. Legacy conflict/error receipts and successful empty-prune receipts do
-not carry an owner anywhere; their scoped receipt key is a one-way hash and
-cannot recover it. Those ownerless rows are retained indefinitely by design
-rather than classified lossily. They are a bounded pre-change set: the
-classifiable legacy portion shrinks as sessions cross the deletion frontier or
-host cutoffs run, while the irreducibly ownerless remainder stays retained.
-
-The reconciliation deletes exact terminal delivery candidates first. It then
-applies the occurrence and dead-session cascades in one trigger-store
-transaction. Any failure rolls the transaction back; retry repeats the same
-decision without weakening subscription revision fencing or delivery claims.
+Trigger reconciliation deletes exact terminal delivery candidates, then applies
+occurrence and deleted-session subscription cascades in one transaction. A
+failure rolls the transaction back. Receipts whose owner cannot be established
+from their retained record remain protected; an irreversible hashed receipt key
+is not evidence for assigning an owner.
 
 ### 4. Report contract: a three-way split
 
-**Blocked is not error, and failure is not silence.**
+A pass reports completed work, incomplete work, or a stop. The concrete
+maintenance vocabulary distinguishes all five reachable arms:
 
-A reclamation report distinguishes three outcomes, and the types make all three
-reachable:
+- `MaintenanceSweep::Swept` is a completed pass with reclaimed items and no
+  failures or deferrals.
+- `MaintenanceSweep::NothingToDo` is completed enumeration with nothing to
+  reclaim.
+- `MaintenanceSweep::Incomplete` is a completed pass with unfinished work,
+  including per-item attachment failures, live-peer deferrals and typed stalls.
+- `MaintenanceStop::Refused` is an unmet destructive precondition.
+- `MaintenanceStop::Failed` is a backend failure that stops the pass.
 
-1. **Empty** — the scope was enumerated and there was nothing to reclaim.
-2. **Incomplete** — the sweep completed its scope, with unfinished work named
-   in `Ok(report)`. Failed attachment deletes and typed stalls remain in the
-   report's failure and stall channels. A live owner, a peer's condemnation,
-   and a grace window are also named deferrals. The workbench serves a completed
-   incomplete sweep as HTTP 200 with failed and stalled counts and IDs.
-3. **Failed** — `Err` means the sweep itself could not complete its scope, and
-   the error **carries the partial report accumulated before the stop**. Failure
-   to open a pass, adopt its predecessors, or enumerate the backend cannot be
-   mistaken for a completed sweep.
+The first three are `Ok(report)`. Both stop arms are
+`Err(MaintenanceFailure { stop, partial })`, preserving the report accumulated
+before the stop. A refused or failed pass cannot be rendered as a clean zero.
+A transaction that rolls back reports zero committed deletions, not attempted
+ones. A completed attachment pass can report failed deletes as incomplete
+without pretending the entire backend enumeration failed.
 
-A conformance law reds any backend that swallows an injected failure into a
-clean report. (Seam ticket: FIG-1505.) The evidence sweep's report names each
-phase it ran: receipts, usage deltas, attachment roots, and the runtime
-operation scopes it retired (`retired_effect_scope_count`), so a refused
-retirement is a zero with a name rather than an absence.
+The retained-evidence report names receipts, usage deltas, attachment roots
+and retired runtime-operation scopes. Those counts let the host see which
+ownership transitions occurred.
 
 ### 5. Witnessed emptiness
 
-**Every destructive scope boundary consumes a typed enumeration witness.**
+Every destructive scope boundary consumes a complete, typed enumeration witness.
+Complete enumeration of zero rows is a different fact from a failed, partial
+or unavailable enumeration. An unwitnessed destructive scope refuses and names
+the source it cannot prove. A host assertion cannot manufacture the witness.
+FIG-4343 owns the explicit witness type at the reclamation boundary; the current
+attachment seam represents successful enumeration as
+`Result<BTreeSet<AttachmentId>, StoreError>`.
 
-"Enumerated completely, zero rows" is a different value from "enumeration
-returned nothing". The second covers an error, a partial scan, and an unwired
-registry, and it must not be spellable as the first.
-
-An empty scope without a witness **refuses**, naming the source it could not
-prove. A host-asserted empty root set is not an enumeration — FIG-881 stays
-refused on exactly this ground. The type is what makes the FIG-1246 incident
-structurally impossible rather than merely fixed: the failing enumeration has
-no witness to hand over, so the delete cannot be authorized. FIG-1508's unwired
-process registry likewise cannot witness, and is therefore refused from the
-sweep, loudly, instead of contributing an empty set. (Type ticket: FIG-1607.)
-
-A refusal here is reported, not thrown away: it surfaces through section 4's
-blocked channel as a typed reason naming the unproven source, so "process-owned
-rows were refused from this sweep" is a visible outcome rather than a sweep that
-looks clean while silently rooting those rows forever.
-
-**Amendment (2026-08-20):** A refusal is
-`Err(MaintenanceFailure { stop: Refused(..), partial })`, not an `Ok`-side
-counted reason. A refusal must be impossible to read as a healthy sweep, while
-the partial report preserves the earlier ruling that work already reported is
-not thrown away; this replaces section 4's `Ok(report)` blocked-channel
-placement for refusals without changing the typed refusal reason.
+The current pass preserves the outcome distinction. If root enumeration fails
+while an eligible blob exists, the pass fails. If blobs exist but all are
+grace-protected, it refuses with `UnwitnessedScope`. A completely enumerated,
+empty blob backend permits a witnessed nothing-to-do result even if root
+enumeration fails, because no blob deletion depends on those roots. Its root
+diagnostic stays in the report. A successfully enumerated empty root set still
+requires the host's explicit `EmptyRootSetPolicy::AuthorizeDeleteAll` before
+it permits deleting every unreferenced blob.
 
 ### 6. In-flight destruction: adoption-first, generation-fenced
 
-**A factory sweep begins by adopting the incomplete condemnations left by
-crashed predecessors.**
+A fenced attachment sweep begins by adopting incomplete condemnations from
+proven-dead predecessors. The factory condemnation protocol owns those rows.
+The pass completes each adopted row before listing and condemning new candidates.
 
-**Condemnation rows are owned by the condemnation protocol itself**, which is
-factory-scoped: the owner in section 1's list is the factory, and the trigger
-class is the drain-armed sweep, discharged by the adoption pass below. Naming
-that owner is what removes the row class's exemption from section 1 — a
-condemnation is not protocol scaffolding that lives outside the axiom, it is a
-durable row with an owner like any other.
+`begin_attachment_sweep` mints a monotonically increasing durable generation.
+Creation, adoption, arming and settlement compare the condemnation's recorded
+`sweep_generation` with the pass's own generation. SQLite holds liveness in a
+process registry; PostgreSQL holds a session advisory lock on a dedicated
+connection keyed by catalog and generation. A predecessor is dead only when
+its liveness authority permits adoption. A timed-out lock probe defers; it
+does not prove death.
 
-Amended 2026-09-29 (FIG-4100): this section now describes what is built. The
-attachment sweep (`reclaim_unreferenced_attachments`) implements it on SQLite
-and PostgreSQL, and the host lever `release_attachment_condemnation` is
-deleted. Attachment GC is lash's own protocol, so lash recovers its own crashed
-sweeps; a host cannot judge fencing safely and has no lever for it.
+Adoption requires an older, dead generation, no restoring writer token and a
+due retry. Competing passes claim the row through CAS. A physical-delete
+failure preserves the condemnation, its attempt count and error. Bytes already
+absent permit successful completion; a backend error does not. A successful
+delete retires the condemnation and its stall together.
 
-**Generations.** Every sweep pass opens with
-`AttachmentRootSet::begin_attachment_sweep`, which mints a generation from a
-durable counter that only rises (`attachment_sweep_clock`). Every condemnation
-the pass creates or adopts records that generation in `sweep_generation`, and
-every sweep transition — arm, retire, spare, record a failed delete — is a
-compare-and-swap on it, so a pass moves only rows it owns. The generation pin
-is the **sweep pass's own generation**, not a session-lease token: a factory
-sweeper holds no session-execution lease, so it cannot pin the ADR 0029 fencing
-token. It borrows 0029's *shape*.
+A refused delete stalls immediately; a retryable failure stalls after
+`MAX_ATTACHMENT_DELETE_ATTEMPTS`, which is five. Later sweeps retry stalled
+rows under the same liveness and generation fence. Each failure schedules a
+store-clock deadline with exponential backoff from one second to a fifteen-minute
+cap. Attempt counts saturate at the signed 32-bit storage bound. A deadline
+paces retries; it never expires a row or proves an owner dead.
 
-**The generation proves the old pass is dead, without a timer.** A pass holds
-its generation's liveness for as long as it runs. On SQLite, which runs in one
-process (ADR 0106), that is an in-process registry the pass leaves when it
-returns, is cancelled, or dies with its process. On PostgreSQL it is a
-session-scoped advisory lock keyed on the catalog and the generation, held on
-a dedicated connection that the server releases when the connection closes. A
-later pass adopts only rows whose generation is older than its own *and* whose
-pass is proven dead: on PostgreSQL the adopter takes that key itself. Its
-probe waits a moment for a closing connection to let go, and a probe that
-times out leaves the rows to their pass: the wait never authorizes a
-reclamation. A live peer's rows are deferred, never adopted, so a slow sweeper
-cannot have its row finished under it and then land a late delete on bytes a
-writer put back.
+`list_condemnations` exposes phase, provenance, attempt count, last error and
+typed stall. `stalled_ids` keeps the report incomplete. There is no operator
+re-arm or condemnation-release lever. A restoring writer claims a surviving
+condemnation with its opaque token and clears it only after restoring the bytes.
 
-**Adopt, then complete, then condemn.** The obligation is exact: **complete
-each adopted condemnation before starting new work.** Adoption is one CAS per
-row: stamp the new generation where the row still carries the generation it
-was read with, no restoring writer holds it, and its retry is due.
-Two sweepers adopting at once claim each row exactly once and delete its
-bytes once. For each adopted row the pass arms a `Condemned` row, re-stats the
-blob through the same witness the sweep uses everywhere else, deletes it if
-present, and retires the row. "The backend says the blob is gone" and "the
-backend errored" are different answers, and only the first completes the
-delete: bytes already gone count as success, and a row already settled is a
-no-op. Only then does the pass list the backend and condemn new candidates.
-A restoring writer's row belongs to that writer and is never adopted; ADR
-0028's writer recovery is unchanged.
-
-**A delete that keeps failing stalls, typed.** A failed final `HEAD` or
-physical delete keeps the row: it returns from `Deleting` to `Condemned`, so a
-writer can still reclaim the digest, with its failed-attempt count raised and
-the error recorded, and later sweeps adopt and retry it, one attempt per
-sweep once its backoff has elapsed. A refusal (credentials, authorization, a
-terminal or contract failure) stalls the row at once as `refused`; a
-retryable failure stalls it as `attempts_exhausted` once
-`MAX_ATTACHMENT_DELETE_ATTEMPTS` (5) deletes have failed.
-
-A stall is not final. Every failure records `next_delete_at_ms` using the
-store clock and a capped exponential delay: 1 second after the first failure,
-doubling per failed attempt to a 15-minute cap, the obligation relay's default
-backoff values. An early sweep leaves the row and its deadline alone. A due
-stalled row is adopted only after the predecessor is proven dead, through the
-same generation CAS and liveness fence as crashed condemnations. Its attempt
-count keeps rising, saturating at the shared signed 32-bit storage bound; every
-further failure moves the deadline and preserves the original typed stall.
-The stall stays listed even while the retry is `Deleting`, and a success drops
-the row and the stall together. No operator re-arm API exists. Each sweep
-reports stalled digests in
-`AttachmentReclamationReport::stalled_ids`, which keeps it `Incomplete`. A
-completed delete retires its condemnation row outright (FIG-2795): the same
-fenced condemnation already deleted every manifest row for the digest, so the
-durable fact that the bytes are absent is the absence of upload evidence
-rather than a phase that has to be kept. A fresh put claims a surviving
-`Condemned` row, stalled or not, with an opaque token while recording the new
-write intent, restores the bytes, and clears the phase only after success;
-failure releases its token. FIG-1510's stuck-forever state becomes
-unreachable. Retry deadlines pace attempts; they never prove owner death or
-expire rows.
-
-`list_condemnations()` is the enumeration surface (FIG-1510), and its stated
-purpose is operator inspection: "what is stuck right now" must be answerable
-without waiting for a sweep to run. It is the stalled listing: each row
-carries its phase, provenance, failed-attempt count, last delete error and
-typed stall reason.
-
-**This supersedes ADR 0028's condemnation-recovery rule.** 0028 keeps its
-ownership transitions fenced by CAS, but its earlier rule made clearing a
-condemnation left by a sweeper that died mid-delete *host
-policy*, with the host calling `release_attachment_condemnation` after deciding
-the sweeper was gone. That recovery is now automatic and structural: the next
-sweep adopts the row under a generation whose predecessor is proven dead, and
-the host lever is deleted. lash still expires nothing on a clock.
-
-Effect-group VO state severs the same way. The effect-group row owns the group
-VO's state. Group retirement issues the idempotent VO purge inline — the owner
-cascade of section 3 — and the factory sweep gains a severance pass for group
-keys it can prove are gone (FIG-1608, after the FIG-1537 wiring lands).
-
-There is no TTL on VO state, ever. A TTL is a timer reaching a row whose owner
-it never consulted, which section 2 forbids.
+Effect-group retirement likewise severs owned state rather than expiring it.
+The engine retains an identity fence and discharges group cleanup as a whole
+under ADR 0065 and ADR 0099.
 
 ## Alternatives considered
 
-* **Per-class retention policies instead of ownership.** Rejected: a retention
-  policy answers "how long" and never "whose", which is exactly the gap that
-  produced ownerless dedup tables. Retention survives as a deferral knob under
-  section 2, subordinate to a named owner.
+Per-class age policies without owners cannot decide whether live data is
+reachable. Retention stays subordinate to ownership and explicit host bounds.
 
-* **Keep an auto-sweep commit hook, bounded by a work budget.** Rejected: a
-  budget bounds the sweep's cost per commit but not its blast radius, and it
-  leaves the commit path holding destructive work the host did not schedule.
-  Levers are the honest shape; a host that wants sweeping on a cadence runs the
-  lever on a cadence.
+Commit-triggered factory sweeps introduce catalog-sized work into a bounded
+owner transaction. Explicit levers let the host schedule and observe it.
 
-* **`Option<Report>` or an empty report for enumeration failure.** Rejected:
-  both spell "nothing" for two different facts. This is the FIG-1246 defect
-  reintroduced at the report layer rather than the root-set layer.
+Stored reference counts can disagree with the real edges. Exact edges make
+severance and remaining ownership one transactional predicate.
 
-* **A sentinel row or host assertion standing in for a witness.** Rejected: an
-  assertion is a claim, an enumeration is evidence, and the destructive
-  boundary must consume evidence. This is why FIG-881 remains refused.
+Empty reports for enumeration failure erase the difference between nothing
+present and nothing known. Typed stops preserve the failure and completed work.
 
-* **TTL-expiring VO state to avoid a severance pass.** Rejected under section 2:
-  it arms reclamation by a clock rather than by group retirement, so it can
-  reach a live group.
-
-* **A cross-session repair actor for rotation-stranded rows.** Rejected: it
-  would hold no session-execution lease over the rows it reclaims, which is the
-  fencing shape FIG-1573's fix exists to forbid. The stranded rows get an owner
-  instead, and the sweep stays drain-armed.
-
-* **Keeping `gc_unreachable` as a reclaim mechanism to harden.** Rejected by the
-  round-2 ruling: it is demoted to the read-only verify/repair tier, so
-  FIG-1504's "no production caller" finding argues for the demotion rather than
-  for wiring a caller.
+A timer or host judgement of sweeper death cannot fence a late physical delete.
+Generation CAS and backend liveness prove which pass owns the condemnation.
 
 ## Consequences
 
-* Every new durable table states its owner and trigger class at review time.
-  A table that cannot is a design finding, not a style nit.
-* Commit-triggered automatic GC leaves the contract. Hosts that relied on
-  incidental sweeping now schedule the lever, and the sweep's cost becomes
-  something they can observe and place.
-* Reclamation reports gain typed blocked reasons and an error that carries its
-  partial report; backends that previously returned a clean empty report on
-  failure fail the new conformance law.
-* Destructive boundaries take a witness parameter, so an unenumerable source is
-  a refusal at the call site rather than an empty set flowing inward.
-* SQL-backed reclaimable classes carry a DDL CHECK tying reclaim eligibility to
-  terminal state, so the "no timer reaches a live row" rule is enforced by the
-  database rather than by review; non-DDL backends carry the same invariant as
-  a conformance law.
-* Singly-owned row classes lose their root-set and GC touchpoints outright
-  rather than gaining better ones, and multi-referenced classes converge on one
-  edges-backed predicate instead of the hand-copied liveness SQL.
-* This ADR supersedes ADR 0028's condemnation recovery (adoption is automatic
-  and generation-fenced, the host lever is deleted, and the CAS-fenced
-  state machine survives) and leaves ADR 0023 intact — terminality arms
-  eligibility, the host's `RetentionBound` and watermark still bound execution.
+Every durable table has a reviewable owner and reclaim trigger. Destructive
+maintenance reports its stops and partial work. Host cutoffs bound retained
+evidence, while physical deletion and interrupted deletion have separate
+ownership protocols. Complete typed witnesses remain an explicit implementation
+obligation under FIG-4343.
 
-### Children and sequencing
+## Executable evidence
 
-The model is implemented by the FIG-1494 children, plus three tickets filed for
-the parts this ADR made explicit:
-
-* **FIG-1505 — report contract seam. First.** Sections 3, 5 and 6 all report
-  through it, so every other child either builds on this shape or is rewritten
-  by it.
-* **FIG-1607 — the enumeration witness type** (section 5), and **FIG-1606 — the
-  terminal-state CHECK mechanism** (section 2). These are the two structural
-  pieces; children that only consume them can land afterwards in any order.
-* **FIG-1504–1516 — the per-class ownership and trigger work** (sections 1–3),
-  including FIG-1506's SQLite/Postgres scope split and FIG-1510's
-  `list_condemnations()` surface. **FIG-1509 is blocked on FIG-1599**: the
-  emission scoping that gives `tool_intent_submissions` its owner has to exist
-  before the row class can name one.
-* **FIG-1508** stays open as a refusal, not a fix: the process registry is
-  refused from the sweep until it is wired to witness.
-* **FIG-1507** specs against both trigger-occurrence arms in section 2 —
-  zero-match terminal at ingest accounting, matched terminal when its last
-  delivery is — since implementing only the first leaves the cascade inert.
-* **FIG-1608 — effect-group VO severance** (section 6), after FIG-1537.
-* The rotation-stranded turn-input class (section 1) has no child yet; it enters
-  the ownership map here and needs one filed against FIG-1494.
+- [Storage maintenance contract](../../crates/lash-core-store/src/store/mod.rs#L1695),
+  [SQLite repair](../../crates/lash-sqlite-store/src/graph.rs#L131) and
+  [PostgreSQL repair](../../crates/lash-postgres-store/src/postgres/runtime_persistence/maintenance.rs#L69)
+  define explicit reclamation and its transactional predicates.
+- [Maintenance outcomes](../../crates/lash-core-store/src/store/maintenance.rs#L1)
+  and [retention counts](../../crates/lash-core-store/src/store/retention.rs#L15)
+  implement §4. [Outcome laws](../../crates/lash-conformance/src/conformance/store_maintenance_outcome.rs#L1)
+  cover failures and witnessed emptiness.
+- [Trigger retention contract](../../crates/lash-core-execution/src/triggers.rs#L1693)
+  and [audit cutoff](../../crates/lash-core-execution/src/triggers.rs#L1917)
+  separate fired fan-out and non-fired history.
+- [Sweep](../../crates/lash-core-store/src/attachments.rs#L819),
+  [enumeration outcomes](../../crates/lash-core-store/src/attachments.rs#L883),
+  [SQLite liveness](../../crates/lash-sqlite-store/src/attachments.rs#L299),
+  [PostgreSQL liveness](../../crates/lash-postgres-store/src/postgres/attachments.rs#L263)
+  and [condemnation SQL](../../crates/lash-store-sql/src/attachment/condemnation.rs#L1)
+  implement §6. [Cold-reopen adoption laws](../../crates/lash-conformance/src/conformance/attachment_condemnation_recovery.rs#L1)
+  cover interrupted passes and competing sweepers.
+- Store laws run on SQLite file, SQLite memory and PostgreSQL. Effect-host laws
+  run on the in-process Restate server double, live Restate and lash-sim's
+  in-process effect host. Upgrade proofs use the synthetic-next tier.

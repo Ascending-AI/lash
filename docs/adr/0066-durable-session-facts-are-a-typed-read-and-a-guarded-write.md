@@ -4,282 +4,112 @@
 
 Accepted.
 
-Amended 2026-09-24 (FIG-3019): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-deleted the dialect fact. `RlmSessionConfig` and `RlmCreateExtras` carry only
-`final_answer_format` and `termination`. `RlmDialect`, `.rlm_dialect(X)`,
-`rlm_plugin_session_dialect`, `rlm_session_dialect` and the post-open dialect
-comparison are gone, and a recorded session config that still names a `dialect`
-is refused with the typed `RlmSessionConfigDecodeError::RetiredDialectField`.
-The guarded set-if-unset write stands for the remaining facts; since FIG-4099
-it is `update(SessionConfigPatch)`, not `set_rlm_config_if_unset` (see the
-amendment below). The dialect text below is historical.
-
 ## Context
 
-A session carries two different kinds of configuration and they had one shape.
-
-ADR 0030 configuration — model, turn budget, generation options, the prompt
-layer — is *host-wins*: the host resolves it when it constructs or reopens a
-session, and the value it supplies is the value the session runs with. Passing
-that at open is right. Re-passing it is right. A host that changes its mind
-changes the value.
-
-A *durable per-session fact* is the opposite. The RLM source dialect, the
-final-answer format, the session-wide termination requirement: these are pinned
-for the session's life. The host does not decide them on reopen; the session
-already did. But they were expressed in the same shape as host-wins config —
-open-time builder parameters, `.rlm_dialect(X)` and `.final_answer_format(F)` —
-and a request-shaped API for a fact the caller cannot actually change produces a
-predictable set of defects, all of which we shipped:
-
-* **Prose refusals, matched as prose.** The pin conflict was a
-  `SessionError::Protocol(String)`. Two reference hosts needed to tell it apart
-  from every other protocol failure, so both wrote
-  `error.to_string().contains("RLM dialect is durably pinned")` — with a test
-  pinning the exact sentence, in each host. Matching a typed refusal on its
-  message is itself the defect shape: the refusal's wording became load-bearing
-  API, and the check silently answers "no" the moment anyone rewords it.
-
-* **Catch-and-fallback smoothing.** Because the request could be refused and the
-  host had a way to detect the refusal, both hosts did the natural thing: catch
-  it and reopen *without* the dialect. A session whose recorded dialect
-  disagreed with the operator's `LASH_RUNBOOK_DIALECT` opened anyway, in its old
-  dialect, with every route green — and the operator's configuration quietly
-  ignored. `runbooks/RULES.md` documented this as expected behaviour, which is
-  how we know it was load-bearing rather than accidental.
-
-* **Absence that could not be read.** The typed read returned
-  `RlmDialect`, not `Option<RlmDialect>`, so "this session pinned Lashlang" and
-  "this session pinned nothing" were the same answer. A host that needed to tell
-  them apart — the workbench, to badge a session honestly — peeked at the raw
-  option payload for the presence of a `"dialect"` key.
-
-* **Silent clobbers.** Applying a request over a durable bag means writing the
-  whole bag. Two facts got restated by callers that never mentioned them: every
-  reopen that did not name a final-answer format reset it to the root default,
-  and a bare `.rlm_dialect(X)` constructed full options carrying the *default*
-  termination, resetting a recorded `FinishRequired` to `Natural`. Neither was
-  reachable through a refusal. They just happened.
-
-The in-tree counter-example already existed. `lash-subagents` reads the parent
-session's recorded dialect and writes it forward onto the child through the
-plugin-agnostic options seam. No refusal is possible, so no fallback exists, so
-nothing smooths anything over.
+A durable session fact and a live open-time binding have different authority.
+The recorded fact governs a reopened session. A provider resolver or plugin
+factory supplies process-local wiring. Confusing the two lets defaults overwrite
+recorded facts or encourages hosts to detect conflicts by matching error prose.
 
 ## Decision
 
-**A durable per-session fact is exposed as a typed config read plus a guarded
-set-if-unset write with a typed conflict refusal. It is never a request.**
+A durable per-session fact has a typed read and a guarded set-if-unset write
+with a typed conflict. Creation records the initial facts; opening reads them;
+later changes use the durable session-config command.
 
-Open-time parameters are reserved for ADR 0030 host-wins configuration (model,
-turn budget, generation) and live wiring (store, provider handle, plugin
-factories).
+### Read the recorded facts
 
-Concretely, for the RLM bag — all three facts, because they share one durable
-bag and one materialization hook:
+`RlmSessionConfig` carries `final_answer_format` and `termination`, both as
+`Option`. `None` means the session records no statement for that fact, which is
+different from explicitly recording its default value. Read it through
+`RlmSessionReadViewExt::rlm_config` or `RlmSessionExt::rlm_config`.
 
-1. **Read.** `RlmSessionConfig` carries `dialect`, `final_answer_format` and
-   `termination`, each `Option`-shaped, read as recorded. `None` means the
-   session has stated nothing, which is a different answer from the value its
-   default resolves to. It is available on `SessionReadView`
-   (`RlmSessionReadViewExt::rlm_config`) and on an opened session
-   (`RlmSessionExt::rlm_config`).
+Reads return `Result`. Malformed recorded options refuse instead of defaulting.
+A bag containing a `dialect` field returns
+`RlmSessionConfigDecodeError::RetiredDialectField`. The session records no
+source-language selection; ADR 0096 governs the shipped dialect.
 
-2. **Guarded write.** `apply_rlm_session_config_if_unset` is the single engine:
-   each fact the request states is written only where the session recorded
-   nothing, restating a recorded fact is a no-op, and stating a *different*
-   value refuses. Facts the request leaves unstated are carried through
-   untouched — which is what closes both clobbers. Durability is unchanged: the
-   pin lands with the session's next commit.
+### Creation and opening
 
-3. **Typed refusal.** `RlmSessionConfigConflict` names the fact and carries both
-   the `recorded` and the `requested` value. Its `Display` is the one place any
-   prose for a refused pin is produced. No host matches a message to tell a pin
-   conflict from anything else.
+`SessionBuilder::create(SessionCreation)` is the facade's creating operation.
+`SessionCreation` carries the session spec, parent relation and plugin-keyed
+creation options. Its `plugin_options` states RLM facts under
+`RLM_PROTOCOL_PLUGIN_ID`. The protocol resolves these options before admission,
+and the catalog writes the row and `SessionCreationHead::Config` in one
+transaction. An existing id refuses with `SessionAlreadyExists`.
 
-4. **Assertion is host code.** `assert` is comparing the read against what you
-   require and failing loudly. `prefer` is the guarded write. Both are
-   one-liners in the host, and where the host sources its answer — an
-   environment variable, a roster row, a create form — is host policy that stays
-   out of core. `LASH_RUNBOOK_DIALECT` lives in the reference hosts, not in the
-   protocol.
+`SessionBuilder::open` opens an existing id and reads its recorded head.
+`UnknownSession` and `SessionDeleted` are typed refusals. The builder carries
+provider resolution, process-local plugin factories and tool-source policy;
+it carries no replacement session config. A resolver that cannot serve the
+recorded provider pin refuses with `ProviderMismatch`.
 
-The RLM-specific request sugar is removed wholehog. A host that states a durable
-fact when a session opens does so through the plugin-agnostic options seam every
-plugin shares (`SessionBuilder::plugin_option` keyed by
-`RLM_PROTOCOL_PLUGIN_ID`) — the same seam `lash-subagents` already writes a
-parent's dialect forward through — and that statement is applied by the guarded
-engine above, refusing with the same typed conflict.
+The protocol fills a missing final-answer format at creation: `Markdown` for a
+root and `RawFinalValue` for a child. Termination has no default fill, so its
+absence survives. Recorded options are read strictly and carried through
+rematerialization without defaulting again. The kernel's creation path for state
+bound by its creator uses `SessionCreationHead::CommittedByCreator`; its creator
+commits the head.
 
-### The one boundary this decision does not cross
+### One guarded write
 
-The protocol plugin selects its dialect implementation when a session's plugins
-are built, which happens before any post-open write can reach it: the active
-dialect is captured by the prompt projector, the protocol driver, the prose
-projector, the control-tool vocabulary and the stream mask at registration. So a
-dialect a session has never recorded cannot be *introduced* after that session is
-open — `set_rlm_config_if_unset` confirms the dialect the session resolved and
-refuses a different one, and a session states its dialect when it opens. That is
-a deliberate boundary, not an oversight: a live dialect re-selection would make
-the one fact this layer exists to pin mutable mid-life, and it is not needed
-once a host can read the recorded dialect *before* opening. That pre-open read is
-FIG-1556's preflight surface.
+A host forms a patch with `lash::rlm::rlm_session_config_patch` and applies it
+with `SessionConfigAdmin::update(SessionConfigPatch)`. The protocol's
+`apply_session_config_patch` hook calls `apply_rlm_session_config_if_unset`:
 
-The guarded write on an open session is therefore narrower than the engine
-underneath it, and the boundary is worth stating exactly, because two of the
-three facts are already decided by the time a host can call it:
+1. An unstated field is carried through unchanged.
+2. A stated field fills an absent recorded fact.
+3. Restating the recorded value is a no-op.
+4. Stating a different value refuses with `RlmSessionConfigConflict`, carrying
+   the recorded and requested values and naming the fact.
 
-* **Dialect** — compared, never written. A session that recorded no dialect is
-  still *running* one (the plugin resolved the default), so the comparison is
-  against the running dialect rather than against the recorded `Option`.
-  `apply_rlm_session_config_post_open` is the one place that holds the field
-  back; writing it would leave the recorded fact disagreeing with the plugin
-  that is executing.
-* **Final-answer format** — default-filled at the same first open, so post-open
-  a statement can only agree (no-op) or disagree (refuse). It is writable in the
-  engine, and it is what a session's *first* open states; it is not a fact a
-  host adds later.
-* **Termination** — genuinely settable after the fact. It has no default fill,
-  so `None` survives the first open and the guarded write is the way a host
-  records it.
+The command settles a durable config write. Successful return means the patch
+is durable. Conflicts travel as `SessionError::SessionConfigRefused` and are
+read with `lash::rlm::rlm_session_config_conflict`; error prose is presentation.
+The RLM patch preserves the recorded channel and refuses plugin keys it does
+not accept.
 
-Defaults are filled only on a session that has recorded nothing. That is what
-pins a session's dialect at its first open, exactly as before, while making a
-reopen incapable of re-defaulting — the mechanism behind both clobber fixes.
+Because creation fills the final-answer format, a later statement normally
+agrees or refuses. Termination can be introduced later where absent. RLM
+per-turn options have their own type and do not carry a dialect fact.
 
-Plugin construction enforces that distinction below the host-facing open API.
-A new plugin session uses the defaultable creation entry point; rebuilding a
-session with a plugin snapshot uses a separate rematerialization entry point
-that requires its recorded protocol-turn options. The RLM factory never
-defaults the dialect on rematerialization, and refuses a missing recorded
-dialect as a typed `MissingRecordedSessionConfig` error before snapshot restore.
-This construction split does not move the durable pin to open time: the fact
-still lands only with the session's next commit.
+Assertion remains host code: read the fact, compare it with the host's
+requirement, and fail if it differs. A host preference uses the guarded patch.
+The protocol does not interpret environment variables or decide host policy.
 
 ## Alternatives considered
 
-* **Pass the dialect only when creating.** Rejected: there is no host-facing
-  create/resume split for recording the fact, and the pin lands at the first
-  *commit*, not at open. The lower-level plugin-construction split described
-  above only requires the already-recorded bag when restoring a snapshot. This
-  was already tried and reverted — the two call sites that "create" both open and
-  drop without running a turn, so the pin evaporated with the handle and the
-  first real turn committed the default permanently. A workbench told to serve
-  TypeScript served Lashlang.
+A request-shaped open parameter makes a durable fact appear replaceable and
+requires conflict handling during ordinary reads. Explicit creation and a
+separate durable update identify the write authority.
 
-* **Assert the configured dialect on every open.** Rejected: it conflates
-  *stating* configuration with *asserting* a requirement, and would refuse every
-  route against a legitimately mixed store — a service holding sessions from
-  before a configuration change could not open any of them. Asserting is a
-  choice a host makes per requirement, not a property of the open call.
+Writing the whole bag for one stated fact overwrites fields the caller never
+mentions. Field-by-field set-if-unset preserves them.
 
-* **`assert` / `prefer` intent modes baked into the open call.** Rejected as
-  unnecessary machinery: once a typed read and a guarded write exist, both modes
-  collapse to one line of host code each, and the host can compose them — assert
-  on one fact, prefer on another — without core knowing the difference.
-
-* **Keeping the prose refusal alongside the typed one.** Rejected: a message a
-  caller is expected to match is API, and two copies of an API drift. The
-  message survives only as the typed error's rendering, for the operator.
+`assert` and `prefer` modes in the open operation duplicate host decisions
+already expressible with the typed read and guarded patch. Matching a refusal's
+message makes wording part of the contract; the typed conflict carries the
+information directly.
 
 ## Consequences
 
-* `.rlm_dialect(X)` and `.final_answer_format(F)` are gone. Callers state
-  durable facts through the plugin options seam, or write them post-open through
-  the guarded write.
-* `RlmCreateExtras::termination` becomes `Option<RlmTermination>`. Absence and an
-  explicit `Natural` are now different statements; only a stated value
-  participates in the guard. Existing durable state decodes unchanged, and a bag
-  that omits the key reads as absent.
-* Both reference hosts lose their `is_dialect_pin_conflict` string match, their
-  message-string tests and their catch-and-reopen fallbacks. A genuine mismatch
-  now reaches the operator.
-* `runbooks/RULES.md` no longer documents a fallback, because there is none: a
-  carried-over store opened under the other row's `LASH_RUNBOOK_DIALECT` fails
-  the open instead of serving the recorded dialect behind green routes. A fresh
-  data directory per row is still required, now for evidence purity rather than
-  to avoid a silent mislabel.
-* Default-filling at the first open is now a pin, honestly: a dialect and a
-  final-answer format the host never chose become unchangeable for the life of
-  the session, and a reopen stating a *different* format is refused where it
-  previously won by silently overwriting. That is the price of killing the
-  clobber — the last writer no longer wins — and it is why a host that cares
-  states its facts at the first open rather than later.
-* Sibling facts follow the same shape rather than growing their own request
-  parameters: the provider pin is FIG-1558 and the parent-relation rebind is
-  FIG-1559.
+Creation facts exist before the first facade runtime opens. A reopen cannot
+change them through builder defaults. A patch records an absent fact or confirms
+an existing one; it cannot change an RLM fact already recorded. Hosts that need a
+particular presentation format state it at creation.
 
-### Amendment (FIG-1979): the dialect has exactly one carrier
+## Executable evidence
 
-`RlmCreateExtras` doubled as the session create bag *and* the per-turn override
-bag, so a turn could state a dialect that execution — already pinned at
-materialization — ignored, while a host reading that bag printed the stated one.
-The types now split: `RlmTurnOptions` is the per-turn bag and has no dialect
-field at all, so the disagreement is unrepresentable rather than merely unused.
-`RlmCreateExtras` keeps the dialect and stays the session carrier.
-
-Host reads of the running dialect go through `rlm_plugin_session_dialect`
-(resolved once in `PluginFactory::build`, from the session's durable bag *plus*
-its create options — the same rule the RLM plugin build itself uses, since at a
-first open the pin still lives in the create options) or, where a host holds a
-read view, `rlm_session_dialect`. Neither is read from a prompt hook's effective
-options: the merge under the typed bag is an untyped shallow key-extend of the
-host's per-turn override over the session bag, so a raw `{"dialect": ...}` key
-on a turn override reaches the hook and would win there. The typed bag removes
-the *supported* spelling; resolving at plugin build is what removes the raw one.
-
-The reads are strict: an unknown or malformed language id is an error, never the ratified
-default. Defaulting on a decode failure re-admitted through the back door the
-substitution `RlmDialect::from_language_id` refuses at the front. Absence stays a
-distinct answer from malformed — a session that recorded nothing *is* running the
-default — and `RlmSessionReadViewExt::rlm_config` returns a `Result` for the same
-reason.
-
-## Amendment (FIG-4099, 2026-09-29): creation config and one write path
-
-Durable RLM facts are creation config. A session's creator states them through
-the plugin-agnostic options seam (`SessionBuilder::plugin_option` keyed by
-`RLM_PROTOCOL_PLUGIN_ID`), and they are recorded with the session's catalog row
-in its initial config head. A reopen's statement is neither applied nor refused:
-the session keeps what it recorded, so the open-time conflict that surfaced as
-an untyped `SessionError::Protocol(String)` is gone. Every creating path —
-`open()` of a new id, `create()`, `open_with_state()`/`observe_with_state()` and
-the engine's own drive-open — passes the creator's config to the catalog as
-`SessionStoreCreateRequest::config`, and the store writes it as the session's
-initial config head in the same transaction as the catalog row
-(`SessionHeadMeta::created`). The request says which head it carries:
-host-facing creation states `SessionCreationHead::Config`, so the head is on
-disk before the session is first materialized, and it includes the protocol turn
-options the session's protocol resolves at creation (the RLM session config
-among them). A core runtime binding state it was handed states
-`SessionCreationHead::CommittedByCreator`, and its first commit writes the head,
-so only the row is written at admission. Admitting an id that already exists
-writes no config either way. The facade forms that config in one place,
-`SessionBuilder::creation_config`. A reopen reads the recorded head and writes
-nothing: there is no reconciliation, no seed write and no report, and builder
-config stated on a reopen is ignored. Only live policy follows an open (the
-session binding, turn budget, autonomy, no-progress budget and charge safety),
-and a builder provider that cannot serve the recorded pin is still refused typed
-(`ProviderMismatch`) without a write. Every later change is the one durable
-command, `update(SessionConfigPatch)`, which covers provider, model, prompt,
-generation, attachment acceptance and plugin session config.
-
-The guarded write is that config command. `set_rlm_config_if_unset`,
-`RlmSessionConfigError` and the facade's separate RLM setter are deleted; a
-host states facts with `lash::rlm::rlm_session_config_patch` and applies them
-with `SessionConfigAdmin::update`. The engine is still
-`apply_rlm_session_config_if_unset`, now behind the protocol's
-`apply_session_config_patch` hook: a fact is written only where the session
-recorded nothing, restating it is a no-op, and a different value is refused
-with the typed `RlmSessionConfigConflict`, carried as
-`SessionError::SessionConfigRefused` and read with
-`lash::rlm::rlm_session_config_conflict`. The patch settles through the
-commanded config write, so a successful return means the fact is durable.
-
-This supersedes: "Open-time parameters are reserved for ADR 0030 host-wins
-configuration (model, turn budget, generation)" — model, prompt and generation
-are creation config too, and the turn budget is live policy; "Durability is
-unchanged: the pin lands with the session's next commit" and "the fact still
-lands only with the session's next commit" — a creator's facts land with the
-catalog row and a patch's facts land when it settles; and the Context's
-description of model and generation as re-passed at every open.
+- [Recorded facts and conflicts](../../crates/lash-rlm-types/src/lib.rs#L911)
+  define the two fields and typed conflict values.
+- [Strict decode](../../crates/lash-protocol-rlm/src/plugin/protocol_session.rs#L161),
+  [guard](../../crates/lash-protocol-rlm/src/plugin/protocol_session.rs#L222),
+  [materialization](../../crates/lash-protocol-rlm/src/plugin/protocol_session.rs#L275)
+  and [patch hook](../../crates/lash-protocol-rlm/src/plugin/protocol_session.rs#L309)
+  implement the recorded-options rules.
+- [Facade creation](../../crates/lash/src/session.rs#L250) records the config head;
+  [opening](../../crates/lash/src/session.rs#L164) reads an existing session.
+- [Patch construction and conflict read](../../crates/lash/src/rlm.rs#L131) and
+  [durable update](../../crates/lash/src/admin.rs#L1077) define the host API.
+- [Session-fact laws](../../crates/lash/src/tests/core_session_builder/rlm_session_facts.rs#L1)
+  cover creation, reopen, idempotence and conflicts.
