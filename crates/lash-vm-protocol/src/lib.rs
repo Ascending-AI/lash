@@ -32,6 +32,7 @@ mod version;
 pub use bounds::ProtocolBounds;
 pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
+    ObservationChunker,
 };
 pub use message::{
     ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse,

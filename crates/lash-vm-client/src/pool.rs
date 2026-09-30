@@ -218,6 +218,8 @@ impl WorkerPool {
                     resettable: false,
                     owner: None,
                     observations: Vec::new(),
+                    observation_budget: None,
+                    observed_bytes: 0,
                 });
             }
             if !queued {
@@ -375,6 +377,11 @@ pub struct Checkout {
     resettable: bool,
     owner: Option<VmOwner>,
     observations: Vec<EncodedPayload>,
+    /// The run's heap budget, which bounds the observations one step hands
+    /// its parent (FIG-4458). `None` is unbounded.
+    observation_budget: Option<u64>,
+    /// The observation bytes the current step has handed over.
+    observed_bytes: u64,
 }
 impl Checkout {
     pub fn take_observations(&mut self) -> Vec<EncodedPayload> {
@@ -442,6 +449,7 @@ impl Checkout {
             .max_frame_depth
             .min(self.pool.config.vm_limits.max_frame_depth);
         self.owner = Some(start.owner.clone());
+        self.observation_budget = start.limits.memory_limit_bytes;
         self.started = true;
         self.exchange(
             ParentMessage::Start(Box::new(start)),
@@ -624,6 +632,7 @@ impl Checkout {
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
         self.resettable = false;
+        self.observed_bytes = 0;
         self.send(message, timeout)?;
         let mut deadline = Instant::now() + timeout;
         let mut phase = None;
@@ -680,18 +689,17 @@ impl Checkout {
                 }
                 WorkerMessage::Refused { reason } => return Err(PoolError::protocol(reason)),
                 WorkerMessage::Observations { payload } => {
-                    self.bound(
-                        payload.0.len() as u64,
-                        self.pool.config.protocol.decode.max_allocation_bytes,
-                    )?;
-                    let total = self
-                        .observations
-                        .iter()
-                        .try_fold(payload.0.len() as u64, |total, item| {
-                            total.checked_add(item.0.len() as u64)
-                        })
-                        .ok_or_else(|| PoolError::protocol("observation byte count overflow"))?;
-                    self.bound(total, self.pool.config.protocol.decode.max_allocation_bytes)?;
+                    // Each chunk crossed in one frame; the step's stream is
+                    // held to the run's heap budget, never to a transport
+                    // bound (FIG-4458).
+                    self.observed_bytes =
+                        self.observed_bytes.saturating_add(payload.0.len() as u64);
+                    if self
+                        .observation_budget
+                        .is_some_and(|budget| self.observed_bytes > budget)
+                    {
+                        return Err(limit(WorkerLimit::Observations));
+                    }
                     self.observations.push(payload);
                 }
                 WorkerMessage::LimitExceeded { limit: exhausted } => return Err(limit(exhausted)),

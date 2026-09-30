@@ -1701,3 +1701,6 @@ mod worker_verdicts;
 
 #[path = "crash_windows/worker_crashes.rs"]
 mod worker_crashes;
+
+#[path = "crash_windows/observation_stream.rs"]
+mod observation_stream;

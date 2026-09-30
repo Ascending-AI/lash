@@ -303,7 +303,7 @@ const WIDTH: usize = 20_000;
 const SPENT_CPU: Duration = Duration::from_millis(15);
 
 /// A host running process segments with `workers` over `backend`.
-fn process_host(
+pub(super) fn process_host(
     backend: lash_core::Backend,
     workers: lash::rlm::WorkerService,
     executions: &Arc<AtomicUsize>,
@@ -344,7 +344,7 @@ fn process_host(
 }
 
 /// The dialect's worker service with `cumulative_cpu` per execution scope.
-fn workers_with_cpu(cumulative_cpu: Duration) -> lash::rlm::WorkerService {
+pub(super) fn workers_with_cpu(cumulative_cpu: Duration) -> lash::rlm::WorkerService {
     let mut config = lash_protocol_rlm::TypescriptDialect
         .worker_service()
         .config()
