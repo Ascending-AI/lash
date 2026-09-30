@@ -21,7 +21,7 @@ enum DurableFaultKind {
 struct CargoTestEvidence {
     package: &'static str,
     test_target: Option<&'static str>,
-    filter: &'static str,
+    filter: Option<&'static str>,
     required_env: Option<&'static str>,
 }
 
@@ -53,7 +53,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-sim",
             test_target: Some("crash_point_matrix"),
-            filter: "process_terminal_mid_journal_step",
+            filter: Some("process_terminal_mid_journal_step"),
             required_env: None,
         }),
     },
@@ -72,7 +72,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-core",
             test_target: None,
-            filter: "retryable_llm_failures_exhaust_and_fail_turn",
+            filter: Some("retryable_llm_failures_exhaust_and_fail_turn"),
             required_env: None,
         }),
     },
@@ -83,7 +83,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-protocol-standard",
             test_target: Some("protocol_scenarios"),
-            filter: "standard_protocol_scenario_provider_error_stops_without_checkpoint",
+            filter: Some("standard_protocol_scenario_provider_error_stops_without_checkpoint"),
             required_env: None,
         }),
     },
@@ -118,7 +118,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
-            filter: "a_stale_fence_writes_nothing",
+            filter: Some("a_stale_fence_writes_nothing"),
             required_env: None,
         }),
     },
@@ -129,7 +129,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
-            filter: "settlement_is_predicated_on_the_root",
+            filter: Some("settlement_is_predicated_on_the_root"),
             required_env: None,
         }),
     },
@@ -140,7 +140,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
-            filter: "trigger_delivery_recovery",
+            filter: Some("trigger_delivery_recovery"),
             required_env: None,
         }),
     },
@@ -151,7 +151,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
-            filter: "process_trigger_retention",
+            filter: Some("trigger_capture_route_and_compaction_refusal_matrix"),
             required_env: None,
         }),
     },
@@ -162,7 +162,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
-            filter: "conformance",
+            filter: None,
             required_env: None,
         }),
     },
@@ -225,7 +225,9 @@ fn durable_fault_matrix_rows_have_executable_or_blocked_evidence() {
                     row.id
                 );
                 assert!(
-                    !evidence.filter.trim().is_empty(),
+                    evidence
+                        .filter
+                        .is_none_or(|filter| !filter.trim().is_empty()),
                     "{} has an empty test filter",
                     row.id
                 );
@@ -402,12 +404,52 @@ fn assert_real_cargo_filter_selects_tests(command: &[String], row_id: &str) {
     );
 }
 
+#[test]
+fn durable_fault_matrix_target_name_is_not_a_test_filter() {
+    let evidence = CargoTestEvidence {
+        package: "lash-internal-sqlite-store",
+        test_target: Some("conformance"),
+        filter: Some("conformance"),
+        required_env: None,
+    };
+    let mut command = [
+        "test",
+        "-p",
+        "lash-internal-sqlite-store",
+        "--locked",
+        "--test",
+        "conformance",
+        "trigger_capture_route_and_compaction_refusal_matrix",
+    ]
+    .map(str::to_string)
+    .to_vec();
+    assert!(
+        !command_executes_evidence(&command, evidence),
+        "the integration target name must not satisfy a different test filter"
+    );
+    command.pop();
+    assert!(
+        !command_executes_evidence(&command, evidence),
+        "an unfiltered target must not satisfy a named test filter"
+    );
+    assert!(command_executes_evidence(
+        &command,
+        CargoTestEvidence {
+            filter: None,
+            ..evidence
+        }
+    ));
+    command.push("conformance".to_string());
+    command.push("--locked".to_string());
+    assert!(command_executes_evidence(&command, evidence));
+}
+
 fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) -> bool {
     if command.first().map(String::as_str) != Some("test")
         || !command
             .windows(2)
             .any(|pair| pair[0] == "-p" && pair[1] == evidence.package)
-        || !command.iter().any(|arg| arg == evidence.filter)
+        || cargo_test_filter(command) != evidence.filter
     {
         return false;
     }
@@ -416,6 +458,22 @@ fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) ->
             .windows(2)
             .any(|pair| pair[0] == "--test" && pair[1] == target)
     })
+}
+
+fn cargo_test_filter(command: &[String]) -> Option<&str> {
+    let mut args = command.iter().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-p" | "--package" | "--test" | "--features" | "--target" | "--profile"
+            | "--manifest-path" => {
+                args.next();
+            }
+            "--" => break,
+            option if option.starts_with('-') => {}
+            filter => return Some(filter),
+        }
+    }
+    None
 }
 
 fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {

@@ -1151,14 +1151,14 @@ run_state_machine_and_fault_matrix() {
   if area_selected trigger; then
     step "Durable trigger fault-matrix evidence"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
-      process_trigger_retention
+      trigger_capture_route_and_compaction_refusal_matrix
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       trigger_delivery_recovery
   fi
 
   if area_selected store; then
     step "SQLite backend fault-matrix conformance"
-    cargo test -p lash-internal-sqlite-store --locked --test conformance conformance
+    cargo test -p lash-internal-sqlite-store --locked --test conformance
   fi
 }
 

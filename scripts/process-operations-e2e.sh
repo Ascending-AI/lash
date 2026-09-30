@@ -201,7 +201,7 @@ require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
 echo "scenario 4 evidence: EachWake produced separate admissions and Coalesce produced one multi-batch admission on PostgreSQL" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  run_postgres_conformance_test process_trigger_retention \
+  run_postgres_conformance_test trigger_capture_route_and_compaction_refusal_matrix \
   2>&1 | tee "$artifact_dir/07-retention.log" | tee -a "$test_output"
 require_checkpoints "$artifact_dir/07-retention.log" \
   prune_preserves_trigger_mutation_receipt \
