@@ -69,6 +69,7 @@ struct BuildRunner {
     executable: lash_core::ExecutableGeneration,
     ends_on_cancel: bool,
     log: SegmentLog,
+    resumptions: Mutex<Vec<(u64, Option<lash_core::SegmentHandover>)>>,
     hooks: Mutex<HashMap<u64, BoxFuture>>,
 }
 
@@ -79,6 +80,7 @@ impl BuildRunner {
             executable: lash_core::ExecutableGeneration::new(program),
             ends_on_cancel,
             log,
+            resumptions: Mutex::default(),
             hooks: Mutex::default(),
         }
     }
@@ -104,10 +106,11 @@ impl RestateProcessRunner for BuildRunner {
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: ScopedEffectController<'_>,
-        _handover: Option<lash_core::SegmentHandover>,
+        handover: Option<lash_core::SegmentHandover>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         let ordinal = started.segment_ordinal();
+        self.resumptions.lock_recover().push((ordinal, handover));
         self.log.lock_recover().push(SegmentRun {
             build: self.build,
             ordinal,
@@ -340,18 +343,33 @@ impl Roll {
     /// N+1 runs `next_program`: the process's own program lets it take the
     /// next segment, another one makes it refuse it.
     async fn start(seed: u64, next_program: &str, ends_on_cancel: bool) -> Self {
-        let server = RestateTestServer::new(ServerConfig::default().with_seed(seed))
-            .expect("start the server double");
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the shared SQLite memory store set"),
+        );
+        Self::start_on(seed, next_program, ends_on_cancel, stores, false).await
+    }
+
+    async fn start_on(
+        seed: u64,
+        next_program: &str,
+        ends_on_cancel: bool,
+        stores: Arc<dyn lash_core::StoreSet>,
+        always_replay: bool,
+    ) -> Self {
+        let server = RestateTestServer::new(
+            ServerConfig::default()
+                .with_seed(seed)
+                .always_replay(always_replay),
+        )
+        .expect("start the server double");
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
         let ingress = RestateIngressClient::new(connection.clone());
-        let stores = lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open the shared SQLite memory store set");
         let registry = stores.process_registry();
-        let continuations: Arc<dyn lash_core::ProcessContinuationStore> = registry.clone();
-        let registry: Arc<dyn ProcessRegistry> = registry;
-        let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
+        let continuations = stores.process_continuations();
+        let sessions = stores.session_store_factory();
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         let log = SegmentLog::default();
         let gated = Arc::new(GatedContinuations::new(Arc::clone(&continuations)));
@@ -1327,3 +1345,5 @@ async fn l5_a_redrive_after_the_roll_addresses_the_recorded_route() {
 async fn l5_a_forced_stable_redrive_after_the_reroute_adds_no_effects() {
     a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed()).await;
 }
+
+mod crash_cuts;

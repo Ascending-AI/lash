@@ -144,12 +144,15 @@ impl ProcessRegistryAwaiter {
             }
             Err(error) => return Err(error),
         };
+        if let Some(output) = record.outcome {
+            return Ok(Some(output));
+        }
         if record.status == crate::ProcessStatus::CallerDeparted {
             return Err(PluginError::ProcessCallerDeparted {
                 process_id: process_id.clone(),
             });
         }
-        Ok(record.outcome)
+        Ok(None)
     }
 
     async fn read_event(

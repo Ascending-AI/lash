@@ -14,7 +14,7 @@ A pressure frame commits the outgoing records, frame, seed, artifact carries and
 
 A host's durable frame open on a store-backed session is also a session command, `SessionCommand::OpenAgentFrame`, applied at a turn boundary against the boundary's resident head. The drive opens the frame with its seed in the commit that settles the command, under the command root's fence, and then restarts the live protocol from the seed. The command settles with the opened frame and the node ids the commit persisted, or with the open's typed refusal, such as a switch to a historical frame; a refused open writes only its settlement. Only a storeless runtime opens a host's frame directly.
 
-Once a summary result is journaled, replay reuses it. The provider call is at-least-once. A crash between the provider answer and its journal record requests the summary again on redrive: the summarizer is called at most twice, and the session still ends with exactly one frame.
+Summarizer execution is at-least-once, with exactly one committed frame. Once a summary result is journaled, replay reuses it. A crash between the provider answer and publication of its journal record requests the summary again on redrive. Repeated crashes before publication can repeat the call without a fixed call-count cap. Replay after frame publication adopts the journaled compaction base and reuses the same frame key and commit receipt.
 
 ## Alternatives and consequences
 

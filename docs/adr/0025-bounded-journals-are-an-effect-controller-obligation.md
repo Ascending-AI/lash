@@ -26,11 +26,13 @@ Executable generations and routes determine whether a successor can resume captu
 
 Three requirements govern a boundary:
 
-1. Committing the continuation, retiring the incarnation and scheduling its successor are one atomic unit, so nothing arrives in an unobserved gap.
+1. Handover consists of ordered durable steps in one workflow handler. The handler records the successor reference and continuation, journals the successor send, forwards cancellation and retires the preceding continuation. Each store write is idempotent and the send belongs to the engine journal. After a crash, replay completes the sequence and reaches exactly one logical successor scheduling. Recovery produces the complete handover without an observable half-handover or a lost continuation. These steps span storage transactions.
 2. Successor execution is idempotent under the stable process identity across segment resets.
 3. No pending operation remains uncaptured at the cut. Required child identities, consumed settlement prefix and retention dependencies travel in the continuation.
 
-The process remains non-terminal through a segment boundary. A retained handover is replay authority until the successor can resume and terminal publication permits retirement. The engine's journaled successor send makes delivery recoverable. Crash-window evidence exercises handover on the Restate server double, live Restate and the simulator; synthetic-next supplies upgrade proofs.
+The process remains non-terminal through a segment boundary. A retained handover is replay authority until its resume step journals the continuation. After successor scheduling and cancellation forwarding, the predecessor retires the continuation it resumed from. Its replay uses the journaled resume value even after that retirement. The successor's continuation remains retained through terminal publication until pruning permits deletion.
+
+The [build-roll handoff laws](../../crates/lash-restate/src/tests/segment_generation_handoff.rs) exercise crashes after the continuation write, before successor send, during cancellation forwarding after send and after retirement. The [handover crash-cut laws](../../crates/lash-restate/src/tests/segment_generation_handoff/crash_cuts.rs) run the continuation-write, retirement, before-send and immediately-after-send cuts with forced replay over SQLite memory, SQLite file and PostgreSQL. They assert one successor invocation, exact continuation restoration on every replay and one retained terminal outcome. The [segment redrive law](../../crates/lash-conformance/src/conformance/segment_redrive.rs) checks recorded effects within a segment; the [simulator process crash cases](../../crates/lash-sim/src/crash_matrix/cases/process.rs) check process start and terminal recovery.
 
 ## Outstanding tool children at a boundary
 
