@@ -255,10 +255,6 @@ impl RemoteProcessIdentity {
 // justification: this public remote DTO preserves its source-compatible inline SessionTurn construction and matching API.
 #[allow(clippy::large_enum_variant)]
 pub enum RemoteProcessInput {
-    ToolCall {
-        #[serde(default)]
-        prepared_tool_call: serde_json::Value,
-    },
     Engine {
         kind: String,
         #[serde(default)]
@@ -301,30 +297,6 @@ impl RemoteSessionTurnOutcome {
 impl RemoteProcessInput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::ToolCall { prepared_tool_call } => {
-                // The payload stays opaque JSON on the wire, but core refuses a
-                // registration whose prepared call has no call id or tool name
-                // (FIG-2869), and the record decoder builds exactly that
-                // registration. Refuse the same two fields here so peer input
-                // fails with a named field rather than deeper in the decode
-                // (FIG-2985).
-                require_non_empty(
-                    type_name,
-                    "prepared_tool_call.call_id",
-                    prepared_tool_call
-                        .get("call_id")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default(),
-                )?;
-                require_non_empty(
-                    type_name,
-                    "prepared_tool_call.tool_name",
-                    prepared_tool_call
-                        .get("tool_name")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default(),
-                )
-            }
             Self::Engine { kind, payload: _ } => require_non_empty(type_name, "kind", kind),
             Self::SessionTurn {
                 definition_key,
@@ -345,7 +317,7 @@ impl RemoteProcessInput {
     /// ref and declarative ones must not (FIG-2985).
     fn requires_execution_env(&self) -> bool {
         match self {
-            Self::ToolCall { .. } | Self::Engine { .. } => true,
+            Self::Engine { .. } => true,
             Self::SessionTurn { .. } | Self::External { .. } => false,
         }
     }

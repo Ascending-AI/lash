@@ -1,12 +1,12 @@
 use super::*;
 
 #[tokio::test]
-async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
+async fn restate_replay_does_not_reexecute_engine_owned_tool_call() {
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration = counting_tool_registration("restate-process-tool-replay", env_ref);
+    let registration = counting_engine_registration("restate-process-tool-replay", env_ref).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -75,7 +75,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     assert_eq!(
         executions.load(Ordering::SeqCst),
         1,
-        "Restate replay must return the journaled process ToolAttempt instead of re-executing the provider"
+        "Restate replay must return the journaled Engine ToolAttempt instead of re-executing the provider"
     );
 }
 
@@ -92,7 +92,7 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration =
-        counting_tool_registration("restate-process-redrive-after-complete", env_ref);
+        counting_engine_registration("restate-process-redrive-after-complete", env_ref).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -331,7 +331,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration =
-        counting_tool_registration("restate-process-pre-run-read-invariant", env_ref);
+        counting_engine_registration("restate-process-pre-run-read-invariant", env_ref).await;
     let process_id = registry
         .register_process(registration.clone())
         .await

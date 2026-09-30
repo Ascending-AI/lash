@@ -310,7 +310,18 @@ fn registry_local_executor(
     let process_work = Arc::new(lash_core::NoProcessWork::for_registry(Arc::clone(
         &registry,
     )));
-    RuntimeEffectLocalExecutor::processes(registry, process_work)
+    RuntimeEffectLocalExecutor::processes(registry, process_work).with_process_engines(
+        lash_core::testing::process_engine_fixture()
+            .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
+                &RECOVERY_ARTIFACT_BACKEND,
+            ))
+            .with_registration(lash_lashlang_runtime::lashlang_process_engine_registration(
+                lash_lashlang_runtime::LashlangProcessEngine::new(
+                    recovery_artifact_store(),
+                    lash_lashlang_runtime::LashlangSurface::default(),
+                ),
+            )),
+    )
 }
 
 #[tokio::test]

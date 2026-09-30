@@ -602,8 +602,9 @@ mod tests {
                         crate::ProcessExecutionEnvRef::new("env-ref"),
                         "source",
                         "source-key",
-                        crate::ProcessInput::External {
-                            metadata: serde_json::Value::Null,
+                        crate::ProcessInput::Engine {
+                            kind: "engine".to_string(),
+                            payload: serde_json::Value::Null,
                         },
                         crate::ProcessIdentity::new("engine"),
                     ),

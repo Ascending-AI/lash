@@ -1,5 +1,41 @@
 use super::*;
 
+#[tokio::test]
+async fn trigger_registration_refuses_non_engine_target() {
+    let targets = [
+        crate::ProcessInput::External {
+            metadata: serde_json::json!({}),
+        },
+        crate::ProcessInput::SessionTurn {
+            definition_key: "child".to_string(),
+            create_request: Box::new(crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )),
+            turn_input: Box::new(crate::TurnInput::empty()),
+            result: crate::SessionTurnOutcome::Turn,
+        },
+    ];
+    for target in targets {
+        let expected = target.engine_kind();
+        let mut draft = incarnation_fixture_draft();
+        draft.target = target;
+        let registry = crate::ProcessEngineRegistry::default();
+        for error in [
+            draft
+                .validate()
+                .expect_err("store registration refuses the target"),
+            admit_trigger_registration_target(&registry, &mut draft)
+                .await
+                .expect_err("engine admission refuses the target"),
+        ] {
+            assert!(
+                matches!(error, PluginError::InvalidTriggerTarget { kind } if kind == expected)
+            );
+        }
+    }
+}
+
 #[test]
 fn raced_occurrence_delete_requires_reinspection_instead_of_claiming_emptiness() {
     let report = TriggerOccurrenceReclamationReport {

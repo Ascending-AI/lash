@@ -387,7 +387,7 @@ impl ProcessCapability {
             return Ok((None, Some(spec.clone()), Some(spec)));
         }
         match registration.input.as_ref() {
-            crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
+            crate::ProcessInput::Engine { .. } => {
                 let spec = self.current_execution_env_spec(current);
                 Ok((None, Some(spec.clone()), Some(spec)))
             }

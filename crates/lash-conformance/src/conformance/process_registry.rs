@@ -62,12 +62,6 @@ pub async fn process_registry_registration_contract(
     lifecycle::registration_contract(registry).await;
 }
 
-pub async fn empty_tool_call_identifiers_leave_no_row(
-    registry: Arc<dyn crate::ConformanceProcessRegistry>,
-) {
-    lifecycle::empty_tool_call_identifiers_leave_no_row(registry).await;
-}
-
 pub async fn process_registry_cancellation_contract(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {

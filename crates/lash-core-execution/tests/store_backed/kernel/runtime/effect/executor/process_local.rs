@@ -36,16 +36,11 @@ mod tests {
     }
 
     /// A start keyed by `key`: a journaled start is addressed by its key.
-    fn tool_registration(key: &str, marker: &str) -> crate::ProcessRegistration {
+    fn engine_registration(key: &str, marker: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
-            crate::ProcessInput::ToolCall {
-                call: crate::ProcessToolCall {
-                    tool_id: crate::ToolId::new("test-tool"),
-                    tool_name: "test_tool".into(),
-                    args: serde_json::json!({"marker": marker}),
-                    replay: None,
-                    prepared_payload: serde_json::Value::Null,
-                },
+            crate::ProcessInput::Engine {
+                kind: "testing-fixture".to_string(),
+                payload: serde_json::json!({"marker": marker}),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
@@ -138,7 +133,7 @@ mod tests {
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
             "owned-env-start",
-            tool_registration(key, "original"),
+            engine_registration(key, "original"),
             env_spec,
         );
         let executor = || {
@@ -146,6 +141,7 @@ mod tests {
                 Arc::clone(&registry),
                 Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
             )
+            .with_process_engines(crate::testing::process_engine_fixture())
             .with_process_env_store(Arc::clone(&env_store))
         };
         let first = started_record(
@@ -289,7 +285,7 @@ mod tests {
                 "raced-staging-owner-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: tool_registration(key, "delivery")
+                registration: engine_registration(key, "delivery")
                     .with_execution_env_ref(Some(env_ref.clone())),
                 observers: Vec::new(),
                 env_spec: None,
@@ -300,6 +296,7 @@ mod tests {
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
+        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
 
         let started = started_record(
@@ -382,7 +379,7 @@ mod tests {
             ),
         );
         let registration = |marker: &str| {
-            let mut registration = tool_registration("crashed-start", marker);
+            let mut registration = engine_registration("crashed-start", marker);
             registration.start_key = Some(key.clone());
             registration
         };
@@ -420,6 +417,7 @@ mod tests {
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
+        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store));
         let returned = started_record(
             execute_in_handler(&double, envelope, executor)
@@ -540,13 +538,14 @@ mod tests {
             backend.obligation_ledger(crate::store::ObligationKind::ProcessStart),
             backend.clock(),
         )
+        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(backend.process_env_store());
 
         let outcome = runtime_controller(&backend)
             .execute_effect(
                 start_envelope(
                     "advisory-poke-start",
-                    tool_registration(key, "advisory"),
+                    engine_registration(key, "advisory"),
                     env_spec,
                 ),
                 executor,
@@ -602,7 +601,7 @@ mod tests {
     /// `ToolCallId`; another occurrence mints another process, and so names
     /// another call.
     #[tokio::test]
-    async fn a_trigger_delivery_names_its_tool_call_by_the_process_it_starts() {
+    async fn an_engine_trigger_delivery_names_its_tool_call_by_the_process_it_starts() {
         let delivery = |occurrence: &str| {
             crate::StartKey::for_trigger_delivery(
                 crate::StartKeyDerivation::LASH_START_PATHS,
@@ -613,17 +612,16 @@ mod tests {
             )
         };
         let registration = |occurrence: &str| {
-            tool_registration(occurrence, "delivery")
+            engine_registration(occurrence, "delivery")
                 .with_start_key(Some(delivery(occurrence)))
                 .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
                     "process-env:delivery",
                 )))
         };
         let call_id = |record: &crate::ProcessRecord| {
-            let crate::ProcessInput::ToolCall { call } = &*record.input else {
-                panic!("a tool-call delivery: {:?}", record.input)
-            };
-            call.admitted(&record.id).call_id
+            crate::EffectOpener::process(record.id.clone())
+                .tool_call_admission()
+                .call_id(&[])
         };
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -679,7 +677,7 @@ mod tests {
             1,
         );
         let keyed =
-            |marker: &str| tool_registration(key, marker).with_start_key(Some(start_key.clone()));
+            |marker: &str| engine_registration(key, marker).with_start_key(Some(start_key.clone()));
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let registry: Arc<dyn crate::ProcessRegistry> = double.lash_backend().process_registry();
@@ -706,6 +704,7 @@ mod tests {
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         )
+        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store));
 
         let returned = started_record(

@@ -27,33 +27,16 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         // The controller arrived already admitted for the process's minted id
         // (ADR 0099 §1, ADR 0107), so every arm below — a session-turn row's
         // cells reading it through their `RuntimeExecutionContext`, an engine
-        // row's run context, a tool-call row's future cells — runs under that
+        // row's run context — runs under that
         // process by construction.
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
-        // - ToolCall, SessionTurn, and External are kernel primitives because
+        // - SessionTurn and External are kernel primitives because
         //   core owns their process contracts directly.
         // - Engine rows are deployment runtimes looked up from the registry.
         // This split keeps core process coordination explicit without pulling
         // language-specific runtimes into the kernel.
         match input.as_ref() {
-            crate::ProcessInput::ToolCall { call } => {
-                let output = Box::pin(
-                    self.run_process_tool_call(ProcessToolCallRun {
-                        lineage: registration.lineage(&process_id),
-                        call: call.admitted(&process_id),
-                        process_id,
-                        parent_invocation: execution_context.causal_invocation,
-                        execution_write_authority: execution_context
-                            .execution_write_authority
-                            .expect("process worker installs execution write authority"),
-                        scoped_effect_controller,
-                        cancellation,
-                    }),
-                )
-                .await;
-                Ok(crate::ProcessRunOutcome::from(output))
-            }
             crate::ProcessInput::SessionTurn {
                 create_request,
                 turn_input,

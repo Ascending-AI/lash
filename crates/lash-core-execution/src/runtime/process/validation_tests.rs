@@ -22,10 +22,6 @@ fn fixture_registration(_label: &str) -> ProcessRegistration {
     )
 }
 
-fn registration_for_input(input: ProcessInput) -> ProcessRegistration {
-    ProcessRegistration::new(input, ProcessProvenance::host(), crate::Lifetime::Detached)
-}
-
 #[test]
 fn producer_cannot_override_runtime_lifecycle_event_types() {
     let mut collision =
@@ -361,27 +357,6 @@ fn a_core_named_override_remains_a_valid_registration() {
         )),
     });
     validate_process_registration(&overridden).expect("core-named override remains valid");
-}
-
-#[test]
-fn tool_call_registration_refuses_an_empty_tool_name() {
-    for tool_name in ["", "\t"] {
-        let expected = "process `keyless start` tool call must carry a tool name";
-        let registration = registration_for_input(ProcessInput::ToolCall {
-            call: crate::ProcessToolCall {
-                tool_id: crate::ToolId::new("tool-id"),
-                tool_name: tool_name.into(),
-                args: serde_json::json!({}),
-                replay: None,
-                prepared_payload: serde_json::Value::Null,
-            },
-        });
-        match validate_process_registration(&registration) {
-            Err(crate::PluginError::Session(message)) => assert_eq!(message, expected),
-            Err(other) => panic!("expected session refusal `{expected}`, got {other:?}"),
-            Ok(()) => panic!("expected session refusal `{expected}`, got success"),
-        }
-    }
 }
 
 #[test]

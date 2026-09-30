@@ -203,14 +203,6 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
 
     fn try_from(value: lash_core::ProcessInput) -> Result<Self, Self::Error> {
         match value {
-            lash_core::ProcessInput::ToolCall { call } => Ok(Self::ToolCall {
-                prepared_tool_call: serde_json::to_value(call).map_err(|err| {
-                    RemoteProtocolError::InvalidEnvelope {
-                        type_name: "RemoteProcessInput",
-                        message: format!("invalid prepared tool call: {err}"),
-                    }
-                })?,
-            }),
             lash_core::ProcessInput::Engine { kind, payload } => Ok(Self::Engine { kind, payload }),
             lash_core::ProcessInput::SessionTurn {
                 definition_key,
@@ -239,13 +231,6 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
     fn try_from(value: RemoteProcessInput) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessInput")?;
         match value {
-            RemoteProcessInput::ToolCall { prepared_tool_call } => Ok(Self::ToolCall {
-                call: decode_remote_json(
-                    prepared_tool_call,
-                    "RemoteProcessInput",
-                    "prepared_tool_call",
-                )?,
-            }),
             RemoteProcessInput::Engine { kind, payload } => Ok(Self::Engine { kind, payload }),
             RemoteProcessInput::SessionTurn {
                 definition_key,

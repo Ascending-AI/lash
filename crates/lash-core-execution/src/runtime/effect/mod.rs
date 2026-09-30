@@ -105,16 +105,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn process_effect_envelope_round_trips_prepared_tool_call() {
+    fn process_effect_envelope_round_trips_engine_payload() {
         let registration = crate::ProcessRegistration::new(
-            crate::ProcessInput::ToolCall {
-                call: crate::ProcessToolCall {
-                    tool_id: crate::ToolId::from("tool:echo"),
-                    tool_name: "echo".to_string(),
-                    args: serde_json::json!({"value": "hi"}),
-                    replay: None,
-                    prepared_payload: serde_json::json!({"context": "prepared"}),
-                },
+            crate::ProcessInput::Engine {
+                kind: "echo".to_string(),
+                payload: serde_json::json!({"args": {"value": "hi"}, "prepared": {"context": "prepared"}}),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
@@ -159,14 +154,13 @@ mod tests {
         };
         assert!(observers.is_empty());
         assert!(execution_context.is_empty());
-        let crate::ProcessInput::ToolCall { call } = registration.input.as_ref() else {
+        let crate::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
             panic!("wrong process input");
         };
-        assert_eq!(call.tool_name, "echo");
-        assert_eq!(call.args, serde_json::json!({"value": "hi"}));
+        assert_eq!(kind, "echo");
         assert_eq!(
-            call.prepared_payload,
-            serde_json::json!({"context": "prepared"})
+            payload,
+            &serde_json::json!({"args": {"value": "hi"}, "prepared": {"context": "prepared"}})
         );
     }
 

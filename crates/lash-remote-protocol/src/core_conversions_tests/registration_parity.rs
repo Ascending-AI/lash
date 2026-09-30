@@ -14,6 +14,28 @@ use lash_core::runtime::{
     ProcessRegistrationRefusal, accepted_process_registration, refused_process_registrations,
 };
 
+#[test]
+fn remote_decode_refuses_tool_call_process_input() {
+    let wire = serde_json::json!({
+        "protocol_version": REMOTE_PROTOCOL_VERSION,
+        "type": "tool_call",
+        "prepared_tool_call": {
+            "tool_id": "echo",
+            "tool_name": "echo",
+            "args": {},
+            "prepared_payload": {},
+            "call_id": "call-1"
+        }
+    });
+    assert!(matches!(
+        Envelope::<RemoteProcessInput>::decode_json(
+            wire.to_string().as_bytes(),
+            VersionRange::exactly(REMOTE_PROTOCOL_VERSION),
+        ),
+        Err(RemoteProtocolError::MessageDecode(_))
+    ));
+}
+
 /// Projects a core registration onto the peer-facing record DTO.
 ///
 /// Deliberately field-by-field rather than through
@@ -129,30 +151,6 @@ fn every_core_refusal_is_a_typed_remote_refusal_not_a_decoder_panic() {
         "at least one fixture must reach the decoder guard, or this test only \
          proves the DTO layer"
     );
-}
-
-#[test]
-fn tool_call_input_refuses_a_blank_call_id_or_tool_name() {
-    for (prepared_tool_call, field) in [
-        (
-            serde_json::json!({ "call_id": "  ", "tool_name": "echo" }),
-            "prepared_tool_call.call_id",
-        ),
-        (
-            serde_json::json!({ "call_id": "call-1", "tool_name": "" }),
-            "prepared_tool_call.tool_name",
-        ),
-        (serde_json::json!({}), "prepared_tool_call.call_id"),
-    ] {
-        let input = RemoteProcessInput::ToolCall { prepared_tool_call };
-        match input.validate("RemoteProcessInput") {
-            Err(RemoteProtocolError::MissingRequiredField {
-                field: refused_field,
-                ..
-            }) => assert_eq!(refused_field, field),
-            other => panic!("expected `{field}` to be required, got {other:?}"),
-        }
-    }
 }
 
 /// `prepare_process_registration` normalizes event types — it fills in the core

@@ -43,8 +43,9 @@ impl SimTriggerHarness {
                 lash_core::ProcessExecutionEnvRef::new("process-env:sim-trigger"),
                 source_type,
                 source_key.clone(),
-                lash_core::ProcessInput::External {
-                    metadata: json!({
+                lash_core::ProcessInput::Engine {
+                    kind: "sim-trigger".to_string(),
+                    payload: json!({
                         "trigger_boundary": event.boundary_id,
                     }),
                 },
@@ -89,7 +90,17 @@ impl SimTriggerHarness {
             // ProcessStart. Replaying the boundary finds the same start key,
             // including when registration landed but the bind did not.
             let registration = lash_core::ProcessRegistration::new(
-                subscription.target.clone(),
+                lash_core::ProcessInput::External {
+                    metadata: match &subscription.target {
+                        lash_core::ProcessInput::Engine { payload, .. } => payload.clone(),
+                        target => {
+                            return Err(FixedScriptRunnerError::Runtime(format!(
+                                "simulation trigger requires an Engine target, received {}",
+                                target.engine_kind()
+                            )));
+                        }
+                    },
+                },
                 lash_core::ProcessProvenance::new(subscription.registrant.clone()).with_caused_by(
                     Some(lash_core::CausalRef::TriggerOccurrence {
                         occurrence_id: reservation.occurrence.occurrence_id.clone(),

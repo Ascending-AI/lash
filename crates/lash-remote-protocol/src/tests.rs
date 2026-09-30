@@ -1936,8 +1936,9 @@ fn trigger_target_label_round_trips_independently_of_the_identity_label() {
         canonical_env_ref().parse().expect("canonical env ref"),
         "ui.button.pressed",
         "source-key",
-        RemoteProcessInput::External {
-            metadata: serde_json::json!({}),
+        RemoteProcessInput::Engine {
+            kind: "external".to_string(),
+            payload: serde_json::json!({}),
         },
         RemoteProcessIdentity {
             kind: "external".to_string(),
@@ -2315,4 +2316,37 @@ fn observed_process_failure_is_typed_and_round_trips_through_core() {
         assert_eq!(decoded, remote);
         assert_eq!(lash_core::ObservedProcessFailure::from(decoded), core);
     }
+}
+
+#[test]
+fn remote_trigger_registration_refuses_non_engine_target() {
+    let mut draft = RemoteTriggerSubscriptionDraft::for_process(
+        "engine-only",
+        canonical_env_ref().parse().expect("canonical env ref"),
+        "source",
+        "key",
+        RemoteProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        RemoteProcessIdentity {
+            kind: "external".to_string(),
+            label: None,
+            definition: None,
+        },
+    );
+    assert!(matches!(
+        draft.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { .. })
+    ));
+    assert!(matches!(
+        lash_core::TriggerSubscriptionDraft::try_from(draft.clone()),
+        Err(RemoteProtocolError::InvalidEnvelope { .. })
+    ));
+    draft.target = RemoteProcessInput::Engine {
+        kind: "engine".to_string(),
+        payload: serde_json::json!({}),
+    };
+    draft
+        .validate()
+        .expect("an Engine target passes wire registration");
 }

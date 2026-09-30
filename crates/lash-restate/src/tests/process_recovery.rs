@@ -1018,24 +1018,18 @@ pub(super) fn counting_tool_plugin(
     ))
 }
 
-pub(super) fn counting_tool_registration(
+pub(super) async fn counting_engine_registration(
     label: &str,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
-    ProcessRegistration::new(
-        ProcessInput::ToolCall {
-            call: lash_core::ProcessToolCall {
-                tool_id: "tool:recovery_count".into(),
-                tool_name: "recovery_count".into(),
-                args: serde_json::json!({ "line": label }),
-                replay: None,
-                prepared_payload: serde_json::Value::Null,
-            },
-        },
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+    one_tool_engine_registration(
+        "recovery_count",
+        CountingProcessTool::definition().contract(),
+        label,
+        env_ref,
+        None,
     )
-    .with_execution_env_ref(Some(env_ref))
+    .await
 }
 
 pub(super) fn discover_service<S: Discoverable>(_: &S) -> restate_sdk::discovery::Service {

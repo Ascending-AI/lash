@@ -315,7 +315,6 @@ macro_rules! process_registry_tests {
             ]
             conformance [
                 (process_registry_registration_contract, "process-registry-registration"),
-                (empty_tool_call_identifiers_leave_no_row, "empty-tool-call-identifiers"),
                 (process_namespace, "process-namespace"),
                 (process_event_append_arms_are_ordered, "process-event-append-arms"),
                 (a_failed_observer_transfer_leaves_no_partial_mutation, "observer-transfer-rollback"),

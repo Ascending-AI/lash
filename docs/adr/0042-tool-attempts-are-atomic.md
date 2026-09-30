@@ -138,11 +138,8 @@ structural runtime laws enforce the binding contract at execution: `batch` and
 `spawn_agent` have no `ToolAttempt` frame of their own, and their journaled
 children retain stable direct lineage.
 
-An internal owner-bound `ProcessInput::ToolCall` body is a different boundary:
-it is the process activity itself and may perform host I/O. Core executes an
-`Internal` process tool directly, with panic containment but without a
-`ToolAttempt`; that route is not exposed to model-facing providers as an escape
-from the orchestration determinism contract.
+An explicit `Engine` body calls ordinary recorded tool attempts under its
+process journal. Process bodies use the engine extension point.
 
 The structural rule remains:
 
@@ -456,8 +453,8 @@ return Pending; if you need to cause durable work, return an intent.* The
 orchestrating lane (`OrchestratingToolDef`, `OrchestrationContext`, its unsafe
 capability constructor, its typed source key and the cross-lane collision
 laws), the orchestration-body determinism contract and its lint, and the
-internal `ProcessInput::ToolCall` body class are deleted. A
-`ProcessInput::ToolCall` runs an ordinary recorded attempt. Protocol-standard
+internal process-tool body class are deleted. An explicit `Engine` body
+calls an ordinary recorded tool attempt. Protocol-standard
 `batch` is sugar that the standard driver expands into the turn step's one
 top-level tool group ([ADR 0116](0116-tools-are-opaque.md) §2). `spawn_agent` is an ordinary tool that returns
 Pending carrying one `DeclaredStart` ([ADR 0116](0116-tools-are-opaque.md) §3, §4).

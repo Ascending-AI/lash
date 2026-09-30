@@ -1092,7 +1092,6 @@ pub enum ProcessRegistrationRefusal {
     LifetimeScopeUnreachable,
     HostGrantOutsideRoot,
     SessionCapabilityUnreachable,
-    ToolCallWithoutToolName,
     ExecutionEnvMissing,
     ExecutionEnvNotAllowed,
     EmptySessionTurnDefinitionKey,
@@ -1109,7 +1108,6 @@ impl ProcessRegistrationRefusal {
         Self::LifetimeScopeUnreachable,
         Self::HostGrantOutsideRoot,
         Self::SessionCapabilityUnreachable,
-        Self::ToolCallWithoutToolName,
         Self::ExecutionEnvMissing,
         Self::ExecutionEnvNotAllowed,
         Self::EmptySessionTurnDefinitionKey,
@@ -1198,26 +1196,6 @@ pub(crate) fn classify_process_registration(
         }
     }
     match registration.input.as_ref() {
-        super::model::ProcessInput::ToolCall { call } => {
-            if call.tool_name.trim().is_empty() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::ToolCallWithoutToolName,
-                    format!(
-                        "process `{}` tool call must carry a tool name",
-                        registration_name(registration)
-                    ),
-                ));
-            }
-            if registration.env_ref.is_none() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::ExecutionEnvMissing,
-                    format!(
-                        "process `{}` requires a captured execution env",
-                        registration_name(registration)
-                    ),
-                ));
-            }
-        }
         super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
                 return Err(refuse(

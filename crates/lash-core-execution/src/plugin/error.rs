@@ -40,6 +40,8 @@ pub fn is_durable_identity_conflict(error: &PluginError) -> bool {
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginError {
+    #[error("trigger registration requires an Engine target, received `{kind}`")]
+    InvalidTriggerTarget { kind: String },
     /// The process already accepted a different cancellation request.
     #[error(
         "process `{process_id}` already accepted cancellation {existing:?}; refused {requested:?}"
@@ -350,6 +352,7 @@ impl PluginError {
             refused @ (Self::Runtime(_)
             | Self::RuntimeEffectController(_)
             | Self::ProcessCancelConflict { .. }
+            | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
             | Self::InvalidToolDiscovery { .. }
@@ -437,6 +440,7 @@ impl PluginError {
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessHandedOver { .. }
+            | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
             | Self::SessionAlreadyExists { .. }

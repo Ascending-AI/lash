@@ -547,8 +547,8 @@ impl<'run> ProcessEngineRunContext<'run> {
 #[async_trait::async_trait]
 /// Deployment extension point for non-kernel process runtimes.
 ///
-/// Core built-ins (`ToolCall`, `SessionTurn`, and `External`) are intentionally not registered
-/// here; they are kernel primitives with direct orchestration support.
+/// Core built-ins (`SessionTurn` and `External`) are not registered here;
+/// they have direct orchestration support in the kernel.
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 

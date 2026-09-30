@@ -56,9 +56,9 @@ withdrawn by its own recheck and overruled by ruling 3.
 
 ## Context
 
-### Three execution classes, two of which drive lash
+### Execution classes before the cutover
 
-Today a tool reaches the runtime through one of three classes
+Before this cutover, leaf and orchestrating tool classes reached the runtime
 ([ADR 0051](0051-the-facade-is-the-host-api-core-is-integrator-seams.md) §3):
 
 - **Leaf.** `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome`
@@ -78,11 +78,6 @@ Today a tool reaches the runtime through one of three classes
   `scripts/push-gate.sh:380`) polices body determinism. Two bodies use it:
   standard `batch` (`crates/lash-protocol-standard/src/lib.rs:124-125,214-340`)
   and `spawn_agent` (`crates/lash-subagents/src/rlm.rs:39-97,177-226`).
-- **Internal process tool.** `InternalProcessToolDef` and
-  `InternalProcessContext` (`crates/lash-core-execution/src/tool_provider/process.rs`),
-  executed directly by the `ProcessInput::ToolCall` runner
-  (`crates/lash-core/src/runtime/session_manager/process_runners/tool.rs:110-121`).
-  It has the same powers and no production registrant.
 
 Beside them, `ToolContext` (`tool_provider.rs:402-442`) still exports
 body-shaped capability clients: `ToolDispatchClient`
@@ -230,7 +225,7 @@ unaffected.
 |---|---|---|
 | Nested dispatch: `OrchestrationContext::call_tool_batch`, `callable_tool_manifest`, `ToolDispatchClient::batch` | `orchestration.rs:46,140`; `tool_provider/dispatch.rs:15-47` | Deleted. `batch` is sugar (§2). |
 | Body-driven process lifecycle: `start_process`, `await_process`, `cancel_process`, `signal_process`, `start_key(ordinal)` | `orchestration.rs:73-128` | Deleted. The declared forms stay: `ToolIntent::{StartProcess, SignalProcess, CancelProcess}` realized after the attempt commits, keyed by `StartKey::for_tool_intent` (`process_identity.rs:185`), plus `DeclaredStart` (§3). |
-| The internal process-tool class: `InternalProcessContext`, `InternalProcessAdmin`, `InternalProcessToolDef`, `InternalProcessToolCall`, `InternalProcessToolImplementation`, `PluginSpec::with_internal_tool`, `ToolRegistrations::internal` | `tool_provider/process.rs:16-156,175-349` | Deleted. `ProcessEngine` is the extension point for process bodies. A `ProcessInput::ToolCall` runs only an ordinary recorded attempt. |
+| The internal process-tool class: `InternalProcessContext`, `InternalProcessAdmin`, `InternalProcessToolDef`, `InternalProcessToolImplementation`, `PluginSpec::with_internal_tool`, `ToolRegistrations::internal` | `tool_provider/process.rs:16-156,175-349` | Deleted. `ProcessEngine` is the extension point for process bodies. An explicit `Engine` body calls an ordinary recorded tool attempt. |
 | Session administration from a body: `ToolSessionAdmin::snapshot(other)`, `set_tool_membership` | `tool_provider/session.rs:66,101` | Deleted. Hosts reconfigure through their own facade (`crates/lash/src/admin.rs:912`). The reads stay on `AttemptSessionReads`. |
 | Body-time trigger emission: `ToolTriggerClient::emit` | `tool_provider/triggers.rs:11` | Deleted. `ToolIntent::EmitTrigger` is the declared form. |
 | Body-time process events: `ToolProcessEventClient` | `tool_provider/process_events.rs:89-145` | Deleted. `ToolIntent::EmitProcessEvent` is the declared form. The engine helper `enqueue_wake_delivery` in the same file stays. |
@@ -814,11 +809,12 @@ left, the persisted field is dropped in place; `src/tool_state.rs:155-162`),
 (`src/process_identity.rs:102-133,193-202`). The family stays
 `lash.process-start-key` v1, changed in place.
 
-**`crates/lash-core`**: `src/runtime/session_manager/process_runners/tool.rs:110-129`
-(the internal and orchestrating branches), `process_runners/runner.rs:35`
-(prose), `src/lib.rs:693,839` and `src/runtime/mod.rs:200` (exports),
-`src/testing/runtime_helpers.rs`: remove. Remove the orchestrating cases from
-`tests/runtime/tests/child_sessions.rs` and `tests/runtime/tests/effect.rs`.
+**`crates/lash-core`**: `process_runners/runner.rs` dispatches `Engine`,
+`SessionTurn` and `External` inputs. The dedicated tool-process runner is
+deleted; Engine bodies call ordinary recorded tool attempts. The obsolete
+capability exports and orchestrating cases in
+`tests/runtime/tests/child_sessions.rs` and `tests/runtime/tests/effect.rs`
+are removed.
 
 **`crates/lash-sansio`**: remove `ToolActivation` and the manifest
 `activation` field (`src/tool_contract.rs:115-123,767`), the `Internal`
@@ -1090,9 +1086,9 @@ Four more ADRs describe the replaced system in passing and get the same note:
 
 ### 9. What is not changed
 
-- `ProcessInput::SessionTurn` stays a process-engine input with ADR 0108
-  ancestry and lifetimes. `ProcessInput::ToolCall` stays and runs an ordinary
-  recorded attempt.
+- `ProcessInput::SessionTurn` keeps ADR 0108 ancestry and lifetimes.
+  Executable process bodies use `Engine` and call ordinary recorded tool
+  attempts. Trigger registration accepts only `Engine` targets.
 - RLM owns durable composition in the language: `processes.start`,
   `processes.await`, `Promise.all`, `Promise.race`.
 - Intent realization, its identities and its host ingress

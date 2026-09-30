@@ -322,18 +322,15 @@ impl DurableProcessWorker {
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime =
             Box::pin(self.runtime_for_registration(&process_id, &registration)).await?;
-        let _attachment_owner_binding = matches!(
-            registration.input.as_ref(),
-            ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
-        )
-        .then(|| {
-            runtime
-                .host
-                .core
-                .durability
-                .attachment_store
-                .bind_process_scoped(attachment_owner)
-        });
+        let _attachment_owner_binding =
+            matches!(registration.input.as_ref(), ProcessInput::Engine { .. }).then(|| {
+                runtime
+                    .host
+                    .core
+                    .durability
+                    .attachment_store
+                    .bind_process_scoped(attachment_owner)
+            });
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator
         {
@@ -446,7 +443,7 @@ impl DurableProcessWorker {
             ProcessInput::SessionTurn { create_request, .. } => {
                 Box::pin(self.runtime_for_session_turn(process_id, create_request.as_ref())).await
             }
-            ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. } => {
+            ProcessInput::Engine { .. } => {
                 Box::pin(self.runtime_for_process_env(process_id, registration)).await
             }
             // Externally-owned rows are rejected before dispatch (ADR 0110), so an

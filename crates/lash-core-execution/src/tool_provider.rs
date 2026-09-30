@@ -496,9 +496,8 @@ pub(crate) struct ToolProcessEventContext {
 
 /// The durable process a tool call runs inside, and the wiring the runtime
 /// appends that call's declared park announcement and nudges its wake
-/// delivery through. A process host supplies it to
-/// [`crate::RuntimeEffectLocalExecutor::process_tool_attempt`]; the tool body
-/// never sees it.
+/// delivery through. Engine process calls carry this wiring in their tool
+/// context; the tool body never sees it.
 #[derive(Clone)]
 pub struct ProcessToolCallWiring {
     process_id: ProcessId,
@@ -987,39 +986,6 @@ impl PreparedToolCall {
     pub fn with_prepared_payload(mut self, payload: serde_json::Value) -> Self {
         self.prepared_payload = payload;
         self
-    }
-}
-
-/// The tool call a `ProcessInput::ToolCall` process runs, as its registrant
-/// supplies it: everything a [`PreparedToolCall`] carries but its identity.
-/// The process's minted id names the call when the process runs it (ADR 0117
-/// §2), so every trigger delivery of one registration, each a process of its
-/// own, runs a call of its own.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessToolCall {
-    pub tool_id: ToolId,
-    pub tool_name: String,
-    pub args: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay: Option<ProviderReplayMeta>,
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
-    pub prepared_payload: serde_json::Value,
-}
-
-impl ProcessToolCall {
-    /// The call as the process `process_id` admits it, named by its root.
-    pub fn admitted(&self, process_id: &ProcessId) -> PreparedToolCall {
-        PreparedToolCall {
-            call_id: crate::EffectOpener::process(process_id.clone())
-                .tool_call_admission()
-                .call_id(&[]),
-            provider_call_id: None,
-            tool_id: self.tool_id.clone(),
-            tool_name: self.tool_name.clone(),
-            args: self.args.clone(),
-            replay: self.replay.clone(),
-            prepared_payload: self.prepared_payload.clone(),
-        }
     }
 }
 

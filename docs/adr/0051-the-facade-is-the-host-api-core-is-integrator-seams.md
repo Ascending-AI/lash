@@ -41,8 +41,7 @@ write against, are:
    orchestrating bodies use `OrchestratingToolImplementation`. These are three
    explicit execution capability classes — leaf, internal, orchestrating — and
    they are distinct registry sources that are never selected by a serialized
-   activation hint or a name/ID fallback. `ToolCall` and
-   `InternalProcessToolCall` each carry one immutable manifest, preserving ID/name
+   activation hint or a name/ID fallback. `ToolCall` carries one immutable manifest, preserving ID/name
    coherence, and completed versus pending outcomes remain structurally exclusive.
 4. **Conformance-suite embedders** — everything
    `lash::testing::conformance` exposes, closed over its signatures, so an
@@ -360,7 +359,7 @@ A tool host migrates in four steps:
 Tool hosts implement `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome`,
 and every executable tool registers as a `ToolProvider`.
 `InternalProcessToolImplementation`, `InternalProcessToolDef`,
-`InternalProcessToolCall`, `OrchestratingToolImplementation`,
+`OrchestratingToolImplementation`,
 `OrchestratingToolDef`, `ToolRegistrations::internal`,
 `PluginSpec::with_internal_tool` and `with_orchestrating_tool` are deleted, and
 item 3 of the plugin-authoring amendment is superseded. `ToolContext` is no

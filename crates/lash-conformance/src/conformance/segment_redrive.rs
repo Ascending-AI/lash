@@ -256,8 +256,9 @@ impl Scenario {
                         crate::ProcessExecutionEnvRef::new("process-env:segment-redrive"),
                         "segment-redrive.source",
                         "segment-redrive-source-key",
-                        crate::ProcessInput::External {
-                            metadata: serde_json::json!({ "law": "segment-redrive" }),
+                        crate::ProcessInput::Engine {
+                            kind: "segment-redrive".to_string(),
+                            payload: serde_json::json!({ "law": "segment-redrive" }),
                         },
                         crate::ProcessIdentity::new("segment-redrive"),
                     ),
@@ -268,16 +269,10 @@ impl Scenario {
 
     fn child_registration(&self) -> ProcessRegistration {
         ProcessRegistration::new(
-            // A tool-call child: lash executes it, and no engine tier needs a
-            // process-engine registry to start it.
-            crate::ProcessInput::ToolCall {
-                call: lash_core::ProcessToolCall {
-                    tool_id: crate::ToolId::new("tool:segment_redrive_child"),
-                    tool_name: "segment_redrive_child".into(),
-                    args: serde_json::json!({ "law": "segment-redrive" }),
-                    replay: None,
-                    prepared_payload: serde_json::Value::Null,
-                },
+            // The child uses the engine-only executable process contract.
+            crate::ProcessInput::Engine {
+                kind: "testing-fixture".to_string(),
+                payload: serde_json::json!({"law": "segment-redrive"}),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
@@ -606,6 +601,7 @@ async fn segment_body(
                         Arc::clone(&registry),
                         Arc::new(crate::NoProcessWork::for_registry(registry)),
                     )
+                    .with_process_engines(crate::testing::process_engine_fixture())
                     .with_process_env_store(Arc::clone(&scenario.env_store)),
                 )
                 .await;

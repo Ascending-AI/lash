@@ -563,8 +563,9 @@ mod tests {
             crate::ProcessExecutionEnvRef::new("process-env:test"),
             "ui.button.pressed",
             "source-key",
-            crate::ProcessInput::External {
-                metadata: serde_json::json!({}),
+            crate::ProcessInput::Engine {
+                kind: "external".to_string(),
+                payload: serde_json::json!({}),
             },
             crate::ProcessIdentity::labelled("external", Some("expected")),
         )

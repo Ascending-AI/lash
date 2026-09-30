@@ -1,11 +1,10 @@
 //! Execution kernel for Lash: process, tool, plugin, session, and effect
 //! execution extracted below the `lash-core` orchestration layer.
 //!
-//! The process kernel intentionally understands `ToolCall`, `SessionTurn`, and
-//! `External` because those inputs carry runtime mechanisms core must enforce:
-//! recorded tool attempts, child-session turns, and externally completed work. New
-//! process runtimes should use `ProcessInput::Engine { kind, payload }` unless
-//! core must understand their semantics to enforce a kernel mechanism.
+//! The process kernel understands `SessionTurn` and `External` to coordinate
+//! child-session turns and externally completed work. Executable process bodies
+//! use `ProcessInput::Engine { kind, payload }` and call ordinary recorded tool
+//! attempts under their process journal.
 //!
 //! Protocols follow the same boundary: core owns the `HostTurnProtocol` state
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
@@ -898,9 +897,8 @@ pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ProcessToolCall, ToolCall,
-    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
+    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 pub(crate) use lash_core_store::process_identity::StartKeyDerivation;

@@ -173,12 +173,11 @@ Per ingress:
 | RLM cell command | turn | the executing call's model positions, then code opener, cell, command, and aggregate for a leaf |
 | Process-body command | process | code opener, command, and aggregate for a leaf |
 | Host submission | host submission | none, or content index when one submission carries several calls |
-| `ProcessInput::ToolCall` | process | none |
 | Trigger delivery | the registered process it is bound to, not its subscription template (`crates/lash-core-execution/src/triggers/router.rs:624-653`) | as the process's own calls |
 
 Process segment boundaries never reset code positions, matching
-`host_identity.rs:25-104`. `ProcessInput::ToolCall` stays (ADR 0116 §9); its
-admitted process root names the call.
+`host_identity.rs:25-104`. An explicit `Engine` body calls the tool under
+its admitted process root, using the process-body command positions.
 
 **Excluded** from every preimage: the provider call id, the arguments, the
 tool name, the attempt number, scheduling and completion order, and any user

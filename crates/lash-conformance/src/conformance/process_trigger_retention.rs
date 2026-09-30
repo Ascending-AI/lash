@@ -89,7 +89,7 @@ where
     .await;
 }
 
-/// A reserved non-engine target cannot start through the runtime router. Its
+/// A reserved Engine target with a non-object payload cannot start. Its
 /// due pass stalls with a typed refusal instead of leaving the delivery owed.
 #[expect(
     clippy::expect_used,
@@ -110,15 +110,16 @@ where
                 owner_scope: owner(&session),
                 actor: actor(&session),
                 draft: TriggerSubscriptionDraft {
-                    target: ProcessInput::External {
-                        metadata: serde_json::Value::Null,
+                    target: ProcessInput::Engine {
+                        kind: "test".to_string(),
+                        payload: serde_json::Value::Null,
                     },
                     ..draft(&session, "delivery-refusal-key", "delivery-refusal-source")
                 },
             },
         )
         .await
-        .expect("register non-engine target")
+        .expect("register engine target")
         .expect("store the captured subscription");
     let reserved = handles
         .triggers
@@ -156,9 +157,9 @@ where
     assert_eq!(stalled[0].reason, crate::StallReason::Refused);
     assert!(
         stalled[0].last_error.as_deref().is_some_and(
-            |error| error.contains("trigger target must be an engine process, got external")
+            |error| error.contains("trigger engine target payload must be a JSON object")
         ),
-        "the runtime refuses a non-engine target: {stalled:?}"
+        "the runtime refuses an invalid Engine payload: {stalled:?}"
     );
     assert!(
         handles

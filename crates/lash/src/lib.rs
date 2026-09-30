@@ -299,7 +299,7 @@ pub mod tools {
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
-        PendingCompletion, PendingResolver, PreparedToolCall, ProcessToolCall, SignalProcessIntent,
+        PendingCompletion, PendingResolver, PreparedToolCall, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
         TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,

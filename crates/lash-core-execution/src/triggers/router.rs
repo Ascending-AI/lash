@@ -3,32 +3,10 @@ use crate::runtime::process::identity_projection::{
     project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
 };
 
-// Bumped to 3 (FIG-2913): the preimage projects the admitted source
-// contract and provider route the subscription now captures.
-const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
-// Bumped to 5 (FIG-2913): the subscription-definition preimage projects the
-// admitted source contract and provider route captured at registration. It was
-// 4 (FIG-1383) when the process-status tag registry gained `caller_departed`;
-// see the process-registration family note.
-pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 5;
+pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
-
-pub(super) fn trigger_definition_family_version(draft: &TriggerSubscriptionDraft) -> u8 {
-    match &draft.target {
-        crate::ProcessInput::ToolCall { call }
-            if call
-                .replay
-                .as_ref()
-                .and_then(|replay| replay.origin.as_ref())
-                .is_some() =>
-        {
-            TRIGGER_DEFINITION_FAMILY_VERSION
-        }
-        _ => LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION,
-    }
-}
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,
@@ -61,7 +39,7 @@ fn trigger_subscription_address_preimage(
 ///
 /// Owners: 1 session, 2 host, 3 platform.
 /// Actors: 1 host, 2 session.
-/// Process inputs: 1 tool call, 2 engine, 3 session turn, 4 external.
+/// Process inputs: 1 burned, 2 engine, 3 session turn, 4 external.
 /// Tool output contracts: 1 static, 2 from-input-schema.
 /// Arbitrary JSON and schemas are each one canonical opaque bytes leaf.
 /// Value selectors: 1 payload, 2 pointer, 3 const, 4 template, 5 present.
@@ -72,13 +50,13 @@ fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
     draft: &TriggerSubscriptionDraft,
 ) -> Vec<u8> {
-    let family_version = trigger_definition_family_version(draft);
+    let family_version = TRIGGER_DEFINITION_FAMILY_VERSION;
     let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
         "lash.trigger-subscription-definition",
         family_version,
     );
     project_trigger_owner(&mut fingerprint, owner_scope);
-    project_trigger_draft(&mut fingerprint, draft, family_version);
+    project_trigger_draft(&mut fingerprint, draft);
     fingerprint.finish()
 }
 
@@ -90,7 +68,7 @@ pub fn trigger_subscription_definition_fingerprint(
     // lookup. Its v2 grammar shares the trigger store's reject-and-recreate
     // lifecycle; projection corrections require a new family version.
     let preimage = trigger_subscription_definition_preimage(owner_scope, draft);
-    let family_version = trigger_definition_family_version(draft);
+    let family_version = TRIGGER_DEFINITION_FAMILY_VERSION;
     crate::stable_identity::rendered_hash("trigger-definition", family_version, &preimage)
 }
 
@@ -130,7 +108,6 @@ pub(super) fn project_trigger_actor(
 pub(super) fn project_trigger_draft(
     identity: &mut crate::stable_identity::IdentityEncoder,
     draft: &TriggerSubscriptionDraft,
-    family_version: u8,
 ) {
     let TriggerSubscriptionDraft {
         subscription_key,
@@ -166,7 +143,7 @@ pub(super) fn project_trigger_draft(
     project_process_payload_leaf(identity, source);
     project_process_schema_leaf(identity, &payload_schema.schema);
     project_trigger_source_capture(identity, source_capture);
-    project_trigger_process_input(identity, target, family_version);
+    project_trigger_process_input(identity, target);
     let crate::ProcessIdentity {
         kind,
         label,
@@ -233,35 +210,8 @@ pub(super) fn project_trigger_source_capture(
 fn project_trigger_process_input(
     identity: &mut crate::stable_identity::IdentityEncoder,
     input: &crate::ProcessInput,
-    family_version: u8,
 ) {
     match input {
-        crate::ProcessInput::ToolCall { call } => {
-            let crate::ProcessToolCall {
-                tool_id,
-                tool_name,
-                args,
-                replay,
-                prepared_payload,
-            } = call;
-            identity.tag(1);
-            identity.string(tool_id.as_str());
-            identity.string(tool_name);
-            project_process_payload_leaf(identity, args);
-            identity.optional(replay.as_ref(), |identity, replay| {
-                let lash_sansio::llm::types::ProviderReplayMeta {
-                    item_id,
-                    opaque,
-                    origin,
-                } = replay;
-                identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
-                identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
-                if family_version == TRIGGER_DEFINITION_FAMILY_VERSION {
-                    identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-                }
-            });
-            project_process_payload_leaf(identity, prepared_payload);
-        }
         crate::ProcessInput::Engine { kind, payload } => {
             identity.tag(2);
             identity.string(kind);

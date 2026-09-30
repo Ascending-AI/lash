@@ -1,10 +1,11 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
+#[cfg(test)]
+mod context_tests;
 mod control;
 mod runner;
 mod session;
-mod tool;
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
@@ -25,7 +26,6 @@ impl<'run> ProcessRunContext<'run> {
             tool_surface: None,
             scoped_effect_controller: None,
             causal_invocation: None,
-            dispatch_parent_invocation: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
             process_lineage: None,
             process_originator: None,
@@ -53,20 +53,9 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     tool_surface: Option<crate::plugin::ResolvedToolSurface>,
     scoped_effect_controller: Option<crate::ScopedEffectController<'run>>,
     causal_invocation: Option<crate::RuntimeInvocation>,
-    dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: tokio_util::sync::CancellationToken,
     process_lineage: Option<crate::ProcessLineage>,
     process_originator: Option<crate::ProcessOriginator>,
-}
-
-pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
-    process_id: crate::ProcessId,
-    lineage: crate::ProcessLineage,
-    call: crate::PreparedToolCall,
-    parent_invocation: Option<crate::RuntimeInvocation>,
-    execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-    cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
@@ -91,14 +80,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         scoped_effect_controller: crate::ScopedEffectController<'run>,
     ) -> Self {
         self.scoped_effect_controller = Some(scoped_effect_controller);
-        self
-    }
-
-    pub(in crate::runtime::session_manager::process_runners) fn dispatch_parent_invocation(
-        mut self,
-        invocation: Option<crate::RuntimeInvocation>,
-    ) -> Self {
-        self.dispatch_parent_invocation = invocation;
         self
     }
 
@@ -174,7 +155,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             process_engines: services.process_engines().clone(),
             effect_controller,
             direct_completions,
-            parent_invocation: self.dispatch_parent_invocation,
+            parent_invocation: None,
             observation_call_key: None,
             execution_env_spec,
             session_id: self.services.current.session_id.clone(),

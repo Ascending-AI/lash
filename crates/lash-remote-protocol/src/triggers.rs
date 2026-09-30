@@ -397,6 +397,12 @@ impl RemoteTriggerSubscriptionSpec {
         }
         require_non_empty(type_name, "source_type", &self.source_type)?;
         require_non_empty(type_name, "source_key", &self.source_key)?;
+        if !matches!(self.target, RemoteProcessInput::Engine { .. }) {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "trigger registration requires an Engine target".to_string(),
+            });
+        }
         self.target.validate(type_name)?;
         self.target_identity.validate(type_name)?;
         for event_type in &self.event_types {

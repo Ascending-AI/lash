@@ -41,18 +41,6 @@ pub fn accepted_process_registration() -> ProcessRegistration {
     })
 }
 
-fn tool_call_input(tool_name: &str) -> ProcessInput {
-    ProcessInput::ToolCall {
-        call: crate::ProcessToolCall {
-            tool_id: crate::ToolId::new("fixture-tool-id"),
-            tool_name: tool_name.to_string(),
-            args: serde_json::json!({}),
-            replay: None,
-            prepared_payload: serde_json::Value::Null,
-        },
-    }
-}
-
 fn env_ref() -> Option<ProcessExecutionEnvRef> {
     Some(ProcessExecutionEnvRef::new(FIXTURE_ENV_REF.to_string()))
 }
@@ -119,19 +107,13 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             registration.session_capability = Some(crate::SessionId::from("a-different-session"));
             vec![registration]
         }
-        ProcessRegistrationRefusal::ToolCallWithoutToolName => {
-            let mut registration = host_registration(tool_call_input("\t"));
-            registration.env_ref = env_ref();
-            vec![registration]
-        }
-        // Both arms that must carry an env: engine and tool-call.
-        ProcessRegistrationRefusal::ExecutionEnvMissing => vec![
-            host_registration(ProcessInput::Engine {
+        // Engine inputs must carry an env.
+        ProcessRegistrationRefusal::ExecutionEnvMissing => {
+            vec![host_registration(ProcessInput::Engine {
                 kind: "fixture-engine".to_string(),
                 payload: serde_json::Value::Null,
-            }),
-            host_registration(tool_call_input("fixture-tool")),
-        ],
+            })]
+        }
         // Both arms that must not: external and session-turn.
         ProcessRegistrationRefusal::ExecutionEnvNotAllowed => {
             let mut external = accepted_process_registration();

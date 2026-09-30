@@ -514,7 +514,7 @@ pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
 }
 
 #[tokio::test]
-pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
+pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_engine_process() {
     let runner = Arc::new(RecordingRunner::default());
     // The run is recorded and the process stays live for the cancel below.
     runner.stay_live.store(true, Ordering::SeqCst);
@@ -531,17 +531,11 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .build();
     let context = Arc::new(RecordingContext::with_endpoint(endpoint));
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    // A tool-call process: lash executes it, and a Restate start needs no
-    // process-engine registry for it.
+    // The recording runner executes an Engine process.
     let registration = ProcessRegistration::new(
-        ProcessInput::ToolCall {
-            call: lash_core::ProcessToolCall {
-                tool_id: "tool:smoke".into(),
-                tool_name: "smoke".into(),
-                args: serde_json::Value::Null,
-                replay: None,
-                prepared_payload: serde_json::Value::Null,
-            },
+        ProcessInput::Engine {
+            kind: "testing-fixture".to_string(),
+            payload: serde_json::Value::Null,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
@@ -1240,10 +1234,23 @@ pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
 pub(super) async fn snapshot_lashlang_registration(
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
-    // process main() {
-    //   called = await tools.snapshot_echo({ line: "restored" })?
-    //   finish called.echo
-    // }
+    one_tool_engine_registration(
+        "snapshot_echo",
+        SnapshotRecoveryTool::definition().contract(),
+        "restored",
+        env_ref,
+        Some("echo"),
+    )
+    .await
+}
+
+pub(super) async fn one_tool_engine_registration(
+    tool_name: &str,
+    contract: lash_core::ToolContract,
+    line: &str,
+    env_ref: lash_core::ProcessExecutionEnvRef,
+    result_field: Option<&str>,
+) -> ProcessRegistration {
     let module = b::module(
         vec![b::process(
             "main",
@@ -1253,23 +1260,25 @@ pub(super) async fn snapshot_lashlang_registration(
                     "called",
                     b::module_call(
                         &["tools"],
-                        "snapshot_echo",
-                        vec![b::record(vec![("line", b::string("restored"))])],
+                        tool_name,
+                        vec![b::record(vec![("line", b::string(line))])],
                     ),
                 ),
-                b::finish(b::field(b::var("called"), "echo")),
+                b::finish(match result_field {
+                    Some(field) => b::field(b::var("called"), field),
+                    None => b::var("called"),
+                }),
             ]),
         )],
         Vec::new(),
     );
-    let contract = SnapshotRecoveryTool::definition().contract();
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
         .add_module_operation_contract(
             ["tools"],
             "Tools",
-            "snapshot_echo",
-            "tool:snapshot_echo",
+            tool_name,
+            format!("tool:{tool_name}"),
             &lashlang::OperationContract::new(
                 contract.input_schema.canonical().clone(),
                 contract.output_schema.canonical().clone(),
@@ -1283,7 +1292,7 @@ pub(super) async fn snapshot_lashlang_registration(
             lashlang::LashlangAbilities::default().with_sleep(),
         ),
     )
-    .expect("link snapshot lashlang module");
+    .expect("link one-tool engine module");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
         &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -1293,7 +1302,7 @@ pub(super) async fn snapshot_lashlang_registration(
         &linked_module.artifact,
     )
     .await
-    .expect("store snapshot lashlang module artifact");
+    .expect("store one-tool engine module artifact");
     let process_ref = linked_module
         .artifact
         .process_ref("main")
@@ -1359,23 +1368,22 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     let host_a = RestateRuntimeEffectController::new_for_test(context_a);
     let creator_scope = lash_core::SessionScope::new("root");
     let env_ref = persist_recovery_env_ref().await;
-    let registration = ProcessRegistration::new(
-        ProcessInput::ToolCall {
-            call: lash_core::ProcessToolCall {
-                tool_id: "tool:recovery_echo".into(),
-                tool_name: "recovery_echo".into(),
-                args: serde_json::json!({ "line": "wake-after-rebuild" }),
-                replay: None,
-                prepared_payload: serde_json::Value::Null,
-            },
-        },
-        lash_core::ProcessProvenance::session(creator_scope.clone()),
-        lash_core::Lifetime::Detached,
+    let mut registration = one_tool_engine_registration(
+        "recovery_echo",
+        RecoveryProcessTool::definition().contract(),
+        "wake-after-rebuild",
+        env_ref,
+        None,
     )
-    .with_extra_event_types([process_wake_event_type()])
-    .with_execution_env_ref(Some(env_ref))
+    .await
     .with_wake_session_id(Some(creator_scope.session_id.clone()))
     .with_start_key(Some(lash_core::StartKey::for_host("recovery-start")));
+    registration.provenance = lash_core::ProcessProvenance::session(creator_scope.clone());
+    *registration
+        .event_types
+        .iter_mut()
+        .find(|event_type| event_type.name == "process.wake")
+        .expect("the Engine fixture declares process.wake") = process_wake_event_type();
 
     let RuntimeEffectOutcome::Process {
         result:

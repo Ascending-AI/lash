@@ -682,19 +682,23 @@ impl TriggerSubscriptionDraft {
         self
     }
 
-    /// Rejects an empty or reserved subscription key and any target label that disagrees with the
-    /// process identity label before trigger-store implementors persist the draft.
+    /// Validates the subscription key, Engine target shape and captured source
+    /// contract before trigger-store implementors persist the draft.
     pub fn validate(&self) -> Result<(), PluginError> {
         validate_subscription_key(&self.subscription_key, false)?;
-        if let crate::ProcessInput::SessionTurn { definition_key, .. } = &self.target
-            && definition_key.trim().is_empty()
-        {
-            return Err(PluginError::Session(
-                "trigger session-turn definition_key must not be empty".to_string(),
-            ));
-        }
+        validate_trigger_target(&self.target)?;
         self.source_capture.validate()?;
         Ok(())
+    }
+}
+
+fn validate_trigger_target(target: &crate::ProcessInput) -> Result<(), PluginError> {
+    if matches!(target, crate::ProcessInput::Engine { .. }) {
+        Ok(())
+    } else {
+        Err(PluginError::InvalidTriggerTarget {
+            kind: target.engine_kind().to_string(),
+        })
     }
 }
 
@@ -710,15 +714,12 @@ impl TriggerSubscriptionDraft {
 /// An engine target resolves its definition reference through the owning
 /// engine, so the durable row pins the engine's authoritative signature rather
 /// than whatever the registrant claimed; a target that names no definition is
-/// admitted on its engine kind alone. Non-engine targets (tool calls, session
-/// turns, external inputs) name no engine and are not gated here.
+/// admitted on its engine kind alone. Every non-Engine target is refused.
 pub async fn admit_trigger_registration_target(
     registry: &crate::ProcessEngineRegistry,
     draft: &mut TriggerSubscriptionDraft,
 ) -> Result<(), PluginError> {
-    if !matches!(draft.target, crate::ProcessInput::Engine { .. }) {
-        return Ok(());
-    }
+    validate_trigger_target(&draft.target)?;
     let Some(reference) = draft.target_identity.definition.clone() else {
         // Refuses an unregistered kind with the registry's own typed error.
         registry.require(draft.target_identity.kind.as_str())?;
@@ -1486,9 +1487,6 @@ pub fn evaluate_trigger_prune(
 // on its own, but the three tags share one family namespace and are rotated
 // together so no retired encoding can be re-read under a live tag.
 const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 6;
-// Definition-bearing commands were v4 (FIG-1383) when their preimage's
-// process-status tag registry gained `caller_departed`.
-const TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION: u8 = 7;
 // Was 5 (FIG-2886): list filters carry the canonical owner scope and retain an
 // absent slot for the retired raw session-id spelling.
 const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 8;
@@ -1505,20 +1503,7 @@ fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
     if matches!(command, TriggerCommand::List { .. }) {
         return TRIGGER_COMMAND_FAMILY_VERSION;
     }
-    let draft = match command {
-        TriggerCommand::Register { draft, .. }
-        | TriggerCommand::Update { draft, .. }
-        | TriggerCommand::Revive { draft, .. } => Some(draft),
-        _ => None,
-    };
-    if draft.is_some_and(|draft| {
-        router::trigger_definition_family_version(draft)
-            == router::TRIGGER_DEFINITION_FAMILY_VERSION
-    }) {
-        TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION
-    } else {
-        LEGACY_TRIGGER_COMMAND_FAMILY_VERSION
-    }
+    LEGACY_TRIGGER_COMMAND_FAMILY_VERSION
 }
 
 fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
@@ -1534,7 +1519,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             fingerprint.tag(1);
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
-            project_trigger_draft(&mut fingerprint, draft, family_version);
+            project_trigger_draft(&mut fingerprint, draft);
         }
         TriggerCommand::List {
             owner_scope,
@@ -1577,7 +1562,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
             fingerprint.string(subscription_key);
-            project_trigger_draft(&mut fingerprint, draft, family_version);
+            project_trigger_draft(&mut fingerprint, draft);
             fingerprint.u64(*expected_revision);
         }
         TriggerCommand::Enable {
@@ -1627,7 +1612,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
             fingerprint.string(subscription_key);
-            project_trigger_draft(&mut fingerprint, draft, family_version);
+            project_trigger_draft(&mut fingerprint, draft);
             fingerprint.u64(*expected_revision);
         }
         TriggerCommand::Prune {

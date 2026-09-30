@@ -470,16 +470,11 @@ mod tests {
         let cases = [
             (
                 "tool",
-                ProcessInput::ToolCall {
-                    call: crate::ProcessToolCall {
-                        tool_id: "tool:files.read".into(),
-                        tool_name: "files.read".into(),
-                        args: json!({}),
-                        replay: None,
-                        prepared_payload: serde_json::Value::Null,
-                    },
+                ProcessInput::Engine {
+                    kind: "one-tool".to_string(),
+                    payload: json!({"tool": "files.read"}),
                 },
-                "tool",
+                "one-tool",
                 "files.read",
                 None,
             ),
@@ -517,10 +512,7 @@ mod tests {
         ];
         let mut ids = std::collections::BTreeMap::new();
         for (case, input, kind, label, _child_session_id) in cases {
-            let needs_env = matches!(
-                input,
-                ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
-            );
+            let needs_env = matches!(input, ProcessInput::Engine { .. });
             let mut registration = ProcessRegistration::new(
                 input,
                 ProcessProvenance::host(),

@@ -152,21 +152,7 @@ fn enriched_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscrip
 
 #[test]
 fn trigger_definition_identity_golden_corpus() {
-    let tool = crate::ProcessInput::ToolCall {
-        call: crate::ProcessToolCall {
-            tool_id: crate::ToolId::new("tool-id"),
-            tool_name: "tool".into(),
-            args: serde_json::json!({"arg": 0}),
-            replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
-                item_id: Some("item".to_string()),
-                opaque: None,
-                ..Default::default()
-            }),
-            prepared_payload: serde_json::json!({"prepared": true}),
-        },
-    };
     let inputs = [
-        tool,
         crate::ProcessInput::Engine {
             kind: "engine".to_string(),
             payload: serde_json::json!({"payload": 0}),
@@ -196,7 +182,6 @@ fn trigger_definition_identity_golden_corpus() {
         },
     ];
     let owners = [
-        TriggerOwnerScope::session("owner"),
         TriggerOwnerScope::host("owner").expect("host owner"),
         TriggerOwnerScope::Platform,
         TriggerOwnerScope::session("owner"),
@@ -205,13 +190,8 @@ fn trigger_definition_identity_golden_corpus() {
     let actual = owners
         .iter()
         .zip(inputs)
-        .enumerate()
-        .map(|(index, (owner, input))| {
-            let draft = if index == 0 {
-                enriched_identity_corpus_draft(input)
-            } else {
-                minimal_identity_corpus_draft(input)
-            };
+        .map(|(owner, input)| {
+            let draft = minimal_identity_corpus_draft(input);
             (
                 hex(&trigger_subscription_definition_preimage(owner, &draft)),
                 trigger_subscription_definition_fingerprint(owner, &draft),
@@ -219,10 +199,6 @@ fn trigger_definition_identity_golden_corpus() {
         })
         .collect::<Vec<_>>();
     let expected = [
-        (
-            "6c6173682d737461626c652d6964656e74697479020300000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7601000000000000000773657373696f6e0100000000000000056672616d650100000000000000046e616d650000000000000006736f7572636500000000000000036b657900000000000000127b22736f75726365223a5b302c2230225d7d00000000000000117b2274797065223a226f626a656374227d000000000000000000000000000000027b7d01010000000000000007746f6f6c2d69640000000000000004746f6f6c00000000000000097b22617267223a307d010100000000000000046974656d0000000000000000117b227072657061726564223a747275657d00000000000000046b696e640100000000000000056c6162656c0100000000000000107b22646566696e6974696f6e223a307d000000000000000100000000000000096170702e6576656e7400000000000000117b2274797065223a226f626a656374227d0103010400000000000000257b7061796c6f61647d3a7b706f696e7465727d3a7b636f6e73747d3a7b70726573656e747d00000000000000040000000000000005636f6e73740300000000000000013000000000000000077061796c6f6164010000000000000007706f696e7465720200000000000000022f78000000000000000770726573656e740500000000000000022f79010001000000000000000200000000000000056576656e7401000000000000000566697865640200000000000000405b6e756c6c2c66616c73652c747275652c2d312c302c31383434363734343037333730393535313631352c312e352c22613a62222c5b5d2c7b2278223a307d5d0100000000000000056c6162656c",
-            "trigger-definition:v3:blake3:b173e5c9e04834163446b42b2898bfd75fb08e299d0d0aaab2ae5bd801088579",
-        ),
         (
             "6c6173682d737461626c652d6964656e74697479020300000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0200000000000000056f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d000000000000000000000000000000027b7d01020000000000000006656e67696e65000000000000000d7b227061796c6f6164223a307d00000000000000046b696e6400000000000000000000000000000000000000",
             "trigger-definition:v3:blake3:a19efb9486669ed2268b20762592b63d3a8f166d49d03c81a9e4603904849e58",
@@ -245,39 +221,6 @@ fn trigger_definition_identity_golden_corpus() {
         assert_eq!(preimage, expected_preimage);
         assert_eq!(key, expected_key);
     }
-}
-
-#[test]
-fn replay_route_rotates_trigger_definition_to_the_current_family_without_moving_the_legacy_one() {
-    let owner = TriggerOwnerScope::session("owner");
-    let mut draft = minimal_identity_corpus_draft(crate::ProcessInput::ToolCall {
-        call: crate::ProcessToolCall {
-            tool_id: crate::ToolId::new("tool-id"),
-            tool_name: "tool".into(),
-            args: serde_json::json!({}),
-            replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
-                item_id: Some("item".to_string()),
-                opaque: None,
-                origin: None,
-            }),
-            prepared_payload: serde_json::Value::Null,
-        },
-    });
-    let legacy = trigger_subscription_definition_fingerprint(&owner, &draft);
-    assert!(legacy.starts_with("trigger-definition:v3:blake3:"));
-
-    let crate::ProcessInput::ToolCall { call } = &mut draft.target else {
-        unreachable!()
-    };
-    call.replay.as_mut().expect("replay").origin =
-        Some(lash_sansio::llm::types::ProviderRouteIdentity::new(
-            "openai-compatible",
-            "https://gateway.example/v1",
-            "shared-model",
-        ));
-    let routed = trigger_subscription_definition_fingerprint(&owner, &draft);
-    assert!(routed.starts_with("trigger-definition:v5:blake3:"));
-    assert_ne!(legacy, routed);
 }
 
 #[test]
@@ -504,4 +447,31 @@ fn trigger_catalog_rejects_duplicate_trigger_source_identity() {
         .expect_err("duplicate public source identity should be rejected");
 
     assert!(err.contains("duplicate trigger source `ui.button.pressed`"));
+}
+
+#[test]
+fn enriched_engine_trigger_definition_keeps_v3_and_tracks_payload() {
+    let mut draft = enriched_identity_corpus_draft(crate::ProcessInput::Engine {
+        kind: "engine".to_string(),
+        payload: serde_json::json!({"payload": 0}),
+    });
+    let owner = TriggerOwnerScope::session("owner");
+    assert_eq!(
+        hex(&trigger_subscription_definition_preimage(&owner, &draft)),
+        "6c6173682d737461626c652d6964656e74697479020300000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7601000000000000000773657373696f6e0100000000000000056672616d650100000000000000046e616d650000000000000006736f7572636500000000000000036b657900000000000000127b22736f75726365223a5b302c2230225d7d00000000000000117b2274797065223a226f626a656374227d000000000000000000000000000000027b7d01020000000000000006656e67696e65000000000000000d7b227061796c6f6164223a307d00000000000000046b696e640100000000000000056c6162656c0100000000000000107b22646566696e6974696f6e223a307d000000000000000100000000000000096170702e6576656e7400000000000000117b2274797065223a226f626a656374227d0103010400000000000000257b7061796c6f61647d3a7b706f696e7465727d3a7b636f6e73747d3a7b70726573656e747d00000000000000040000000000000005636f6e73740300000000000000013000000000000000077061796c6f6164010000000000000007706f696e7465720200000000000000022f78000000000000000770726573656e740500000000000000022f79010001000000000000000200000000000000056576656e7401000000000000000566697865640200000000000000405b6e756c6c2c66616c73652c747275652c2d312c302c31383434363734343037333730393535313631352c312e352c22613a62222c5b5d2c7b2278223a307d5d0100000000000000056c6162656c"
+    );
+    let first = trigger_subscription_definition_fingerprint(&owner, &draft);
+    assert_eq!(
+        first,
+        "trigger-definition:v3:blake3:e81330239140b8feb59360f1dcdbecf2a98fd210dfd84828fd2524ac5a20aea3"
+    );
+    assert!(first.starts_with("trigger-definition:v3:blake3:"));
+    let crate::ProcessInput::Engine { payload, .. } = &mut draft.target else {
+        unreachable!()
+    };
+    *payload = serde_json::json!({"payload": 1});
+    assert_ne!(
+        first,
+        trigger_subscription_definition_fingerprint(&owner, &draft)
+    );
 }

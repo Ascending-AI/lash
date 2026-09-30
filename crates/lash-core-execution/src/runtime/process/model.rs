@@ -83,18 +83,14 @@ impl From<&str> for SessionScopeId {
 
 /// Durable executable input for a process.
 ///
-/// `ToolCall`, `SessionTurn`, and `External` are kernel process primitives:
-/// core owns their durable representation and execution semantics because they
-/// are how the runtime coordinates tools, child sessions, and externally
-/// completed work. `Engine` is the extension point for deployment-specific
+/// `SessionTurn` and `External` are kernel process primitives: core owns
+/// their durable representation and execution semantics to coordinate child
+/// sessions and externally completed work. `Engine` is the extension point for deployment-specific
 /// process runtimes; those rows require a matching [`crate::ProcessEngine`] in
 /// the host's process engine registry.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessInput {
-    ToolCall {
-        call: crate::ProcessToolCall,
-    },
     Engine {
         kind: String,
         #[serde(default)]
@@ -141,7 +137,6 @@ pub enum SessionTurnOutcome {
 impl Clone for ProcessInput {
     fn clone(&self) -> Self {
         match self {
-            Self::ToolCall { call } => Self::ToolCall { call: call.clone() },
             Self::Engine { kind, payload } => Self::Engine {
                 kind: kind.clone(),
                 payload: payload.clone(),
@@ -174,7 +169,6 @@ impl ProcessInput {
     /// Exposes engine kind to store and process-engine implementors while persisting and coordinating durable process execution.
     pub fn engine_kind(&self) -> &'static str {
         match self {
-            Self::ToolCall { .. } => "tool",
             Self::Engine { .. } => "engine",
             Self::SessionTurn { .. } => "session_turn",
             Self::External { .. } => "external",
@@ -1110,7 +1104,6 @@ impl ProcessIdentity {
     /// authority over an opaque engine payload.
     pub fn from_process_input(input: &ProcessInput) -> Self {
         match input {
-            ProcessInput::ToolCall { call } => Self::labelled("tool", Some(call.tool_name.clone())),
             ProcessInput::Engine { kind, .. } => Self::new(kind.clone()),
             ProcessInput::SessionTurn { create_request, .. } => {
                 let label = create_request
@@ -1485,9 +1478,7 @@ fn recorded_lineage(
                 .clone()
                 .unwrap_or_else(|| process_child_session_id(process_id)),
         ),
-        ProcessInput::ToolCall { .. }
-        | ProcessInput::Engine { .. }
-        | ProcessInput::External { .. } => None,
+        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
     };
     ProcessLineage::of_process(
         process_id,

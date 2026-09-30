@@ -1075,14 +1075,9 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
         declaration: lash_core::ProcessStartDeclaration::new(
-            lash_core::ProcessInput::ToolCall {
-                call: lash_core::ProcessToolCall {
-                    tool_id: "tool:ingress-env".into(),
-                    tool_name: "ingress_env".into(),
-                    args: serde_json::Value::Null,
-                    replay: None,
-                    prepared_payload: serde_json::Value::Null,
-                },
+            lash_core::ProcessInput::Engine {
+                kind: "testing-fixture".to_string(),
+                payload: serde_json::Value::Null,
             },
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,

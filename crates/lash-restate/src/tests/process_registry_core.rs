@@ -1230,14 +1230,9 @@ pub(super) fn start_recovery_effect(
     spec: &lash_core::ProcessExecutionEnvSpec,
 ) -> RuntimeEffectEnvelope {
     let registration = ProcessRegistration::new(
-        ProcessInput::ToolCall {
-            call: lash_core::ProcessToolCall {
-                tool_id: "tool:recovery".into(),
-                tool_name: "recovery".into(),
-                args: serde_json::Value::Null,
-                replay: None,
-                prepared_payload: serde_json::Value::Null,
-            },
+        ProcessInput::Engine {
+            kind: "testing-fixture".to_string(),
+            payload: serde_json::Value::Null,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

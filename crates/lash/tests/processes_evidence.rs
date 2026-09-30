@@ -630,16 +630,6 @@ fn processes_area_witnesses() {
             let _ = turn_input;
         }
     });
-    // W0209: lash::process::ProcessInput::ToolCall [variant]
-    variant_witness(|value: &lash::process::ProcessInput| {
-        matches!(value, lash::process::ProcessInput::ToolCall { .. })
-    });
-    // W0210: lash::process::ProcessInput::ToolCall::call [field]
-    field_witness(|value: &lash::process::ProcessInput| {
-        if let lash::process::ProcessInput::ToolCall { call, .. } = value {
-            let _ = call;
-        }
-    });
     // W0217: lash::process::ProcessListFilter::created_at_end_ms [field]
     field_witness(|value: &lash::process::ProcessListFilter| {
         let _ = &value.created_at_end_ms;
