@@ -87,7 +87,7 @@ pub use model::{
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization, WaitKind,
     WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
-    load_process_execution_env, mint_process_id, process_child_session_id,
+    load_process_execution_env, mint_process_id, process_child_session_id, process_session_turn_id,
     publish_process_execution_env,
 };
 pub use model::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};

@@ -289,6 +289,13 @@ record holds no admission has started nothing: its ingress obligation still
 owes its input and drives it, so the pass leaves it. An admin read that fails
 proves nothing about any run and ends nothing.
 
+A root a live process runs is not a root run. A `SessionTurn` process drives
+its child turn's root, named by the process id, inline in its own process run,
+so no lane ever holds a run of that root's key. While the process's record is
+not terminal, the pass leaves the root and its admitted input; the lost-process
+pass owns the process's run. A terminal process runs nothing more, so its
+root is judged like any other. A failed registry read ends nothing.
+
 ## 4. Two-phase session delete
 
 Delete first records `CloseSession` and marks the session closing. New sends

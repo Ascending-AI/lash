@@ -23,6 +23,10 @@
 //!   again: the restarted deployment's reconcile tick takes the reservation's
 //!   `TriggerDelivery` obligation and starts exactly one process, bound to
 //!   the delivery, which runs to its terminal once.
+//! * **The recovery pass inside a process's child turn (FIG-4378).** A
+//!   `SessionTurn` process runs its child root in its own run, never as a
+//!   `LashTurn` run. The lost-root pass runs while the child holds its model
+//!   call, keeps the root and its admitted input, and the child commits.
 
 #![expect(
     clippy::unwrap_used,
@@ -1652,3 +1656,5 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
 
 #[path = "crash_windows/attachment_delivery.rs"]
 mod attachment_delivery;
+#[path = "crash_windows/process_root_recovery.rs"]
+mod process_root_recovery;

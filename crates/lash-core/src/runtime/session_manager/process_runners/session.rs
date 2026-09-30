@@ -44,7 +44,7 @@ impl RuntimeSessionServices {
         // The process worker admitted this controller under the process id.
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
-        let child_turn_id = crate::TurnId::from(process_id.as_str());
+        let child_turn_id = crate::runtime::process_session_turn_id(&process_id);
         match Box::pin(
             self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
                 create_request,

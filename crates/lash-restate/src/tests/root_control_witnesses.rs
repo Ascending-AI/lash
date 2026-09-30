@@ -1916,6 +1916,7 @@ async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
             &crate::RestateIngressClient::new(harness.connection()),
             &crate::RestateNamespace::default(),
             &factory,
+            &harness.law_stores().process_registry(),
             crate::session_control::RecoveryScan {
                 limit: NonZeroUsize::new(16).expect("page"),
                 after: &mut None,
@@ -2025,4 +2026,216 @@ async fn live_missing_started_root_is_settled_without_new_ingress() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failed_root_run_read_ends_no_root() {
     missing_started_root(HarnessServer::in_process(), true).await;
+}
+
+/// Run recovery passes until one reads the engine without a failure, as the
+/// recovery interval retries a pass a loaded server's admin query timed out.
+async fn read_recovery_pass(
+    work: &crate::RestateSessionWork,
+    writer: &dyn ParkRecoveryWriter,
+) -> Vec<Result<ParkReconcileReport, EngineRefusal>> {
+    let mut passes = Vec::new();
+    for _ in 0..20 {
+        let pass = work
+            .control()
+            .reconcile_parks(
+                writer,
+                EnginePage {
+                    after: None,
+                    limit: NonZeroUsize::new(16).expect("page"),
+                    budget: std::time::Duration::from_secs(5),
+                },
+            )
+            .await;
+        let read = pass.as_ref().is_ok_and(|report| report.failed.is_empty());
+        passes.push(pass);
+        if read {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(
+        matches!(passes.last(), Some(Ok(report)) if report.failed.is_empty()),
+        "a recovery pass read the engine: {passes:?}"
+    );
+    passes
+}
+
+/// A `SessionTurn` process's child root is named by the process and runs in
+/// the process's own run, so the engine never holds a `LashTurn` run of its
+/// key on any lane (FIG-4378). While the process is live, the recovery pass
+/// leaves the started root and its admitted input to it. Once the process
+/// is terminal nothing runs the root, and the pass ends it `SubstrateLost`
+/// with its input.
+async fn process_child_root(server: HarnessServer) {
+    let harness = LiveConformanceHarness::start_on(server).await;
+    let stores = harness.law_stores();
+    let registry = stores.process_registry();
+    let factory = stores.session_store_factory();
+    let session = SessionId::from(format!("process-child-root-{}", harness.run_nonce()));
+    let process_id = registry
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::SessionTurn {
+                definition_key: "process-child-root:v1".to_string(),
+                create_request: Box::new(
+                    lash_core::SessionCreateRequest::child_session(
+                        "process-child-root-parent",
+                        lash_core::SessionStartPoint::Empty,
+                        lash_core::PluginOptions::default(),
+                    )
+                    .with_session_id(&session),
+                ),
+                turn_input: Box::new(lash_core::TurnInput::text("child turn")),
+                result: lash_core::SessionTurnOutcome::Turn,
+            },
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
+        .await
+        .expect("register the SessionTurn process")
+        .id;
+    let target = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the process")
+        .expect("the process is registered")
+        .session_turn_root()
+        .expect("a SessionTurn process runs a child root");
+    assert_eq!(target.session, session, "the child root is in its session");
+    assert_eq!(
+        target.root.as_str(),
+        process_id.as_str(),
+        "the child root is named by its process"
+    );
+    let store = lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
+            session_id: session.clone(),
+            relation: lash_core::SessionRelation::Root,
+            pending_observer_intents: vec![],
+            config: lash_core::testing::mock_session_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
+            owning_process_id: Some(process_id.clone()),
+        },
+    )
+    .await
+    .expect("store");
+    let input = store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core::TurnInputIngress::next_turn(),
+                lash_core::TurnInput::text("child turn"),
+            )
+            .with_source_key(target.root.as_str()),
+        )
+        .await
+        .expect("enqueue")
+        .input_id;
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        store.store(),
+        &session,
+        "process-child-root",
+    )
+    .await;
+    lash_core::testing::store_fixtures::admit_root_for_test(
+        store.store(),
+        &fence,
+        &target.root,
+        AdmittedHead::Input(input.clone()),
+    )
+    .await
+    .expect("admit the child root")
+    .expect("the child root's admission reaches its head");
+    let key = crate::session_driver::turn_workflow_key(&session, &target.root);
+    assert!(
+        harness
+            .admin_client()
+            .root_runs(
+                &crate::RestateNamespace::default(),
+                std::slice::from_ref(&key)
+            )
+            .await
+            .expect("root runs")
+            .is_empty(),
+        "the engine holds no LashTurn run of the child root on any lane"
+    );
+
+    let work = harness.session_work();
+    let clock = lash_core::facade_support::SystemClock;
+    let writer = lash_core::drive::StoreParkRecovery::new(factory.as_ref(), &clock);
+    let live = read_recovery_pass(&work, &writer).await;
+    assert!(
+        live.iter().all(|pass| pass
+            .as_ref()
+            .is_ok_and(|report| !report.ended_roots.contains(&target))),
+        "no pass ends the root a live process runs: {live:?}"
+    );
+    assert!(
+        factory
+            .root_terminal(&session, &target.root)
+            .await
+            .expect("terminal read")
+            .is_none(),
+        "the live process's root stays open"
+    );
+    assert!(
+        matches!(
+            factory
+                .list_pending_turn_inputs(&session)
+                .await
+                .expect("pending")
+                .as_slice(),
+            [row] if row.input.input_id == input
+                && row.status == lash_core::PendingTurnInputReadStatus::Admitted {
+                    root: target.root.clone(),
+                }
+        ),
+        "the live process's root still holds its input"
+    );
+
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("child done"),
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(process_id.as_str()),
+        )
+        .await
+        .expect("complete the process");
+    let ended = read_recovery_pass(&work, &writer).await;
+    assert!(
+        ended.iter().any(|pass| pass
+            .as_ref()
+            .is_ok_and(|report| report.ended_roots.contains(&target))),
+        "a pass ends the root once its process is terminal: {ended:?}"
+    );
+    let terminal = factory
+        .root_terminal(&session, &target.root)
+        .await
+        .expect("terminal read")
+        .expect("the root has its terminal");
+    assert_eq!(
+        terminal.cause,
+        RootTerminalCause::SubstrateLost { cancelled_by: None }
+    );
+    assert!(
+        factory
+            .list_pending_turn_inputs(&session)
+            .await
+            .expect("pending")
+            .is_empty(),
+        "the root's input is settled with it"
+    );
+    harness.finish().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_live_process_keeps_its_child_root_and_a_terminal_one_releases_it() {
+    process_child_root(HarnessServer::in_process()).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires the pinned live Restate server"]
+async fn live_a_live_process_keeps_its_child_root_and_a_terminal_one_releases_it() {
+    process_child_root(HarnessServer::Live).await;
 }
