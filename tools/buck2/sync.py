@@ -670,6 +670,7 @@ def root_buck(inventory: dict) -> str:
         [
             GENERATED_HEADER,
             'load("//tools/buck2:schema_checks.bzl", "schema_check", "schema_check_group", "schema_documents")\n\n',
+            'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")\n\n',
             suite("workspace_compile", inventory["workspace_build_targets"]),
             suite("workspace_check", inventory["workspace_check_targets"]),
             suite("workspace_tests", inventory["workspace_test_suite_labels"]),
@@ -713,9 +714,9 @@ filegroup(
     visibility = ["PUBLIC"],
 )
 
-filegroup(
+lash_workspace_sources(
     name = "workspace_rust_sources",
-    srcs = ''' + json.dumps(inventory["workspace_rust_source_targets"], indent=8) + ''',
+    deps = ''' + json.dumps(inventory["workspace_rust_source_targets"], indent=8) + ''',
     visibility = ["PUBLIC"],
 )
 
