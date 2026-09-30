@@ -293,6 +293,8 @@ pub mod tools {
     pub use lash_core::ToolControl;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
+    /// The pending model call passed to a tool's preparation hook.
+    pub use lash_core::sansio::PendingToolCall;
     /// Collected replies returned by a runtime tool batch.
     pub use lash_core::session::ToolBatchReplies;
     pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;

@@ -232,6 +232,11 @@ The app builds a `LashCore` via `LashCore::rlm_builder`, activates `DemoPlugin` 
 `SessionBuilder::plugin::<DemoPlugin>(...)`, and lets the plugin provide
 its fixed app tools through the normal `ToolProvider` hook.
 
+Board tools seal their chat id in the prepared call. A session supplies its own
+id; a process supplies its recorded session originator. A host-originated
+process has no implicit chat and its board call is refused. Attempts read the
+sealed chat id, including after replay, without requiring a process session.
+
 The plugin demonstrates:
 
 - Typed session activation through `PluginBinding::SessionConfig`.

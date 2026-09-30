@@ -1,14 +1,16 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lash::process::ProcessOriginator;
 use lash::sync::MutexExt;
 use lash::{
     PluginBinding,
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
     prompt::PromptContribution,
     tools::{
-        StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
-        ToolDefinition, ToolDefinitionBindingExt, ToolOutcome,
+        PendingToolCall, PreparedToolCall, StaticToolExecute, StaticToolProvider,
+        ToolAttemptOutcome, ToolBinding, ToolCall, ToolDefinition, ToolDefinitionBindingExt,
+        ToolId, ToolOutcome, ToolPrepareContext,
     },
 };
 use serde_json::json;
@@ -87,15 +89,44 @@ struct DemoTools {
     db: Arc<Mutex<AppDb>>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PreparedBoardCall {
+    chat_id: lash::SessionId,
+}
+
 #[async_trait]
 impl StaticToolExecute for DemoTools {
+    async fn prepare_tool_call(
+        &self,
+        tool_id: &ToolId,
+        pending: PendingToolCall,
+        context: &ToolPrepareContext,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        let chat_id = match context.owner() {
+            lash::RuntimeOwner::Session(session_id) => session_id,
+            lash::RuntimeOwner::Process(_) => match context.process_originator() {
+                Some(ProcessOriginator::Session { session_id, .. }) => session_id,
+                _ => {
+                    return Err(ToolOutcome::err_fmt(
+                        "the board call has no originating chat",
+                    ));
+                }
+            },
+        };
+        let payload = serde_json::to_value(PreparedBoardCall {
+            chat_id: chat_id.clone(),
+        })
+        .map_err(ToolOutcome::err_fmt)?;
+        Ok(PreparedToolCall::identity(tool_id.clone(), pending).with_prepared_payload(payload))
+    }
+
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            // The board belongs to the chat session; a process has none.
-            let session_id = match call.context.session_id() {
-                Ok(session_id) => session_id.as_str(),
+            let prepared = match call.context.decode_prepared_payload::<PreparedBoardCall>() {
+                Ok(prepared) => prepared,
                 Err(err) => return ToolOutcome::err_fmt(err),
             };
+            let session_id = prepared.chat_id.as_str();
             match call.name() {
                 "read_board" => match load_chat_board_for_tool(&self.db, session_id) {
                     Ok(board) => ToolOutcome::ok(board_snapshot(&board)),
@@ -175,4 +206,70 @@ fn apply_agent_move_for_tool(
     let mut db = db.lock_recover();
     db.apply_agent_move(chat_id, cell)
         .map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash::RuntimeOwner;
+    use lash::ToolCallId;
+    use lash::process::ProcessOriginator;
+    use lash::tools::{ToolId, ToolPrepareContext};
+
+    fn pending() -> PendingToolCall {
+        PendingToolCall {
+            call_id: ToolCallId::fixture("board-read"),
+            provider_call_id: None,
+            tool_name: "read_board".to_string(),
+            args: json!({}),
+            replay: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_process_board_call_is_bound_to_its_originating_chat() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let tools = DemoTools {
+            db: Arc::new(Mutex::new(
+                AppDb::open(&temp.path().join("app.db")).expect("app db"),
+            )),
+        };
+        let context = ToolPrepareContext::for_testing(
+            RuntimeOwner::Process(lash::ProcessId::fixture("process-without-a-session")),
+            Arc::new(lash::testing::MockSessionManager::default()),
+            Some(ProcessOriginator::Session {
+                session_id: "originating-chat".into(),
+                agent_frame_id: None,
+            }),
+        );
+        let call = tools
+            .prepare_tool_call(&ToolId::new("tool:read_board"), pending(), &context)
+            .await
+            .expect("prepare board read");
+        assert_eq!(
+            call.prepared_payload,
+            json!({"chat_id": "originating-chat"})
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_process_has_no_implicit_chat_board() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let tools = DemoTools {
+            db: Arc::new(Mutex::new(
+                AppDb::open(&temp.path().join("app.db")).expect("app db"),
+            )),
+        };
+        let context = ToolPrepareContext::for_testing(
+            RuntimeOwner::Process(lash::ProcessId::fixture("host-process")),
+            Arc::new(lash::testing::MockSessionManager::default()),
+            Some(ProcessOriginator::host()),
+        );
+        assert!(
+            tools
+                .prepare_tool_call(&ToolId::new("tool:read_board"), pending(), &context)
+                .await
+                .is_err()
+        );
+    }
 }
