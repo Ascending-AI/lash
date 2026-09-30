@@ -511,21 +511,32 @@ def check_external_buildscripts() -> None:
         f"missing build scripts: {sorted(expected - actual)}; "
         f"unexpected build scripts: {sorted(actual - expected)}"
     )
-    native_link_buildscripts = {
-        "aws-lc-sys",
-        "libsqlite3-sys",
-        "ring",
-    }
-    native_link_blocks = {
-        re.search(r'^\s*package_name = "([^"]+)"', block, re.M).group(1): block
-        for block in re.findall(r"third_party_buildscript_run\(\n(.*?)\n\)\n", generated, re.S)
-        if re.search(r'^\s*package_name = "([^"]+)"', block, re.M).group(1)
-        in native_link_buildscripts
-    }
-    assert native_link_blocks.keys() == native_link_buildscripts
-    for name, block in native_link_blocks.items():
-        assert "rustc_link_lib = True" in block, f"{name} drops cargo:rustc-link-lib"
-        assert "rustc_link_search = True" in block, f"{name} drops cargo:rustc-link-search"
+    spec = importlib.util.spec_from_file_location("buck2_sync_links", HERE / "sync.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    opt_outs = module.buildscript_link_opt_outs()
+    for block in re.findall(r"third_party_buildscript_run\(\n(.*?)\n\)\n", generated, re.S):
+        name = re.search(r'^\s*package_name = "([^"]+)"', block, re.M).group(1)
+        for directive in module.BUILDSCRIPT_LINK_DIRECTIVES:
+            enabled = f"    {directive} = True,\n" in block + "\n"
+            expected_enabled = directive not in opt_outs.get(name, ())
+            assert enabled == expected_enabled, (
+                f"{name} build script {'drops' if expected_enabled else 'forwards opted-out'} "
+                f"cargo:{directive.replace('_', '-')}"
+            )
+    # Linux builds compile these packages' native objects in their build
+    # scripts; the linked binaries need the emitted static archives.
+    for name in ("aws-lc-sys", "blake3", "libsqlite3-sys", "ring"):
+        assert name not in opt_outs, f"{name} must forward its native link output"
+    # `rustc-link-arg*` applies only to the emitting package's own linked
+    # targets. Third-party packages must therefore contribute libraries only.
+    third_party_binaries = re.findall(r"third_party_rust_binary\(\n(.*?)\n\)\n", generated, re.S)
+    assert third_party_binaries
+    for block in third_party_binaries:
+        assert '"CARGO_CRATE_NAME": "build_script_' in block, block.splitlines()[0]
+    assert '"cdylib"' not in generated
+    check_buildscript_link_projection(module)
     metadata_edges = {
         re.search(r'^\s*name = "([^"]+)"', block, re.M).group(1): sorted(
             re.findall(r'":([^"\]]+\[metadata\])"', block)
@@ -543,6 +554,70 @@ def check_external_buildscripts() -> None:
             "wasm-bindgen-shared-0.2-build-script-run[metadata]"
         ],
     }
+
+
+def check_buildscript_link_projection(module) -> None:
+    """The generator forwards link output by default and honors documented opt-outs."""
+    block = (
+        "third_party_buildscript_run(\n"
+        '    name = "{name}-build-script-run",\n'
+        '    package_name = "{name}",\n'
+        '    buildscript_rule = ":{name}-build-script-build",\n'
+        '    version = "1.0.0",\n'
+        ")\n"
+    )
+    content = block.format(name="native") + block.format(name="quiet")
+    rendered = module.enable_buildscript_link_directives(
+        content, {"quiet": frozenset({"rustc_link_search"})}
+    )
+    assert rendered == (
+        block.format(name="native").replace(
+            '    version = "1.0.0"',
+            "    rustc_link_lib = True,\n    rustc_link_search = True,\n    version = \"1.0.0\"",
+        )
+        + block.format(name="quiet").replace(
+            '    version = "1.0.0"', '    rustc_link_lib = True,\n    version = "1.0.0"'
+        )
+    )
+    for bad, opt_outs in (
+        (block.format(name="native").replace("    version", "    rustc_link_lib = True,\n    version"), {}),
+        (content, {"absent": frozenset({"rustc_link_lib"})}),
+    ):
+        try:
+            module.enable_buildscript_link_directives(bad, opt_outs)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("link projection accepted a conflicting or stale setting")
+
+    with tempfile.TemporaryDirectory(prefix="lash-link-fixups-") as directory:
+        root = pathlib.Path(directory)
+        fixup = root / "tools/buck2/fixups/quiet/fixups.toml"
+        fixup.parent.mkdir(parents=True)
+        original = module.ROOT, module.BUCK2
+        module.ROOT, module.BUCK2 = root, root / "tools/buck2"
+        try:
+            fixup.write_text(
+                "[buildscript.run]\n# The search path names a host-only directory.\n"
+                "rustc_link_search = false\n",
+                encoding="utf-8",
+            )
+            assert module.buildscript_link_opt_outs() == {
+                "quiet": frozenset({"rustc_link_search"})
+            }
+            for text in (
+                "[buildscript.run]\nrustc_link_search = false\n",
+                "[buildscript.run]\nrustc_link_lib = true\n",
+            ):
+                fixup.write_text(text, encoding="utf-8")
+                try:
+                    module.buildscript_link_opt_outs()
+                except SystemExit:
+                    pass
+                else:
+                    raise AssertionError(f"accepted link fixup: {text!r}")
+        finally:
+            module.ROOT, module.BUCK2 = original
 
 
 def check_buildscript_metadata_bridge() -> None:

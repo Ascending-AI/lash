@@ -213,6 +213,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.8.12",
 )
 
@@ -739,6 +741,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.103",
 )
 
@@ -1172,6 +1176,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.18.1",
 )
 
@@ -1949,6 +1955,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.8.7",
 )
 
@@ -2815,6 +2823,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.10.4",
 )
 
@@ -3978,6 +3988,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.5.0",
 )
 
@@ -4308,6 +4320,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.8.7",
 )
 
@@ -4417,6 +4431,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.9.20",
 )
 
@@ -4574,6 +4590,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.8.22",
 )
 
@@ -4682,6 +4700,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.4",
 )
 
@@ -5235,6 +5255,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.1.1",
 )
 
@@ -5338,6 +5360,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.1.1",
 )
 
@@ -7490,6 +7514,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.14.7",
 )
 
@@ -7646,6 +7672,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.3.4",
 )
 
@@ -7762,6 +7790,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.4.3",
 )
 
@@ -8781,6 +8811,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.10.1",
 )
 
@@ -9252,6 +9284,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.1.2",
 )
 
@@ -9501,6 +9535,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "2.2.0",
 )
 
@@ -9649,6 +9685,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "2.2.0",
 )
 
@@ -10583,6 +10621,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.22.4",
 )
 
@@ -10687,6 +10727,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.22.4",
 )
 
@@ -11200,6 +11242,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.186",
 )
 
@@ -12191,6 +12235,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.31.3",
 )
 
@@ -12789,6 +12835,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.19",
 )
 
@@ -12910,6 +12958,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.37.3",
 )
 
@@ -13501,6 +13551,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.9.12",
 )
 
@@ -14246,6 +14298,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.15.0",
 )
 
@@ -14346,6 +14400,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.7",
 )
 
@@ -14634,6 +14690,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.37",
 )
 
@@ -14743,6 +14801,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.106",
 )
 
@@ -15203,6 +15263,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.11.11",
 )
 
@@ -15371,6 +15433,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.5.15",
 )
 
@@ -15480,6 +15544,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.46",
 )
 
@@ -16210,6 +16276,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.13.0",
 )
 
@@ -16403,6 +16471,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.26",
 )
 
@@ -17061,6 +17131,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.11.1",
 )
 
@@ -17484,6 +17556,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.8.0",
 )
 
@@ -17973,6 +18047,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.1.4",
 )
 
@@ -18102,6 +18178,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.23.45",
 )
 
@@ -18446,6 +18524,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.23",
 )
 
@@ -18793,6 +18873,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.8.22",
 )
 
@@ -19365,6 +19447,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.228",
 )
 
@@ -19530,6 +19614,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.228",
 )
 
@@ -19843,6 +19929,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.150",
 )
 
@@ -22343,6 +22431,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.0",
 )
 
@@ -22548,6 +22638,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "2.0.18",
 )
 
@@ -25239,6 +25331,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.1.1",
 )
 
@@ -25709,6 +25803,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.126",
 )
 
@@ -25956,6 +26052,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.2.126",
 )
 
@@ -27324,6 +27422,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -27420,6 +27520,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -27516,6 +27618,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -27612,6 +27716,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -27708,6 +27814,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -27804,6 +27912,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -27900,6 +28010,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -27996,6 +28108,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -28092,6 +28206,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -28188,6 +28304,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -28284,6 +28402,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -28380,6 +28500,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -28476,6 +28598,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -28572,6 +28696,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.48.5",
 )
 
@@ -28668,6 +28794,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.52.6",
 )
 
@@ -28807,6 +28935,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.57.1",
 )
 
@@ -29112,6 +29242,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.8.54",
 )
 
@@ -29604,5 +29736,7 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "1.0.21",
 )

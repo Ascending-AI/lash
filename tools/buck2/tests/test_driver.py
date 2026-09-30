@@ -63,6 +63,41 @@ class DriverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No generated clippy output'):
             self.command(['clippy', '//unknown:label'], inventory)
 
+    def test_package_recursive_patterns_select_each_operation_output(self):
+        inventory = {
+            'packages': [
+                {'targets': [
+                    {'label': '//crates/sql:sql', 'build_label': '//crates/sql:sql[static]', 'check_label': '//crates/sql:sql[check]', 'clippy_label': '//crates/sql:sql[clippy.txt]'},
+                    {'label': '//crates/sql:sql__unit_test', 'build_label': '//crates/sql:sql__unit_test', 'check_label': '//crates/sql:sql__unit_test[check]', 'clippy_label': '//crates/sql:sql__unit_test[clippy.txt]', 'tags': ['manual']},
+                ]},
+                {'targets': [{'label': '//crates/sql/nested:nested', 'check_label': '//crates/sql/nested:nested[check]'}]},
+                {'targets': [{'label': '//crates/sqlite:sqlite', 'check_label': '//crates/sqlite:sqlite[check]'}]},
+                {'targets': [{'cargo': 'cargo_only', 'label': None}]},
+            ],
+            'feature_lane_units': [{'label': '//crates/sql:sql__fv_1', 'check_label': '//crates/sql:sql__fv_1[check]'}],
+        }
+        check = self.command(['check', '//crates/sql/...'], inventory)
+        self.assertEqual(check[-3:], ['//crates/sql:sql[check]', '//crates/sql:sql__unit_test[check]', '//crates/sql/nested:nested[check]'])
+        self.assertNotIn('//crates/sql/...', check)
+        self.assertEqual(self.command(['check', 'root//crates/sql:all'], inventory)[-2:], ['//crates/sql:sql[check]', '//crates/sql:sql__unit_test[check]'])
+        self.assertEqual(len([arg for arg in self.command(['check', '//...'], inventory) if arg.endswith('[check]')]), 4)
+        self.assertEqual(self.command(['clippy', '//crates/sql:'], inventory)[-2:], ['//crates/sql:sql[clippy.txt]', '//crates/sql:sql__unit_test[clippy.txt]'])
+        self.assertEqual(self.command(['build', '//crates/sql/...'], inventory)[-2:], ['//crates/sql:sql[static]', '//crates/sql:sql__unit_test'])
+        self.assertEqual(self.command(['build', '//tools/buck2/...'], inventory)[-1], '//tools/buck2/...')
+        for operation in ('check', 'clippy', 'doc'):
+            with self.subTest(operation=operation), self.assertRaisesRegex(ValueError, f'No generated {operation} targets match //tools/...'):
+                self.command([operation, '//tools/...'], inventory)
+
+    def test_test_and_analyze_accept_package_recursive_patterns(self):
+        command = self.command(['test', '//crates/sql/...'])
+        self.assertIn('//crates/sql/...', command[:command.index('--')])
+        analyze = self.command(['--local', 'analyze', '//crates/sql/...', 'root//crates/core:core'])
+        self.assertEqual(analyze[-1], 'deps(//crates/sql/...) + deps(//crates/core:core)')
+        self.assertEqual(self.command(['--local', 'analyze'])[-1], 'deps(//:workspace_compile)')
+        for bad in ('--show-output', '//a) + deps(//b', '//crates/sql:sql[check]'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'analyze accepts only target labels and patterns'):
+                self.command(['--local', 'analyze', bad])
+
     def test_test_controls_do_not_disable_compile_cache(self):
         command = self.command(['test', '--local-test-execution', '--no-test-cache', '--test_arg=--ignored', '--test_timeout=1200', '//store:unit_test'])
         front, runner = command[:command.index('--')], command[command.index('--') + 1:]

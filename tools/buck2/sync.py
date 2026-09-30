@@ -345,6 +345,83 @@ def validate_buildscript_fixups(canonical: dict) -> None:
         )
 
 
+# Cargo hands every build script's `rustc-link-lib` and `rustc-link-search`
+# output to rustc.  Reindeer translates them only when a crate's fixups set
+# `rustc_link_lib`/`rustc_link_search`, and it has no global default, so the
+# generator enables both on every generated build-script run.  A crate opts
+# out in its fixups.toml with `rustc_link_lib = false` (or
+# `rustc_link_search = false`) directly beneath a comment giving the reason.
+# `rustc-link-arg*` needs no projection: Cargo applies it only to the emitting
+# package's own linked targets, and third-party packages contribute libraries.
+BUILDSCRIPT_LINK_DIRECTIVES = ("rustc_link_lib", "rustc_link_search")
+
+
+def buildscript_link_opt_outs() -> dict[str, frozenset[str]]:
+    opt_outs = {}
+    for path in sorted((BUCK2 / "fixups").glob("*/fixups.toml")):
+        text = path.read_text(encoding="utf-8")
+        run = tomllib.loads(text).get("buildscript", {}).get("run")
+        if not isinstance(run, dict):
+            continue
+        relative = path.relative_to(ROOT)
+        disabled = set()
+        for directive in BUILDSCRIPT_LINK_DIRECTIVES:
+            value = run.get(directive)
+            if value is None:
+                continue
+            if value is not False:
+                raise SystemExit(
+                    f"{relative}: {directive} is enabled for every build script by "
+                    "tools/buck2/sync.py; remove the redundant fixup"
+                )
+            if not re.search(rf"^[ \t]*#.*\n[ \t]*{directive}[ \t]*=[ \t]*false\b", text, re.M):
+                raise SystemExit(
+                    f"{relative}: the {directive} opt-out needs a comment on the line "
+                    "above explaining why the directive must not apply"
+                )
+            disabled.add(directive)
+        if disabled:
+            opt_outs[path.parent.name] = frozenset(disabled)
+    return opt_outs
+
+
+def enable_buildscript_link_directives(
+    content: str, opt_outs: dict[str, frozenset[str]]
+) -> str:
+    """Forward build-script native link output unless a fixup opts out."""
+    seen = set()
+
+    def inject(match: re.Match[str]) -> str:
+        block = match.group(1)
+        package = re.search(r'^    package_name = "([^"]+)",$', block, re.M)
+        version = re.search(r'^    version = "[^"]+",$', block, re.M)
+        if package is None or version is None:
+            raise SystemExit("generated build-script rule lacks package_name/version")
+        name = package.group(1)
+        if "rustc_link_" in block:
+            raise SystemExit(
+                f"Reindeer emitted link directive settings for {name}; "
+                "tools/buck2/sync.py owns them"
+            )
+        seen.add(name)
+        rendered = "".join(
+            f"    {directive} = True,\n"
+            for directive in BUILDSCRIPT_LINK_DIRECTIVES
+            if directive not in opt_outs.get(name, ())
+        )
+        block = block[: version.start()] + rendered + block[version.start() :]
+        return "third_party_buildscript_run(\n" + block + "\n)\n"
+
+    output = re.sub(r"third_party_buildscript_run\(\n(.*?)\n\)\n", inject, content, flags=re.S)
+    stale = sorted(opt_outs.keys() - seen)
+    if stale:
+        raise SystemExit(
+            "build-script link opt-outs name packages without a generated build script:\n  "
+            + "\n  ".join(stale)
+        )
+    return output
+
+
 def reindeer() -> pathlib.Path:
     path = BUCK2 / "bin/reindeer"
     if not path.is_file():
@@ -1003,7 +1080,10 @@ def main() -> int:
     derived = metadata(SYNTHETIC / "Cargo.toml")
     validate_synthetic(canonical, derived)
     validate_buildscript_fixups(derived)
-    third_party_buck = inject_buildscript_metadata(buckify_stdout(), derived)
+    third_party_buck = inject_buildscript_metadata(
+        enable_buildscript_link_directives(buckify_stdout(), buildscript_link_opt_outs()),
+        derived,
+    )
     targets = parse_third_party_targets(third_party_buck)
     outputs[ROOT / "third-party/rust/BUCK"] = third_party_buck
     outputs[BUCK2 / "deps.bzl"] = deps_bzl(dependency_table(canonical, targets))

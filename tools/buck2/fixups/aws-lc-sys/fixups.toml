@@ -1,6 +1,2 @@
-[buildscript.run]
-rustc_link_lib = true
-rustc_link_search = true
-
 [buildscript.run.env]
 AWS_LC_SYS_CMAKE_BUILDER = "0"

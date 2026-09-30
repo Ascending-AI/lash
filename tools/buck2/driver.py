@@ -5,6 +5,7 @@ import configparser
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -89,11 +90,36 @@ def resolve_environment(entries, environment):
     return values
 
 
+TARGET_PATTERN = re.compile(r'^//(?:[A-Za-z0-9_.+-]+(?:/[A-Za-z0-9_.+-]+)*)?(?:/\.\.\.|\.\.\.|:[A-Za-z0-9_.+=,@~*-]*)?$')
+
+
+def package_pattern(label):
+    """Return (package, recursive) for `//pkg/...` or `//pkg:all`-style patterns."""
+    if label == '//...':
+        return '', True
+    if label.endswith('/...'):
+        return label[2:-4], True
+    if label.endswith((':', ':all', ':*')):
+        return label[2:].rsplit(':', 1)[0], False
+    return None
+
+
+def pattern_matches(pattern, label):
+    package, recursive = pattern
+    owner = label[2:].split(':', 1)[0]
+    return owner == package or (recursive and (not package or owner.startswith(package + '/')))
+
+
 def expand_labels(tokens, inventory, operation):
-    records = [target for package in inventory['packages'] for target in package['targets']]
-    records += inventory.get('feature_lane_units', [])
+    ordinary = [target for package in inventory['packages'] for target in package['targets']]
+    records = ordinary + inventory.get('feature_lane_units', [])
     field = 'build_label' if operation == 'build' else operation + '_label'
     mapping = {target['label']: target[field] for target in records if field in target}
+    # A wildcard names the generated Cargo targets beneath it, each mapped to
+    # the operation's output exactly as if listed. Passing it to Buck2 instead
+    # would build default outputs, so check and clippy would link or skip lint.
+    # Feature-lane variants stay behind their explicit //:feature_lane_* groups.
+    selectable = [target for target in ordinary if target.get('label') and field in target]
     groups = {
         'build_label': {'//:workspace_compile': 'workspace_build_targets', '//:feature_lane_compile': 'feature_lane_build_targets'},
         'check_label': {'//:workspace_check': 'workspace_check_targets', '//:workspace_compile': 'workspace_check_targets', '//:feature_lane_compile': 'feature_lane_check_targets'},
@@ -112,7 +138,17 @@ def expand_labels(tokens, inventory, operation):
             skip_value = True
             continue
         key = token.removeprefix('root') if token.startswith('root//') else token
-        if key in groups:
+        pattern = package_pattern(key) if key.startswith('//') else None
+        if pattern is not None:
+            matched = [target[field] for target in selectable if pattern_matches(pattern, target['label'])]
+            if matched:
+                expanded.extend(matched)
+            elif operation == 'build':
+                # Stock Buck2 builds non-Cargo packages such as tool rules.
+                expanded.append(token)
+            else:
+                raise ValueError(f'No generated {operation} targets match {key}')
+        elif key in groups:
             targets = inventory.get(groups[key])
             if not targets:
                 raise ValueError(f'No generated {operation} targets for {key}; run sync')
@@ -154,9 +190,11 @@ def command(options, remaining, executable, root, inventory=None):
         from test_selection import target_positions
         labels = target_positions(args)
     if operation == 'analyze':
-        if args:
-            raise ValueError('analyze accepts no arguments')
-        args = ['--show-providers', 'deps(//:workspace_compile)']
+        universe = [arg.removeprefix('root') if arg.startswith('root//') else arg for arg in args] or ['//:workspace_compile']
+        invalid = [arg for arg in universe if not TARGET_PATTERN.match(arg)]
+        if invalid:
+            raise ValueError('analyze accepts only target labels and patterns: ' + ' '.join(invalid))
+        args = ['--show-providers', ' + '.join(f'deps({label})' for label in universe)]
     elif operation == 'run':
         if not labels:
             raise ValueError('run requires an explicit target')
