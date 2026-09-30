@@ -2176,24 +2176,17 @@ async fn runners_for_case_with_clock(
     );
     let sqlite_lifecycle: lash::Backend =
         held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
-    // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
-    // store set, and the session delete it drives needs some effect-host
-    // authority to retire scopes against — a recording host is enough; the
-    // differential certifies the rows, not the journal.
-    let postgres_effects: Arc<dyn lash_core::EffectHost> =
-        Arc::new(lash_conformance::RecordingEffectHost::default());
     let postgres_lifecycle: lash::Backend =
-        held_work_lifecycle_backend(lash_conformance::backend_over(
-            Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+        held_work_lifecycle_backend(lash_conformance::recording_backend_over(Arc::new(
+            lash_postgres_store::PostgresStoreSet::with_clock(
                 postgres,
                 Arc::new(lash::persistence::FileAttachmentStore::new(
                     sqlite_case_root.join("postgres-attachments"),
                 )),
                 lash_core::WakeDeliveryConfig::default(),
                 Arc::clone(&clock),
-            )),
-            postgres_effects,
-        ));
+            ),
+        )));
 
     vec![
         BackendRunner {
