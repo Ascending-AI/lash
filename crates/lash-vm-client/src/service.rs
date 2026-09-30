@@ -286,7 +286,22 @@ impl Service {
         &self,
         scope: &str,
     ) -> Result<crate::RecoveryExecution, PoolError> {
-        use lash_core_execution::store::worker_recovery::WorkerRecoveryLimits;
+        self.begin_execution_from(scope, Default::default()).await
+    }
+    /// Reserve `scope` for an execution that continues work earlier scopes
+    /// already consumed `carried` of (ADR 0123): a process body reserves a
+    /// scope per segment boundary and carries the totals its boundary
+    /// recorded. The reservation starts from no less than `carried`, and the
+    /// row is seeded with it before any worker launches, so a redrive of
+    /// this scope counts on from the carried totals too.
+    pub async fn begin_execution_from(
+        &self,
+        scope: &str,
+        carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
+    ) -> Result<crate::RecoveryExecution, PoolError> {
+        use lash_core_execution::store::worker_recovery::{
+            WorkerRecoveryError, WorkerRecoveryLimits,
+        };
         let store = self
             .recovery
             .as_ref()
@@ -304,10 +319,23 @@ impl Service {
                 .try_into()
                 .map_err(|_| PoolError::InvalidConfiguration)?,
         };
-        let claim = store
+        let mut claim = store
             .reserve(scope, limits)
             .await
             .map_err(crate::recovery::recovery_error)?;
+        let seeded = crate::recovery::at_least(claim.baseline, carried);
+        if seeded != claim.baseline {
+            if seeded.cpu_nanos >= limits.max_cpu_nanos {
+                return Err(crate::recovery::recovery_error(
+                    WorkerRecoveryError::CpuExhausted,
+                ));
+            }
+            store
+                .settle(&claim, seeded)
+                .await
+                .map_err(crate::recovery::recovery_error)?;
+            claim.baseline = seeded;
+        }
         let budget = ExecutionBudget::from_recovery(claim.baseline);
         let mut service = self.clone();
         service.budget = Some(budget.clone());

@@ -607,6 +607,7 @@ fn predecessor_envelope(
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
+        worker_recovery: Default::default(),
     })
     .expect("serialize segment-state writer");
     wire["vm"] = serde_json::to_value(continuation).expect("serialize the inline continuation");
@@ -889,6 +890,7 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
+        worker_recovery: Default::default(),
     };
     let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
     assert_eq!(wire["version"], LASHLANG_SEGMENT_STATE_VERSION);
@@ -948,6 +950,7 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         pending_summary: writer.pending(),
         effect_omissions: writer.omissions(),
         outstanding_groups: Vec::new(),
+        worker_recovery: Default::default(),
     })
     .expect("encode the boundary's segment state");
     let decoded = decode_lashlang_segment_state(&encoded).expect("decode the segment state");

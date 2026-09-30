@@ -297,8 +297,8 @@ impl Engine {
 
     /// The names of `invocation`'s journaled `ctx.run` commands, in order,
     /// where the server keeps the journal of a completed invocation: the
-    /// double does, a live server's default retention does not.
-    fn run_names(&self, invocation: &str) -> Option<Vec<String>> {
+    /// double does, a live server only under a journal retention.
+    async fn run_names(&self, invocation: &str) -> Option<Vec<String>> {
         match self {
             Self::Double(backend) => Some(
                 backend
@@ -310,7 +310,19 @@ impl Engine {
                     .filter_map(|entry| entry.name)
                     .collect(),
             ),
-            Self::Live { .. } => None,
+            Self::Live { backend, .. } => {
+                let journal = backend
+                    .journal(invocation)
+                    .await
+                    .expect("read the invocation's journal");
+                (!journal.is_empty()).then(|| {
+                    journal
+                        .iter()
+                        .filter_map(|entry| entry.split_once(":Command: Run:"))
+                        .map(|(_, name)| name.to_owned())
+                        .collect()
+                })
+            }
         }
     }
 
@@ -942,7 +954,7 @@ async fn a_presentation_put_before_its_journal_crash_replays_one_presentation(en
         children[0].status, "completed",
         "the child ended: {children:#?}"
     );
-    if let Some(runs) = engine.run_names(&children[0].id) {
+    if let Some(runs) = engine.run_names(&children[0].id).await {
         let presentations: Vec<_> = runs
             .into_iter()
             .filter(|name| name.ends_with(":present"))

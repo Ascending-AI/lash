@@ -230,6 +230,11 @@ struct LashlangSegmentState {
     /// unsettled; the successor segment reattaches these cursors and the
     /// process terminal closes them.
     outstanding_groups: Vec<lash_core::EffectGroupHandle>,
+    /// The worker accounting the body carries across this boundary
+    /// (ADR 0123). Absent from a handover written before it existed: that
+    /// successor reserves boundary 0's successor with fresh totals.
+    #[serde(default)]
+    worker_recovery: WorkerRecoveryLedger,
 }
 
 #[cfg(test)]
@@ -350,34 +355,30 @@ pub(crate) fn validate_lashlang_process_for_run(
 
 pub async fn run_lashlang_process(
     mut engine: LashlangProcessEngine,
-    context: lash_core::ProcessEngineRunContext<'_>,
+    mut context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-    let scope =
-        lash_vm_broker::CodeCallIdentities::process_body(context.process_id().clone()).scope();
-    let recovery = match engine.workers.begin_execution(&scope).await {
-        Ok(recovery) => recovery,
-        Err(
-            error @ (lash_vm_client::PoolError::RetryLimitExceeded
-            | lash_vm_client::PoolError::Infrastructure(
-                lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { .. },
-            )),
-        ) => {
-            return Ok(process_lashlang_failure(
-                LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
-                error.to_string(),
-                None,
-            )
-            .into());
-        }
-        Err(error) => {
-            return Err(lash_core::ProcessInfraError::new(
-                lash_core::PluginError::Session(error.to_string()),
-            ));
-        }
-    };
+    let handover = context.take_handover();
+    let ledger = WorkerRecoveryLedger::carried(handover.as_ref());
+    // The reservation is live accounting, read outside any recorded step,
+    // and its answer differs between executions of one segment. A refusal
+    // therefore decides nothing the journal holds: the attempt fails
+    // retryably with no command issued, where a terminal proposed here
+    // would stand at a position a re-execution's journal already recorded
+    // the body's commands at (ADR 0105 §1, FIG-4422). A body whose budget
+    // stays exhausted parks once its engine's bounded retry runs out.
+    let recovery = engine
+        .workers
+        .begin_execution_from(&ledger.scope(context.process_id()), ledger.totals)
+        .await
+        .map_err(|error| {
+            lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+        })?;
     engine.workers = recovery.service().clone();
-    let result = Box::pin(run_lashlang_process_scoped(engine, context, payload)).await;
+    let result = Box::pin(run_lashlang_process_scoped(
+        engine, context, payload, handover, ledger,
+    ))
+    .await;
     recovery.settle().await.map_err(|error| {
         lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
     })?;
@@ -390,10 +391,11 @@ pub async fn run_lashlang_process(
 )]
 async fn run_lashlang_process_scoped(
     engine: LashlangProcessEngine,
-    mut context: lash_core::ProcessEngineRunContext<'_>,
+    context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
+    handover: Option<lash_core::SegmentHandover>,
+    worker_recovery: WorkerRecoveryLedger,
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-    let handover = context.take_handover();
     let is_initial_segment = handover.is_none();
     let segment_controller = context.scoped_effect_controller();
     let phase_probe = context.turn_phase_probe();
@@ -628,6 +630,7 @@ async fn run_lashlang_process_scoped(
         }),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         ordinals,
+        worker_recovery,
         cancellation: cancellation.clone(),
         effect_summary: segment_state
             .as_ref()
@@ -902,6 +905,10 @@ struct LashlangProcessHost<'run> {
     /// handover that resumed the run (or zeroed for a first segment) and
     /// snapshotted into the next boundary's envelope.
     ordinals: ReplayOrdinals,
+    /// The worker accounting the handover that resumed the run carried (or
+    /// the first segment's): its boundary keys this run's reservation, and
+    /// the next boundary's envelope carries it on.
+    worker_recovery: WorkerRecoveryLedger,
     /// This run's recorded cancellation fact, read by the VM's cooperative
     /// cancellation probe so a cancelled process terminates as an uncatchable
     /// host terminal instead of running to completion inside a guest handler.
@@ -1735,7 +1742,11 @@ pub use trace_map::{
 
 #[path = "process/resource_invocation.rs"]
 mod resource_invocation;
+
+#[path = "process/worker_recovery.rs"]
+mod worker_recovery;
 use resource_invocation::PreparedResourceInvocation;
+use worker_recovery::WorkerRecoveryLedger;
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]
@@ -1747,5 +1758,9 @@ mod signal_wait_tests;
 #[cfg(test)]
 #[path = "process/opaque_state_tests.rs"]
 mod opaque_state_tests;
+
+#[cfg(test)]
+#[path = "process/worker_recovery_tests.rs"]
+mod worker_recovery_tests;
 
 mod definition_publication;

@@ -391,6 +391,22 @@ so the worst-case work bound is `(attempts × per-attempt CPU cap) + known CPU`.
 Known CPU and consumed attempts remain monotone across redrives. SQLite and
 PostgreSQL store this accounting independently of positional effect journals.
 
+A process body reserves one scope per segment boundary. The engine re-executes
+a segment that already handed over while its successor runs live: Restate
+replays the handler from the start on each resumption. A shared scope would
+let that replay count the successor's active worker as a lost attempt and
+fence its settlement. The segment state a boundary hands over carries the
+boundary count and the totals consumed so far. The successor's first
+reservation seeds its scope with those totals before any worker launches, so
+the totals stay monotone across the whole process.
+
+The reservation is live accounting read outside every recorded step, so its
+answer decides nothing the journal holds (ADR 0105 §1). A process body whose
+reservation is refused fails its attempt retryably and issues no command. A
+terminal proposed there would sit at a position where a re-execution's journal
+already holds the body's commands. A body whose budget stays exhausted parks
+once its engine's bounded retry runs out.
+
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains
 in force across every effect response and if the parent dies. Only reset for a
