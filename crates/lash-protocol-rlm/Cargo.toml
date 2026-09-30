@@ -31,7 +31,6 @@ lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-typescript = { workspace = true }
 lashlang = { workspace = true }
-lash-vm-protocol = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-render = { workspace = true }
 async-trait = { workspace = true }

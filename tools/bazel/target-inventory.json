@@ -20878,7 +20878,6 @@
         "lash-internal-sqlite-store",
         "lash-internal-trace",
         "lash-internal-typescript",
-        "lash-internal-vm-protocol",
         "rmp-serde",
         "serde",
         "serde_bytes",
