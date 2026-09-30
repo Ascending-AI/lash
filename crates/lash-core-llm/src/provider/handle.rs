@@ -351,9 +351,9 @@ impl ProviderHandle {
                 .rate_limiter
                 .admit(self.components.provider.as_ref(), &request)
                 .await;
-            let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(
-                self.components.provider.complete(request.clone()),
-            )
+            let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(async {
+                self.components.provider.complete(request.clone()).await
+            })
             .catch_unwind()
             .await
             {
@@ -610,7 +610,7 @@ impl ProviderHandle {
     /// call this before process exit.
     /// Providers with no reusable transport state close as a no-op.
     pub async fn close(&self) -> Result<(), LlmTransportError> {
-        std::panic::AssertUnwindSafe(self.components.provider.close())
+        std::panic::AssertUnwindSafe(async { self.components.provider.close().await })
             .catch_unwind()
             .await
             .unwrap_or_else(provider_close_panicked)
@@ -621,10 +621,15 @@ impl ProviderHandle {
         &mut self,
         generation_id: &str,
     ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
-        std::panic::AssertUnwindSafe(self.components.provider.reconcile_usage(generation_id))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|payload| provider_close_panicked(payload).map(|()| None))
+        std::panic::AssertUnwindSafe(async {
+            self.components
+                .provider
+                .reconcile_usage(generation_id)
+                .await
+        })
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|payload| provider_close_panicked(payload).map(|()| None))
     }
 }
 
