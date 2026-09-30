@@ -44,7 +44,7 @@ fn assert_artifact_storage_failure<T>(
 
 #[tokio::test]
 async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open store");
     let blob_ref = BlobRef("corrupt-non-msgpack-blob".to_string());
@@ -67,7 +67,7 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
 
 #[tokio::test]
 async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open blob store");
     for (name, version, compression) in [
@@ -514,7 +514,7 @@ async fn seed_failure_evidence_session(
     session_id: &str,
     bad_result_json: &str,
 ) -> Arc<SqliteStore> {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open receipt store");
     store
@@ -648,7 +648,7 @@ async fn turn_failure_evidence_refuses_a_newer_receipt_version() {
 
 #[tokio::test]
 async fn absent_rows_remain_honest_successful_outcomes() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open store");
     let unknown = SessionId::from("never-admitted");
@@ -929,7 +929,7 @@ async fn corrupt_graph_node_surfaces_typed_corruption_from_history_reads() {
 
 #[tokio::test]
 async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open store");
     let session_id = SessionId::from("closed");

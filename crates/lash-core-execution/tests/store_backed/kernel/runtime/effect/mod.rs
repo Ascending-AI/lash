@@ -17,7 +17,7 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_effect_envelope_and_request_specs_round_trip_without_live_fields() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let attachment_store = crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store());
         let llm_request = CoreLlmRequest {
             instructions: Some(Arc::from("I")),

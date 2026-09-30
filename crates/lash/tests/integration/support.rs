@@ -26,7 +26,7 @@ pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestB
 }
 
 /// A fresh SQLite memory store set: storage ports only, no engine.
-pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
     Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -36,7 +36,7 @@ pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet>
 
 /// A backend over a fresh SQLite memory store set whose effect host only
 /// records: for a test that needs a backend value but runs no effect.
-pub(crate) async fn memory_store_backend() -> lash_core::Backend {
-    let stores = memory_store_set().await;
+pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
+    let stores = sqlite_memory_store_set().await;
     lash_conformance::recording_backend_over(stores)
 }

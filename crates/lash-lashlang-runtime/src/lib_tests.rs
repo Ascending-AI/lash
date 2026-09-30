@@ -6,15 +6,15 @@ use lashlang::testing::ast_builders as b;
 const SEED: u64 = 0x1a5_1a9;
 
 /// A storage-backed test backend for paths that do not execute engine effects.
-pub(crate) async fn memory_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(memory_store_set().await)
+pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
+    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
 }
 
 /// A fresh memory store set's Lashlang artifact store: a storage port a test
 /// reaches without an engine.
 pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
     use lash_core_execution::StoreSet;
-    LashlangArtifacts::new(memory_store_set().await.module_artifacts())
+    LashlangArtifacts::new(sqlite_memory_store_set().await.module_artifacts())
 }
 
 thread_local! {
@@ -24,9 +24,9 @@ thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of `memory_backend` for a test that
+/// rest of the running test: the twin of `sqlite_recording_backend` for a test that
 /// reaches only store ports.
-pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -2432,7 +2432,7 @@ async fn nested_signal_admission_registers_each_process_payload_independently() 
 async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
     use lash_core_execution::StoreSet;
     super::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(
-        memory_store_set().await.module_artifacts(),
+        sqlite_memory_store_set().await.module_artifacts(),
     )
     .await;
 }

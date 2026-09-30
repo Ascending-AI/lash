@@ -417,7 +417,7 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
             ExecRequest {
                 code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::new()
@@ -1051,7 +1051,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             ExecRequest {
                 code: "let scratch_note = \"after execution\";".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -1112,7 +1112,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &mut state,
             ctx,
             ExecRequest { code },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),

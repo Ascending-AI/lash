@@ -293,7 +293,9 @@ fn gate() -> lash_sansio::EffectJournalIdentity {
 /// frame, and neither may keep its edges.
 #[tokio::test]
 async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "resident-frame-switch", &clock).await;
     let session = state.session_id.clone();
@@ -342,7 +344,9 @@ async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
 /// ends anyway.
 #[tokio::test]
 async fn a_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_leaves() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "park-frame-switch", &clock).await;
     let session = state.session_id.clone();
@@ -378,7 +382,9 @@ async fn a_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_
 /// commit may paper over it.
 #[tokio::test]
 async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
-    let store = crate::test_support::memory_store().await.expect("store");
+    let store = crate::test_support::sqlite_memory_store()
+        .await
+        .expect("store");
     let clock = lash_core::testing::TestClock::new(1_000);
     let mut state = committed_first_frame(&store, "forged-carry", &clock).await;
     let session = state.session_id.clone();

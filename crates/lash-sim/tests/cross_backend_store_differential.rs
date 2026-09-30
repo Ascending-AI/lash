@@ -2154,22 +2154,23 @@ async fn runners_for_case_with_clock(
         relation,
     };
 
-    let memory_backend = Arc::new(
+    let sqlite_memory_stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::clone(&clock))
             .await
             .expect("open the SQLite memory differential store set"),
     );
-    let memory_factory = memory_backend.session_store_factory();
-    let memory_store = admit_test_session(memory_factory.clone(), &create_request)
+    let memory_factory = sqlite_memory_stores.session_store_factory();
+    let sqlite_memory_store = admit_test_session(memory_factory.clone(), &create_request)
         .await
         .expect("create SQLite memory differential store");
-    memory_store
+    sqlite_memory_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic SQLite memory session metadata");
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn DeploymentStore>;
-    let memory_path =
-        PathBuf::from(memory_backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
+    let memory_path = PathBuf::from(
+        sqlite_memory_stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    );
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
@@ -2209,7 +2210,7 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
 
     let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(
-        lash_conformance::recording_backend_over(memory_backend.clone()),
+        lash_conformance::recording_backend_over(sqlite_memory_stores.clone()),
     );
     let sqlite_lifecycle: lash::Backend =
         held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
@@ -2236,15 +2237,15 @@ async fn runners_for_case_with_clock(
         BackendRunner {
             name: "sqlite-memory",
             session_id: session_id.clone(),
-            store: Some(Arc::clone(&memory_store)),
+            store: Some(Arc::clone(&sqlite_memory_store)),
             factory: Some(memory_factory_dyn),
             raw_reader: RawDurableReader::Sqlite {
                 path: memory_path,
                 session_id: session_id.clone(),
-                store: Some(memory_store),
+                store: Some(sqlite_memory_store),
             },
             reopen: BackendReopen::SqliteMemory {
-                backend: memory_backend,
+                backend: sqlite_memory_stores,
             },
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),

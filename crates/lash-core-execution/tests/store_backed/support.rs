@@ -2,12 +2,12 @@
 
 /// Storage ports over an isolated SQLite memory store set and a recording
 /// controller for tests that do not need a durable engine.
-pub async fn memory_backend() -> lash_core_execution::Backend {
-    memory_store_backend().await
+pub async fn sqlite_recording_backend() -> lash_core_execution::Backend {
+    sqlite_memory_store_backend().await
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
 /// kernel test whose effects run on an engine. Hold the double to the end of
 /// the test and never build a core over the handle itself (FIG-3723); a turn
 /// runs on `double.open_handler(scope)`'s scoped controller.
@@ -27,9 +27,9 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
 /// only store ports.
-pub async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+pub async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -39,10 +39,10 @@ pub async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStore
     stores
 }
 
-/// [`memory_store_set`] as a backend whose effect host is the recording
+/// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
-pub async fn memory_store_backend() -> lash_core_execution::Backend {
-    lash_conformance::recording_backend_over(memory_store_set().await)
+pub async fn sqlite_memory_store_backend() -> lash_core_execution::Backend {
+    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
 }
 
 /// Waits until the wall clock has passed `epoch_ms`, so a cutoff one
@@ -91,7 +91,7 @@ pub fn scoped_controller(
 /// scope the dispatch fixtures admit: what the dispatch
 /// fixtures run their tool attempts through.
 pub async fn runtime_operation_controller() -> std::sync::Arc<dyn crate::RuntimeEffectController> {
-    let backend = memory_backend().await;
+    let backend = sqlite_recording_backend().await;
     scoped_controller(
         &backend,
         crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
@@ -197,7 +197,7 @@ pub async fn controller_dispatch_ports(
         )
         .expect("valid test runtime scope"),
         attachment_store: std::sync::Arc::new(crate::RuntimeAttachmentStore::ephemeral(
-            memory_store_backend().await.attachment_store(),
+            sqlite_memory_store_backend().await.attachment_store(),
         )),
     }
 }

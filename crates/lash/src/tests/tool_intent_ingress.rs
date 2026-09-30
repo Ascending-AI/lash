@@ -350,9 +350,9 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
 }
 
 #[tokio::test]
-async fn host_register_trigger_realizes_and_fires_in_memory() -> Result<()> {
+async fn host_register_trigger_realizes_and_fires_on_sqlite_memory() -> Result<()> {
     Box::pin(host_register_trigger_realizes_and_fires(
-        memory_store_backend().await,
+        sqlite_memory_store_backend().await,
     ))
     .await
 }
@@ -400,7 +400,7 @@ async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
 /// router, and re-submitting the same identity cannot emit a second time.
 #[tokio::test]
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let (core, store, subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -491,7 +491,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
 /// (FIG-3116).
 #[tokio::test]
 async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Result<()> {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         backend.process_env_store().as_ref(),
@@ -622,7 +622,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
 #[tokio::test]
 async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
 -> Result<()> {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -708,7 +708,7 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
 
 #[tokio::test]
 async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let (core, store, _, _) =
         ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1155,7 +1155,7 @@ fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_
 
 #[tokio::test]
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress
         .key("host-call", 0)
@@ -1215,7 +1215,7 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
 
 #[tokio::test]
 async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress
         .key("kind-swap-start-emit", 0)
@@ -1262,7 +1262,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
 
 #[tokio::test]
 async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress
         .key("kind-swap-emit-cancel", 0)
@@ -1324,7 +1324,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
 async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -> Result<()> {
     let controller = Arc::new(KeyJournalController::default());
     let (core, registry, process) = ingress_core_with_effect_host(
-        memory_store_backend().await,
+        sqlite_memory_store_backend().await,
         Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
     )
     .await?;
@@ -1372,7 +1372,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 
 #[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let foreign_session = crate::tools::ToolIntentIngressKey::derive(
         "foreign-session",
@@ -1423,7 +1423,7 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 
 #[tokio::test]
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
         SESSION,
@@ -1609,7 +1609,7 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
 async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
     let (core, registry, process) = ingress_core_with_effect_host(
-        memory_store_backend().await,
+        sqlite_memory_store_backend().await,
         Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
     )
     .await?;
@@ -1709,7 +1709,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
 #[tokio::test]
 async fn a_digest_only_start_redrives_without_republishing_its_environment() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     let (core, registry, _process) = ingress_core_over(
         backend,
@@ -2053,7 +2053,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
 /// stamp — neither happened while ingress built its Start command unchecked.
 #[tokio::test]
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
-    let (core, registry) = ingress_engine_core(memory_store_backend().await).await?;
+    let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
     let unregistered_key = ingress
@@ -2132,7 +2132,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
 #[tokio::test]
 async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
 -> Result<()> {
-    let (core, registry) = ingress_engine_core(memory_store_backend().await).await?;
+    let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(

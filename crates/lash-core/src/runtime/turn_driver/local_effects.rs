@@ -267,7 +267,7 @@ mod tests {
     /// (ADR 0105 §1).
     #[tokio::test]
     async fn a_checkpoint_body_and_the_driver_mint_distinct_observation_ids() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::sqlite_recording_backend().await;
         let scoped = backend
             .effect_host()
             .scoped_static(crate::AdmittedScope::turn(

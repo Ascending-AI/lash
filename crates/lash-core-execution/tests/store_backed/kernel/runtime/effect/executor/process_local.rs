@@ -6,7 +6,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_journaled_environment_load_keeps_its_bytes_after_the_source_pin_ends() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let store = backend.process_env_store();
         let pin = crate::testing::host_pin_claim_for_testing();
         let spec = crate::ProcessExecutionEnvSpec::new(
@@ -594,7 +594,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_worker_poke_still_returns_the_started_record() {
         let key = "advisory-poke-start";
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::sqlite_recording_backend().await;
         let env_store = backend.process_env_store();
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
@@ -920,7 +920,7 @@ mod tests {
     async fn a_local_signal_redelivered_after_its_wait_advances_resolves_only_its_admitted_wait() {
         use crate::TestProcessRegistryWriteExt as _;
 
-        let stores = crate::support::memory_store_set().await;
+        let stores = crate::support::sqlite_memory_store_set().await;
         let registry = crate::StoreSet::process_registry(stores.as_ref());
         let record = registry
             .register_process(

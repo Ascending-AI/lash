@@ -1065,7 +1065,9 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
 }
 #[tokio::test]
 async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::sqlite_recording_backend()
+        .await
+        .attachment_store();
     let attachment = crate::AttachmentStore::put(
         backend.as_ref(),
         vec![1, 2, 3],

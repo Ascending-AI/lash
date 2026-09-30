@@ -205,7 +205,8 @@ async fn open_with_state_runs_the_supplied_snapshot_prompt_not_the_created_one()
 }
 
 #[tokio::test]
-async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memory() -> Result<()> {
+async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_on_sqlite_memory()
+-> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
@@ -251,7 +252,8 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memo
 }
 
 #[tokio::test]
-async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory() -> Result<()> {
+async fn committed_prompt_without_host_prompt_renders_committed_prompt_on_sqlite_memory()
+-> Result<()> {
     let committed = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Committed", "COMMITTED PROMPT"),
     );
@@ -283,8 +285,8 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
 }
 
 #[tokio::test]
-async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_memory() -> Result<()>
-{
+async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_on_sqlite_memory()
+-> Result<()> {
     use crate::PromptLayerSink as _;
 
     let state = prompt_probe_state(
@@ -322,7 +324,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
 /// nothing; the prompt changes through `update(SessionConfigPatch)`, which
 /// recommits it.
 #[tokio::test]
-async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_in_memory() -> Result<()> {
+async fn a_reopen_writes_nothing_and_update_recommits_the_prompt_on_sqlite_memory() -> Result<()> {
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "OLD STORED PROMPT"),
     );

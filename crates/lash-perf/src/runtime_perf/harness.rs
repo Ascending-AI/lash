@@ -26,7 +26,7 @@ use super::providers::{
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 use backend::PerfBackend;
-pub(crate) use backend::{memory_stores, restate_backend, restate_backend_over};
+pub(crate) use backend::{restate_backend, restate_backend_over, sqlite_memory_stores};
 
 const HISTORY_EXCHANGES: usize = 18;
 // `deep_turn_composition` performs two provider iterations: one runs the
@@ -874,7 +874,7 @@ pub(crate) async fn memory_perf_store(
     session_id: &SessionId,
 ) -> anyhow::Result<Arc<RuntimePerfStore>> {
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
-        memory_stores().await?.session_store_factory(),
+        sqlite_memory_stores().await?.session_store_factory(),
     );
     Ok(factory.root_store(session_id).await?)
 }

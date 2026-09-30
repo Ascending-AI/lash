@@ -439,7 +439,7 @@ async fn durable_state(
 }
 
 lash_conformance::checkpoint_admission_probe_tests!({
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open counter store");
     let counting_store = Arc::clone(&store);
@@ -457,7 +457,7 @@ lash_conformance::checkpoint_admission_probe_tests!({
 async fn checkpoint_component_statement_count_is_depth_invariant() {
     let mut observed = Vec::new();
     for depth in [10, 100, 1_000, 4_000] {
-        let store = crate::test_support::memory_store()
+        let store = crate::test_support::sqlite_memory_store()
             .await
             .expect("open depth-invariance store");
         let mut state = durable_state(
@@ -648,7 +648,7 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
 
 #[tokio::test]
 async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open memory catalog");
     let request = SessionStoreCreateRequest {
@@ -816,7 +816,7 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
-    let store = crate::test_support::memory_store()
+    let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("memory store");
     let artifacts = lashlang::LashlangArtifacts::new(store.clone());

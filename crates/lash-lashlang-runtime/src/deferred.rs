@@ -1563,7 +1563,7 @@ mod tests {
             "exec-code:other",
         );
         let mismatched_context = lash_core::testing::code_execution_context_with_invocation(
-            &crate::lib_tests::memory_backend().await,
+            &crate::lib_tests::sqlite_recording_backend().await,
             mismatched_invocation,
         );
 

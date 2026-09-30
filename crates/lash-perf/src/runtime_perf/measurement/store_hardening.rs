@@ -75,7 +75,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     let (
         _sqlite_root,
         postgres,
-        memory_store,
+        sqlite_memory_store,
         sqlite_store,
         postgres_store,
         memory_registry,
@@ -86,8 +86,8 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
         postgres_session_id,
     ) = run
         .build(async {
-            let memory_stores = memory_stores().await?;
-            let memory_factory = memory_stores.session_store_factory();
+            let sqlite_memory_stores = sqlite_memory_stores().await?;
+            let memory_factory = sqlite_memory_stores.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
             let sqlite_factory = lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
                 .await?
@@ -115,12 +115,12 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             postgres_factory
                 .admit_session(&runtime_perf_session_create_request(&postgres_session_id))
                 .await?;
-            let memory_store: Arc<dyn lash_core::RuntimeStore> = memory_factory;
+            let sqlite_memory_store: Arc<dyn lash_core::RuntimeStore> = memory_factory;
             let sqlite_store: Arc<dyn lash_core::RuntimeStore> = sqlite_factory;
             let postgres_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(postgres_factory);
 
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
-                memory_stores.process_registry();
+                sqlite_memory_stores.process_registry();
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
                     &sqlite_root.join("process-registry.sqlite"),
@@ -132,7 +132,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             Ok((
                 sqlite_root,
                 postgres,
-                memory_store,
+                sqlite_memory_store,
                 sqlite_store,
                 postgres_store,
                 memory_registry,
@@ -204,7 +204,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
 
                 phase_profile.extend(
                     measure_store_hardening_backend_turn(
-                        &memory_store,
+                        &sqlite_memory_store,
                         &memory_session_id,
                         turn_index,
                         &mut memory_history_fork,
@@ -711,7 +711,7 @@ mod store_hardening_tests {
 
     #[tokio::test]
     async fn process_prune_is_scoped_to_the_hardening_batch() {
-        let registry = memory_stores()
+        let registry = sqlite_memory_stores()
             .await
             .expect("open a SQLite memory store set")
             .process_registry();

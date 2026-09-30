@@ -269,7 +269,7 @@ mod tests {
     /// a non-manifest namespace cannot inherit the module label (FIG-1949).
     #[tokio::test]
     async fn pointer_table_roots_derive_labels_from_their_namespace() {
-        let store = crate::test_support::memory_store()
+        let store = crate::test_support::sqlite_memory_store()
             .await
             .expect("open store");
         store
@@ -312,7 +312,7 @@ mod tests {
     /// with a sibling namespace's kind.
     #[tokio::test]
     async fn pointer_table_root_with_unknown_namespace_fails_closed() {
-        let store = crate::test_support::memory_store()
+        let store = crate::test_support::sqlite_memory_store()
             .await
             .expect("open store");
         store

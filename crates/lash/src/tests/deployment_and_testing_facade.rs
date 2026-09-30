@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
         LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
@@ -69,7 +69,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
 #[tokio::test]
 async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     {
-        let backend: lash_core::Backend = memory_store_backend().await;
+        let backend: lash_core::Backend = sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
             LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
@@ -437,7 +437,7 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 /// hold until they are gone; the mark is what makes it drainable at all.
 #[tokio::test]
 async fn generation_drain_status_counts_the_generations_live_processes() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let own = backend.build_generation().clone();
     let core = explicit_ephemeral_facets(
@@ -652,7 +652,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
 /// before then would strand them.
 #[tokio::test]
 async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let factory = backend.session_store_factory();
     let clock = backend.clock();
     let core = explicit_ephemeral_facets(

@@ -68,6 +68,70 @@ class RetiredTermsTests(unittest.TestCase):
         self.assertFalse(self.check('let local_rewind = "in-memory store";', ".rs"))
         self.assertTrue(self.check("/// We use NativeEffectHost.", ".rs"))
 
+    def test_retired_identifiers_fail_without_history_exemption(self) -> None:
+        for identifier in (
+            "memory_store_backend", "memory_store_set", "memory_store",
+            "memory_store_with_options", "a_memory_stores_lives_until_its_last_handle_drops",
+            "law_in_memory", "InMemorySessionStore", "JournaledCommitController",
+            "store_journal_host", "store-journal",
+        ):
+            for path in ("crates/example/src/lib.rs", "scripts/run.sh", "examples/demo/Cargo.toml"):
+                with self.subTest(identifier=identifier, path=path):
+                    self.assertTrue(checker.check_text(Path(path), f'fn {identifier}() {{}} // Retired in 60e0e86b2a\n'))
+
+    def test_current_identifiers_and_real_memory_models_pass(self) -> None:
+        for identifier in (
+            "sqlite_memory_store_backend", "sqlite_memory_store_set",
+            "sqlite_memory_store_with_options", "law_on_sqlite_memory",
+            "EngineOwnedCommitLayer", "open_in_memory",
+            "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
+            "InMemoryRootLedger", "InMemoryRoots", "InMemoryDriveEpochs",
+            "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
+            "InMemorySpanExporter", "InMemoryMetricExporter", "InMemory",
+            "s3_attachment_store_satisfies_conformance_with_in_memory_object_store",
+        ):
+            with self.subTest(identifier=identifier):
+                self.assertFalse(checker.check_text(Path("crates/example/src/lib.rs"), f"fn {identifier}() {{}}"))
+
+    def test_identifier_rules_cover_filters_and_features(self) -> None:
+        self.assertTrue(checker.check_text(Path("scripts/run.sh"), "kiln test --test_arg=law_in_memory"))
+        self.assertTrue(checker.check_text(Path("crates/example/Cargo.toml"), '[features]\nstore-journal = []'))
+        self.assertTrue(checker.check_text(Path("crates/example/src/lib.rs"), 'let label = "memory_store_backend";'))
+        self.assertFalse(checker.check_text(Path("crates/example/src/lib.rs"), '// The store-journal host was retired in 476264fbea.'))
+
+    def test_identifier_exceptions_cannot_hide_retired_names(self) -> None:
+        path = Path("crates/example/src/lib.rs")
+        for body in (
+            '#[cfg(feature = "store-journal")] fn example() {}',
+            "fn sqlite_memory_store_JournaledCommit() {}",
+            "fn InMemoryLiveReplayStoreBackend() {}",
+            "fn notsqlite_memory_store() {}",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(checker.check_text(path, body))
+        self.assertFalse(checker.check_text(Path("scripts/check-guarded-transactions.py"), 'pattern = "_in_memory"'))
+        self.assertTrue(checker.check_text(Path("scripts/other.py"), 'pattern = "_in_memory"'))
+        self.assertFalse(checker.check_text(Path("scripts/check-substrate-boundary.sh"), 'retired="InMemorySessionStore"'))
+        self.assertTrue(checker.check_text(Path("crates/example/src/lib.rs"), "struct InMemorySessionStore;"))
+
+    def test_repository_cli_rejects_planted_identifiers(self) -> None:
+        temporary_root = Path(__file__).resolve().parents[1] / "target"
+        temporary_root.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            source = root / "crates" / "planted" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            command = ["python3", str(Path(checker.__file__).resolve()), "--root", str(root)]
+            source.write_text("fn memory_store_backend() {}\nfn law_in_memory() {}\n")
+            red = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(red.returncode, 1, red.stdout + red.stderr)
+            self.assertIn("crates/planted/src/lib.rs:1", red.stdout)
+            self.assertIn("crates/planted/src/lib.rs:2", red.stdout)
+            source.write_text("fn sqlite_memory_store_backend() {}\nfn law_on_sqlite_memory() {}\n")
+            green = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(green.returncode, 0, green.stdout + green.stderr)
+
     def test_repository_cli_rejects_a_planted_adr(self) -> None:
         # An ignored directory avoids exposing planted prose to a concurrent
         # repository gate. The fixture stays inside the current checkout.

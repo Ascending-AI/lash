@@ -4,11 +4,11 @@ mod tests {
     use crate::runtime::{SessionObserverIntentSource, reconcile_session_process_observer_intents};
     use crate::support::prelude::*;
 
-    use crate::support::memory_store_set;
+    use crate::support::sqlite_memory_store_set;
 
     #[tokio::test]
     async fn noproc_receipts_preserve_missing_and_pruned_outcomes() {
-        let backend = memory_store_set().await;
+        let backend = sqlite_memory_store_set().await;
         let registry = backend.process_registry();
         let registered = registry
             .register_process(crate::ProcessRegistration::new(
@@ -66,7 +66,7 @@ mod tests {
     }
     #[tokio::test]
     async fn a_selected_pruned_process_never_retargets_to_a_later_process() {
-        let backend = memory_store_set().await;
+        let backend = sqlite_memory_store_set().await;
         let registry = backend.process_registry();
         let registration = crate::ProcessRegistration::new(
             crate::ProcessInput::External {

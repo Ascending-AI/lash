@@ -553,7 +553,7 @@ mod label_annotation_tests {
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
                 std::sync::Arc::new(crate::TypescriptDialect),
-                &crate::testing::memory_store_backend().await,
+                &crate::testing::sqlite_memory_store_backend().await,
             )
             .with_process_lifecycle(false),
         );

@@ -290,7 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn builder_methods_configure_runtime_host() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let trace_context = TraceContext::default().for_session("session-1");
         let termination = TerminationPolicy {
             treat_missing_done_as_failure: false,
@@ -321,7 +321,7 @@ mod tests {
     /// every persistence port comes from the selected store set.
     #[tokio::test]
     async fn every_store_port_is_the_config_backends() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let env = RuntimeEnvironment::builder(core_over(&backend)).build();
 
         assert!(Arc::ptr_eq(
@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_only_environment_and_host_have_no_process_ports() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
         let env = RuntimeEnvironment::builder(core_over(&backend))
             .with_queued_work(Arc::clone(&queued))
@@ -368,11 +368,11 @@ mod tests {
 
     #[tokio::test]
     async fn rebinding_work_ports_replaces_the_registry_and_both_ports() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let env = RuntimeEnvironment::builder(core_over(&backend))
             .with_process_work(backend.process_work())
             .build();
-        let replacement = crate::testing::memory_store_backend().await;
+        let replacement = crate::testing::sqlite_memory_store_backend().await;
         let wiring = replacement.process_work();
         let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
         assert!(!Arc::ptr_eq(
@@ -395,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_built_from_an_environment_carries_its_complete_process_wiring() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let wiring = backend.process_work();
         let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());
         let env = RuntimeEnvironment::builder(core_over(&backend))
@@ -420,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn embedded_builder_keeps_queued_work_in_both_setter_orders() {
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let core = crate::testing::runtime_helpers::test_host_config(&backend).core;
         let wiring = backend.process_work();
         let queued: Arc<dyn SessionWorkEngine> = Arc::new(NoSessionWork::new());

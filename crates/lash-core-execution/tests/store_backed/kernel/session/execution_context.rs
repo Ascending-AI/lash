@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_path_start_holds_its_environment_before_journaling_its_digest() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
             .session_id("session")
             .build()
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let spec = crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -134,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn detached_child_start_carries_the_parents_recorded_render() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let render = crate::RecordedRender {
             renderer_id: "parent.renderer".to_string(),
             params: serde_json::json!({"print": {"max_chars": 37}}),
@@ -168,7 +168,7 @@ mod tests {
     /// after its referrer is fenced; the public helper preserves that refusal.
     #[tokio::test]
     async fn an_ended_execution_referrer_still_fails_the_public_env_ref_publish() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let env_store = backend.process_env_store();
         let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
             .session_id("session")
@@ -204,7 +204,7 @@ mod tests {
     /// definition: nothing on the derivation reads the registry.
     #[tokio::test]
     async fn a_child_parents_on_the_process_that_started_it() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let retired = registry
             .register_process(registration_for_starter("worker"))

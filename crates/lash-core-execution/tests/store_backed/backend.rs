@@ -34,7 +34,7 @@ impl EffectEngine for WrappedEngine {
 
 #[tokio::test]
 async fn backend_ports_remain_coherent_through_wrappers() {
-    let base = crate::support::memory_store_backend().await;
+    let base = crate::support::sqlite_memory_store_backend().await;
     let stores: Arc<dyn StoreSet> = Arc::new(CapturedStores::new(base.stores()));
     let host = base.effect_host();
     let mut engine = Arc::clone(base.engine());

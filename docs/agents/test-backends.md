@@ -86,7 +86,7 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 ## Keeping this document current
 
 `python3 scripts/check_retired_terms.py` checks tracked and new documentation
-and source comments. `python3 scripts/test_check_retired_terms.py` proves that a
+and source comments, plus backend and host identifiers. `python3 scripts/test_check_retired_terms.py` proves that a
 planted current statement fails, that its corrected matrix passes, and that
 historical markers cannot leak into current sections or exempt ADR text. Both commands belong to
 CI's repository-gates heredoc, which
@@ -100,5 +100,7 @@ commit in `scripts/check_retired_terms.py`. For an entire historical section,
 put `Historical` and the same marker in its heading. The exception ends at the
 next heading of equal or lower depth. A status elsewhere in the file
 is insufficient. SQLite memory references must name SQLite explicitly.
-Historical filenames and code identifiers can remain; changing those names is
-outside this prose gate.
+Historical filenames can remain. Code identifiers must name the current backend
+or host, even when a historical marker appears nearby. The identifier gate
+allows genuine memory-only replay buffers, store-double ledgers, artifact
+reference models, upstream memory APIs and the retirement checks themselves.

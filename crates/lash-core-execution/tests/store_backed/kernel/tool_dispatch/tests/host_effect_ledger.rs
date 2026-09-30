@@ -703,7 +703,9 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
         Arc::new(context),
-        crate::support::memory_store_set().await.process_env_store(),
+        crate::support::sqlite_memory_store_set()
+            .await
+            .process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),

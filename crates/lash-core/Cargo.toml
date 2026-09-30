@@ -55,7 +55,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 futures-util = { workspace = true }
 
 [dev-dependencies]
-# `memory_store_backend`: a store-only backend over the recording effect host
+# `sqlite_memory_store_backend`: a store-only backend over the recording effect host
 # (FIG-3668, D1 PR-S2); another dev-dependency cycle through this crate.
 lash-conformance = { workspace = true }
 chrono = { workspace = true }

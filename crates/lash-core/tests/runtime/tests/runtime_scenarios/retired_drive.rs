@@ -10,7 +10,7 @@ use super::*;
 
 #[tokio::test]
 pub(super) async fn a_retired_sessions_drive_admission_step_records_the_retirement() {
-    let backend = memory_backend().await;
+    let backend = sqlite_recording_backend().await;
     let session = lash_core::SessionId::from("retired-admission");
     let request = lash_core::engine::DriveRequest {
         session: session.clone(),

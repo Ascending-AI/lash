@@ -73,7 +73,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -292,7 +292,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -429,7 +429,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -575,7 +575,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()

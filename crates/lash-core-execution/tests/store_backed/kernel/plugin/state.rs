@@ -6,7 +6,7 @@ mod tests {
 
     /// A memory backend's catalog holding the session the test commits.
     async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimeStore> {
-        let catalog = crate::support::memory_store_set()
+        let catalog = crate::support::sqlite_memory_store_set()
             .await
             .session_store_factory();
         crate::SessionCatalogStore::admit_session(

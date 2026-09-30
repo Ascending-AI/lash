@@ -262,13 +262,13 @@ impl StoreTestSupport for SqliteStore {
 /// An unbound durable-core store on a fresh memory store set. The store holds
 /// the store set's anchors, so the database lives as long as it does.
 #[cfg(test)]
-pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Arc<SqliteStore>> {
-    memory_store_with_options(crate::SqliteStoreSetOptions::memory().store).await
+pub(crate) async fn sqlite_memory_store() -> tokio_rusqlite::Result<Arc<SqliteStore>> {
+    sqlite_memory_store_with_options(crate::SqliteStoreSetOptions::memory().store).await
 }
 
-/// [`memory_store`] with explicit store options.
+/// [`sqlite_memory_store`] with explicit store options.
 #[cfg(test)]
-pub(crate) async fn memory_store_with_options(
+pub(crate) async fn sqlite_memory_store_with_options(
     options: StoreOptions,
 ) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
     crate::SqliteStoreSet::memory_with_options_and_clock(

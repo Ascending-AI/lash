@@ -12,7 +12,7 @@ use super::*;
 
 /// The recording conformance host: it journals no effect.
 async fn recording_ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_over(memory_store_backend().await, None, None).await
+    ingress_core_over(sqlite_memory_store_backend().await, None, None).await
 }
 
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
@@ -72,7 +72,7 @@ async fn assert_ledger_retains_the_outcome(
 
 #[tokio::test]
 async fn a_journaling_host_retains_every_outcome_in_the_submission_ledger() -> Result<()> {
-    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
+    let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     assert_ledger_retains_the_outcome(&core, &registry, &process).await
 }
 

@@ -22,12 +22,12 @@ std::thread_local! {
 
 /// A fresh SQLite memory store set behind a recording effect host, held for
 /// the running test.
-pub(crate) async fn memory_backend() -> lash_core::Backend {
+pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
     lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
-/// [`memory_backend`] on `clock`: its storage ports read and wait on `clock`.
-pub(crate) async fn memory_backend_with_clock(
+/// [`sqlite_recording_backend`] on `clock`: its storage ports read and wait on `clock`.
+pub(crate) async fn sqlite_recording_backend_with_clock(
     clock: std::sync::Arc<dyn lash_core::Clock>,
 ) -> lash_core::Backend {
     let backend = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
@@ -37,7 +37,7 @@ pub(crate) async fn memory_backend_with_clock(
     lash_conformance::recording_backend_over(std::sync::Arc::new(backend))
 }
 
-/// [`memory_backend`] as its concrete SQLite type.
+/// [`sqlite_recording_backend`] as its concrete SQLite type.
 pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet {
     let backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
@@ -47,7 +47,7 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
 /// kernel test whose effects run on an engine. Hold the double to the end of
 /// the test and never build a core over the handle itself (FIG-3723); a turn
 /// runs on `double.open_handler(scope)`'s scoped controller.
@@ -176,9 +176,9 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
 /// only store ports.
-pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -188,15 +188,15 @@ pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::Sqli
     stores
 }
 
-/// [`memory_store_set`] as a backend whose effect host is the recording
+/// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
-pub(crate) async fn memory_store_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(memory_store_set().await)
+pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
+    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
 }
 
 /// `backend`'s session catalog as a runtime store: every session a test
 /// admits on it is a [`lash_core::store::SessionStore`] view of this one
-/// store. `backend` is one [`memory_backend`] opened.
+/// store. `backend` is one [`sqlite_recording_backend`] opened.
 pub(crate) async fn unbound_store(
     backend: &lash_core::Backend,
 ) -> std::sync::Arc<dyn lash_core::RuntimeStore> {
@@ -238,7 +238,7 @@ pub(crate) async fn unbound_recording_store(
 
 /// `unbound_recording_store` on any backend's session catalog — storage only.
 /// The store-set twin needs no concrete store type, so it serves
-/// [`memory_store_backend`] and a double's `lash_backend` alike: a test that
+/// [`sqlite_memory_store_backend`] and a double's `lash_backend` alike: a test that
 /// runs no effect still gets the recording decorator's seams.
 pub(crate) async fn recording_unbound_store_on(
     backend: &lash_core::Backend,
@@ -275,7 +275,7 @@ pub(crate) async fn unbound_recording_store_with_clock(
 }
 
 /// Fresh handles on `backend`'s databases: what a second process over the
-/// same substrate is. `backend` is one [`memory_backend`] opened.
+/// same substrate is. `backend` is one [`sqlite_recording_backend`] opened.
 pub(crate) async fn reopened_backend(backend: &lash_core::Backend) -> lash_core::Backend {
     let identity = backend.binding_identity().to_string();
     let sqlite = TEST_BACKENDS

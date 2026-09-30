@@ -215,7 +215,7 @@ mod contention_tests {
     #[tokio::test]
     async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
         let session_id = "commit-admission-bypass";
-        let factory = memory_stores()
+        let factory = sqlite_memory_stores()
             .await
             .expect("open a SQLite memory store set")
             .session_store_factory();

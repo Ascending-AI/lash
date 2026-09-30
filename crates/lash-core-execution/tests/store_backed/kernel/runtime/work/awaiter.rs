@@ -17,7 +17,9 @@ mod tests {
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-        crate::support::memory_store_set().await.process_registry()
+        crate::support::sqlite_memory_store_set()
+            .await
+            .process_registry()
     }
     use lash_sansio::sync::MutexExt;
 

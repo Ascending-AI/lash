@@ -73,7 +73,7 @@ fn attempt(
                 ExecRequest {
                     code: CELL.to_string(),
                 },
-                crate::testing::fresh_memory_artifact_store().await,
+                crate::testing::fresh_sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),

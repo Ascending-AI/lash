@@ -155,7 +155,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         code: "finish(1);".to_string(),
     };
     let mut artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::memory_artifact_store().await;
+        crate::testing::sqlite_memory_artifact_store().await;
     let mut surface = LashlangSurface::default();
     let mut deferred_resolver = None;
     let mut projected_bindings = RlmProjectedBindings::default();
@@ -405,7 +405,7 @@ pub(super) async fn execute_and_collect_inventory(
         ExecRequest {
             code: source.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(BindingDeferredResolver {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -519,7 +519,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 ExecRequest {
                     code: successful_code.to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -549,7 +549,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     ExecRequest {
                         code: code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -621,7 +621,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             ExecRequest {
                 code: "let survives: number = 7;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -660,7 +660,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 ExecRequest {
                     code: "let cancelledTail: number = 1; while (true) {}".to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -735,7 +735,7 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             ExecRequest {
                 code: "await sleep(3600000); let woke: number = 1;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -780,7 +780,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 ExecRequest {
                     code: code.to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -828,7 +828,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     ExecRequest {
                         code: code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -888,7 +888,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     ExecRequest {
                         code: first_code.clone(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -922,7 +922,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     ExecRequest {
                         code: tail_code.to_string(),
                     },
-                    crate::testing::memory_artifact_store().await,
+                    crate::testing::sqlite_memory_artifact_store().await,
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
@@ -1450,7 +1450,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
             code: r#"await control.continue_as({ task: "continue deterministically" });"#
                 .to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
@@ -1560,7 +1560,7 @@ pub(super) async fn execute_test_code(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest { code },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
@@ -1681,10 +1681,10 @@ pub(super) async fn execute_with_host_environment(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let ctx = super::triggers::trigger_tool_context(
         crate::testing::double_ports(&double, &handler),
-        crate::testing::memory_trigger_store().await,
+        crate::testing::sqlite_memory_trigger_store().await,
         &artifact_store,
         None,
     )
@@ -1734,7 +1734,7 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             ExecRequest {
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1768,7 +1768,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             ExecRequest {
                 code: "const value = 1;".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1817,7 +1817,7 @@ pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1848,7 +1848,7 @@ pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
                 &double, &handler,
             )),
             request(),
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),

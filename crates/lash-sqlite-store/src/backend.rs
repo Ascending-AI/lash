@@ -666,12 +666,12 @@ mod tests {
             .expect("read the catalog")
     }
 
-    /// A memory stores's databases live exactly as long as the stores
+    /// A SQLite memory store set's databases live exactly as long as the stores
     /// or a handle taken from it: data written through one handle is read
     /// through another after the writer is gone, and the databases disappear
     /// once the last handle drops.
     #[tokio::test]
-    async fn a_memory_stores_lives_until_its_last_handle_drops() {
+    async fn a_sqlite_memory_store_lives_until_its_last_handle_drops() {
         let stores = SqliteStoreSet::memory()
             .await
             .expect("open the memory stores");

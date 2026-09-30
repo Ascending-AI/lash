@@ -540,7 +540,7 @@ mod tests {
 
         let collector = CheckpointWriteCollector::default();
         let factory: Arc<dyn DeploymentStore> = Arc::new(ObservedDeploymentStore::new(
-            crate::testing::memory_store_set()
+            crate::testing::sqlite_memory_store_set()
                 .await
                 .session_store_factory(),
             collector.clone(),

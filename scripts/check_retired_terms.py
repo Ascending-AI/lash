@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject retired mechanisms in current documentation and source comments."""
+"""Reject retired mechanisms in current prose and backend/host identifiers."""
 
 from __future__ import annotations
 
@@ -43,6 +43,59 @@ TERMS = (
 )
 
 
+# These are actual memory-only implementations, not the retired persistence
+# backend. Upstream APIs and recording/reference models keep their real names.
+LEGITIMATE_MEMORY_IDENTIFIERS = frozenset({
+    "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
+    "InMemoryDriveEpochs", "InMemoryRootLedger", "InMemoryRoots",
+    "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
+    "InMemoryMetricExporter", "InMemorySpanExporter", "InMemory",
+    "open_in_memory",
+    "s3_attachment_store_satisfies_conformance_with_in_memory_object_store",
+})
+IDENTIFIER_RULES = (
+    ("unqualified memory store", r"memory_store"),
+    ("retired memory backend law", r"_in_memory"),
+    ("retired memory backend type", r"InMemory"),
+    ("retired commit host", r"JournaledCommit"),
+    ("retired store journal host", r"store[_-]journal"),
+)
+
+
+def check_identifiers(path: Path, body: str) -> list[str]:
+    if not path.parts or path.parts[0] not in {"crates", "scripts", "runbooks", "examples"}:
+        return []
+    # The gate and its planted self-test fixtures must spell the denied names.
+    if path in {Path("scripts/check_retired_terms.py"), Path("scripts/test_check_retired_terms.py")}:
+        return []
+    violations: list[str] = []
+    for number, line in enumerate(body.splitlines(), 1):
+        # Historical comments remain subject to the prose rules, not identifier
+        # rules. Executable strings still include test filters and feature names.
+        if re.match(r"\s*(?://|#(?!\[)|/\*|\*(?!/))", line):
+            continue
+        if not re.search(r"memory_store|_in_memory|InMemory|JournaledCommit|store[_-]journal", line):
+            continue
+        for match in re.finditer(r"[A-Za-z_][A-Za-z_0-9-]*", line):
+            identifier = match[0]
+            if identifier in LEGITIMATE_MEMORY_IDENTIFIERS:
+                continue
+            # This existing retirement gate denies removed types explicitly.
+            if path == Path("scripts/check-substrate-boundary.sh") and identifier in {
+                "InMemorySessionStore", "InMemorySessionStoreFactory",
+            }:
+                continue
+            if path == Path("scripts/check-guarded-transactions.py") and identifier == "_in_memory":
+                continue  # SQLite API suffix in the raw-connection denial regex.
+            for term, pattern in IDENTIFIER_RULES:
+                if term == "unqualified memory store" and re.search(r"(?:^|_)sqlite_memory_store", identifier):
+                    continue
+                if re.search(pattern, identifier):
+                    violations.append(f"{path}:{number}: {term}: rename '{identifier}' to its current backend or host")
+                    break
+    return violations
+
+
 def prose(line: str) -> str:
     # Link destinations and source paths can retain historical identifiers.
     line = re.sub(r"\]\([^)]*\)", "]", line)
@@ -54,7 +107,7 @@ def check_text(path: Path, body: str) -> list[str]:
     markdown = path.suffix == ".md"
     adr = path.parts[:2] == ("docs", "adr")
     lines = body.splitlines()
-    violations: list[str] = []
+    violations = check_identifiers(path, body)
     sections: list[tuple[int, str]] = []
     paragraph: list[tuple[int, str]] = []
 
@@ -131,7 +184,7 @@ def main() -> int:
         print("\n".join(violations))
         print(f"retired terms: {len(violations)} unmarked uses")
         return 1
-    print(f"retired terms: {len(TERMS)} retirement rules passed")
+    print(f"retired terms: {len(TERMS)} prose and {len(IDENTIFIER_RULES)} identifier rules passed")
     return 0
 
 

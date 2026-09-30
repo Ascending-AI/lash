@@ -121,7 +121,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
             deferred_execution_grants: BTreeMap::new(),
             cell_bindings: Default::default(),
             workers: service.clone(),
-            artifact_store: crate::testing::memory_artifact_store().await,
+            artifact_store: crate::testing::sqlite_memory_artifact_store().await,
         }),
     };
     let owner = VmOwner::new("parked-cell-witness");

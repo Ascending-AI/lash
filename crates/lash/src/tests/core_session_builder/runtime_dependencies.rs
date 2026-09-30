@@ -72,8 +72,8 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()> {
-    let artifacts = memory_store_backend().await;
-    let core_backend = memory_store_backend().await;
+    let artifacts = sqlite_memory_store_backend().await;
+    let core_backend = sqlite_memory_store_backend().await;
     // Precondition: two memory store sets are two substrates.
     assert_ne!(
         artifacts.binding_identity(),
@@ -1074,7 +1074,7 @@ async fn duplicate_only_fork_intents_are_canonical(
 }
 
 #[tokio::test]
-async fn duplicate_only_fork_intents_are_canonical_in_memory() -> Result<()> {
+async fn duplicate_only_fork_intents_are_canonical_on_sqlite_memory() -> Result<()> {
     duplicate_only_fork_intents_are_canonical("memory", double_backend().await).await
 }
 

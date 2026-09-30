@@ -129,7 +129,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
         ExecRequest {
             code: source.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface {
             language_features: lashlang::LashlangLanguageFeatures::default()
                 .with_label_annotations(),
@@ -319,7 +319,7 @@ fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind() {
             panic!("one execution_started event, got {}", maps.len());
         };
         let artifact = stored_artifact(
-            &crate::testing::memory_artifact_store().await,
+            &crate::testing::sqlite_memory_artifact_store().await,
             &started.identity.module_ref,
         )
         .await;

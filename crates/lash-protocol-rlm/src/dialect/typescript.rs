@@ -538,7 +538,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::memory_artifact_store_blocking(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -598,7 +598,7 @@ mod tests {
             },
             RlmDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::memory_artifact_store_blocking(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -681,7 +681,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::memory_artifact_store_blocking(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -745,7 +745,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::memory_artifact_store_blocking(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -832,7 +832,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::memory_artifact_store_blocking(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -983,7 +983,7 @@ mod tests {
                     LashlangSurface::default(),
                     RlmDialectServices {
                         workers: lash_vm_client::service::Service::default(),
-                        artifact_store: crate::testing::memory_artifact_store().await,
+                        artifact_store: crate::testing::sqlite_memory_artifact_store().await,
                         deferred_tool_resolver: None,
                         deferred_trigger_resolver: None,
                         execution_trace_config:

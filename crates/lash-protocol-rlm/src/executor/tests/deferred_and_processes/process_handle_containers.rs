@@ -20,7 +20,7 @@ async fn process_controls_preserve_container_handles_across_suspension_and_snaps
 
 async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     // The cell runs in a handler on the double, whose process workflow runs
     // the started body: the signal crosses the engine's own delivery route
     // to the waiter the body parks on.

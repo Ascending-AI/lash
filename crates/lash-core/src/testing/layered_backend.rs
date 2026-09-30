@@ -508,7 +508,7 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "map_process_registry cannot decorate")]
     async fn map_process_registry_refuses_an_engine_with_its_own_process_work() {
-        let engine_driven = LayeredBackend::over(crate::testing::memory_backend().await)
+        let engine_driven = LayeredBackend::over(crate::testing::sqlite_recording_backend().await)
             .wire_process_work(crate::testing::process_work_wiring_for_registry)
             .into_backend();
         assert!(

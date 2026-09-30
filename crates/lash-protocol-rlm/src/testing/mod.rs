@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 /// A fresh storage backend for tests that do not execute durable effects.
-pub(crate) async fn memory_backend() -> lash_core::Backend {
-    memory_store_backend().await
+pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
+    sqlite_memory_store_backend().await
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
 /// kernel test whose effects run on an engine. Hold the double to the end of
 /// the test and never build a core over the handle itself (FIG-3723); a turn
 /// runs on `double.open_handler(scope)`'s scoped controller.
@@ -140,9 +140,9 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
 /// only store ports.
-pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -152,10 +152,10 @@ pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::Sqli
     stores
 }
 
-/// [`memory_store_set`] as a backend whose effect host is the recording
+/// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
-pub(crate) async fn memory_store_backend() -> lash_core::Backend {
-    lash_conformance::recording_backend_over(memory_store_set().await)
+pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
+    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
 }
 
 thread_local! {
@@ -234,7 +234,7 @@ impl lash_core::ModuleArtifactStore for TestModuleStore {
     }
 }
 
-pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
+pub(crate) async fn sqlite_memory_artifact_store() -> lashlang::LashlangArtifacts {
     let slot = artifact_slot();
     let existing = slot
         .lock()
@@ -243,7 +243,7 @@ pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
     let backend = match existing {
         Some(backend) => backend,
         None => {
-            let backend = memory_backend().await;
+            let backend = sqlite_recording_backend().await;
             *slot
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(backend.clone());
@@ -253,7 +253,7 @@ pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
     lashlang::LashlangArtifacts::of_backend(&backend)
 }
 
-pub(crate) fn memory_backend_blocking() -> lash_core::Backend {
+pub(crate) fn sqlite_recording_backend_blocking() -> lash_core::Backend {
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
@@ -261,19 +261,19 @@ pub(crate) fn memory_backend_blocking() -> lash_core::Backend {
                     .enable_all()
                     .build()
                     .expect("build a current-thread runtime")
-                    .block_on(memory_backend())
+                    .block_on(sqlite_recording_backend())
             })
             .join()
             .expect("open the memory backend on its own thread")
     })
 }
 
-pub(crate) fn memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&memory_backend_blocking())
+pub(crate) fn sqlite_memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
+    lashlang::LashlangArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
-pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts {
-    let backend = memory_backend().await;
+pub(crate) async fn fresh_sqlite_memory_artifact_store() -> lashlang::LashlangArtifacts {
+    let backend = sqlite_recording_backend().await;
     *artifact_slot()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(backend.clone());
@@ -390,15 +390,15 @@ pub(crate) fn attempt_ports_over_layer<'a>(
     )
 }
 
-/// A fresh memory store set's process registry, for a trigger router whose
+/// A fresh SQLite memory store set's process registry, for a trigger router whose
 /// deliveries no law inspects.
-pub(crate) async fn memory_process_registry() -> Arc<dyn lash_core::ProcessRegistry> {
-    lash_core::StoreSet::process_registry(memory_store_set().await.as_ref())
+pub(crate) async fn sqlite_memory_process_registry() -> Arc<dyn lash_core::ProcessRegistry> {
+    lash_core::StoreSet::process_registry(sqlite_memory_store_set().await.as_ref())
 }
 
-/// A fresh memory store set's trigger store.
-pub(crate) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
-    lash_core::StoreSet::trigger_store(memory_store_set().await.as_ref())
+/// A fresh SQLite memory store set's trigger store.
+pub(crate) async fn sqlite_memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
+    lash_core::StoreSet::trigger_store(sqlite_memory_store_set().await.as_ref())
 }
 pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
     lash_core::RecordedRender {

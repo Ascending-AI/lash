@@ -981,7 +981,7 @@ mod tests {
             config: policy.clone().into(),
             head: crate::SessionCreationHead::CommittedByCreator,
         };
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
         let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
             .await
@@ -1046,7 +1046,7 @@ mod tests {
 
         let session_id = "transient-park-commit-failure";
         let policy = standard_test_policy();
-        let backend = crate::testing::memory_store_backend().await;
+        let backend = crate::testing::sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
         crate::testing::runtime_helpers::create_session_store(
             &factory,

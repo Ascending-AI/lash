@@ -3,7 +3,7 @@ mod tests {
 
     #[tokio::test]
     async fn attachment_limit_defaults_unbounded_and_accepts_host_override() {
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let unbounded = RuntimeHostConfig::new(
             backend,
             crate::CommitBudget::bounded(1024 * 1024, 512),

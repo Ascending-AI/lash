@@ -163,7 +163,7 @@ async fn run_counted(
         lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone()).build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> = crate::lib_tests::memory_store_set()
+    let registry: Arc<dyn lash_core::ProcessRegistry> = crate::lib_tests::sqlite_memory_store_set()
         .await
         .process_registry();
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
@@ -203,7 +203,9 @@ async fn run_counted(
         LashlangProcessEngine::new(
             store,
             LashlangSurface::default(),
-            crate::lib_tests::memory_backend().await.worker_recovery(),
+            crate::lib_tests::sqlite_recording_backend()
+                .await
+                .worker_recovery(),
         ),
         context,
         serde_json::to_value(input).expect("process input serializes"),

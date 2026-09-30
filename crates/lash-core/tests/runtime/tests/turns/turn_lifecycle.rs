@@ -399,7 +399,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
 
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn double_invalidation_preserves_first_decision_id() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let mut runtime = runtime_with_plugins_and_tools(
         &backend,
         Vec::new(),
@@ -434,7 +434,7 @@ pub(super) async fn double_invalidation_preserves_first_decision_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let store = recording_unbound_store_on(&backend).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),

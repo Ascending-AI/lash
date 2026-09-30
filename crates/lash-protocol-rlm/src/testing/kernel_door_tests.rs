@@ -26,9 +26,9 @@ async fn an_open_handler_lends_its_scope_on_the_double() {
 /// runs no effect reaches.
 #[tokio::test]
 async fn the_storage_only_twins_serve_artifacts_and_triggers() {
-    let backend = super::memory_store_backend().await;
+    let backend = super::sqlite_memory_store_backend().await;
     let _artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
-    let stores = super::memory_store_set().await;
+    let stores = super::sqlite_memory_store_set().await;
     assert_ne!(
         lash_core::StoreSet::binding_identity(stores.as_ref()),
         &backend.binding_identity(),
@@ -100,7 +100,7 @@ async fn run_cell(
         lash_core::ExecRequest {
             code: code.to_string(),
         },
-        super::memory_artifact_store().await,
+        super::sqlite_memory_artifact_store().await,
         lash_lashlang_runtime::LashlangSurface::default(),
         None,
         crate::projection::RlmProjectedBindings::default(),

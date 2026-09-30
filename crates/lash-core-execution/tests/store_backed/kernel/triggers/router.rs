@@ -17,7 +17,7 @@ mod tests {
     }
 
     async fn router_world() -> RouterWorld {
-        let stores = crate::support::memory_store_set().await;
+        let stores = crate::support::sqlite_memory_store_set().await;
         let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
             stores.process_env_store();
         let env_ref =

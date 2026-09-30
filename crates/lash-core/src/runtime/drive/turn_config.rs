@@ -384,7 +384,7 @@ mod tests {
         let mut runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_store_backend().await,
+                    crate::testing::sqlite_memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
