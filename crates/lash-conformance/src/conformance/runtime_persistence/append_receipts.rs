@@ -1073,6 +1073,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
     let _failing_lease =
         seal_drive_fence_for_test(&store, &SessionId::from("root"), "atomic-append-failing").await;

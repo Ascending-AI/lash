@@ -18,7 +18,9 @@ use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::runtime::logical_turn::{LogicalTurnAdmissions, LogicalTurnStart};
 use crate::runtime::turn_loop::TurnStopwatch;
-use crate::store::{AdmittedHead, RootAdmissionAnswer, RootAdmissionRefusal};
+use crate::store::{
+    AdmittedHead, FollowOnRecoveryAnswer, RootAdmissionAnswer, RootAdmissionRefusal,
+};
 use crate::{
     RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError, TurnId, TurnInput,
 };
@@ -294,31 +296,97 @@ impl LashRuntime {
     }
 
     /// Recover the follow-on the session head owes under `admitted`'s root
-    /// (ADR 0101 §3, FIG-3542), raising its recovery count from the
-    /// `attempts` admission recorded.
+    /// (ADR 0101 §3, FIG-3542), from the recovery count `attempts` its drive
+    /// admission recorded, under the drive fence its seal raised.
+    ///
+    /// The root's recorded decision, `drive-follow-on:{root}`, answers
+    /// whether the head still owes the follow-on and how it is recovered,
+    /// and raises the recovery count inside its body (FIG-4361). The rest of
+    /// the root drives the recorded answer, never the head a replay finds:
+    /// a follow-on the head owed no longer cedes the root, and one it owed
+    /// runs under the recorded fact or commits exhausted. The resident head is
+    /// brought current first, for the turn the answer runs; a refresh that
+    /// failed leaves the drive no head, and the root issues the same step
+    /// headless ([`run_headless_follow_on_root`]).
     pub(super) async fn run_follow_on_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
-        follow_on: &TurnId,
-        attempts: u32,
+        follow_on: &FollowOnWork<'_>,
         sinks: &DriveSinks<'_>,
+        fence: &crate::store::DriveFence,
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
+        let store = self.drive_store()?;
+        if let Err(fault) = self.refresh_resident_head().await {
+            return run_headless_follow_on_root(
+                root_controller,
+                admitted,
+                follow_on,
+                HeadlessRoot::Unrefreshed {
+                    catalog: self.host.core.session_store_factory(),
+                    fault,
+                },
+            )
+            .await
+            .map(|outcome| RootRun {
+                outcome,
+                run: None,
+                driven_inputs: Vec::new(),
+                empty_drain: None,
+            });
+        }
+        let answer = execute_follow_on_recovery(
+            root_controller,
+            admitted,
+            follow_on,
+            crate::RuntimeEffectLocalExecutor::owned_runner(
+                Box::new(RecoverFollowOnRunner {
+                    store,
+                    fence: fence.clone(),
+                    follow_on: follow_on.turn.clone(),
+                    attempts: follow_on.attempts,
+                }),
+                None,
+            ),
+        )
+        .await?
+        .map_err(|error| drive_abort(Some(&root), error))?;
+        let recovery = match answer {
+            FollowOnRecoveryAnswer::Ceded => {
+                return Ok(RootRun {
+                    outcome: RootOutcome::Ceded { root },
+                    run: None,
+                    driven_inputs: Vec::new(),
+                    empty_drain: Some(
+                        crate::runtime::turn_loop::EmptyQueuedDrainReason::AdmissionRefused(
+                            crate::AdmissionRefusal::AdmissionRaceLost,
+                        ),
+                    ),
+                });
+            }
+            FollowOnRecoveryAnswer::Run { follow_on } => {
+                crate::store::FollowOnRecovery::Run(follow_on)
+            }
+            FollowOnRecoveryAnswer::Exhausted { follow_on } => {
+                crate::store::FollowOnRecovery::Exhausted(follow_on)
+            }
+        };
+        // The recorded fact is the head's while the head still owes this
+        // follow-on: the first execution's body raised its count after the
+        // refresh read it, and every head write of the turn must carry the
+        // fact the head holds.
+        if let (crate::store::FollowOnRecovery::Run(recorded), Some(owed)) =
+            (&recovery, self.state.pending_follow_on.as_deref())
+            && owed.is_turn(&recorded.follow_on_turn_id)
+        {
+            self.state.pending_follow_on = Some(Box::new(recorded.clone()));
+        }
         let host = Arc::clone(&self.host.core.control.effect_host);
         let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
-        let drain = Box::pin(self.recover_admitted_follow_on(options, follow_on, attempts))
+        let drain = Box::pin(self.drive_recovered_follow_on(recovery, &options, fence.clone()))
             .await
             .map_err(|error| drive_abort(Some(&root), error))?;
-        self.root_run_of_drain(root, drain)
-    }
-
-    /// A follow-on recovery root's outcome from how its drain ended.
-    fn root_run_of_drain(
-        &self,
-        root: TurnId,
-        drain: crate::runtime::turn_loop::QueuedTurnDrain<crate::AssembledTurn>,
-    ) -> Result<RootRun, DriveAbort> {
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
@@ -332,17 +400,6 @@ impl LashRuntime {
                 driven_inputs: Vec::new(),
                 empty_drain: None,
             },
-            crate::runtime::turn_loop::QueuedTurnDrain::Empty(
-                crate::runtime::turn_loop::EmptyQueuedDrainReason::ExecutionLaneBusy,
-            ) => {
-                return Err(DriveAbort::Retry(RuntimeError::new(
-                    RuntimeErrorCode::SessionExecutionLaneBusy,
-                    format!(
-                        "session `{}` cannot run root `{root}` until it acquires its execution lane",
-                        self.state.session_id
-                    ),
-                )));
-            }
             crate::runtime::turn_loop::QueuedTurnDrain::Empty(reason) => RootRun {
                 outcome: RootOutcome::Ceded { root },
                 run: None,
@@ -516,6 +573,130 @@ async fn execute_head_inspection(
         .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
 }
 
+/// The follow-on a recovery root was admitted for, with the recovery count
+/// its drive admission recorded.
+pub(super) struct FollowOnWork<'a> {
+    pub(super) turn: &'a TurnId,
+    pub(super) attempts: u32,
+}
+
+/// A follow-on recovery root's recorded decision, `drive-follow-on:{root}`,
+/// whose first execution runs `runner` (FIG-4361). The outer error is a step
+/// the drive could not address; the inner one is the step's answer that is
+/// not a decision: its recorded retirement, or a fault its attempt met.
+async fn execute_follow_on_recovery(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    follow_on: &FollowOnWork<'_>,
+    runner: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<Result<FollowOnRecoveryAnswer, RuntimeError>, DriveAbort> {
+    let invocation = root_step_invocation(root_controller, admitted, "drive-follow-on")?;
+    Ok(root_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::RecoverFollowOn {
+                    follow_on: follow_on.turn.clone(),
+                    attempts: follow_on.attempts,
+                },
+            ),
+            runner,
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_follow_on_recovery)
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
+}
+
+/// The first execution of a follow-on recovery root's decision: the drive's
+/// one live read of the fact the head owes, and the fenced write that raises
+/// its recovery count before the follow-on's first effect (ADR 0101 §3).
+///
+/// The decision is taken on the count `attempts` the drive admission
+/// recorded. A head that owes the follow-on at a count already past it was
+/// raised by an earlier execution of this step whose answer was not
+/// recorded, which this one continues without raising again. Once the raised
+/// count would pass the recovery bound the fact froze for its logical run,
+/// the answer is `Exhausted` and nothing is written: the bound of the host
+/// driving the root never decides it. The recorded fact carries that bound. A store that did not answer is this attempt's fault and the
+/// step runs again; a retired session is recorded (FIG-3630).
+struct RecoverFollowOnRunner {
+    store: crate::store::SessionStore,
+    fence: crate::store::DriveFence,
+    follow_on: TurnId,
+    attempts: u32,
+}
+
+impl RecoverFollowOnRunner {
+    async fn decide(&self) -> Result<FollowOnRecoveryAnswer, crate::StoreError> {
+        let Some(owed) = self
+            .store
+            .load_pending_follow_on()
+            .await?
+            .filter(|owed| owed.is_turn(&self.follow_on))
+        else {
+            return Ok(FollowOnRecoveryAnswer::Ceded);
+        };
+        let basis = crate::store::PendingFollowOn {
+            attempts: self.attempts,
+            ..owed.clone()
+        };
+        let recovery = basis.recovery()?;
+        if owed.attempts > basis.attempts {
+            // An earlier execution of this step raised the count.
+            return Ok(match recovery {
+                crate::store::FollowOnRecovery::Run(_) => {
+                    FollowOnRecoveryAnswer::Run { follow_on: owed }
+                }
+                crate::store::FollowOnRecovery::Exhausted(_) => {
+                    FollowOnRecoveryAnswer::Exhausted { follow_on: owed }
+                }
+            });
+        }
+        Ok(match recovery {
+            crate::store::FollowOnRecovery::Run(_) => FollowOnRecoveryAnswer::Run {
+                follow_on: self
+                    .store
+                    .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
+                    .await?,
+            },
+            exhausted @ crate::store::FollowOnRecovery::Exhausted(_) => exhausted.into(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for RecoverFollowOnRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::RecoverFollowOn {
+            follow_on,
+            attempts,
+        } = &envelope.command
+        else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "follow-on recovery executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        if *follow_on != self.follow_on || *attempts != self.attempts {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "follow-on recovery executor was bound to another follow-on or recovery count",
+            ));
+        }
+        let answer = self
+            .decide()
+            .await
+            .map_err(|error| super::admission::store_fault("follow-on recovery failed", error))?;
+        Ok(crate::RuntimeEffectOutcome::RecoverFollowOn { answer })
+    }
+}
+
 /// Why a sealed root's drive holds no current head of its session.
 #[derive(Clone)]
 pub(super) enum HeadlessRoot {
@@ -662,17 +843,60 @@ pub(super) async fn run_headless_commands_root(
     }
 }
 
+/// Run a sealed follow-on recovery root whose drive holds no current head of
+/// its session (FIG-4361).
+///
+/// The root still issues its recorded decision, `drive-follow-on`, under
+/// the envelope a root with a head issues it, and its body decides nothing
+/// ([`HeadlessRootStepRunner`]):
+///
+/// - a decision that recorded the session's retirement ends the root with
+///   the typed `SessionDeleted` refusal (ADR 0049);
+/// - a recorded `Ceded` cedes the root, as it does with a head;
+/// - a recorded run or exhaustion means an earlier attempt ran the
+///   follow-on's turn after it, which cannot replay without the session's
+///   head ([`HeadlessRoot::past_its_steps`]).
+pub(super) async fn run_headless_follow_on_root(
+    root_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    follow_on: &FollowOnWork<'_>,
+    headless: HeadlessRoot,
+) -> Result<RootOutcome, DriveAbort> {
+    let root = admitted.root().clone();
+    let runner = crate::RuntimeEffectLocalExecutor::owned_runner(
+        Box::new(HeadlessRootStepRunner {
+            session: admitted.session().clone(),
+            step: HeadlessStep::FollowOn {
+                follow_on: follow_on.turn.clone(),
+                attempts: follow_on.attempts,
+            },
+            headless: headless.clone(),
+        }),
+        None,
+    );
+    match execute_follow_on_recovery(root_controller, admitted, follow_on, runner).await? {
+        Ok(FollowOnRecoveryAnswer::Ceded) => Ok(RootOutcome::Ceded { root }),
+        Ok(FollowOnRecoveryAnswer::Run { .. } | FollowOnRecoveryAnswer::Exhausted { .. }) => {
+            Err(headless.past_its_steps(admitted, "its follow-on recovery"))
+        }
+        Err(error) => Err(drive_abort(Some(&root), error)),
+    }
+}
+
 /// The steps a headless root issues.
 enum HeadlessStep {
     /// An input- or queued-headed root's admission and head inspection.
     Root { root: TurnId, head: AdmittedHead },
     /// A command root's read of the session's command lane.
     CommandRun,
+    /// A follow-on recovery root's decision.
+    FollowOn { follow_on: TurnId, attempts: u32 },
 }
 
 /// The first execution of a headless root's step ([`run_headless_root`],
-/// [`run_headless_commands_root`]): it admits, inspects and reads nothing,
-/// and answers why the drive holds no head.
+/// [`run_headless_commands_root`], [`run_headless_follow_on_root`]): it
+/// admits, inspects, reads and decides nothing, and answers why the drive
+/// holds no head.
 ///
 /// A retired session is a settled fact the step records, as the drive's own
 /// admission and seal record it (FIG-3630, FIG-3881): the engine could not
@@ -707,6 +931,16 @@ impl RuntimeEffectLocalRunner for HeadlessRootStepRunner {
                 HeadlessStep::CommandRun,
                 crate::RuntimeEffectCommand::ReadSessionCommandRun { session },
             ) => *session == self.session,
+            (
+                HeadlessStep::FollowOn {
+                    follow_on: bound_follow_on,
+                    attempts: bound_attempts,
+                },
+                crate::RuntimeEffectCommand::RecoverFollowOn {
+                    follow_on,
+                    attempts,
+                },
+            ) => follow_on == bound_follow_on && attempts == bound_attempts,
             (_, other) => {
                 return Err(crate::RuntimeEffectControllerError::new(
                     RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -720,7 +954,7 @@ impl RuntimeEffectLocalRunner for HeadlessRootStepRunner {
         if !bound {
             return Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "headless root step executor was bound to another session, root or head",
+                "headless root step executor was bound to another session, root, head or follow-on",
             ));
         }
         let retirement = |error: crate::StoreError| {

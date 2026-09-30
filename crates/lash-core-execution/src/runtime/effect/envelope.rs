@@ -440,6 +440,15 @@ pub enum RuntimeEffectCommand {
         root: crate::TurnId,
         head: crate::store::AdmittedHead,
     },
+    /// Decide a follow-on recovery root before its turn (FIG-4361): whether
+    /// the head still owes `follow_on`, and, from the recovery count
+    /// `attempts` its drive admission recorded, whether it runs under a
+    /// raised count or commits exhausted. The body raises the count; replay
+    /// serves the recorded answer and never reads the head.
+    RecoverFollowOn {
+        follow_on: crate::TurnId,
+        attempts: u32,
+    },
     /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
     AdmitDrive {
@@ -598,6 +607,7 @@ impl RuntimeEffectCommand {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
@@ -1246,6 +1256,10 @@ pub enum RuntimeEffectOutcome {
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
     },
+    /// A follow-on recovery root's recorded decision (FIG-4361).
+    RecoverFollowOn {
+        answer: crate::store::FollowOnRecoveryAnswer,
+    },
     /// The drive admission's recorded verdict.
     AdmitDrive {
         verdict: Box<crate::engine::AdmitVerdict>,
@@ -1758,6 +1772,7 @@ impl RuntimeEffectOutcome {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,

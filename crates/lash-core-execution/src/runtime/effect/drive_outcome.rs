@@ -1,5 +1,6 @@
 //! The recorded outcomes of a session drive's steps (FIG-3600): its
-//! admission, root start and seal, a root's admission, its turn-config
+//! admission, root start and seal, a root's admission, a follow-on
+//! recovery root's decision (FIG-4361), its turn-config
 //! resolution (S6), its scope close (S7) and a session's close.
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
@@ -25,6 +26,18 @@ impl RuntimeEffectOutcome {
             Self::AdmitRoot { answer } => Ok(answer),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::AdmitRoot,
+                other.kind(),
+            )),
+        }
+    }
+
+    pub fn into_follow_on_recovery(
+        self,
+    ) -> Result<crate::store::FollowOnRecoveryAnswer, RuntimeEffectControllerError> {
+        match self {
+            Self::RecoverFollowOn { answer } => Ok(answer),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::RecoverFollowOn,
                 other.kind(),
             )),
         }

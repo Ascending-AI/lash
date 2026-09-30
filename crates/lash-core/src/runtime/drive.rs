@@ -18,7 +18,9 @@
 //! frontier; a redrive honours the recorded verdict at every position
 //! (FIG-4058), and the turn's fenced commit meets a head that moved since as
 //! a typed refusal. The check cannot select new work or change the admission's
-//! recorded base (ADR 0105 §2).
+//! recorded base (ADR 0105 §2). A follow-on recovery root records its
+//! decision instead, `RecoverFollowOn`, whose body raises the recovery count
+//! and whose answer the root drives on every replay (FIG-4361).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!
@@ -418,10 +420,12 @@ pub async fn admit_drive_retired(
 /// O1) — and the seal's recorded body answers the session's retirement, which
 /// every redrive of the run decodes. A seal an earlier attempt recorded
 /// answers what it answered then: a superseded or lost admission is the
-/// refused root it was. An input-, queued- or command-headed root it
-/// recorded sealed goes on headless, through the recorded steps an earlier
-/// attempt may have journaled after the seal (FIG-4346). `controller` serves
-/// the root's [`drive_root_scope`](crate::engine::drive_root_scope).
+/// refused root it was. A root it recorded sealed goes on headless, through
+/// the recorded steps an earlier attempt may have journaled after the seal:
+/// an input- or queued-headed root's admission and head inspection, a
+/// command root's reads of its command lane (FIG-4346), and a follow-on
+/// recovery root's decision (FIG-4361). `controller` serves the root's
+/// [`drive_root_scope`](crate::engine::drive_root_scope).
 #[doc(hidden)]
 pub async fn run_admitted_root_retired(
     controller: &ScopedEffectController<'_>,
@@ -430,7 +434,10 @@ pub async fn run_admitted_root_retired(
     let scope = controller.admitted_scope().clone();
     let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
     if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
-        return retired_root_outcome(&admitted, verdict);
+        return Ok(RootOutcome::Refused {
+            root: admitted.root().clone(),
+            verdict,
+        });
     }
     let headless = root::HeadlessRoot::Retired;
     match admitted.work().clone() {
@@ -458,38 +465,21 @@ pub async fn run_admitted_root_retired(
             ))
             .await
         }
-        crate::engine::AdmittedWork::FollowOn { .. } => retired_root_outcome(&admitted, verdict),
-    }
-}
-
-/// What a root answers whose session retired before it ran and that goes on
-/// no headless steps: the refused root its seal recorded, or, for a
-/// follow-on root its seal recorded sealed, the retirement. A follow-on root
-/// records no step between its seal and its turn (FIG-4361).
-/// A root sealed before its session's close is one the close ended and whose
-/// execution it released, so no run of it goes on.
-fn retired_root_outcome(
-    admitted: &Admitted,
-    verdict: crate::engine::SealVerdict,
-) -> Result<RootOutcome, DriveAbort> {
-    match verdict {
-        crate::engine::SealVerdict::Sealed(_) => Err(DriveAbort::Refused(
-            RuntimeError::new(
-                RuntimeErrorCode::SessionDeleted,
-                format!(
-                    "root `{}` of session `{}` was sealed before its session retired; its execution ended with the session's close",
-                    admitted.root(),
-                    admitted.session()
-                ),
-            )
-            .with_cause(crate::RuntimeErrorCause::SessionDeleted {
-                session_id: admitted.session().clone(),
-            }),
-        )),
-        verdict => Ok(RootOutcome::Refused {
-            root: admitted.root().clone(),
-            verdict,
-        }),
+        crate::engine::AdmittedWork::FollowOn {
+            follow_on,
+            attempts,
+        } => {
+            Box::pin(root::run_headless_follow_on_root(
+                controller,
+                &admitted,
+                &root::FollowOnWork {
+                    turn: &follow_on,
+                    attempts,
+                },
+                headless,
+            ))
+            .await
+        }
     }
 }
 
@@ -1078,9 +1068,12 @@ impl LashRuntime {
                 Box::pin(self.run_follow_on_root(
                     &root_controller,
                     &admitted,
-                    &follow_on,
-                    attempts,
+                    &root::FollowOnWork {
+                        turn: &follow_on,
+                        attempts,
+                    },
                     sinks,
+                    &fence,
                 ))
                 .await
             }

@@ -319,6 +319,7 @@ async fn commit_switch_owing(
         resolved_run,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
     store
         .commit_runtime_state(steering_commit(&state, switching_turn, Some(owed.clone())))

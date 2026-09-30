@@ -254,7 +254,7 @@ epoch and warns `restate.host_wire_unbound` once
 (`crates/lash-restate/src/compat.rs:110`, `:128`, `:152`,
 `crates/lash-restate/src/engine.rs:210`).
 Session and turn requests rely on this wire contract rather than a request
-`drive_version` gate (`crates/lash-restate/src/session_driver.rs:787`, `:795`).
+`drive_version` gate (`crates/lash-restate/src/session_driver.rs:788`, `:796`).
 Journal generation remains a separate routing concern.
 
 #### 3.2 The per-object `_compat` record
@@ -294,7 +294,7 @@ formats before the SQL fence observes finalize.
 `LashTurn` records its outcome under `LASH_TURN_OUTCOME_FORMAT_VERSION` in
 the same stamped envelope. It is immutable history and has no object sweep.
 The run, outcome and session-drive replies use the selected wire version
-(`crates/lash-restate/src/session_driver.rs:70`, `:152`, `:787`, `:795`,
+(`crates/lash-restate/src/session_driver.rs:71`, `:153`, `:788`, `:796`,
 `crates/lash-core-store/src/store/fleet_format.rs:464`).
 
 #### 3.5 Deployment and rollback routing

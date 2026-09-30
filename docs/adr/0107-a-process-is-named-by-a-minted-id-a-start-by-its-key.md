@@ -83,7 +83,7 @@ start that finds its staging referrer ended holds the content under its own
 same referrer. [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)
 §3.3 owns those artifact rules.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:939`,
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:910`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:327`, and
 `crates/lash-restate/src/controller/process_command.rs:281`.
 

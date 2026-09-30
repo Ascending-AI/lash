@@ -408,6 +408,7 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeSt
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
 
     let error = store
@@ -581,6 +582,7 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
         resolved_run: None,
         chain_depth: 1,
         attempts: 0,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
 
     store

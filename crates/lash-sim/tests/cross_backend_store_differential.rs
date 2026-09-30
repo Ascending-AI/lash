@@ -1402,6 +1402,7 @@ impl BackendRunner {
                         resolved_run: None,
                         chain_depth: 1,
                         attempts: 0,
+                        max_recoveries: lash_core::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
                     });
                 self.commit_and_track(commit, CheckpointSpec::Empty).await
             }

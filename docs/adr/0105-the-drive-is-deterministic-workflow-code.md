@@ -66,27 +66,37 @@ Replay honors the recorded verdict at every journal position. A head that
 moves after a recorded `Ready` is met by the fenced commit, rather than a live
 re-check that changes the command stream.
 
+A follow-on recovery root records `RecoverFollowOn`, keyed by the root
+(`drive-follow-on:{root}`), between its seal and its turn. Its body reads the
+fact the head owes, raises the recovery count in a fenced write, and records
+`Run` with the raised fact, `Exhausted` past the recovery bound the fact froze
+for its logical run, or `Ceded` when the head does not owe the follow-on. The
+recorded fact carries that bound; the recovering host's bound never decides.
+The root drives the recorded answer and never re-decides from the head a replay
+finds. It records no base: a replay past the follow-on's own commit refreshes
+the head that commit moved (FIG-4380).
+
 A live read outside the recorded steps never decides which steps a root
-journals: not the resident-session refresh before `AdmitRoot`, not the
-engine's opening of the session. A sealed root whose drive holds no current
-head, because the engine cannot open its session (its close or tombstone
-committed) or because the refresh fails, runs headless. It still issues its
-recorded steps under the envelopes a root with a head issues: `AdmitRoot` and
-`InspectAdmittedHead` for an input- or queued-headed root, and the
-`session-command-run:{n}` reads for a command root. A command root also reads
-on headless once its session retires under a run it read, because every
-command but a compaction settles and commits off the journal. The bodies of
-those steps admit, inspect and read nothing. A deleted session is the step's
-recorded outcome: the catalog's tombstone, read inside the step, or a session
-the engine cannot open. The root then ends with the typed `SessionDeleted`
-refusal of [ADR 0049](0049-session-ids-are-used-once.md) where its journal
-holds nothing more. Any other refresh fault is the attempt's and is recorded
-nowhere. A journal holding work past those steps (the turn after
-`InspectAdmittedHead`, a compaction's apply) cannot be retraced without the
-session's head. That attempt ends as a live fault that journals nothing, and
-the engine's park reconcile releases a root whose session stays deleted as
-`TargetGone`. A follow-on recovery root records no step between its seal and
-its turn, so it still decides live (FIG-4361).
+journals: not the resident-session refresh before `AdmitRoot`, not the engine's
+opening of the session. A sealed root whose drive holds no current head,
+because the engine cannot open its session (its close or tombstone committed)
+or because the refresh fails, runs headless. It still issues its recorded steps
+under the envelopes a root with a head issues: `AdmitRoot` and
+`InspectAdmittedHead` for an input- or queued-headed root, the
+`session-command-run:{n}` reads for a command root, and `RecoverFollowOn` for a
+follow-on recovery root. A command root also reads on headless once its session
+retires under a run it read, because every command but a compaction settles and
+commits off the journal. The bodies of those steps admit, inspect, read and
+decide nothing. A deleted session is the step's recorded outcome: the catalog's
+tombstone, read inside the step, or a session the engine cannot open. The root
+then ends with the typed `SessionDeleted` refusal of
+[ADR 0049](0049-session-ids-are-used-once.md) where its journal holds nothing
+more. A recorded `Ceded` cedes the root as it does with a head. Any other refresh
+fault is the attempt's and is recorded nowhere. A journal holding work past
+those steps (the turn after `InspectAdmittedHead` or after a recorded `Run` or
+`Exhausted`, a compaction's apply) cannot be retraced without the session's
+head. That attempt ends as a live fault that journals nothing, and the engine's
+park reconcile releases a root whose session stays deleted as `TargetGone`.
 
 A sealed execution carries `DriveFence`. Head-changing writes and ingress
 settlement check that fence in their transaction. Replay envelopes do not hash
@@ -114,13 +124,15 @@ Evidence: `crates/lash-core/src/runtime/drive/admission.rs:94`,
 `crates/lash-core/src/runtime/root_start.rs:1`,
 `crates/lash-core-store/src/store/drive_fence.rs:185`,
 `crates/lash-core-store/src/store/head_ownership.rs:1`,
-`crates/lash-core/src/runtime/drive/root.rs:103`,
-`crates/lash-core/src/runtime/drive/root.rs:346`,
-`crates/lash-core/src/runtime/drive/root.rs:800`,
-`crates/lash-core/src/runtime/drive/root.rs:557`,
-`crates/lash-core/src/runtime/drive/root.rs:605`,
-`crates/lash-core/src/runtime/drive.rs:894`,
-`crates/lash-core/src/runtime/drive.rs:930`.
+`crates/lash-core/src/runtime/drive/root.rs:105`,
+`crates/lash-core/src/runtime/drive/root.rs:423`,
+`crates/lash-core/src/runtime/drive/root.rs:1054`,
+`crates/lash-core/src/runtime/drive/root.rs:622`,
+`crates/lash-core/src/runtime/drive/root.rs:758`,
+`crates/lash-core/src/runtime/drive/root.rs:806`,
+`crates/lash-core/src/runtime/drive/root.rs:859`,
+`crates/lash-core/src/runtime/drive.rs:884`,
+`crates/lash-core/src/runtime/drive.rs:920`.
 
 ### 3. Cancel races and losing work
 
@@ -227,7 +239,7 @@ old segment's journal in place. Durable formats follow the current freeze
 and compatibility rules of ADR 0106.
 
 Evidence: `crates/lash-core-execution/src/engine/drive.rs:1`,
-`crates/lash-restate/src/session_driver.rs:1155`,
+`crates/lash-restate/src/session_driver.rs:1156`,
 `crates/lash-restate/src/process/workflow.rs:1`,
 `crates/lash-core-execution/src/engine/contracts.rs:37`.
 
@@ -260,7 +272,7 @@ store fence cannot retract a request already sent.
 Evidence: `crates/lash-core/src/runtime/turn_boundary.rs:1`,
 `crates/lash-core/src/runtime/turn_loop/commit.rs:1`,
 `crates/lash-core/src/runtime/drive/park.rs:1`,
-`crates/lash-core/src/runtime/drive.rs:930`,
+`crates/lash-core/src/runtime/drive.rs:920`,
 `crates/lash-core-store/src/store/runtime_commit.rs:1`.
 
 ### 10. Commands and executors

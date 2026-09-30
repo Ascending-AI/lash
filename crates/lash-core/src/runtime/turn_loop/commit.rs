@@ -584,6 +584,11 @@ impl LashRuntime {
                 self.drive_root
                     .as_ref()
                     .map_or(&trace_turn_id, |run| run.root()),
+                self.host
+                    .core
+                    .durability
+                    .queued_work_batching
+                    .max_follow_on_recoveries(),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -658,6 +663,11 @@ impl LashRuntime {
             self.drive_root
                 .as_ref()
                 .map_or(&trace_turn_id, |run| run.root()),
+            self.host
+                .core
+                .durability
+                .queued_work_batching
+                .max_follow_on_recoveries(),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {

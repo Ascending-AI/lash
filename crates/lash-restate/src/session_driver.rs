@@ -31,8 +31,9 @@
 //! The kernel owns what a drive admits and how a root runs; these handlers
 //! only give each step its journal. The root's admission step repairs orphaned
 //! inputs and records its admission. Its `InspectAdmittedHead` step records the
-//! store-backed decision about the admitted head. On replay both steps return
-//! their recorded outcomes: the inspection's live check runs only when its
+//! store-backed decision about the admitted head, and a follow-on recovery
+//! root's `RecoverFollowOn` step records its recovery decision. On replay the
+//! steps return their recorded outcomes: the inspection's live check runs only when its
 //! step is the attempt's live frontier, and a replay honours its recorded
 //! verdict (FIG-3824, FIG-4058, ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
 //! store calls and the repair helper in the session drive. The core installs its

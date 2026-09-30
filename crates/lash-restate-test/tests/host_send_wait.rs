@@ -23,7 +23,9 @@
 //! * the engine's own root does too: its session deleted after the root
 //!   journaled its admission, the killed root's replay follows its journal
 //!   and ends with the typed retirement (FIG-4346, live leg of
-//!   `lash::tests::deleted_session_root_replay`);
+//!   `lash::tests::deleted_session_root_replay`), and so does a follow-on
+//!   recovery root killed after its seal and before its recorded recovery
+//!   decision (FIG-4361);
 //! * a committed root answers its follower from the store alone: with the
 //!   session's durable-wait index held after the commit, a follower that
 //!   attaches then still answers, and no terminal key ever holds more than
@@ -1819,6 +1821,284 @@ async fn live_restate_a_dropped_terminal_attach_leaves_no_second_server_invocati
         "the terminal key holds one server-side waiter however often it was attached"
     );
     world.backend.finish().await;
+}
+
+/// The task the frame switch of the follow-on leg hands its follow-on; the
+/// follow-on frame's context carries it and the first frame's does not.
+const FOLLOW_ON_TASK: &str = "answer from the switched frame";
+
+fn switch_frame_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:switch_frame",
+        "switch_frame",
+        "Hand the task to another agent frame.",
+        serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        serde_json::json!({"type": "object"}),
+    )
+}
+
+/// Switches agent frame, handing the follow-on [`FOLLOW_ON_TASK`].
+struct SwitchFrameTool;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for SwitchFrameTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![switch_frame_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "switch_frame").then(|| Arc::new(switch_frame_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({"switched": true}))
+            .with_control(lash_core::ToolControl::SwitchAgentFrame {
+                frame_key: lash_core::FrameKey::from_caller_material("follow-on-frame")
+                    .expect("non-empty caller material"),
+                initial_nodes: Vec::new(),
+                task: Some(FOLLOW_ON_TASK.to_string()),
+            })
+            .into()
+    }
+}
+
+/// A core whose first turn switches agent frame and whose inline follow-on
+/// fails before its commit, so the session's drive admits the owed follow-on
+/// as a recovery root of its own. `follow_on_calls` counts the model calls
+/// made in the follow-on's frame.
+fn follow_on_core(
+    backend: lash_core::Backend,
+    follow_on_calls: &Arc<AtomicUsize>,
+) -> lash::LashCore {
+    let calls = Arc::clone(follow_on_calls);
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("host-send-wait-follow-on")
+        .complete(move |request: LlmRequest| {
+            let in_follow_on = serde_json::to_string(&request.messages)
+                .unwrap_or_default()
+                .contains(FOLLOW_ON_TASK);
+            if in_follow_on {
+                calls.fetch_add(1, Ordering::SeqCst);
+            }
+            async move {
+                let part = if in_follow_on {
+                    LlmOutputPart::Text {
+                        text: "follow-on done".into(),
+                        response_meta: None,
+                    }
+                } else {
+                    LlmOutputPart::ToolCall {
+                        call_id: "switch-call".into(),
+                        tool_name: "switch_frame".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }
+                };
+                Ok::<_, LlmTransportError>(LlmResponse {
+                    parts: vec![part],
+                    response_metadata: Default::default(),
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    // The inline follow-on runs in the switched frame while the head owes
+    // it at recovery count zero; the recovery root raises the count first.
+    let catalog = backend.session_store_factory();
+    let hook: lash_core::plugin::BeforeTurnHook = Arc::new(move |context| {
+        let catalog = Arc::clone(&catalog);
+        Box::pin(async move {
+            let owed =
+                match lash_core::runtime::live_session_view(&catalog, &context.session_id).await {
+                    Ok(Some(store)) => store.load_pending_follow_on().await.ok().flatten(),
+                    _ => None,
+                };
+            let frame = context.state.to_snapshot().current_frame_node_id;
+            if owed.is_some_and(|owed| owed.attempts == 0 && frame.as_ref() == Some(&owed.frame_id))
+            {
+                return Err(lash_core::PluginError::Invoke(
+                    "the inline follow-on fails before its commit".to_owned(),
+                ));
+            }
+            Ok(Vec::new())
+        }) as lash_core::plugin::PluginFuture<_>
+    });
+    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .provider(provider)
+        .model(
+            lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .tools(Arc::new(SwitchFrameTool) as Arc<dyn lash_core::ToolProvider>)
+        .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "host-send-wait-follow-on-failure",
+            lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
+        )))
+        .build(owner())
+        .expect("build the lash core")
+}
+
+/// FIG-4361 against a live `restate-server`: a follow-on recovery root's run
+/// dies after its seal and before its recorded recovery decision
+/// (`drive-follow-on`), the session's storage delete commits while it is
+/// down, and the server's retry replays the run into the deployment that
+/// comes back. The input root before it switched agent frame and its inline
+/// follow-on failed before its commit, so the session's drive admitted the
+/// owed follow-on as a root of its own. The host still holds the session, so
+/// the drive runs on its resident runtime, whose head refresh meets the
+/// tombstone. The replay follows the journal (never `RT0016`), its recovery
+/// decision records the retirement, and the run ends with the typed
+/// `SessionDeleted` refusal. On the suite's replay leg the run also suspends
+/// and replays at every await.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the host-send-wait Restate suite runs it"]
+async fn live_restate_follow_on_root_killed_after_its_session_was_deleted_ends_typed() {
+    let env = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment names {name}"))
+    };
+    let key = format!(
+        "deleted-under-its-follow-on-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let backend = LiveRestateBackend::start(LiveConfig {
+        ingress_url: env("RESTATE_INGRESS_URL"),
+        admin_url: env("RESTATE_ADMIN_URL"),
+        endpoint_bind: env("HSW_BIND").parse().expect("endpoint bind"),
+        endpoint_url: env("HSW_URL"),
+        run_tag: key.clone(),
+        namespace: lash_restate::RestateNamespace::default(),
+    })
+    .await
+    .expect("start the live backend");
+    let follow_on_calls = Arc::new(AtomicUsize::new(0));
+    let core = follow_on_core(backend.lash_backend(), &follow_on_calls);
+    let session_id = lash::SessionId::from(key.as_str());
+    let session = created_session(&core, session_id.clone())
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    let root = lash_core::TurnId::from("deleted-replay-root");
+    let recovery = lash_core::TurnId::from(format!("follow-on:{root}:agent-frame:1#0"));
+    let turn_key = lash_restate::turn_workflow_key(&session_id, &recovery);
+    // The recovery root's run dies with its seal journaled and its recovery
+    // decision not.
+    backend.crash_on(
+        CrashRule::new(CrashPoint::BeforeRun {
+            name: format!("lash:drive-follow-on:{recovery}"),
+        })
+        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE))
+        .key(turn_key.clone()),
+    );
+    // The storage delete commits while the dead run is down: the listener
+    // runs as the deployment dies, and the delete is the store's alone.
+    let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let factory = backend.lash_backend().session_store_factory();
+    assert!(backend.on_crash(Arc::new({
+        let deleted = Arc::clone(&deleted);
+        let session_id = session_id.clone();
+        move |_target: &str| {
+            let factory = Arc::clone(&factory);
+            let session_id = session_id.clone();
+            let delete = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime for the delete")
+                    .block_on(async {
+                        // The dead run's writer can still hold the session for
+                        // a moment: a contended delete is retried until a
+                        // bounded deadline.
+                        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                        loop {
+                            match factory.delete_session(&session_id).await {
+                                Ok(_) => return,
+                                Err(error)
+                                    if format!("{error:?}").contains("Contended")
+                                        && std::time::Instant::now() < deadline =>
+                                {
+                                    tokio::time::sleep(Duration::from_millis(25)).await;
+                                }
+                                Err(error) => panic!("the storage delete commits: {error:?}"),
+                            }
+                        }
+                    });
+            })
+            .join();
+            deleted.store(delete.is_ok(), Ordering::SeqCst);
+        }
+    })));
+    let _handle = session
+        .send(lash::TurnInput::text(
+            "hand this off, then delete me mid-recovery",
+        ))
+        .id(root.clone())
+        .await
+        .expect("the input is accepted");
+    until("the recovery root dies before its decision", || {
+        deleted.load(Ordering::SeqCst)
+    })
+    .await;
+    backend
+        .start_serving()
+        .await
+        .expect("the killed deployment serves again");
+
+    let target = format!(
+        "{}/{turn_key}/run",
+        backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(180), async {
+        loop {
+            if let Some(run) = live_host(&backend, &target).await {
+                if let Some(failure) = &run.last_failure
+                    && diverged(failure)
+                {
+                    panic!("the root's replay diverged from its journal: {failure}");
+                }
+                if let Some(outcome) = backend.outcome(&run.id).await.expect("the run's outcome") {
+                    let journal = backend.journal(&run.id).await.expect("the run's journal");
+                    return (outcome, journal);
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    let Ok((outcome, journal)) = ended else {
+        let run = live_host(&backend, &target).await;
+        let journal = match &run {
+            Some(run) => backend.journal(&run.id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        panic!("the replayed recovery root never ended: {run:?}\njournal {journal:?}");
+    };
+    for step in ["drive-root-start:", "drive-seal:", "drive-follow-on:"] {
+        assert!(
+            journal.iter().any(|entry| entry.contains(step)),
+            "the replay issued the recorded steps and the recovery decision after them, \
+             missing `{step}`: {journal:?}"
+        );
+    }
+    assert!(
+        matches!(&outcome, Err(failure) if failure.contains("session_deleted")),
+        "the recovery root's run ends with the typed retirement: {outcome:?}\njournal {journal:?}"
+    );
+    assert_eq!(
+        follow_on_calls.load(Ordering::SeqCst),
+        0,
+        "the deleted session's follow-on called no model"
+    );
+    drop(session);
+    backend.finish().await;
 }
 
 /// This test crate's one path to a session that may not exist yet

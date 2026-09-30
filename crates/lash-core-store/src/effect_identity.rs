@@ -65,6 +65,10 @@ pub enum RuntimeEffectKind {
     AdmitRoot,
     /// The recorded decision about an admitted root's head.
     InspectAdmittedHead,
+    /// A follow-on recovery root's recorded decision before its turn
+    /// (FIG-4361): run the owed follow-on under its raised recovery count,
+    /// commit it exhausted, or cede a follow-on the head owes no longer.
+    RecoverFollowOn,
     /// A session drive's recorded admission (ADR 0105 §2, FIG-3600): the root
     /// it admitted, with its base and turn index, or why it admitted none.
     AdmitDrive,
@@ -126,6 +130,7 @@ impl RuntimeEffectKind {
             Self::AcceptTurnInput => "accept_turn_input",
             Self::AdmitRoot => "admit_root",
             Self::InspectAdmittedHead => "inspect_admitted_head",
+            Self::RecoverFollowOn => "recover_follow_on",
             Self::AdmitDrive => "admit_drive",
             Self::DrawRootStart => "draw_root_start",
             Self::SealDriveAdmission => "seal_drive_admission",

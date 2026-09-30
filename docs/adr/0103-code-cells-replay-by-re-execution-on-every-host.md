@@ -26,7 +26,7 @@ A nested replay refusal stops further dispatch; a seal cannot hide it.
 Replaying a checkpoint treats its recorded result as the authority for messages
 already incorporated there, so a later checkpoint does not deliver them twice.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:571`,
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:580`,
 `crates/lash-restate/src/controller/execution.rs:122`,
 `crates/lash-protocol-rlm/src/executor/mod.rs:152`,
 `crates/lash-protocol-rlm/src/executor/mod.rs:547`,
@@ -125,7 +125,7 @@ and grammar stamps do not imply a compatibility reader for arbitrary builds.
 release boundary.
 
 Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:82`,
-`crates/lash-core/src/runtime/drive/root.rs:346`,
+`crates/lash-core/src/runtime/drive/root.rs:423`,
 `crates/lash-core/src/runtime/turn_loop/generation_fence.rs:1`.
 
 ### Laws

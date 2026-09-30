@@ -104,6 +104,9 @@ impl QueuedWorkBatchingConfig {
     /// Sets how many times a drive may recover a pending follow-on before the
     /// follow-on commits as a failed turn carrying
     /// `FollowOnRecoveryExhausted` (ADR 0101 §3). The count is never reset.
+    /// The bound is frozen on the pending follow-on when a logical run's
+    /// first frame switch owes it, so a host with another bound recovers
+    /// that chain under the frozen one (FIG-4361).
     pub const fn with_max_follow_on_recoveries(mut self, max_follow_on_recoveries: u32) -> Self {
         self.max_follow_on_recoveries = max_follow_on_recoveries;
         self

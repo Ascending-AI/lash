@@ -1735,7 +1735,8 @@ impl RuntimeEffectControllerError {
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
-    /// admission, whose binding read is the attempt's (FIG-4369), and a process command
+    /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
+    /// recovery root's decision (FIG-4361), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as
     /// can any step whose cancellation watch was lost
@@ -1754,6 +1755,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::AdmitRoot
                 | RuntimeEffectKind::InspectAdmittedHead
+                | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose

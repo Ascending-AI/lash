@@ -544,6 +544,7 @@ mod tests {
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
+            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         assert!(matches!(
@@ -693,6 +694,7 @@ mod tests {
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
+            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         commit

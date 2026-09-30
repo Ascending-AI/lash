@@ -60,8 +60,8 @@ Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
 
 A frame switch records `PendingFollowOn` atomically with its frame pointer in
 `pending_follow_on_json` on `session_head` or `lash_sessions`. It contains the
-follow-on turn id, frame id, task, options, resolved run, chain depth, and
-recovery count. It is not a queue item.
+follow-on turn id, frame id, task, options, resolved run, chain depth, recovery
+count, and the recovery bound of its logical run. It is not a queue item.
 
 The turn id derives from the logical root and next physical-turn ordinal.
 Only that follow-on's terminal commit clears the fact or replaces it with the
@@ -71,9 +71,14 @@ can proceed. Fork heads owe no source follow-on.
 
 Drive admission prioritizes owed follow-on recovery before the unfinished root,
 commands, or fresh turn-lane work. The original run continues its chain inline.
-A recovering drive raises the recovery count once in a fenced write before the
-first effect. Replay uses its recorded count and cannot raise it twice. The
-host's `max_follow_on_recoveries` defaults to 3. Exhaustion commits
+A recovery root records its decision, `RecoverFollowOn`, between its seal and
+its turn. The step's body raises the recovery count once in a fenced write, and
+records the raised fact, the exhaustion, or that the head does not owe the
+follow-on. Replay drives the recorded answer and cannot raise the count twice.
+The first frame switch of a logical run freezes the host's
+`max_follow_on_recoveries` (default 3) on the fact, and the chain carries it:
+every recovery decides on the frozen bound, never on the bound of the host
+driving it, and the recorded decision carries it. Exhaustion commits
 `FollowOnRecoveryExhausted` as a failed follow-on with its task delivered and
 clears the fact. Chain depth also survives crashes. Cancellation answers the
 follow-on's own task, rather than deferring it as undelivered ingress.
@@ -84,8 +89,8 @@ uses frame retention and journal end evidence under
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
 Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
-`:65`, `crates/lash-core/src/runtime/drive/admission.rs:213`,
-`crates/lash-core/src/runtime/turn_loop/follow_on_recovery.rs:22`, and
+`:76`, `crates/lash-core/src/runtime/drive/admission.rs:213`,
+`crates/lash-core/src/runtime/drive/root.rs:622`, and
 `crates/lash-sqlite-store/src/persistence/session_commit.rs:14`.
 
 ### 4. Session commands are a lane applied at turn boundaries
@@ -151,7 +156,7 @@ Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
 `crates/lash-core/src/runtime/host_commands.rs:1`,
 `crates/lash-core/src/runtime/drive/root.rs` (`run_commands_root`),
 `crates/lash/src/admin/host_commands.rs:1`, and
-`crates/lash-core-store/src/store/mod.rs:1590`.
+`crates/lash-core-store/src/store/mod.rs:1591`.
 
 ### 5. Ordering and composition
 

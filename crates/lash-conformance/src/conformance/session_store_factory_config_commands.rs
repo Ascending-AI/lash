@@ -91,6 +91,7 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
         resolved_run: None,
         chain_depth: 3,
         attempts: 2,
+        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
     let mut switch = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,

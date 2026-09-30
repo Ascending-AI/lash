@@ -32,7 +32,7 @@ unsupported, empty or oldest-version backend answers. The operation list
 generates decorators and the session view's forwarders. Drive authority is a
 `DriveFence`; the drive owns turn execution.
 
-Evidence: `crates/lash-core-store/src/store/mod.rs:1058`, `:1780`,
+Evidence: `crates/lash-core-store/src/store/mod.rs:1063`, `:1790`,
 `crates/lash-core-store/src/store/runtime_store_decorator.rs`, and
 `crates/lash-core-store/src/store/drive_fence.rs:249`.
 
@@ -63,7 +63,7 @@ and applied commands it names. Every session read takes a session id;
 a mutation's request carries its session identity or drive fence.
 History reads belong to §1.3.
 
-Evidence: `crates/lash-core-store/src/store/mod.rs:1035`.
+Evidence: `crates/lash-core-store/src/store/mod.rs:1040`.
 
 #### 1.3 `SessionHistoryStore`
 
@@ -120,7 +120,7 @@ contracts.
 
 Evidence: `crates/lash-core-execution/src/runtime/vocabulary.rs:425`,
 `crates/lash-core-execution/src/runtime/deployment_store_decorator.rs:60`,
-and `crates/lash-core-store/src/store/mod.rs:1776`.
+and `crates/lash-core-store/src/store/mod.rs:1786`.
 
 ### 3. `SessionStore` is the permanent thin view
 
