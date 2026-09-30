@@ -1280,6 +1280,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.45.0",
 )
 
@@ -11387,6 +11389,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.35.0",
 )
 
@@ -17295,6 +17299,8 @@ third_party_buildscript_run(
     platform = {
         "linux-x86_64": dict(),
     },
+    rustc_link_lib = True,
+    rustc_link_search = True,
     version = "0.17.14",
 )
 

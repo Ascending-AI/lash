@@ -158,6 +158,7 @@ def lash_test_wrapper(
             shard_env = dict(run_env)
             shard_env["TEST_SHARD_INDEX"] = "0"
             shard_env["TEST_TOTAL_SHARDS"] = "0"
+        shard_env["LASH_TEST_EXECUTION_PREFIX_ARG_COUNT"] = str(len(prefix))
         _external_test(
             name = wrapper_name,
             runner = "//tools/buck2:test_helpers",

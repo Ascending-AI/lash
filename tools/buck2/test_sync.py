@@ -472,6 +472,21 @@ def check_external_buildscripts() -> None:
         f"missing build scripts: {sorted(expected - actual)}; "
         f"unexpected build scripts: {sorted(actual - expected)}"
     )
+    native_link_buildscripts = {
+        "aws-lc-sys",
+        "libsqlite3-sys",
+        "ring",
+    }
+    native_link_blocks = {
+        re.search(r'^\s*package_name = "([^"]+)"', block, re.M).group(1): block
+        for block in re.findall(r"third_party_buildscript_run\(\n(.*?)\n\)\n", generated, re.S)
+        if re.search(r'^\s*package_name = "([^"]+)"', block, re.M).group(1)
+        in native_link_buildscripts
+    }
+    assert native_link_blocks.keys() == native_link_buildscripts
+    for name, block in native_link_blocks.items():
+        assert "rustc_link_lib = True" in block, f"{name} drops cargo:rustc-link-lib"
+        assert "rustc_link_search = True" in block, f"{name} drops cargo:rustc-link-search"
     metadata_edges = {
         re.search(r'^\s*name = "([^"]+)"', block, re.M).group(1): sorted(
             re.findall(r'":([^"\]]+\[metadata\])"', block)

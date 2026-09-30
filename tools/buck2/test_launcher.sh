@@ -3,7 +3,19 @@ set -euo pipefail
 
 here=${BASH_SOURCE[0]%/*}
 watchdog=(/usr/bin/python3 "$here/test_timeout.py")
-if [[ -n ${LASH_POSTGRES_SLOT_DIR:-} ]]; then
-    exec /usr/bin/bash "$here/postgres_slot_runner.sh" "${watchdog[@]}" "$@"
+prefix_count=${LASH_TEST_EXECUTION_PREFIX_ARG_COUNT:-0}
+unset LASH_TEST_EXECUTION_PREFIX_ARG_COUNT
+if [[ ! $prefix_count =~ ^[0-9]+$ ]] || ((prefix_count >= $#)); then
+    echo "invalid test execution prefix argument count: $prefix_count" >&2
+    exit 2
 fi
-exec /usr/bin/bash "$here/test_xml_runner.sh" "${watchdog[@]}" "$@"
+execution=("$@")
+shift "$prefix_count"
+selection=("$@")
+runner_args=(
+    --selection-argv-count "${#selection[@]}" "${selection[@]}"
+    "${watchdog[@]}" "${execution[@]}")
+if [[ -n ${LASH_POSTGRES_SLOT_DIR:-} ]]; then
+    exec /usr/bin/bash "$here/postgres_slot_runner.sh" "${runner_args[@]}"
+fi
+exec /usr/bin/bash "$here/test_xml_runner.sh" "${runner_args[@]}"

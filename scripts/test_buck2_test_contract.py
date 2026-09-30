@@ -217,6 +217,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('"libtest_selection.py": ctx.attrs.libtest_selection', rules)
         self.assertIn('libtest_selection = "libtest_selection.py"', package)
         self.assertIn('libtest_selection.py" runner', single)
+        self.assertIn("--selection-argv-count", single)
+        self.assertIn('shard_env["LASH_TEST_EXECUTION_PREFIX_ARG_COUNT"]', rules)
         self.assertIn('"$libtest_selection" batch-members', batch)
 
     def test_trust_decision_and_required_partition_ids_are_buck2_owned(self) -> None:

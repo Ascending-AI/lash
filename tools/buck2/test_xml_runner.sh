@@ -6,6 +6,19 @@
 set -uo pipefail
 
 xml=${XML_OUTPUT_FILE:?the Buck2 test runner sets XML_OUTPUT_FILE}
+selection=()
+if [[ ${1:-} == --selection-argv-count ]]; then
+    count=${2:-}
+    shift 2
+    if [[ ! $count =~ ^[0-9]+$ ]] || ((count == 0 || count > $#)); then
+        echo "invalid libtest selection argument count: $count" >&2
+        exit 2
+    fi
+    selection=("${@:1:count}")
+    shift "$count"
+else
+    selection=("$@")
+fi
 log=$(mktemp) || exec "$@"
 trap 'rm -f "$log"' EXIT
 for signal in TERM INT HUP; do
@@ -29,7 +42,7 @@ for ((i = 0; i < 200; i++)); do
 done
 
 if ((code == 0)) && [[ ! -e "$xml" ]]; then
-    python3 "${BASH_SOURCE[0]%/*}/libtest_selection.py" runner "$log" "$@" || code=$?
+    python3 "${BASH_SOURCE[0]%/*}/libtest_selection.py" runner "$log" "${selection[@]}" || code=$?
 fi
 
 if [[ ! -e "$xml" ]]; then

@@ -127,6 +127,20 @@ class Fixture(unittest.TestCase):
     def single(self, *args):
         return self.run_command(["bash", str(TOOLS / "test_xml_runner.sh"), str(self.member), *args])
 
+    def launcher(self, *args, prefix=()):
+        Path(self.env["XML_OUTPUT_FILE"]).unlink(missing_ok=True)
+        undeclared = self.root / "undeclared"
+        undeclared.mkdir(exist_ok=True)
+        self.env.update(
+            LASH_TEST_EXECUTION_PREFIX_ARG_COUNT=str(len(prefix)),
+            LASH_TEST_TIMEOUT_SECONDS="10",
+            TEST_UNDECLARED_OUTPUTS_DIR=str(undeclared),
+        )
+        return self.run_command([
+            "bash", str(TOOLS / "test_launcher.sh"),
+            *prefix, str(self.member), *args,
+        ])
+
     def batch(self, *args):
         members = [self.member]
         if self.env.get("FIXTURE_BATCH_EMPTY_MEMBER") == "1":
@@ -165,6 +179,21 @@ class Fixture(unittest.TestCase):
 
 
 class FilteredRunnerTests(Fixture):
+    def test_launcher_separates_watchdog_and_shard_prefixes_from_libtest_arguments(self):
+        self.assert_passed(self.launcher())
+        self.assert_passed(self.launcher("law"))
+        self.assert_passed(self.launcher("law", "--exact"))
+        self.assert_failed(
+            self.launcher("missing", "--exact"),
+            "no executable tests matched the runner arguments",
+        )
+
+        self.env.update(TEST_TOTAL_SHARDS="2", TEST_SHARD_INDEX="0")
+        self.assert_passed(self.launcher(
+            "law", "--exact",
+            prefix=("python3", str(TOOLS / "test_shard.py"), "2", "0"),
+        ))
+
     def test_selector_typo_fails(self):
         self.assert_failed(self.single("law_typo"))
 
