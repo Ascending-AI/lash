@@ -1021,7 +1021,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 
     entered_rx.await.expect("provider entered");
 
-    let observed = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+    let observed = async {
         let _ = session.session_id();
         let _ = session.policy_snapshot();
         let _ = session.read_view();
@@ -1041,10 +1041,13 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         );
         let _ = session.admin().processes().list().await?;
         Result::<()>::Ok(())
-    })
-    .await
-    .expect("observation reads should not wait for the turn");
+    }
+    .await;
     observed?;
+    assert!(
+        !turn.is_finished(),
+        "observation reads finish while the provider still holds the turn"
+    );
 
     release_tx.send(()).expect("release provider");
     turn.await.expect("turn task")?;

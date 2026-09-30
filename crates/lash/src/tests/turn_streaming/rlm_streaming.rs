@@ -34,15 +34,22 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
             .await
     });
 
-    let key = tokio::time::timeout(std::time::Duration::from_secs(1), key_rx)
-        .await
-        .expect("pending tool should request completion key")
-        .expect("pending tool should send completion key");
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    let key = tokio::select! {
+        key = key_rx => key.expect("pending tool should send completion key"),
+        result = &mut turn => panic!("turn completed before issuing its completion key: {result:?}"),
+    };
+    assert_eq!(
+        core.env
+            .core
+            .control
+            .effect_host
+            .peek_await_event(&key)
+            .await?,
+        None,
+        "the tool's completion key is durably unresolved"
+    );
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(20), &mut turn)
-            .await
-            .is_err(),
+        !turn.is_finished(),
         "turn completed before external completion resolved"
     );
     assert!(
@@ -724,12 +731,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
             .open()
             .await?;
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            session.send(TurnInput::text("finish")).output(),
-        )
-        .await
-        .expect("abort drain deadline must not wedge")?;
+        let result = session.send(TurnInput::text("finish")).output().await?;
 
         assert_eq!(
             result.final_value(),
@@ -1396,15 +1398,22 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
             .await
     });
 
-    let key = tokio::time::timeout(std::time::Duration::from_secs(1), key_rx)
-        .await
-        .expect("pending RLM tool should request completion key")
-        .expect("pending RLM tool should send completion key");
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    let key = tokio::select! {
+        key = key_rx => key.expect("pending RLM tool should send completion key"),
+        result = &mut turn => panic!("RLM turn completed before issuing its completion key: {result:?}"),
+    };
+    assert_eq!(
+        core.env
+            .core
+            .control
+            .effect_host
+            .peek_await_event(&key)
+            .await?,
+        None,
+        "the RLM tool's completion key is durably unresolved"
+    );
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(20), &mut turn)
-            .await
-            .is_err(),
+        !turn.is_finished(),
         "RLM turn completed before external completion resolved"
     );
     assert!(
@@ -1489,15 +1498,22 @@ finish(result);"#,
             .await
     });
 
-    let key = tokio::time::timeout(std::time::Duration::from_secs(1), key_rx)
-        .await
-        .expect("pending process tool should request completion key")
-        .expect("pending process tool should send completion key");
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    let key = tokio::select! {
+        key = key_rx => key.expect("pending process tool should send completion key"),
+        result = &mut turn => panic!("process-backed turn completed before issuing its completion key: {result:?}"),
+    };
+    assert_eq!(
+        core.env
+            .core
+            .control
+            .effect_host
+            .peek_await_event(&key)
+            .await?,
+        None,
+        "the process tool's completion key is durably unresolved"
+    );
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(20), &mut turn)
-            .await
-            .is_err(),
+        !turn.is_finished(),
         "process-backed turn completed before external completion resolved"
     );
     // `processes.start` is a leaf tool on the shipped surface (ADR 0095), so the
