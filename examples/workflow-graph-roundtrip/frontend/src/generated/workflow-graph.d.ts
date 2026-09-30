@@ -98,6 +98,10 @@ export type WorkflowNodeKind =
       then_is_block: boolean;
     }
   | {
+      /**
+       * The element binding's authored name, outside execution identity.
+       */
+      authored_binding?: string | null;
       bind?: Expr | null;
       binding: string;
       body: WorkflowSubgraph;
@@ -170,6 +174,10 @@ export type Expr =
     }
   | {
       For: {
+        /**
+         * The authored name of a renamed lexical element binding. Display metadata only; `binding` and `bind` retain their linker identities.
+         */
+        authored_binding?: string | null;
         bind?: Expr | null;
         binding: string;
         body: Expr;
