@@ -140,28 +140,34 @@ that cannot settle is one whose bare settlement exceeds the budget, on a head a
 host lowered the budget below (ADR 0058): its drive stops at the typed
 refusal, and the command settles once the host raises the budget.
 
-Every command settles as a typed `SessionCommandOutcome` carried by its
-commit's receipt, so a submitter on any runtime reads
-`SessionCommandSettlement::Applied { receipt, outcome }`. A host submits with a
-stable idempotency key and gets a durable receipt
-(`SessionCommandAdmin::submit`); a resubmission under the key while the command
-is open names the same command. `settle` answers `Applied`, `Cancelled`, or
-`Pending` with the receipt when the drive has not applied the command by the
-deadline, and a host reattaches by the receipt. The convenience calls
+Head-writing host commands return their typed `SessionCommandOutcome` through
+`SessionCommandSettlement::Applied { receipt, outcome }`. Config transactions
+carry their typed applied, stale or refused result as described in §12;
+a catalog refresh answers `Durable`. A host submits with a stable idempotency
+key and gets a durable receipt (`SessionCommandAdmin::submit`). A resubmission
+with equal key and content returns the first receipt while the command is open
+or retained as a tombstone. `settle` answers the recorded result, `Cancelled`,
+or `Pending` with the receipt when the drive has not applied the command by
+the deadline, and a host reattaches by the receipt. The convenience calls
 (`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
 operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
 `AlreadyAdmitted` once a drive read it. A host's cancel of a plugin task a
-drive admitted goes through the task's cancel gate, a first-writer-wins keyed
-promise (`SessionCommandCancelGate`) under the command's queue-drain scope.
-The host resolves it cancelled; the drive seals it the moment the task's code
-returns, before anything of the task enters resident state, and fires the
-task's cancellation token when the cancel lands. A cancel that won settles
-the command `PluginOperationCommandOutcome::Cancelled` with nothing of the
-task committed, and a seal that won keeps the task's own outcome. A redrive
-before the settling commit meets the same winner, and runs none of the code
-of a task whose cancel won. Neither the withdrawal nor the cancel takes the
-runtime writer, which the drive applying the commands holds. The runtime
+drive admitted resolves the task's cancel signal, a keyed promise
+(`SessionCommandCancelSignal`) under the command's queue-drain scope that
+only a host's cancel writes; a cancel of a command that already settled
+finds its settlement and writes nothing. The signal is a durable request,
+never a decision: the drive peeks it before the task runs, fires the task's
+cancellation token when the cancel lands, and peeks it again the moment the
+task's code returns. A cancel requested by then settles the command
+`PluginOperationCommandOutcome::Cancelled` with nothing of the task
+committed; otherwise it settles with the task's own outcome. The settling
+commit is the one record of that decision (FIG-4453): a drive that dies
+before it leaves nothing decided, and its redrive runs the task's code again
+under the same live signal, or none of it once the cancel was requested. A
+cancel landing after the drive's last peek reaches nothing, and the
+settlement says so. Neither the withdrawal nor the cancel takes the runtime
+writer, which the drive applying the commands holds. The runtime
 writer is never held while a settlement is awaited. A command root, once it drained the lane, writes its
 `RootTerminalCause::CommandsApplied` terminal and arms its scope close, so its
 journal is retired like a turn root's.
@@ -279,7 +285,8 @@ key, sequence, submitted delivery, digest, terminal cause, and terminal time,
 with no admission binding. A queued-work tombstone records `terminal_cause`
 and `terminal_at_ms`; an input's terminal state names its cause and it records
 `terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
-distinguish delivered input or wake, applied command, and cancellation.
+distinguish delivered input or wake, applied command, stale config revision,
+and cancellation.
 Open-row selection excludes tombstones. Host vacuum removes queued-work
 tombstones and withdrawn input; an input a root took keeps its tombstone
 beside that root's terminal evidence until session deletion.
@@ -336,8 +343,14 @@ transaction advances `config_revision` by one; other commits preserve it. A
 transaction whose expected revision the config has moved past publishes no
 config and settles with the typed `Stale { expected, actual }` outcome for its
 submitter. Its resolution is recorded before publication, so a redrive
-replays it. Command tombstones follow ordinary vacuum; replay after vacuum
-meets the revision check and cannot reapply the transaction. There is no
+replays it. The applying commit records each batch's outcome in
+`RuntimeCommitReceipt::command_outcomes`. A terminal command retains its first
+receipt identity, submission digest, terminal cause and time, with
+`settled_operation_key` linking to that original commit receipt. Reattachment
+and equal-key resubmission read its recorded outcome after later commits
+advance the head. The head revision compare-and-set, terminal rows and receipt
+commit atomically. Command tombstones follow ordinary vacuum; replay after
+vacuum meets the revision check and cannot reapply the transaction. There is no
 separate session-command completion marker. `RefreshToolCatalog` recomputes
 live sources.
 

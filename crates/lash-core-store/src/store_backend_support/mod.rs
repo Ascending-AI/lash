@@ -42,21 +42,6 @@ pub use turn_input_lifecycle_sql::{
     undelivered_turn_input_state_predicate_sql,
 };
 
-/// Reserved runtime-receipt identity used as the durable completion marker
-/// for one settled session-command batch. Backends write one marker for
-/// every batch in a coalesced command run in the same transaction as the
-/// head commit and queue deletion.
-pub fn session_command_batch_completion_key(
-    session_id: &SessionId,
-    batch_id: &str,
-) -> Result<String, crate::StoreError> {
-    crate::OperationId::new(
-        crate::ExecutionScope::queue_drain(session_id, batch_id),
-        "session-command-settlement",
-    )
-    .storage_key()
-}
-
 /// Durable receipt identity of one turn's final commit.
 ///
 /// A turn's runtime commits are receipted under the turn's own execution

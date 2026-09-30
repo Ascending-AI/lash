@@ -27,6 +27,7 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }
 lash-sansio = { workspace = true }
+# `aws` enables reqwest 0.13's `rustls`, which validates against platform trust.
 object_store = { workspace = true, default-features = false, features = ["aws"] }
 url = "2"
 

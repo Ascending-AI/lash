@@ -1093,6 +1093,16 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
     })
     .await
     .expect("the retry backoff is a live server timer");
+    let timers = double.server().timers();
+    assert_eq!(timers.len(), 1, "only the retry sleep is scheduled");
+    assert_eq!(timers[0].kind, "sleep");
+    let wake_at_ms = timers[0].fire_at_ms;
+    let now_ms = double.server().now_ms();
+    assert!(wake_at_ms > now_ms, "the retry sleep has a future deadline");
+    eprintln!(
+        "retry sleep: virtual now={now_ms}ms, deadline={wake_at_ms}ms, remaining={}ms, retry delay={RETRY_AFTER_MS}ms",
+        wake_at_ms - now_ms,
+    );
     assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
     let receipt = driver
         .request_cancel(request(
@@ -1103,6 +1113,9 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         .await
         .expect("request during the sleep");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+    // SDK deadlines retain wall time spent before the sleep was issued.
+    // Drive the scheduled deadline, rather than a duration from server startup.
+    assert_eq!(double.server().advance_to(wake_at_ms - 1), 0);
     for _ in 0..16 {
         tokio::task::yield_now().await;
     }
@@ -1111,9 +1124,11 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         1,
         "an after-step stop does not wake the sleep early"
     );
-    double
-        .server()
-        .advance(std::time::Duration::from_millis(RETRY_AFTER_MS + 1));
+    assert!(
+        !turn.is_finished(),
+        "the turn still waits for the retry sleep"
+    );
+    assert_eq!(double.server().advance_to(wake_at_ms), 1);
 
     let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await

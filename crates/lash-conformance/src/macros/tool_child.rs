@@ -594,3 +594,17 @@ macro_rules! tool_batch_group_tests {
              "opener-end-retried-end"));
     };
 }
+
+#[macro_export]
+macro_rules! session_command_replay_tests {
+    ($fixture:block) => {
+        $crate::turn_config_tests!(@law [] $fixture;
+            (session_command_resubmission_after_advance_returns_first_receipt, "command-receipt-replay"));
+        $crate::turn_config_tests!(@law [] $fixture;
+            (settled_config_transaction_applies_once_after_advance, "command-config-once"));
+        $crate::turn_config_tests!(@law [] $fixture;
+            (stale_config_transaction_replay_returns_its_recorded_revision, "command-stale-outcome"));
+        $crate::turn_config_tests!(@law [] $fixture;
+            (settled_command_changed_content_is_a_typed_conflict, "command-content-conflict"));
+    };
+}

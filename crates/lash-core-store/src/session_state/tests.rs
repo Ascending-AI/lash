@@ -49,7 +49,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         failure_evidence: Vec::new(),
         outcome: None,
         pending_follow_on: None,
-        command_outcome: None,
+        command_outcomes: Default::default(),
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: Default::default(),
         receipt_replayed: false,

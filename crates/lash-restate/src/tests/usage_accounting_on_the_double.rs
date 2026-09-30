@@ -15,8 +15,8 @@ use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 /// Kills the accounting continuation's next `settle` after its projection
 /// committed: the handler dies before its output frame, and the double
 /// retries the invocation.
-struct SettleCrashes {
-    server: RestateTestServer,
+pub(super) struct SettleCrashes {
+    pub(super) server: RestateTestServer,
 }
 
 impl lash_conformance::UsageContinuationFaults for SettleCrashes {
@@ -56,6 +56,103 @@ async fn usage_accounting_tier() -> (
 }
 
 lash_conformance::usage_accounting_engine_tests!({ usage_accounting_tier().await });
+
+/// E1's facade read: another core opens no runtime and borrows no controller.
+pub(super) async fn read_parked_usage_from_second_core(
+    tier: &lash_conformance::UsageAccountingTier,
+) {
+    lash_conformance::usage_of_a_root_parked_forever_before_finalization_is_read_without_driving(
+        tier,
+    )
+    .await;
+    let session = lash_core::SessionId::from(format!("{}-fourth-envelope-drift", tier.prefix));
+    let owner = lash_core::RuntimeOwner::Session(session.clone());
+    let head = tier
+        .stores
+        .session_store_factory()
+        .load_session_head_meta(&session)
+        .await
+        .expect("parked head")
+        .map(|head| head.head_revision);
+    let factory = tier.stores.session_store_factory();
+    let fence = factory.drive_epoch(&session).await.expect("parked fence");
+    let park = factory
+        .load_turn_park(&session)
+        .await
+        .expect("park before facade read")
+        .expect("still parked");
+    let stores = Arc::clone(&tier.stores);
+    let reader = lash_restate_test::backend_with(
+        0x4440,
+        lash_restate_test::ServerConfig::default(),
+        move |_| stores,
+    )
+    .await
+    .expect("second host over the same storage");
+    let core = lash::LashCore::standard_builder(reader.lash_backend(), lash::TurnBudget::Unbounded)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .provider(
+            lash_core::testing::TestProvider::builder()
+                .kind("read-only-usage")
+                .complete(|_| async { panic!("the second core reads without driving") })
+                .build()
+                .into_handle(),
+        )
+        .model(lash_core::testing::mock_session_policy().model)
+        .build(lash_core::testing::runtime_lease_owner())
+        .expect("second core");
+    let usage = tokio::time::timeout(std::time::Duration::from_secs(5), core.owner_usage(&owner))
+        .await
+        .expect("facade read within five seconds")
+        .expect("parked owner remains readable");
+    assert_eq!(
+        usage,
+        tier.stores
+            .usage_accounting()
+            .load_owner_usage(&owner)
+            .await
+            .expect("kernel usage")
+    );
+    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
+    assert_eq!(
+        usage
+            .rows
+            .iter()
+            .map(|row| row.reported_attempts)
+            .sum::<u64>(),
+        3
+    );
+    assert_eq!(
+        tier.stores
+            .session_store_factory()
+            .load_session_head_meta(&session)
+            .await
+            .expect("head after facade read")
+            .map(|head| head.head_revision),
+        head
+    );
+    assert_eq!(
+        factory
+            .drive_epoch(&session)
+            .await
+            .expect("fence after facade read"),
+        fence
+    );
+    assert_eq!(
+        factory
+            .load_turn_park(&session)
+            .await
+            .expect("park after facade read"),
+        Some(park)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_core_reads_build_drift_parked_usage() {
+    let (_guard, tier) = usage_accounting_tier().await;
+    read_parked_usage_from_second_core(&tier).await;
+}
 
 /// The laws on a live Restate server: the same endpoint, the real
 /// server's delivery. A live server takes no injected continuation fault.

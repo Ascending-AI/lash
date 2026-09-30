@@ -442,15 +442,9 @@ mod session_language_tests {
             .to_owned()
     }
 
-    /// FIG-1979: a raw per-turn `dialect` key cannot re-word the host prompt.
-    ///
-    /// The typed per-turn options bag has no dialect field, but the merge
-    /// underneath it is an untyped shallow key-extend of the host's per-turn
-    /// override over the session bag, so a raw `{"dialect": ...}` key *does*
-    /// reach the prompt hook's effective options. Under TypeScript-only RLM
-    /// (ADR 0096) there is no second language to switch to, and the host's
-    /// board copy must stay unmoved by such a key rather than being re-worded
-    /// by whatever a turn asserts.
+    /// A raw per-turn dialect change is refused before provider dispatch,
+    /// preserves the recorded TypeScript dialect, and leaves subsequent
+    /// legal turns' board prompts in TypeScript (FIG-1979, FIG-4463).
     #[tokio::test]
     async fn a_per_turn_dialect_key_cannot_re_word_the_board_prompt() {
         use lash::rlm::RlmSendBuilderExt as _;
@@ -500,6 +494,18 @@ mod session_language_tests {
             .await
             .expect("the honest turn runs");
 
+        let recorded: lash::rlm::RlmRecordedConfig = session
+            .read_view()
+            .protocol_turn_options()
+            .decode()
+            .expect("the recorded RLM namespace decodes");
+        assert_eq!(recorded.dialect.as_deref(), Some("typescript"));
+        assert_eq!(
+            seen.lock_recover().len(),
+            1,
+            "the honest turn reached the provider"
+        );
+
         // The attack: a raw per-turn override naming the retired language.
         let attack = lash::runtime::ProtocolTurnOptions::from_payload(
             serde_json::json!({ "dialect": "lashlang" }),
@@ -507,23 +513,50 @@ mod session_language_tests {
         let attacked = session
             .send(lash::TurnInput::text("switch me"))
             .protocol_turn_options(attack)
-            // `require_finish` writes through the same seam and merges
-            // shallowly, so the attack has to survive it — otherwise this turn
-            // would carry no override and the test would measure nothing.
+            // The shallow merge must preserve the dialect attack.
             .require_finish()
             .expect("finish requirement");
-        // That the key really does survive to the prompt hook is not assumed:
-        // it is what makes this test red against a host that reads the hook's
-        // effective options, and the same seam is asserted directly on the
-        // public builder in the facade's own RLM session-config suite.
-        attacked.output().await.expect("the attacked turn runs");
+        let refused = attacked
+            .output()
+            .await
+            .expect_err("the RLM owner refuses a per-turn dialect change");
+        assert!(
+            matches!(
+                refused,
+                lash::EmbedError::Runtime(ref error)
+                    if error.code == lash::runtime::RuntimeErrorCode::RunShapeRefused
+            ),
+            "the dialect attack must be refused as a run shape: {refused:?}"
+        );
+        assert_eq!(
+            seen.lock_recover().len(),
+            1,
+            "the refused attack must not reach the provider"
+        );
+        let after_attack: lash::rlm::RlmRecordedConfig = session
+            .read_view()
+            .protocol_turn_options()
+            .decode()
+            .expect("the recorded RLM namespace still decodes");
+        assert_eq!(
+            after_attack, recorded,
+            "the attack must preserve the recorded config"
+        );
+
+        session
+            .send(lash::TurnInput::text("keep playing"))
+            .require_finish()
+            .expect("finish requirement")
+            .output()
+            .await
+            .expect("a legal turn still runs after the refused attack");
         drop(session);
 
         let prompts = seen.lock_recover().clone();
         assert_eq!(
             prompts.len(),
             2,
-            "both turns must have reached the provider"
+            "only the honest and subsequent legal turns reach the provider"
         );
         for prompt in &prompts {
             assert!(

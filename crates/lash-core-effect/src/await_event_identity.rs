@@ -69,7 +69,7 @@ fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -
             identity.string(key);
         }
         AwaitEventWaitIdentity::TurnCancelEscalation => identity.tag(6),
-        AwaitEventWaitIdentity::SessionCommandCancelGate => identity.tag(7),
+        AwaitEventWaitIdentity::SessionCommandCancelSignal => identity.tag(7),
     }
     identity.finish()
 }

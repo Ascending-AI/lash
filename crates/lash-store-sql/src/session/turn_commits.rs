@@ -64,13 +64,5 @@ crate::statements! {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
-        /// The three append-identity columns are `NULL` by construction: a
-        /// marker is not an append request, so it has no request hash, no node
-        /// count and no identity encoding.
-        insert_marker = "INSERT INTO runtime_turn_commits (
-                session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
-                request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL, ?7)";
     }
 }

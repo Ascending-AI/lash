@@ -142,14 +142,11 @@ pub struct RuntimeCommit {
     /// Requires [`Self::drive_fence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_commands: Option<crate::QueuedWorkCompletion>,
-    /// What the command this commit applies settled as, for a command that
-    /// settles with an outcome (FIG-4201, FIG-4202): the command's answer,
-    /// which the receipt carries back to its submitter. Requires
-    /// [`Self::applied_commands`]. It is what the commit's frame, nodes and
-    /// settled rows already say, so the commit identity covers it through
-    /// them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command_outcome: Option<crate::SessionCommandOutcome>,
+    /// Each command's outcome, keyed by its batch, recorded atomically with
+    /// the head revision compare-and-set and covered by the commit identity.
+    /// Every key must belong to [`Self::applied_commands`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces
@@ -433,11 +430,11 @@ pub struct RuntimeCommitReceipt {
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_follow_on: Option<super::PendingFollowOn>,
-    /// What the command the commit applied settled as (FIG-4201,
-    /// FIG-4202), so the batch's completion answers its submitter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub command_outcome: Option<crate::SessionCommandOutcome>,
+    /// Each command batch's outcome, recorded with the applying commit so
+    /// later resubmissions answer their own result.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
+    pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
     /// Canonical input applications settled by this idempotent turn commit.
     ///
     /// Keeping these identities in the durable turn-commit result lets hosts

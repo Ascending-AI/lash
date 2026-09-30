@@ -504,20 +504,7 @@ async fn execute_code_inner(
         .await
     {
         Ok(recovery) => recovery,
-        Err(error) => {
-            let kind = if matches!(
-                &error,
-                lash_vm_client::PoolError::RetryLimitExceeded
-                    | lash_vm_client::PoolError::Infrastructure(
-                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { .. }
-                    )
-            ) {
-                lash_core::CellFailureKind::Program
-            } else {
-                lash_core::CellFailureKind::Host
-            };
-            return exec_setup_failure_or_stop(state, &ctx, kind, error.to_string());
-        }
+        Err(error) => return worker_setup_failure(state, &ctx, error),
     };
     let previous_service = state
         .vm
@@ -544,12 +531,7 @@ async fn execute_code_inner(
     state.vm.state_mut().replace_service(previous_service);
     match recovery.settle().await {
         Ok(()) => response,
-        Err(error) => exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        ),
+        Err(error) => worker_setup_failure(state, &ctx, error),
     }
 }
 
@@ -616,23 +598,11 @@ async fn execute_code_in_worker_scope(
                 format!("unexpected source analysis response: {other:?}"),
             );
         }
-        Err(error) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                error.to_string(),
-            );
-        }
+        Err(error) => return worker_setup_failure(state, &ctx, error),
     };
 
     if let Err(error) = workers.checkpoint().await {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        );
+        return worker_setup_failure(state, &ctx, error);
     }
 
     // gather → journal → mask → fold: every parsed resource-bearing cell first
@@ -788,12 +758,7 @@ async fn execute_code_in_worker_scope(
     // "Compilation failed" is not enough to classify it: a misspelled name and a
     // forbidden construct both fail here and need opposite advice.
     if let Err(error) = workers.mark_running().await {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        );
+        return worker_setup_failure(state, &ctx, error);
     }
     let compile_result = match workers.request(lash_vm_client::service::Request::CompileModule {
         source: code.to_string(),
@@ -823,7 +788,10 @@ async fn execute_code_in_worker_scope(
             lash_core::CellFailureKind::Host,
             format!("unexpected compilation response: {other:?}"),
         )),
-        Err(error) => Err((lash_core::CellFailureKind::Host, error.to_string())),
+        Err(error) => {
+            fail_attempt_on_host_verdict(&ctx, &error);
+            Err((lash_core::CellFailureKind::Host, error.to_string()))
+        }
     };
     emit_step_trace(
         &ctx,
@@ -834,12 +802,7 @@ async fn execute_code_in_worker_scope(
             .map_err(|(_, diagnostic)| diagnostic.as_str()),
     );
     if let Err(error) = workers.checkpoint().await {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        );
+        return worker_setup_failure(state, &ctx, error);
     }
     let linked_module = match compile_result {
         Ok(program) => program,
@@ -881,12 +844,7 @@ async fn execute_code_in_worker_scope(
     };
     let projected_names = projected.names().collect::<Vec<_>>();
     if let Err(error) = workers.mark_running().await {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        );
+        return worker_setup_failure(state, &ctx, error);
     }
     if let Err(error) = state
         .vm
@@ -896,12 +854,7 @@ async fn execute_code_in_worker_scope(
         return exec_setup_failure_or_stop(state, &ctx, lash_core::CellFailureKind::Host, error);
     }
     if let Err(error) = workers.checkpoint().await {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailureKind::Host,
-            error.to_string(),
-        );
+        return worker_setup_failure(state, &ctx, error);
     }
     let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
     let lashlang_execution_trace = foreground_lashlang_execution_trace(
@@ -1022,12 +975,7 @@ async fn execute_code_in_worker_scope(
             if checkpoint.is_some()
                 && let Err(error) = workers.mark_running().await
             {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
+                return worker_setup_failure(state, &ctx, error);
             }
             if let Some(checkpoint) = checkpoint
                 && let Err(error) = state
@@ -1080,28 +1028,34 @@ async fn execute_code_in_worker_scope(
             );
         }
         Err(error) => {
-            if let lash_vm_broker::BrokerFailure::WorkerLost {
-                outcome: lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                ..
-            }
-            | lash_vm_broker::BrokerFailure::Unavailable {
-                refusal:
-                    lash_vm_broker::CheckoutRefusal::Infrastructure(
-                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                    ),
-            } = &error
-            {
+            // Only a limit the run itself exhausted is the cell's result. A
+            // deadline, or the host's cumulative CPU or attempt accounting,
+            // is this host's live verdict: it is retryable, so the attempt
+            // fails below and the cell seals nothing (FIG-4451).
+            let run_limit = match &error {
+                lash_vm_broker::BrokerFailure::WorkerLost {
+                    outcome: lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+                    ..
+                }
+                | lash_vm_broker::BrokerFailure::Unavailable {
+                    refusal:
+                        lash_vm_broker::CheckoutRefusal::Infrastructure(
+                            lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+                        ),
+                } => match limit {
+                    lash_vm_protocol::WorkerLimit::Fuel => Some("instruction budget exceeded"),
+                    lash_vm_protocol::WorkerLimit::Heap => Some("logical memory limit exceeded"),
+                    lash_vm_protocol::WorkerLimit::Depth => Some("frame depth limit exceeded"),
+                    lash_vm_protocol::WorkerLimit::Deadline => None,
+                },
+                _ => None,
+            };
+            if let Some(message) = run_limit {
                 #[cfg(any(test, feature = "testing"))]
                 assert!(
                     !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
-                    "confidence execution exhausted a required Lashlang bound: {limit:?}"
+                    "confidence execution exhausted a required Lashlang bound: {message}"
                 );
-                let message = match limit {
-                    lash_vm_protocol::WorkerLimit::Fuel => "instruction budget exceeded",
-                    lash_vm_protocol::WorkerLimit::Heap => "logical memory limit exceeded",
-                    lash_vm_protocol::WorkerLimit::Depth => "frame depth limit exceeded",
-                    lash_vm_protocol::WorkerLimit::Deadline => "worker execution deadline exceeded",
-                };
                 return exec_response_from(
                     host.into_collected(),
                     Some(lash_core::CellFailure::new(
@@ -1338,6 +1292,42 @@ fn exec_setup_failure_or_stop(
         ));
     }
     exec_setup_failure(lash_core::CellFailure::new(kind, error))
+}
+
+/// A worker service fault in a cell. A host verdict — its retryable worker
+/// failure, worker budget, pool capacity or recovery store
+/// ([`lash_vm_client::PoolError::is_host_verdict`]) — is read live, outside
+/// any recorded step, and a replay or another host with capacity answers it
+/// differently: it fails the attempt retryably, so the cell seals nothing
+/// and the model never sees it (FIG-4451, FIG-4459). Any other fault is the cell's
+/// host failure.
+fn worker_setup_failure(
+    state: &mut RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    error: lash_vm_client::PoolError,
+) -> ExecResponse {
+    fail_attempt_on_host_verdict(ctx, &error);
+    exec_setup_failure_or_stop(
+        state,
+        ctx,
+        lash_core::CellFailureKind::Host,
+        error.to_string(),
+    )
+}
+
+/// Record `error` as the attempt's retryable nested error when it is a host
+/// verdict (see [`worker_setup_failure`]).
+fn fail_attempt_on_host_verdict(
+    ctx: &RuntimeExecutionContext<'_>,
+    error: &lash_vm_client::PoolError,
+) {
+    if error.is_host_verdict() {
+        ctx.record_nested_effect_error(
+            lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                error.to_string(),
+            ),
+        );
+    }
 }
 
 fn exec_response_from(

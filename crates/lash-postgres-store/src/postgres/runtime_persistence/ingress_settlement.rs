@@ -21,7 +21,7 @@ pub(super) async fn settle_commit_ingress_tx(
     let session_id = &commit.session_id;
     if let Some(commands) = commit.applied_commands.as_ref() {
         for batch_id in &commands.batch_ids {
-            crate::queued_work::settle_open_command_tx(tx, session_id, batch_id, now).await?;
+            crate::queued_work::settle_open_command_tx(tx, commit, batch_id, now).await?;
         }
     }
     let interrupted = commit.interrupted_turn_input_turn_id.as_ref();

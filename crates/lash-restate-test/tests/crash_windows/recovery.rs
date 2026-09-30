@@ -2,7 +2,7 @@ use super::*;
 
 const SIGNAL: &str = "go";
 
-fn worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
+pub(super) fn worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
     lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config().expect("worker config"),
     )
@@ -68,7 +68,7 @@ async fn waiting_request_with_sleep(
     }])
 }
 
-async fn start(
+pub(super) async fn start(
     engine: &Engine,
     core: &lash::LashCore,
     request: lash_core::ProcessStartRequest,
@@ -312,7 +312,10 @@ async fn across_wait(
 /// recorded `lash.process.complete` straight after its admission, where
 /// every later execution of the same segment ran the body: a journal the
 /// handler could never replay.
-async fn segment_journals_end_where_their_bodies_ran(engine: &Engine, runs: &[Invocation]) {
+pub(super) async fn segment_journals_end_where_their_bodies_ran(
+    engine: &Engine,
+    runs: &[Invocation],
+) {
     const COMPLETE: &str = "lash.process.complete";
     let ordinal = |target: &str| {
         target
@@ -424,7 +427,7 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
     use std::future::{Future as _, poll_fn};
     use std::task::Poll;
 
-    for replay in [false, true] {
+    for (replay, sleep_duration) in [(false, "20ms"), (true, "20ms"), (false, "2s"), (true, "2s")] {
         let blocked = Arc::new(Mutex::new(None::<String>));
         let refuses = Arc::clone(&blocked);
         let backend = lash_restate_test::backend_with_build(
@@ -490,9 +493,45 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
                 && invocation.status != "completed"
         }));
 
-        let request = waiting_request(&engine, 32).await;
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            2,
+            "both owned effects ran before the publication cut"
+        );
+        let request = waiting_request_with_sleep(&engine, 32, sleep_duration).await;
         let unrelated = start(&engine, &core, request).await;
         engine.settle().await;
+        let unrelated_run = format!("{PROCESS_WORKFLOW}/{unrelated}/run");
+        let sleep = tokio::time::timeout(BOUND, async {
+            loop {
+                if let Some(timer) = backend
+                    .server()
+                    .timers()
+                    .into_iter()
+                    .find(|timer| timer.target == unrelated_run && timer.kind == "sleep")
+                {
+                    return timer;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the unrelated process issues its sleep");
+        eprintln!(
+            "before unrelated wake: replay={replay}, sleep={sleep_duration}, owned={id}, unrelated={unrelated}, now={}ms, effects={}, timer={sleep:?}",
+            backend.server().now_ms(),
+            executions.load(Ordering::SeqCst),
+        );
+        // The SDK deadline includes wall time spent before issuing the sleep.
+        // Reach the signal wait to prove its preceding tool call actually ran.
+        backend.server().advance_to(sleep.fire_at_ms);
+        record_where(&engine, &unrelated, signal_wait).await;
+        engine.settle().await;
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            3,
+            "the unrelated first effect follows the two owned effects"
+        );
         let completion = engine.completed_process_invocations(&id);
         tokio::pin!(completion);
         poll_fn(|cx| {
@@ -504,8 +543,21 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
         })
         .await;
 
+        let retry = backend
+            .server()
+            .timers()
+            .into_iter()
+            .find(|timer| {
+                timer.target == format!("{PROCESS_WORKFLOW}/{id}/run") && timer.kind == "retry"
+            })
+            .expect("the owned continuation has a scheduled retry");
+        eprintln!(
+            "before owned retry: replay={replay}, sleep={sleep_duration}, owned={id}, unrelated={unrelated}, now={}ms, effects={}, timer={retry:?}",
+            backend.server().now_ms(),
+            executions.load(Ordering::SeqCst),
+        );
         *blocked.lock().unwrap() = None;
-        backend.server().advance(Duration::from_secs(1));
+        backend.server().advance_to(retry.fire_at_ms);
         engine.settle().await;
         let completed = tokio::time::timeout(BOUND, completion)
             .await
@@ -514,6 +566,11 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
             completed
                 .iter()
                 .all(|invocation| invocation.status == "completed")
+        );
+        eprintln!(
+            "after owned recovery: replay={replay}, sleep={sleep_duration}, owned={id}, unrelated={unrelated}, now={}ms, effects={}, completed={completed:?}",
+            backend.server().now_ms(),
+            executions.load(Ordering::SeqCst),
         );
         assert!(
             engine
@@ -533,7 +590,7 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
     }
 }
 
-async fn terminal_fact_is_settled(engine: &Engine, id: &lash_core::ProcessId) {
+pub(super) async fn terminal_fact_is_settled(engine: &Engine, id: &lash_core::ProcessId) {
     let registry = engine.lash_backend().process_registry();
     assert_eq!(
         registry

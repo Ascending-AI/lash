@@ -1,6 +1,6 @@
 //! The [`QueuedWorkStore`] operations for [`PostgresStore`], as
 //! inherent methods the trait implementation forwards to: enqueue, host
-//! withdrawal, the completion marker, and the open-work reads.
+//! withdrawal, the command receipt, and the open-work reads.
 
 use super::*;
 
@@ -88,27 +88,24 @@ impl PostgresStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
-        let marker =
-            lash_core_execution::store_backend_support::session_command_batch_completion_key(
-                session_id, batch_id,
-            )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let row = sqlx::query(
-            crate::session_sql::session_sql()
-                .turn_commits
-                .select_receipt
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_batches
+                .select_command_completion
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(&marker)
+        .bind(batch_id)
         .fetch_optional(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
         row.map(|row| {
+            let operation_key: String = row.get(0);
             let result_json: String = row.get(1);
             lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
-                &marker,
+                &operation_key,
                 &result_json,
                 self.fence.fleet(),
             )

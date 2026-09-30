@@ -35,7 +35,7 @@ dependencies = [
  "lash-internal-restate-test",
  "lash-internal-sqlite-store",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rusqlite",
  "serde",
@@ -53,7 +53,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "chrono-tz",
@@ -82,7 +82,7 @@ dependencies = [
  "lash-runtime",
  "lash-sim",
  "percent-encoding",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rusqlite",
  "serde",
@@ -350,6 +350,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "better_scoped_tls"
@@ -760,6 +766,16 @@ name = "crc-catalog"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest 0.10.7",
+ "spin",
+]
 
 [[package]]
 name = "crc32fast"
@@ -1643,7 +1659,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
- "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -1655,7 +1670,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -1897,6 +1912,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2026,7 +2050,7 @@ checksum = "fa0f4bea31643be4c6a678e9aa4ae44f0db9e5609d5ca9dc9083d06eb3e9a27a"
 dependencies = [
  "ahash",
  "anyhow",
- "base64",
+ "base64 0.22.1",
  "bytecount",
  "fancy-regex",
  "fraction",
@@ -2052,7 +2076,7 @@ version = "10.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "getrandom 0.2.17",
  "js-sys",
  "serde",
@@ -2247,7 +2271,7 @@ dependencies = [
  "bytes",
  "httpdate",
  "lash-internal-sansio",
- "reqwest 0.13.4",
+ "reqwest",
  "thiserror",
  "tokio",
 ]
@@ -2353,7 +2377,7 @@ name = "lash-internal-plugin-mcp"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "blake3",
  "fastrand",
  "futures-util",
@@ -2493,13 +2517,13 @@ name = "lash-internal-provider-anthropic"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-provider-anthropic",
  "lash-internal-sansio",
  "proptest",
- "reqwest 0.13.4",
+ "reqwest",
  "serde_json",
  "tokio",
 ]
@@ -2509,12 +2533,12 @@ name = "lash-internal-provider-auth"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "chrono",
  "form_urlencoded",
  "lash-internal-core",
  "lash-internal-sansio",
- "reqwest 0.13.4",
+ "reqwest",
  "serde_json",
  "sha2 0.10.9",
  "thiserror",
@@ -2527,7 +2551,7 @@ name = "lash-internal-provider-google"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-provider-auth",
@@ -2536,7 +2560,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-runtime",
  "proptest",
- "reqwest 0.13.4",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -2548,7 +2572,7 @@ name = "lash-internal-provider-openai"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "lash-internal-core",
@@ -2560,7 +2584,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-tool-support",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -2572,7 +2596,7 @@ dependencies = [
 name = "lash-internal-remote-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "jsonschema",
  "lash-internal-core",
  "lash-internal-sansio",
@@ -2623,7 +2647,7 @@ dependencies = [
  "lash-internal-trace",
  "lash-internal-typescript",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rusqlite",
  "serde",
@@ -2643,7 +2667,7 @@ name = "lash-internal-restate-test"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "http",
@@ -2859,7 +2883,7 @@ dependencies = [
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "blake3",
  "lash-internal-sansio",
  "rmp-serde",
@@ -2922,7 +2946,7 @@ dependencies = [
  "lash-runtime",
  "libc",
  "rand_chacha 0.9.0",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rmp-serde",
  "schemars 0.8.22",
@@ -2968,7 +2992,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-perf",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "serde",
  "serde_json",
@@ -3093,7 +3117,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-vm-client",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rusqlite",
  "serde",
@@ -3211,6 +3235,16 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -3390,14 +3424,16 @@ dependencies = [
 
 [[package]]
 name = "object_store"
-version = "0.13.2"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49"
+checksum = "f1796bc93603f78c5760a69f2d58badc9618d22adade0a95385bb2adbae4eb94"
 dependencies = [
  "async-trait",
- "base64",
+ "aws-lc-rs",
+ "base64 0.23.1",
  "bytes",
  "chrono",
+ "crc-fast",
  "form_urlencoded",
  "futures-channel",
  "futures-core",
@@ -3406,14 +3442,14 @@ dependencies = [
  "http-body-util",
  "humantime",
  "hyper",
- "itertools 0.14.0",
- "md-5",
+ "itertools 0.15.0",
+ "md-5 0.11.0",
  "parking_lot",
  "percent-encoding",
  "quick-xml",
  "rand 0.10.2",
- "reqwest 0.12.28",
- "ring",
+ "reqwest",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -3759,9 +3795,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
-version = "0.39.4"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
  "serde",
@@ -4048,53 +4084,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
-dependencies = [
- "base64",
- "bytes",
- "futures-core",
- "futures-util",
- "h2",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "js-sys",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "quinn",
- "rustls",
- "rustls-native-certs",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-streams 0.4.2",
- "web-sys",
-]
-
-[[package]]
-name = "reqwest"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "futures-util",
@@ -4126,7 +4120,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams 0.5.0",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -4176,7 +4170,7 @@ version = "7.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4a8731358ce185d1c9663d3ac97414acf7c0d642e5724864ade03fcccb85134"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bs58",
  "bytes",
  "bytes-utils",
@@ -4239,7 +4233,7 @@ dependencies = [
  "pin-project-lite",
  "process-wrap",
  "rand 0.10.2",
- "reqwest 0.13.4",
+ "reqwest",
  "rmcp-macros",
  "schemars 1.2.2",
  "serde",
@@ -4829,7 +4823,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "dotenvy",
  "futures-util",
@@ -4838,7 +4832,7 @@ dependencies = [
  "lash-internal-restate-test",
  "lash-internal-sqlite-store",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "rmcp",
  "rusqlite",
@@ -4871,6 +4865,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+
+[[package]]
 name = "sqlx"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4887,7 +4887,7 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "crc",
  "crossbeam-queue",
@@ -4960,7 +4960,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
 dependencies = [
  "atoi",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.13.0",
  "byteorder",
  "crc",
@@ -4975,7 +4975,7 @@ dependencies = [
  "home",
  "itoa",
  "log",
- "md-5",
+ "md-5 0.10.6",
  "memchr",
  "once_cell",
  "rand 0.8.7",
@@ -5495,7 +5495,7 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-restate-test",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "restate-sdk",
  "serde",
  "serde_json",
@@ -5939,19 +5939,6 @@ dependencies = [
 
 [[package]]
 name = "wasm-streams"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
-dependencies = [
- "futures-util",
- "js-sys",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "wasm-streams"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
@@ -6306,7 +6293,7 @@ dependencies = [
  "anyhow",
  "axum",
  "lash-runtime",
- "reqwest 0.13.4",
+ "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",

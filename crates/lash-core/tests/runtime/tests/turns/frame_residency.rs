@@ -249,7 +249,7 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
             )
             .await
             .expect("read the compaction's completion")
-            .and_then(|completion| completion.command_outcome),
+            .and_then(|completion| completion.command_outcomes.get(&batch.batch_id).cloned()),
             Some(lash_core::runtime::SessionCommandOutcome::CompactContext {
                 outcome: lash_core::runtime::CompactContextOutcome::Opened { .. },
             })

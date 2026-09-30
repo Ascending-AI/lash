@@ -38,6 +38,18 @@ pub enum WorkerLimit {
     Deadline,
 }
 
+impl WorkerLimit {
+    /// Whether this limit is a verdict of the host and the attempt that met
+    /// it rather than of the run. Fuel, heap and frame depth are measured by
+    /// the VM against the run's own bounds, so every execution of the run
+    /// meets them at the same point. A deadline is the host's clock, or its
+    /// cumulative CPU and attempt accounting: a replay, or another host with
+    /// capacity, answers it differently (FIG-4451).
+    pub const fn is_host_verdict(self) -> bool {
+        matches!(self, Self::Deadline)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InfrastructureOutcome {
@@ -55,9 +67,16 @@ pub enum InfrastructureOutcome {
 
 impl InfrastructureOutcome {
     /// Whether re-driving the owning invocation can succeed. A limit the run
-    /// itself exhausted fails the same way on every attempt.
+    /// itself exhausted fails the same way on every attempt; a host's
+    /// deadline or budget does not ([`WorkerLimit::is_host_verdict`]).
     pub fn is_retryable(&self) -> bool {
-        !matches!(self, Self::WorkerLimitExceeded { .. })
+        match self {
+            Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
+            Self::WorkerCrashed { .. }
+            | Self::WorkerUnresponsive { .. }
+            | Self::ProtocolViolation { .. }
+            | Self::PayloadTooLarge { .. } => true,
+        }
     }
 }
 
@@ -75,6 +94,28 @@ impl From<CodecRefusal> for InfrastructureOutcome {
             refusal => Self::ProtocolViolation {
                 reason: refusal.to_string(),
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_deadline_is_the_hosts_verdict_and_retryable_where_a_run_limit_is_not() {
+        for (limit, host_verdict) in [
+            (WorkerLimit::Fuel, false),
+            (WorkerLimit::Heap, false),
+            (WorkerLimit::Depth, false),
+            (WorkerLimit::Deadline, true),
+        ] {
+            assert_eq!(limit.is_host_verdict(), host_verdict, "{limit:?}");
+            assert_eq!(
+                InfrastructureOutcome::WorkerLimitExceeded { limit }.is_retryable(),
+                host_verdict,
+                "{limit:?}: only a limit the run itself exhausted fails every attempt"
+            );
         }
     }
 }

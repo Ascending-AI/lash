@@ -35,6 +35,14 @@ crate::statements! {
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
+        /// The applying commit's original receipt, reached through the command tombstone.
+        select_command_completion = "SELECT receipt.turn_id, receipt.result_json
+             FROM queued_work_batches AS batch
+             JOIN runtime_turn_commits AS receipt
+               ON receipt.session_id = batch.session_id
+              AND receipt.turn_id = batch.settled_operation_key
+             WHERE batch.session_id = ?1 AND batch.batch_id = ?2";
+
         /// The id and admission-time submission digest of the batch session
         /// `?1` filed under source key `?2`, open or a tombstone: what a
         /// resubmission's verdict compares (ADR 0101 §8).
@@ -159,12 +167,13 @@ crate::statements! {
                AND admitted_root = ?3";
 
         /// Settle open session command `?2` of session `?1` into its
-        /// `applied` tombstone at `?3`: the command lane's settlement, in the
+        /// tombstone at `?3`, with cause `?4` and applying operation `?5`, in the
         /// commit that applied it (FIG-3927). A command withdrawn since the
         /// drive read it matches no row, and the commit is refused.
         settle_command = "UPDATE queued_work_batches
-             SET terminal_cause = 'applied',
+             SET terminal_cause = ?4,
                  terminal_at_ms = ?3,
+                 settled_operation_key = ?5,
                  obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN 'delivered' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')

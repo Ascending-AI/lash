@@ -90,6 +90,9 @@ struct Observation {
     /// itself compared.
     #[serde(skip)]
     detail: Option<String>,
+    /// The original typed executor failure, retained in divergence reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure: Option<lash_core::CellFailure>,
     /// Node only: the probed names whose value reaches a function. It feeds
     /// the `closure-boundary` rule and is not itself compared.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,6 +108,7 @@ impl Observation {
     fn comparable(&self) -> Self {
         Self {
             detail: None,
+            failure: None,
             closures: Vec::new(),
             prints: self
                 .prints
@@ -254,6 +258,7 @@ fn observe_cell(session: &mut Session, source: &str) -> Observation {
             .collect(),
         probes: BTreeMap::new(),
         detail: response.error.as_ref().map(|failed| failed.message.clone()),
+        failure: response.error.clone(),
         closures: Vec::new(),
     };
     match (rejection, &response.error, &response.terminal_finish) {
@@ -375,6 +380,39 @@ fn run_cells<'a>(
 
 /// A whole session through lash in one harness mode.
 fn run_session(mode: HarnessMode, names: &[String], sources: &[String]) -> Vec<LashCell> {
-    let mut session = Session::open(mode);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the oracle host selects its worker"
+    )]
+    let worker = std::env::var_os("LASH_VM_WORKER")
+        .expect("the node oracle requires its matching-feature LASH_VM_WORKER");
+    let mut session = Session::open_with_workers(
+        mode,
+        &BTreeMap::new(),
+        lash_vm_client::service::Service::subprocess(worker),
+    );
     run_cells(&mut session, names, sources.iter().map(String::as_str))
+}
+
+#[test]
+fn a_worker_launch_failure_preserves_the_original_cell_failure() {
+    let scratch = tempfile::tempdir().expect("a scratch worker path");
+    let mut session = Session::open_with_workers(
+        HarnessMode::Resident,
+        &BTreeMap::new(),
+        lash_vm_client::service::Service::subprocess(scratch.path().join("missing-worker")),
+    );
+    let observation = observe_cell(&mut session, "console.log(42);");
+    let failure = observation.failure.as_ref().expect("the launch failed");
+    assert_eq!(failure.kind, lash_core::CellFailureKind::Host);
+    assert!(
+        failure.message.contains("No such file or directory"),
+        "{failure:?}"
+    );
+    let json = serde_json::to_value(&observation).expect("the observation serializes");
+    assert_eq!(json["failure"], serde_json::to_value(failure).unwrap());
+    let reported: Observation = serde_json::from_value(json).expect("the report decodes");
+    assert_eq!(reported.failure.as_ref(), Some(failure));
+    assert!(observation.agrees_with(&reported));
+    assert!(observation.comparable().failure.is_none());
 }

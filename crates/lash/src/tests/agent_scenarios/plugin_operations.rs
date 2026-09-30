@@ -136,7 +136,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
         );
         // The task is running in the drive, so the cancel no longer
         // withdraws it (FIG-4202): it reaches the task through its cancel
-        // gate, and the drive settles the command cancelled (FIG-4391).
+        // signal, and the drive settles the command cancelled (FIG-4391).
         let cancel = crate::CancellationToken::new();
         let task_cancel = cancel.clone();
         let running_ops = ops.clone();

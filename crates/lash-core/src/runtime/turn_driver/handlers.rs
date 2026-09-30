@@ -569,7 +569,13 @@ impl RuntimeTurnDriver<'_> {
                 // nothing further. Nor is a session retirement: the deleted
                 // session's gate is revoked with it, so a peek could only
                 // fail, and the typed retirement refusal must reach the turn.
-                let stopped_on_host = !err.code.parks_turn() && !err.is_session_retirement();
+                // Nor is a fault of the attempt itself, such as its host's
+                // worker verdict: the retry runs the cell again, and a peek
+                // journaled here would stand where that run's commands go
+                // (FIG-4451).
+                let stopped_on_host = !err.code.parks_turn()
+                    && !err.is_session_retirement()
+                    && !err.is_attempt_fault();
                 let cancellation_evidence = self
                     .recorded_cell_cancel(machine, &cell_key, stopped_on_host)
                     .await?;

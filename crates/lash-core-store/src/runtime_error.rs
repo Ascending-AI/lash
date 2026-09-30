@@ -435,6 +435,8 @@ pub enum RuntimeErrorCode {
     /// Admitting a spending effect's usage run to storage failed. The attempt
     /// ends retryably and journals nothing; the engine runs it again.
     UsageAdmissionFault,
+    /// The accounting owner is retired; no further provider dispatch may spend under it.
+    UsageOwnerRetired,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -805,6 +807,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
             Self::UsageRunMissing => "usage_run_missing",
             Self::UsageAdmissionFault => "usage_admission_fault",
+            Self::UsageOwnerRetired => "usage_owner_retired",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -1025,6 +1028,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolChildRequestVersion,
         Self::UsageRunMissing,
         Self::UsageAdmissionFault,
+        Self::UsageOwnerRetired,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -1265,6 +1269,7 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
             "usage_run_missing" => Self::UsageRunMissing,
             "usage_admission_fault" => Self::UsageAdmissionFault,
+            "usage_owner_retired" => Self::UsageOwnerRetired,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }
@@ -1769,6 +1774,16 @@ impl RuntimeEffectControllerError {
         );
         error.journal_disposition = EffectErrorJournalPolicy::RetryUncommittedResponseDerivation;
         error
+    }
+
+    /// Whether this failure is the attempt's own: an uncommitted derivation
+    /// marked safe to execute again ([`Self::retryable_response_derivation`],
+    /// [`Self::retryable_uncommitted_derivation`]). The retry runs the failed
+    /// work again, so nothing may be journaled after it in its place — a
+    /// cell that failed on its host's worker verdict records no cancellation
+    /// peek either (FIG-4451).
+    pub fn is_attempt_fault(&self) -> bool {
+        self.journal_disposition.is_retryable_derivation()
     }
 
     /// Marks this failure of an uncommitted host derivation — an

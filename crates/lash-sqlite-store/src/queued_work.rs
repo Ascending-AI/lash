@@ -395,10 +395,18 @@ pub(crate) fn complete_admitted_batch_conn(
 /// since the drive read it refuses the whole commit.
 pub(crate) fn settle_open_command_conn(
     conn: &Connection,
-    session_id: &SessionId,
+    commit: &lash_core_execution::store::RuntimeCommit,
     batch_id: &lash_core_execution::BatchId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
+    let session_id = &commit.session_id;
+    let operation_key = commit.turn_commit.operation.storage_key()?;
+    let cause = match commit.command_outcomes.get(batch_id) {
+        Some(lash_core_execution::runtime::SessionCommandOutcome::ConfigTransaction {
+            outcome: lash_core_execution::ConfigTransactionOutcome::Stale { .. },
+        }) => lash_core_execution::store::IngressTerminalCause::StaleConfigRevision,
+        _ => lash_core_execution::store::IngressTerminalCause::Applied,
+    };
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> = conn
         .query_row(
@@ -419,7 +427,9 @@ pub(crate) fn settle_open_command_conn(
             params![
                 session_id.as_str(),
                 batch_id.as_str(),
-                crate::clamp_epoch_ms(at_ms)
+                crate::clamp_epoch_ms(at_ms),
+                cause.as_str(),
+                operation_key
             ],
         )
         .map_err(sqlite_error)?;

@@ -794,8 +794,9 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
         count = len(bad) + len(missing) + len(failures) + len(healed)
         print(f"::warning title={suite.name} {leg} leg (report-only)::{count} law(s) failed; {reason}")
         return 0
-    for outcome in outcomes:
-        outcome.log.unlink(missing_ok=True)
+    if not args.keep_test_logs:
+        for outcome in outcomes:
+            outcome.log.unlink(missing_ok=True)
     return 0
 
 
@@ -867,6 +868,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     suite.add_argument("name")
     suite.add_argument("--leg", choices=sorted(LEGS), required=True)
     suite.add_argument("--artifacts", default=str(ROOT / "target" / "restate-suites"))
+    suite.add_argument("--keep-test-logs", action="store_true", help="retain passing per-test logs")
     suite.add_argument(
         "--binary",
         default=os.environ.get("LASH_RESTATE_SUITE_BINARY"),

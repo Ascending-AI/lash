@@ -11,7 +11,7 @@
 macro_rules! usage_accounting_engine_tests {
     ($(#[$meta:meta])* $tier:block) => {
         $crate::usage_accounting_engine_tests!(@catalogue [$(#[$meta])*] $tier; [
-            usage_of_an_unfinished_root_is_read_without_driving,
+            usage_of_a_root_parked_forever_before_finalization_is_read_without_driving,
             each_paid_attempt_counts_once_under_any_boundary_grouping_and_replay,
             usage_crash_p1_committed_completed,
             usage_crash_p1_committed_cancelled,
@@ -27,6 +27,11 @@ macro_rules! usage_accounting_engine_tests {
             usage_crash_p2_parked_forever,
             a_settlement_retried_after_its_projection_counts_once,
             committed_turn_totals_are_preserved,
+            session_delete_drains_accounting_first,
+            tool_child_spend_counts_once_without_settlement_charging,
+            refused_superseded_keeps_each_paid_call_once,
+            substrate_lost_keeps_each_paid_call_once,
+            operator_cancelled_parked_keeps_each_paid_call_once,
         ]);
     };
     (@catalogue $attrs:tt $tier:block; [$($law:ident),* $(,)?]) => {

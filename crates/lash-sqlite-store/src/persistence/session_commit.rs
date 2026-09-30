@@ -843,27 +843,6 @@ impl SqliteStore {
                             ],
                         )
                         .map_err(sqlite_error)?;
-                        if let Some(commands) = commit.applied_commands.as_ref() {
-                            for batch_id in &commands.batch_ids {
-                                let marker = lash_core_execution::store_backend_support::session_command_batch_completion_key(
-                                    &commit.session_id,
-                                    batch_id,
-                                )?;
-                                crate::conn::cached_execute(tx,
-                                    session_sql().turn_commits.insert_marker.sql(),
-                                    params![
-                                        commit.session_id.as_str(),
-                                        marker,
-                                        receipt.turn_commit_hash,
-                                        result_json,
-                                        Option::<&str>::None,
-                                        now as i64,
-                                        !result.failure_evidence.is_empty(),
-                                    ],
-                                )
-                                .map_err(sqlite_error)?;
-                            }
-                        }
                     }
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
                         let closure = settlement.authorization();

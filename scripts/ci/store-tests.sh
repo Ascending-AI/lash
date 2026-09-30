@@ -233,13 +233,13 @@ case "${suite}" in
       buck2_test --test_arg=committed_shape_artifact_matches_the_ddl_artifact \
         //crates/lash-postgres-store:lash-postgres-store__unit_test
       buck2_test \
-        --test_arg=a_mismatched_version_stamp_is_reported_without_a_column_diff \
+        --test_arg=a_compatible_expansion_still_reports_column_drift \
         //crates/lash-postgres-store:schema_drift__test
     else
       cargo_test cargo test -p lash-internal-postgres-store --locked --lib \
         committed_shape_artifact_matches_the_ddl_artifact
       cargo_test cargo test -p lash-internal-postgres-store --locked --test schema_drift \
-        a_mismatched_version_stamp_is_reported_without_a_column_diff
+        a_compatible_expansion_still_reports_column_drift
     fi
     ;;
 

@@ -1762,8 +1762,12 @@ jobs:
           set -euo pipefail
           start=$(( 1000000 + (GITHUB_RUN_ID % 1000000) * 1000 ))
           echo "generated session seeds ${start}..$(( start + 300 ))"
-          LASH_GENERATED_SEEDS="${start}..$(( start + 300 ))" \
-            cargo test -p lash-internal-protocol-rlm --lib -- \
+          cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing
+          target_dir="${CARGO_TARGET_DIR:-target}"
+          [[ "$target_dir" = /* ]] || target_dir="$PWD/$target_dir"
+          LASH_VM_WORKER="$target_dir/debug/lash-vm-worker" \
+            LASH_GENERATED_SEEDS="${start}..$(( start + 300 ))" \
+            cargo test --locked -p lash-internal-protocol-rlm --features testing --lib -- \
             --ignored --exact --nocapture \
             testing::cell_conformance::node_oracle::generated::generated_sessions_against_live_node
 
@@ -1995,7 +1999,7 @@ jobs:
               //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
           else
             cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-            cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
+            cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker --features testing
             mkdir -p "${RUNNER_TEMP}/worker-artifacts"
             find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
               -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
@@ -2472,6 +2476,7 @@ jobs:
         if: env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
         env:
           LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR: target/operator-flow-artifacts/context-overflow-recovery
+          LASH_CONTEXT_OVERFLOW_VM_WORKER: ${{ runner.temp }}/worker-binaries/lash-vm-worker
         run: bash scripts/context-overflow-recovery-e2e.sh
 
       - name: Upload operator-flow E2E failure artifacts

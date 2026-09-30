@@ -66,16 +66,37 @@ fi
 
 staging="$artifact_root/context-overflow-recovery/.observed"
 mkdir -p "$staging"
-if [[ -f .buckconfig.local ]]; then
-  "$repo/scripts/ci/with-service.sh" restate -- \
-    kiln run //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
-    2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
+if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  companion="$LASH_E2E_PREBUILT_BIN_DIR/lash-e2e-context-overflow-recovery"
+  worker="$LASH_E2E_PREBUILT_BIN_DIR/lash-vm-worker"
+elif [[ -f .buckconfig.local ]]; then
+  mapfile -t built < <(python3 "$repo/scripts/ci/restate_suite.py" build \
+    //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
+    //crates/lash-vm-worker:lash-vm-worker__bin)
+  if [ "${#built[@]}" -ne 2 ]; then
+    echo "expected 2 built outputs, got ${#built[@]}" >&2
+    exit 1
+  fi
+  companion="${built[0]}"
+  worker="${built[1]}"
 else
-  "$repo/scripts/ci/with-service.sh" restate -- \
-    cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
-    --bin lash-e2e-context-overflow-recovery \
-    2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
+  cargo build --locked \
+    -p lash-restate-postgres-workers-e2e -p lash-internal-vm-worker \
+    --bin lash-e2e-context-overflow-recovery --bin lash-vm-worker
+  target_dir="${CARGO_TARGET_DIR:-target}"
+  [[ "$target_dir" = /* ]] || target_dir="$repo/$target_dir"
+  companion="$target_dir/debug/lash-e2e-context-overflow-recovery"
+  worker="$target_dir/debug/lash-vm-worker"
 fi
+export LASH_CONTEXT_OVERFLOW_VM_WORKER="${LASH_CONTEXT_OVERFLOW_VM_WORKER:-$worker}"
+for executable in "$companion" "$LASH_CONTEXT_OVERFLOW_VM_WORKER"; do
+  if [ ! -x "$executable" ]; then
+    echo "context-overflow companion requires an executable: $executable" >&2
+    exit 1
+  fi
+done
+"$repo/scripts/ci/with-service.sh" restate -- "$companion" \
+  2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
 
 dialect="$(python3 - "$staging/03-observed.jsonl" <<'DIALECT'
 import json

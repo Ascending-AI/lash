@@ -369,6 +369,7 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::UsageOwnerRetired
                     ) =>
             {
                 error
@@ -380,6 +381,7 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::UsageOwnerRetired
                     ) =>
             {
                 error.into_runtime_error()
@@ -549,6 +551,33 @@ mod classification_tests {
             assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionHeadOwned);
             assert!(runtime.is_retryable());
             assert!(!runtime.is_terminal());
+        }
+    }
+
+    #[test]
+    fn owner_retirement_survives_plugin_journaling_and_host_conversions() {
+        let runtime = crate::RuntimeError::new(
+            crate::RuntimeErrorCode::UsageOwnerRetired,
+            "the accounting owner was retired",
+        );
+        let controller = crate::RuntimeEffectControllerError::from(runtime.clone());
+        for plugin in [
+            PluginError::Runtime(runtime),
+            PluginError::RuntimeEffectController(controller),
+        ] {
+            let encoded = serde_json::to_vec(&plugin).expect("encode plugin journal");
+            let plugin: PluginError =
+                serde_json::from_slice(&encoded).expect("replay plugin journal");
+            assert!(plugin.is_terminal());
+            assert!(!plugin.is_retryable());
+            let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+            assert_eq!(controller.code, crate::RuntimeErrorCode::UsageOwnerRetired);
+            let runtime = plugin.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+            assert_eq!(runtime.code, crate::RuntimeErrorCode::UsageOwnerRetired);
+            assert_eq!(
+                lash_sansio::FailureCode::from(&runtime.code).namespaced(),
+                "lash:usage_owner_retired"
+            );
         }
     }
 

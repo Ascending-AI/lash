@@ -1892,7 +1892,7 @@ class PostgresMatrixTests(unittest.TestCase):
                 "Test PostgreSQL catalog compatibility",
             ),
             (
-                "a_mismatched_version_stamp_is_reported_without_a_column_diff",
+                "a_compatible_expansion_still_reports_column_drift",
                 "Test PostgreSQL catalog compatibility",
             ),
         ):

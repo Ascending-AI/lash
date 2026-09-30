@@ -2145,3 +2145,18 @@ lash_conformance::usage_ledger_store_tests!({
     };
     ((lock, storage), fixture)
 });
+mod session_commands {
+    use super::*;
+    lash_conformance::session_command_replay_tests!({
+        let (lock, storage) = storage().await.expect("command laws require PostgreSQL");
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-commands",
+            host,
+            stores,
+            runner,
+        )
+    });
+}

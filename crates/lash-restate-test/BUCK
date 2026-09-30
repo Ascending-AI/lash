@@ -454,6 +454,27 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "usage_accounting_windows__test",
+    crate_features = [],
+    crate_name = "usage_accounting_windows",
+    crate_root = "tests/usage_accounting_windows.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "usage_accounting_windows", "//crates/lash-restate-test:usage_accounting_windows__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

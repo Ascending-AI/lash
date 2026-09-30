@@ -336,7 +336,14 @@ impl LashRuntime {
             };
             commit.drive_fence = Some(Box::new(drive_fence.clone()));
             commit.applied_commands = Some(completion.clone());
-            commit.command_outcome = Some(super::SessionCommandOutcome::CompactContext { outcome });
+            for batch_id in &completion.batch_ids {
+                commit.command_outcomes.insert(
+                    batch_id.clone(),
+                    super::SessionCommandOutcome::CompactContext {
+                        outcome: outcome.clone(),
+                    },
+                );
+            }
             let error = match store.commit_runtime_state_verified(commit).await {
                 Ok(result) => {
                     self.state.apply_persisted_commit_result(result);

@@ -21,8 +21,10 @@
 //! (FIG-4392); and a command withdrawn before the drive read it never
 //! applies, while one the drive already read is no longer withdrawn. A
 //! host's cancel still reaches a plugin task the drive admitted, through the
-//! task's cancel gate: the drive stops the task's code and settles the
-//! command cancelled, with nothing of the task committed (FIG-4391).
+//! task's cancel signal: the drive stops the task's code and settles the
+//! command cancelled, with nothing of the task committed (FIG-4391), and a
+//! task whose drive died after its code returned and before its settlement
+//! runs again under a signal the cancel still reaches (FIG-4453).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -132,6 +134,22 @@ impl crate::plugin::PluginOperation for HostCancellableTask {
 
 impl crate::plugin::PluginTask for HostCancellableTask {}
 
+/// A plugin task whose first run returns at once, and whose every later run
+/// waits for its cancellation and then appends the note its arguments name:
+/// the task a crash between its return and its settlement makes run again.
+struct HostReturnsOnceTask;
+
+impl crate::plugin::PluginOperation for HostReturnsOnceTask {
+    const NAME: &'static str = "conformance_host_returns_once_task";
+    const DESCRIPTION: &'static str = "Return at once on the first run; on a later run, wait \
+         until cancelled, then append a note to the session, as a host's plugin task.";
+    const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
+    type Args = serde_json::Value;
+    type Output = serde_json::Value;
+}
+
+impl crate::plugin::PluginTask for HostReturnsOnceTask {}
+
 /// What the host-command plugin saw, shared by every runtime a law builds.
 #[derive(Clone, Default)]
 struct HostPluginProbe {
@@ -143,6 +161,11 @@ struct HostPluginProbe {
     cancellable_task_runs: Arc<AtomicUsize>,
     /// Notified each time the cancellable plugin task's code starts.
     cancellable_task_entered: Arc<tokio::sync::Notify>,
+    /// How many times the returns-once plugin task's code ran.
+    returns_once_task_runs: Arc<AtomicUsize>,
+    /// Notified each time a later run of the returns-once plugin task's code
+    /// starts.
+    returns_once_task_rerun: Arc<tokio::sync::Notify>,
     /// Holds the plugin command's code after it counted its run.
     command_hold: Option<SummaryHold>,
     /// Whether the terminal callback appends a note on every persisted turn.
@@ -198,6 +221,7 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
     let command_probe = probe.clone();
     let task_probe = probe.clone();
     let cancellable_probe = probe.clone();
+    let returns_once_probe = probe.clone();
     let event_probe = probe.clone();
     Arc::new(crate::plugin::StaticPluginFactory::new(
         HOST_PLUGIN_ID,
@@ -224,6 +248,17 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                 async move {
                     probe.cancellable_task_runs.fetch_add(1, Ordering::SeqCst);
                     probe.cancellable_task_entered.notify_one();
+                    ctx.cancellation_token.cancelled().await;
+                    append_note(&ctx.session_graph, ctx.session_id, &args).await
+                }
+            })
+            .with_plugin_task_value::<HostReturnsOnceTask, _, _>(move |ctx, args| {
+                let probe = returns_once_probe.clone();
+                async move {
+                    if probe.returns_once_task_runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return Ok(serde_json::json!({"returned": "at once"}));
+                    }
+                    probe.returns_once_task_rerun.notify_one();
                     ctx.cancellation_token.cancelled().await;
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
@@ -630,7 +665,7 @@ pub async fn host_append_waits_for_the_bound_turn(
 /// `crash` and redriven, each settles once; a crash before the commit runs
 /// the command's code again (a plugin's code before its commit is
 /// at-least-once), and its note still lands once. A host's cancel of the
-/// settled task finds its drive's seal and reaches nothing (FIG-4391).
+/// settled task finds its settlement and reaches nothing (FIG-4453).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -711,11 +746,15 @@ pub async fn host_plugin_command_applies_at_the_boundary(
     );
     assert_eq!(probe.task_runs.load(Ordering::SeqCst), 1);
     assert_eq!(
-        lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipts[1])
-            .await
-            .expect("cancel the settled task"),
-        lash_core::runtime::PluginTaskCancelRequest::TaskSettled,
-        "a cancel after the task's code returned finds its drive's seal (FIG-4391)"
+        lash_core::runtime::request_plugin_task_cancel(
+            law.store.as_ref(),
+            &host_effects,
+            &receipts[1]
+        )
+        .await
+        .expect("cancel the settled task"),
+        lash_core::runtime::PluginTaskCancelRequest::AlreadySettled,
+        "a cancel after the task settled finds its settlement (FIG-4453)"
     );
     let head = law.head().await;
     assert_eq!(
@@ -1279,15 +1318,16 @@ pub async fn command_cancellation_before_admission_withdraws_it(
 
 /// FIG-4391: a host's cancel reaches a plugin task a drive already admitted.
 /// The task runs until its cancellation; once the drive runs its code, a
-/// withdrawal no longer reaches it, and the host's cancel wins the task's
-/// cancel gate instead. The drive stops the task's code through its
+/// withdrawal no longer reaches it, and the host's cancel resolves the
+/// task's cancel signal instead. The drive stops the task's code through its
 /// cancellation token and settles the command `Cancelled` in the one commit
 /// that makes its settlement, with nothing of the task committed (the note
 /// it appends after its cancellation never lands), and a submitter reads
-/// that settlement back by the command's receipt. The lane goes on: the
-/// input queued after the task runs in the same drive. Killed at `crash`
-/// and redriven, the task settles cancelled once, and a redrive that finds
-/// the cancel already won runs none of the task's code again.
+/// that settlement back by the command's receipt; a later cancel finds that
+/// settlement. The lane goes on: the input queued after the task runs in the
+/// same drive. Killed at `crash` and redriven, the task settles cancelled
+/// once, and a redrive that finds the cancel already requested runs none of
+/// the task's code again.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1345,11 +1385,15 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
             "a task the drive admitted is no longer withdrawn"
         );
         assert_eq!(
-            lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipt)
-                .await
-                .expect("cancel the admitted task"),
+            lash_core::runtime::request_plugin_task_cancel(
+                law.store.as_ref(),
+                &host_effects,
+                &receipt
+            )
+            .await
+            .expect("cancel the admitted task"),
             lash_core::runtime::PluginTaskCancelRequest::Requested,
-            "the host's cancel wins the admitted task's cancel gate"
+            "the host's cancel reaches the admitted task's cancel signal"
         );
     };
     tokio::time::timeout(
@@ -1383,11 +1427,11 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
         "a submitter reads the cancelled settlement back by the command's receipt"
     );
     assert_eq!(
-        lash_core::runtime::request_plugin_task_cancel(&host_effects, &receipt)
+        lash_core::runtime::request_plugin_task_cancel(law.store.as_ref(), &host_effects, &receipt)
             .await
             .expect("cancel the settled task again"),
-        lash_core::runtime::PluginTaskCancelRequest::Requested,
-        "the gate keeps the cancel that won it"
+        lash_core::runtime::PluginTaskCancelRequest::AlreadySettled,
+        "a cancel after the task settled finds its settlement"
     );
     assert_eq!(
         probe.cancellable_task_runs.load(Ordering::SeqCst),
@@ -1403,6 +1447,118 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     let path = active_path(&head.graph);
     assert!(
         !path.iter().any(|text| text == CANCELLED_TASK_NOTE),
+        "nothing of the cancelled task commits: {path:?}"
+    );
+    assert!(
+        position_of_once(&path, "answer 1") < position_of_once(&path, "second question"),
+        "the input queued after the task runs once the task settled: {path:?}"
+    );
+    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
+}
+
+/// The note a host's plugin task appends only on a run after a crash, once
+/// cancelled.
+const RERUN_TASK_NOTE: &str = "a note the host's plugin task appended after its rerun";
+
+/// FIG-4453: a host's cancel reaches a plugin task whose drive died after
+/// the task's code returned and before the commit that settles it. Nothing
+/// of that return, nor of the drive's decision to keep it, is durable: the
+/// redrive runs the task's code again under a live cancel signal, and a
+/// host's cancel during that run answers `Requested`, stops the task's code
+/// and settles the command `Cancelled`, with nothing of either run
+/// committed. The lane goes on: the input queued after the task runs in the
+/// same drive.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let probe = HostPluginProbe::default();
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![
+            (protocol.answer("answer 1"), 1),
+            (protocol.answer("answer 2"), 1),
+        ],
+    });
+    let host_effects = Arc::clone(&effect_host);
+    let mut law = LawSession::open(
+        prefix,
+        "host-task-cancel-rerun",
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    law.parts.host_plugins.push(host_plugin(&probe));
+    law.enqueue("first question").await;
+    law.run_root("root-1").await;
+    let before = law.head().await.head_revision;
+
+    let receipt = law
+        .submit_command(
+            crate::SessionCommand::RunPluginTask {
+                name: <HostReturnsOnceTask as crate::plugin::PluginOperation>::NAME.to_string(),
+                args: serde_json::json!({"text": RERUN_TASK_NOTE}),
+            },
+            "rerun-task",
+        )
+        .await;
+    law.enqueue("second question").await;
+    let cancel = async {
+        probe.returns_once_task_rerun.notified().await;
+        assert_eq!(
+            lash_core::runtime::request_plugin_task_cancel(
+                law.store.as_ref(),
+                &host_effects,
+                &receipt
+            )
+            .await
+            .expect("cancel the rerun task"),
+            lash_core::runtime::PluginTaskCancelRequest::Requested,
+            "a cancel during the rerun reaches the unsettled task"
+        );
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        futures_util::future::join(
+            drive_crashed_at(&law, "root-2", HostCommandCrash::BeforeCommit),
+            cancel,
+        ),
+    )
+    .await
+    .expect("the redrive applying the cancelled rerun ends");
+
+    assert!(
+        matches!(
+            law.command_outcome(&receipt).await,
+            Some(crate::SessionCommandOutcome::PluginOperation {
+                outcome: crate::PluginOperationCommandOutcome::Cancelled,
+            })
+        ),
+        "the rerun task settles cancelled through its command's commit"
+    );
+    assert_eq!(
+        probe.returns_once_task_runs.load(Ordering::SeqCst),
+        2,
+        "the task's code ran again after the crash: its first return settled nothing"
+    );
+    let head = law.head().await;
+    assert_eq!(
+        head.head_revision,
+        before + 2,
+        "the cancelled task's settlement and the next root each commit once"
+    );
+    let path = active_path(&head.graph);
+    assert!(
+        !path.iter().any(|text| text == RERUN_TASK_NOTE),
         "nothing of the cancelled task commits: {path:?}"
     );
     assert!(

@@ -951,16 +951,22 @@ impl LashRuntime {
             // no edge that needs the patch re-published residently.
             // Reapplying it here would overwrite a newer settled head
             // with this command's older values, resident-only.
-            Ok(match completion.command_outcome {
-                // A command that settles with an outcome answers what it
-                // settled as, on whichever runtime applied it (FIG-4201,
-                // FIG-4202).
-                Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
-                    receipt: handle.receipt,
-                    outcome,
+            Ok(
+                match completion
+                    .command_outcomes
+                    .get(&handle.receipt.batch_id)
+                    .cloned()
+                {
+                    // A command that settles with an outcome answers what it
+                    // settled as, on whichever runtime applied it (FIG-4201,
+                    // FIG-4202).
+                    Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
+                        receipt: handle.receipt,
+                        outcome,
+                    },
+                    None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
                 },
-                None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
-            })
+            )
         } else {
             Ok(crate::runtime::SessionCommandSettlement::Pending(
                 handle.receipt,
@@ -1215,8 +1221,8 @@ impl LashRuntime {
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
-        // A command that settles with an outcome applies alone, under its
-        // own scope, in the commit that settles it (FIG-4201, FIG-4202).
+        // Compaction and host commands apply alone, under their own scope,
+        // in the commit that settles them (FIG-4201, FIG-4202).
         match commands.as_slice() {
             [crate::SessionCommand::CompactContext { instructions }] => {
                 return Box::pin(self.apply_compact_context_command(

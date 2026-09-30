@@ -1,6 +1,6 @@
 //! The [`QueuedWorkStore`] operations for [`SqliteStore`], as inherent
 //! methods the trait implementation forwards to: enqueue, host withdrawal,
-//! the completion marker, and the open-work reads.
+//! the command receipt, and the open-work reads.
 
 use super::*;
 
@@ -147,31 +147,27 @@ impl SqliteStore {
         batch_id: &str,
     ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
-        let marker =
-            lash_core_execution::store_backend_support::session_command_batch_completion_key(
-                &session_id,
-                batch_id,
-            )?;
+        let batch_id = batch_id.to_string();
         let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
                 let outcome = (|| {
-                    let result_json: Option<String> = conn
+                    let receipt: Option<(String, String)> = conn
                         .query_row(
-                            crate::session_sql::session_sql()
-                                .turn_commits
-                                .select_receipt
+                            crate::turn_ingress::turn_ingress_sql()
+                                .queued_batches
+                                .select_command_completion
                                 .sql(),
-                            params![session_id.as_str(), marker],
-                            |row| row.get(1),
+                            params![session_id.as_str(), batch_id],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
                         )
                         .optional()
                         .map_err(sqlite_error)?;
-                    result_json
-                        .map(|json| {
+                    receipt
+                        .map(|(operation_key, json)| {
                             lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
-                                &marker,
+                                &operation_key,
                                 &json,
                                 fleet,
                             )

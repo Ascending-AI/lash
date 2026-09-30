@@ -372,6 +372,7 @@ class RunnerTests(unittest.TestCase):
                     shards=None,
                     timeout=None,
                     include_divergent=False,
+                    keep_test_logs=False,
                     server_env=[],
                     tail_lines=5,
                 ),

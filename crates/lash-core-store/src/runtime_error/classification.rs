@@ -355,6 +355,8 @@ impl RuntimeErrorCode {
             Self::UsageRunMissing => Terminal,
             // the ledger store faulted; the identical admission succeeds later.
             Self::UsageAdmissionFault => Retryable,
+            // retirement permanently fences this owner's spending.
+            Self::UsageOwnerRetired => Terminal,
             // the child request version is unsupported.
             Self::RuntimeEffectToolChildRequestVersion => Terminal,
             // the invocation names an inconsistent subject.

@@ -217,10 +217,18 @@ pub(crate) async fn complete_admitted_batch_tx(
 /// since the drive read it refuses the whole commit.
 pub(crate) async fn settle_open_command_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &SessionId,
+    commit: &lash_core_execution::store::RuntimeCommit,
     batch_id: &lash_core_execution::BatchId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
+    let session_id = &commit.session_id;
+    let operation_key = commit.turn_commit.operation.storage_key()?;
+    let cause = match commit.command_outcomes.get(batch_id) {
+        Some(lash_core_execution::runtime::SessionCommandOutcome::ConfigTransaction {
+            outcome: lash_core_execution::ConfigTransactionOutcome::Stale { .. },
+        }) => lash_core_execution::store::IngressTerminalCause::StaleConfigRevision,
+        _ => lash_core_execution::store::IngressTerminalCause::Applied,
+    };
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
         sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
@@ -238,6 +246,8 @@ pub(crate) async fn settle_open_command_tx(
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
         .bind(crate::support::clamp_epoch_ms(at_ms))
+        .bind(cause.as_str())
+        .bind(operation_key)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

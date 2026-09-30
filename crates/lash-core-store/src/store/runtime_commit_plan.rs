@@ -455,7 +455,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             failure_evidence: self.commit.failure_evidence.clone(),
             outcome: self.commit.outcome.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
-            command_outcome: self.commit.command_outcome.clone(),
+            command_outcomes: self.commit.command_outcomes.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
             receipt_replayed: false,

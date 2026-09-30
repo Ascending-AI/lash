@@ -32,7 +32,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
         ("failure_evidence", !commit.failure_evidence.is_empty()),
         ("ingress", commit.ingress.is_some()),
         ("applied_commands", commit.applied_commands.is_some()),
-        ("command_outcome", commit.command_outcome.is_some()),
+        ("command_outcomes", !commit.command_outcomes.is_empty()),
         ("outcome", commit.outcome.is_some()),
         (
             "interrupted_turn_input_turn_id",
@@ -96,7 +96,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         turn_commit,
         ingress: _,                             // refused present by validation
         applied_commands: _,                    // refused present by validation
-        command_outcome: _,                     // refused present by validation
+        command_outcomes: _,                    // refused present by validation
         pending_follow_on: _, // head fact carried unchanged; the store refuses a change
         interrupted_turn_input_turn_id: _, // refused present by validation
         interrupted_turn_input_cancellation: _, // refused present by validation

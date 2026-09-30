@@ -151,7 +151,7 @@ macro_rules! duplicate_laws {
             use super::*;
 
             #[tokio::test]
-            #[ignore = "FIG-4352: a settled command's batch is deleted, so its resubmission applies again"]
+            $(#[ignore = $service])?
             async fn session_command_resubmission_after_advance_returns_first_receipt() {
                 families::session_command(StorageKind::$kind).await;
             }

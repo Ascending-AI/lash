@@ -19,11 +19,18 @@ pub enum IngressTerminalCause {
     /// The host withdrew the item, or a cancellation dropped it, before any
     /// turn consumed it.
     Cancelled,
+    /// A config command could not apply because its base revision was stale.
+    StaleConfigRevision,
 }
 
 impl IngressTerminalCause {
     /// Every cause, in declaration order.
-    pub const ALL: [Self; 3] = [Self::Delivered, Self::Applied, Self::Cancelled];
+    pub const ALL: [Self; 4] = [
+        Self::Delivered,
+        Self::Applied,
+        Self::Cancelled,
+        Self::StaleConfigRevision,
+    ];
 
     /// The persisted spelling.
     pub const fn as_str(self) -> &'static str {
@@ -31,6 +38,7 @@ impl IngressTerminalCause {
             Self::Delivered => "delivered",
             Self::Applied => "applied",
             Self::Cancelled => "cancelled",
+            Self::StaleConfigRevision => "stale_config_revision",
         }
     }
 

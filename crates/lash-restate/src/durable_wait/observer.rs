@@ -31,7 +31,7 @@ impl WaitObserver {
             AwaitEventWaitIdentity::ToolCompletion { .. }
             | AwaitEventWaitIdentity::ProcessSignal { .. }
             | AwaitEventWaitIdentity::Custom { .. }
-            | AwaitEventWaitIdentity::SessionCommandCancelGate => None,
+            | AwaitEventWaitIdentity::SessionCommandCancelSignal => None,
         }
     }
 

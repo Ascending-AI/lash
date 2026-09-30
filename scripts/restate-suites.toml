@@ -226,3 +226,12 @@ filters = ["live_sqlite_memory::"]
 endpoints = ["RAA_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 180
+
+# The detached usage continuation's live transport and projection windows.
+[suites.usage-accounting]
+label = "//crates/lash-restate-test:usage_accounting_windows__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_usage_crash_"]
+endpoints = ["CW"]
+shards = 1
+timeout_seconds = 120

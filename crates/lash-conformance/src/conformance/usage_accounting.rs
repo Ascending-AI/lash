@@ -182,6 +182,9 @@ pub(crate) struct World {
     cancel: tokio_util::sync::CancellationToken,
     /// Set when an execution after the kill starts: the recovery.
     recovering: tokio_util::sync::CancellationToken,
+    deletion_child: Option<Arc<deletion::Child>>,
+    children: Option<Arc<children::Children>>,
+    supersede: bool,
 }
 
 impl World {
@@ -194,6 +197,9 @@ impl World {
             kill: crate::ConformanceCrash::new(),
             cancel: tokio_util::sync::CancellationToken::new(),
             recovering: tokio_util::sync::CancellationToken::new(),
+            deletion_child: None,
+            children: None,
+            supersede: false,
         }
     }
 
@@ -253,10 +259,91 @@ impl World {
             .build()
     }
 
+    #[expect(clippy::expect_used, reason = "scripted provider fixture markers")]
     async fn answer(
         &self,
         request: crate::LlmRequest,
     ) -> Result<crate::LlmResponse, crate::facade_support::LlmTransportError> {
+        if let Some(child) = request.extra_body.get("usage_child") {
+            let index = usize::try_from(child["index"].as_u64().expect("child index"))
+                .expect("child index fits");
+            self.witness.invocations.fetch_add(1, Ordering::SeqCst);
+            if child["abort"].as_bool().expect("abort marker") {
+                return Ok(crate::LlmResponse {
+                    parts: vec![crate::LlmOutputPart::Text {
+                        text: "partial output before abort".into(),
+                        response_meta: None,
+                    }],
+                    terminal_reason: crate::LlmTerminalReason::Cancelled,
+                    ..Default::default()
+                });
+            }
+            let failing = self.witness.failed_once.lock_recover().insert(100 + index);
+            let usage = if failing {
+                failed_usage()
+            } else {
+                call_usage(index)
+            };
+            self.witness
+                .returned
+                .lock_recover()
+                .push(token_usage(&usage));
+            if failing {
+                return Err(
+                    crate::facade_support::LlmTransportError::new("billed child failure")
+                        .with_kind(crate::ProviderFailureKind::Stream)
+                        .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                        )
+                        .with_partial_response(crate::LlmResponse {
+                            usage,
+                            ..Default::default()
+                        }),
+                );
+            }
+            return Ok(crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: "paid child success".into(),
+                    response_meta: None,
+                }],
+                terminal_reason: crate::LlmTerminalReason::Stop,
+                provider_usage: Some(serde_json::json!({"child": index})),
+                usage,
+                ..Default::default()
+            });
+        }
+        if let Some(child) = &self.deletion_child
+            && request.extra_body.contains_key("usage_delete_child")
+        {
+            self.witness.invocations.fetch_add(1, Ordering::SeqCst);
+            if child.dispatched.fetch_add(1, Ordering::SeqCst) != 0 {
+                return Err(crate::facade_support::LlmTransportError::new(
+                    "a drained child reached the provider",
+                )
+                .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
+                .with_partial_response(crate::LlmResponse {
+                    usage: failed_usage(),
+                    ..Default::default()
+                }));
+            }
+            self.kill.fire();
+            child.release.cancelled().await;
+            let usage = call_usage(0);
+            self.witness
+                .returned
+                .lock_recover()
+                .push(token_usage(&usage));
+            return Ok(crate::LlmResponse {
+                parts: vec![crate::LlmOutputPart::Text {
+                    text: "child paid".into(),
+                    response_meta: None,
+                }],
+                terminal_reason: crate::LlmTerminalReason::Stop,
+                provider_usage: Some(serde_json::json!({"paid": true})),
+                usage,
+                ..Default::default()
+            });
+        }
         let call = call_of(&request);
         let stream = request.stream_events.clone();
         if self.script.kill == Kill::AtDispatch(call) && !self.kill.has_fired() {
@@ -271,6 +358,16 @@ impl World {
         let failing = self.script.billed_failure == Some(call)
             && self.witness.failed_once.lock_recover().insert(call);
         let last = call + 1 == self.script.calls;
+        if last && self.supersede {
+            let store =
+                crate::conformance::law_session_store(self.tier.stores.as_ref(), &self.session_id)
+                    .await;
+            let recording = crate::testing::runtime_helpers::RecordingStore::over_session(
+                store,
+                self.session_id.clone(),
+            );
+            crate::testing::runtime_helpers::advance_session_head(&recording, |_| {}).await;
+        }
         if failing || (last && self.script.ending == Ending::Failed) {
             let usage = failed_usage();
             if let Some(stream) = &stream {
@@ -586,6 +683,12 @@ impl crate::ToolProvider for Probe {
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if let Some(children) = &self.world.children {
+            return children.execute(call).await;
+        }
+        if let Some(child) = &self.world.deletion_child {
+            return child.execute(call).await;
+        }
         let index = call
             .args
             .get("call")
@@ -658,34 +761,6 @@ pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs
 // ---------------------------------------------------------------------------
 // The laws.
 // ---------------------------------------------------------------------------
-
-/// E1: a root that ran three paid calls and is then abandoned before it
-/// finalizes — killed, and never driven again — keeps all three calls'
-/// usage, read with no runtime open and nothing driving the root.
-pub async fn usage_of_an_unfinished_root_is_read_without_driving(tier: &UsageAccountingTier) {
-    let world = World::new(
-        tier,
-        "unfinished-root",
-        Script {
-            kill: Kill::InTool(2),
-            ..Script::completed(4)
-        },
-    );
-    world.run_killed_forever().await;
-    let usage = world.settled().await;
-    assert_eq!(
-        usage.completeness,
-        crate::UsageCompleteness::default(),
-        "the abandoned root's calls are all settled, nothing is unknown"
-    );
-    assert_eq!(
-        world.facts().await.len(),
-        3,
-        "three paid calls, three facts"
-    );
-    assert_each_returned_attempt_once(&world, 0, "unfinished root").await;
-    assert_eq!(world.invocations(), 3, "the provider was asked three times");
-}
 
 /// E2: each paid attempt counts once however the turn's executions are cut
 /// and replayed: one call or three, a billed failed attempt and its retry,
@@ -1080,3 +1155,15 @@ usage_crash_cells![
         ParkedForever
     ),
 ];
+
+mod deletion;
+pub use deletion::session_delete_drains_accounting_first;
+mod park;
+pub use park::usage_of_a_root_parked_forever_before_finalization_is_read_without_driving;
+mod children;
+pub use children::tool_child_spend_counts_once_without_settlement_charging;
+mod endings;
+pub use endings::{
+    operator_cancelled_parked_keeps_each_paid_call_once,
+    refused_superseded_keeps_each_paid_call_once, substrate_lost_keeps_each_paid_call_once,
+};

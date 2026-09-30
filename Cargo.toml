@@ -237,7 +237,7 @@ jsonschema = { version = "0.18", default-features = false }
 # kill(2)/getpgid(2) for MCP stdio process-group shutdown (FIG-3519); unix-only
 # per-crate under `[target.'cfg(unix)'.dependencies]`.
 libc = "0.2"
-object_store = { version = "0.13.2", default-features = false }
+object_store = { version = "0.14.2", default-features = false }
 percent-encoding = "2.3"
 # The Restate service-protocol messages the in-process server double encodes
 # (lash-restate-test); the same major restate-sdk-shared-core pins.
