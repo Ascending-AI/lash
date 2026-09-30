@@ -270,6 +270,16 @@ no duplicate effects, and both builds reading each other's rows. It rolls back
 and forward again, drains, retires the old deployment and finalizes. It runs
 on every PR that touches a registered surface, and nightly.
 
+SQLite is a single-host embedded store. Its upgrade is stop-then-start:
+drain and close N, then let N+1 open and migrate the whole store set under
+its exclusive migrator lock. Opening N+1 while N holds the store refuses
+with `StoreError::MigrationOpenElsewhere`. Rollback before finalize drains
+and closes N+1, then reopens N, which reads the migrated range. Roll forward
+again the same way, retire N's deployments, and finalize. N then refuses
+the finalized fleet epoch. SQLite has no separate contract step because
+its migration changes the whole store set on open. Mixed-version overlap
+of live nodes belongs to PostgreSQL's multi-node deployment only.
+
 **Gates.** After 1.0 a gate checks every bump: an M or C bump needs its
 predecessor fixture plus an upcaster or migration from a registry a test
 enumerates, and a D bump needs its `G` input. A migration must run from the

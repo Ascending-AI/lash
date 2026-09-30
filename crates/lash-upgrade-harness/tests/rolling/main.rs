@@ -7,7 +7,7 @@
 //!
 //! 1. **migrate:** lashctl provisions PostgreSQL; SQLite migrates on open.
 //!    N serves the store and answers a turn.
-//! 2. **half roll:** lashctl expands PostgreSQL again; N+1 serves beside N,
+//! 2. **half roll** (PostgreSQL): lashctl expands again; N+1 serves beside N,
 //!    and the forward drain of N's generation starts.
 //! 3. **rollback:** mid-drain, the roll reverses: the forward drain ends, N+1
 //!    drains and stops, and N registers at a fresh URI and answers.
@@ -18,6 +18,11 @@
 //!    contract is refused before finalize. Once N's deployments are removed
 //!    and the hold is cleared, finalize moves `F`, runs the backfill, and
 //!    contract raises the reader floor, which N then refuses.
+//!
+//! SQLite instead drains and stops N before N+1 opens and migrates. It
+//! rolls back by draining and stopping N+1 before N reopens, then re-rolls,
+//! finalizes, and requires the old writer to refuse. Every SQLite turn
+//! checks the serving build and generation. SQLite has no separate contract.
 //!
 //! Every step must succeed: a refusal outside the ones the choreography
 //! expects fails the run. Nothing is lost or duplicated: every turn is
@@ -151,39 +156,24 @@ fn finalize(
     Ok(())
 }
 
-fn roll(
-    steps: &mut Vec<StepRecord>,
-    builds: &NodeBuilds,
-    case: &Case,
-    postgres: bool,
-) -> Result<()> {
+fn roll_postgres(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) -> Result<()> {
     let (n, next) = (&builds.n, &builds.next);
     let session = case.session_id("rolling");
-    // PostgreSQL steps are operator commands over the case's own database;
-    // SQLite migrates on open, and `lashctl` does not reach it.
-    let operators = if postgres {
-        Some((
-            Operator::for_case(case, LASHCTL_N_ENV)?,
-            Operator::for_case(case, LASHCTL_NEXT_ENV)?,
-        ))
-    } else {
-        None
-    };
+    let (operator_n, operator_next) = (
+        Operator::for_case(case, LASHCTL_N_ENV)?,
+        Operator::for_case(case, LASHCTL_NEXT_ENV)?,
+    );
 
     // migrate
-    if let Some((operator_n, _)) = &operators {
-        operator_n.run("migrate", None)?;
-        operator_n.run("preflight", None)?;
-    }
+    operator_n.run("migrate", None)?;
+    operator_n.run("preflight", None)?;
     let n_first = n.serve(case)?;
     let n_generation = n_first
         .ready()
         .context("N ready report")?
         .generation
         .clone();
-    if let Some((operator_n, _)) = &operators {
-        operator_n.run("version", None)?;
-    }
+    operator_n.run("version", None)?;
     turn(
         steps,
         n,
@@ -196,14 +186,10 @@ fn roll(
     // half roll: N+1 serves beside N. Which build drives each host's turn
     // depends on Restate's routing between the two deployments, so only the
     // answer is checked. The forward drain of N's generation starts.
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("migrate", None)?;
-        operator_next.run("preflight", None)?;
-    }
+    operator_next.run("migrate", None)?;
+    operator_next.run("preflight", None)?;
     let next_first = next.serve(case)?;
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("version", None)?;
-    }
+    operator_next.run("version", None)?;
     let next_generation = next_first
         .ready()
         .context("N+1 ready report")?
@@ -212,24 +198,18 @@ fn roll(
     ensure!(n_generation != next_generation, "N and N+1 have the same G");
     turn(steps, n, case, &session, "half roll", None)?;
     turn(steps, next, case, &session, "half roll", None)?;
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("drain", Some(&n_generation))?;
-    }
+    operator_next.run("drain", Some(&n_generation))?;
 
     // rollback, mid-drain: the forward drain ends, N+1 drains and retires,
     // and N comes back at a URI of its own. Nothing was finalized, so N
     // serves everything N+1 wrote.
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("end-drain", Some(&n_generation))?;
-        operator_next.run("drain", Some(&next_generation))?;
-    }
+    operator_next.run("end-drain", Some(&n_generation))?;
+    operator_next.run("drain", Some(&next_generation))?;
     next_first.stop()?;
-    if let Some((operator_n, operator_next)) = &operators {
-        let status = operator_next.run("drain-status", Some(&next_generation))?;
-        ensure!(status["drained"] == true, "N+1 did not drain: {status}");
-        operator_next.run("end-drain", Some(&next_generation))?;
-        operator_n.run("preflight", None)?;
-    }
+    let status = operator_next.run("drain-status", Some(&next_generation))?;
+    ensure!(status["drained"] == true, "N+1 did not drain: {status}");
+    operator_next.run("end-drain", Some(&next_generation))?;
+    operator_n.run("preflight", None)?;
     n_first.stop()?;
     let n_again = n.serve(case)?;
     turn(
@@ -242,19 +222,13 @@ fn roll(
     )?;
 
     // roll: N+1 comes back at a URI of its own, then N drains and retires.
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("preflight", None)?;
-    }
+    operator_next.run("preflight", None)?;
     let next_again = next.serve(case)?;
-    if let Some((_, operator_next)) = &operators {
-        operator_next.run("drain", Some(&n_generation))?;
-    }
+    operator_next.run("drain", Some(&n_generation))?;
     n_again.stop()?;
-    if let Some((_, operator_next)) = &operators {
-        let status = operator_next.run("drain-status", Some(&n_generation))?;
-        ensure!(status["drained"] == true, "N did not drain: {status}");
-        finalize(case, n, operator_next, &n_generation)?;
-    }
+    let status = operator_next.run("drain-status", Some(&n_generation))?;
+    ensure!(status["drained"] == true, "N did not drain: {status}");
+    finalize(case, n, &operator_next, &n_generation)?;
     turn(
         steps,
         next,
@@ -265,9 +239,23 @@ fn roll(
     )?;
     next_again.stop()?;
 
-    // Nothing lost or duplicated: every turn of this case was answered, and
-    // each turn's model call ran exactly once, whichever build drove it.
-    for record in steps.iter().filter(|record| record.case == case.name) {
+    verify_turns(steps, case)
+}
+
+fn verify_turns(steps: &[StepRecord], case: &Case) -> Result<()> {
+    let effects = case.effects()?;
+    let records: Vec<_> = steps
+        .iter()
+        .filter(|record| record.case == case.name)
+        .collect();
+    ensure!(
+        effects.len() == records.len(),
+        "{}: expected {} model calls, got {}",
+        case.name,
+        records.len(),
+        effects.len()
+    );
+    for record in records {
         ensure!(
             record.report.status == "Answered",
             "{}: {} was not answered: {:?}",
@@ -275,28 +263,139 @@ fn roll(
             record.step,
             record.report
         );
-    }
-    let effects = case.effects()?;
-    for step in ["migrate", "half roll", "rollback", "roll"] {
-        for host in [n, next] {
-            let marker = format!("{step} from {}", host.label());
-            // The provider records the rendered message: the turn's text,
-            // then the role that follows it.
-            let calls = effects
-                .iter()
-                .filter(|effect| effect.message.starts_with(&format!("{marker} ")))
-                .count();
-            let expected = usize::from(
-                step == "half roll" || (step == "roll") == (host.label() == BuildLabel::Next),
-            );
-            ensure!(
-                calls == expected,
-                "{}: `{marker}` ran {calls} model calls, not {expected}",
-                case.name
-            );
-        }
+        let marker = format!("{} from {} ", record.step, record.report.host);
+        let calls = effects
+            .iter()
+            .filter(|effect| effect.message.starts_with(&marker))
+            .count();
+        ensure!(
+            calls == 1,
+            "{}: `{marker}` ran {calls} model calls",
+            case.name
+        );
     }
     Ok(())
+}
+
+fn sqlite_drain(node: &NodeBinary, case: &Case, session: &str, generation: &str) -> Result<()> {
+    use lash_upgrade_harness::harness::{block_on, wait_for};
+    let view = case.view()?;
+    wait_for("the SQLite session's invocations to finish", || {
+        Ok(block_on(view.live_invocations("LashSession", session))?
+            .is_empty()
+            .then_some(()))
+    })?;
+    wait_for("the SQLite generation to drain", || {
+        let status = node.sqlite_upgrade(case, "drain", generation)?;
+        ensure!(
+            status["generation"] == generation,
+            "wrong drained generation: {status}"
+        );
+        Ok((status["drained"] == true).then_some(()))
+    })
+}
+
+fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) -> Result<()> {
+    let (n, next) = (&builds.n, &builds.next);
+    let session = case.session_id("rolling");
+    let n_first = n.serve(case)?;
+    let n_generation = n_first.generation()?.to_owned();
+    turn(
+        steps,
+        n,
+        case,
+        &session,
+        "migrate",
+        Some((n, &n_generation)),
+    )?;
+    sqlite_drain(n, case, &session, &n_generation)?;
+    n_first.stop()?;
+
+    let next_first = next.serve(case)?;
+    let next_generation = next_first.generation()?.to_owned();
+    ensure!(n_generation != next_generation, "N and N+1 have the same G");
+    turn(
+        steps,
+        next,
+        case,
+        &session,
+        "roll",
+        Some((next, &next_generation)),
+    )?;
+    sqlite_drain(next, case, &session, &next_generation)?;
+    next_first.stop()?;
+
+    n.sqlite_upgrade(case, "end-drain", &n_generation)?;
+    let n_again = n.serve(case)?;
+    ensure!(
+        n_again.generation()? == n_generation,
+        "N changed generation on rollback"
+    );
+    turn(
+        steps,
+        n,
+        case,
+        &session,
+        "rollback",
+        Some((n, &n_generation)),
+    )?;
+    sqlite_drain(n, case, &session, &n_generation)?;
+    n_again.stop()?;
+
+    next.sqlite_upgrade(case, "end-drain", &next_generation)?;
+    let next_again = next.serve(case)?;
+    ensure!(
+        next_again.generation()? == next_generation,
+        "N+1 changed generation on re-roll"
+    );
+    turn(
+        steps,
+        next,
+        case,
+        &session,
+        "re-roll",
+        Some((next, &next_generation)),
+    )?;
+    // Finish the last pre-finalize invocation before retiring the old lanes.
+    let view = case.view()?;
+    lash_upgrade_harness::harness::wait_for("the SQLite pre-finalize turn to finish", || {
+        Ok(
+            lash_upgrade_harness::harness::block_on(
+                view.live_invocations("LashSession", &session),
+            )?
+            .is_empty()
+            .then_some(()),
+        )
+    })?;
+    ensure!(
+        case.retire_generation(&n_generation)? >= 1,
+        "N had no deployment to retire"
+    );
+    let flip = next.sqlite_upgrade(case, "finalize", &n_generation)?;
+    ensure!(
+        flip == serde_json::json!({"outcome": "finalized", "from": 1, "to": 2}),
+        "SQLite finalize did not move F: {flip}"
+    );
+    let refusal = n.probe_refusal(case)?;
+    ensure!(
+        matches!(
+            refusal,
+            lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded: 2, .. }
+        ),
+        "N opened finalized SQLite with {refusal:?}"
+    );
+    println!("{}: old writer refused: {refusal:?}", case.name);
+    turn(
+        steps,
+        next,
+        case,
+        &session,
+        "finalize",
+        Some((next, &next_generation)),
+    )?;
+    sqlite_drain(next, case, &session, &next_generation)?;
+    next_again.stop()?;
+    verify_turns(steps, case)
 }
 
 #[test]
@@ -312,18 +411,16 @@ fn roll_and_rollback_smoke() -> Result<()> {
     let mut steps = Vec::new();
     // The PostgreSQL roll finalizes, and `F` is one row per database, so it
     // runs on a database of its own.
-    let rolled = roll(
+    let rolled = roll_postgres(
         &mut steps,
         &builds,
         &Case::postgres_database("postgres", &services, &scratch)?,
-        true,
     )
     .and_then(|()| {
-        roll(
+        roll_sqlite(
             &mut steps,
             &builds,
             &Case::sqlite("sqlite", &services, &scratch)?,
-            false,
         )
     });
     let report = scratch.join("rolling-report.json");
@@ -331,5 +428,71 @@ fn roll_and_rollback_smoke() -> Result<()> {
         .with_context(|| format!("write {}", report.display()))?;
     rolled?;
     ensure!(steps.len() == 10, "expected ten turns, ran {}", steps.len());
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs both node builds and a restate-server"]
+fn sqlite_migration_overlap_refused() -> Result<()> {
+    let services = Services::from_env()?;
+    let builds = NodeBuilds::from_env()?;
+    let scratch = tempfile::tempdir()?;
+    let case = Case::sqlite("sqlite-overlap", &services, scratch.path())?;
+    let held = builds.n.serve(&case)?;
+    let output =
+        std::process::Command::new(std::env::var(lash_upgrade_harness::harness::NODE_NEXT_ENV)?)
+            .arg("probe")
+            .args([
+                "--store",
+                &format!(
+                    "sqlite:{}",
+                    case.sqlite_dir().context("SQLite directory")?.display()
+                ),
+                "--data-dir",
+                scratch.path().to_str().context("scratch path")?,
+            ])
+            .output()?;
+    ensure!(
+        output.status.success(),
+        "overlap probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    ensure!(
+        report["open_elsewhere"]["database"] == "durable core",
+        "missing typed open-elsewhere refusal: {report}"
+    );
+    ensure!(
+        report["open_elsewhere"]["location"]
+            == case
+                .sqlite_dir()
+                .context("SQLite directory")?
+                .to_string_lossy()
+                .as_ref(),
+        "wrong refused store: {report}"
+    );
+    held.stop()?;
+    builds.next.probe(&case, None)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs both node builds and a restate-server"]
+fn sqlite_stop_then_start_roll_and_rollback() -> Result<()> {
+    let services = Services::from_env()?;
+    let builds = NodeBuilds::from_env()?;
+    let scratch = tempfile::tempdir()?;
+    let case = Case::sqlite("sqlite-roll", &services, scratch.path())?;
+    let mut steps = Vec::new();
+    roll_sqlite(&mut steps, &builds, &case)?;
+    ensure!(
+        steps.iter().map(|record| record.step).collect::<Vec<_>>()
+            == ["migrate", "roll", "rollback", "re-roll", "finalize"],
+        "wrong SQLite sequence"
+    );
+    ensure!(
+        steps.iter().all(|record| record.expected_driver.is_some()),
+        "every SQLite turn needs its build and generation checked"
+    );
     Ok(())
 }

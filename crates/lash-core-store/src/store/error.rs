@@ -820,6 +820,16 @@ pub enum StoreError {
         /// The lowest feed position the store still serves.
         horizon: crate::store::ParkFeedCursor,
     },
+    /// A whole-store migration cannot start while another connection holds
+    /// a database. Close the other host before retrying the open.
+    #[error(
+        "the {database} is open elsewhere, and its migration needs the store to itself: \
+         close every other connection to {} and open again", location.display()
+    )]
+    MigrationOpenElsewhere {
+        database: String,
+        location: std::path::PathBuf,
+    },
     /// The storage substrate failed an operation before a trustworthy value
     /// could be returned.
     #[error("{backend} storage failure: {message}")]
@@ -852,7 +862,10 @@ impl StoreError {
     /// a new variant does not compile until it is classified.
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::Contended | Self::StorageFailure { .. } | Self::Backend(_) => true,
+            Self::Contended
+            | Self::MigrationOpenElsewhere { .. }
+            | Self::StorageFailure { .. }
+            | Self::Backend(_) => true,
             Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
@@ -1065,6 +1078,7 @@ impl StoreError {
             Self::ArtifactMissing { .. } => "ArtifactMissing",
             Self::ArtifactCarryMissing { .. } => "ArtifactCarryMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
+            Self::MigrationOpenElsewhere { .. } => "MigrationOpenElsewhere",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",
         }

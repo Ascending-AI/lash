@@ -6,7 +6,8 @@
 > itself.
 
 **Purpose.** Prove, before the 1.0 cut, that a 1.0 node can serve as an N-1:
-it runs beside a newer build during a roll, and it can be rolled back to
+it runs beside a newer build during a PostgreSQL roll, upgrades SQLite
+stop-then-start, and can be rolled back to
 ([ADR 0115](../../docs/adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 §6, FIG-3805 phase A). The rollout follows the choreography of
 [ADR 0106](../../docs/adr/0106-durable-formats-upgrade-by-migration-or-drain.md)
@@ -45,11 +46,15 @@ reports the CLI build; the fleet generation comes from each node's ready file.
 `just e2e-rolling` builds both node and operator binaries into `<artifacts>/bin/n/` and
 `<artifacts>/bin/n+1/`. It starts one pinned `restate-server`, plus a pg16
 container unless `LASH_POSTGRES_DATABASE_URL` names a server. Then it runs
-`roll_and_rollback_smoke` in `crates/lash-upgrade-harness/tests/rolling/`.
+`roll_and_rollback_smoke`, `sqlite_migration_overlap_refused`, and
+`sqlite_stop_then_start_roll_and_rollback` in
+`crates/lash-upgrade-harness/tests/rolling/`, without parallel test execution.
 The smoke rolls twice: once over a fresh PostgreSQL database of its own, and
 once over a fresh SQLite store directory. Each roll has its own Restate
 namespace and authority, and all of its turns go to one session, so each
 build reads what the other wrote.
+
+The PostgreSQL leg permits live mixed-version overlap:
 
 | Step | Nodes serving afterwards | Turns | Driver the run requires |
 |---|---|---|---|
@@ -72,6 +77,25 @@ generation again, and finalize runs before the roll's turn:
 | `finalize-hold clear`, then `finalize` | `F` moves from 1 to 2; every backfill `applied` |
 | `end-drain` of N's generation, then `migrate --phase contract` | the contract step runs |
 | N probes the store | refused `reader_floor_above` (floor 2) |
+
+SQLite is a single-host embedded store. Each transition waits for the
+session's invocations and generation drain to finish, then stops and reaps
+the serving node before its replacement opens the same directory:
+
+| Step | Node serving afterwards | Turn and required driver |
+|---|---|---|
+| migrate | N | host N, served by N at its generation |
+| roll | N+1, after N closes | host N+1, served by N+1 at its generation |
+| rollback before finalize | N, after N+1 closes | host N, served by N at its generation |
+| re-roll | N+1, after N closes | host N+1, served by N+1 at its generation |
+| finalize | N+1, after N's deployments retire and F moves from 1 to 2 | host N+1, served by N+1 at its generation |
+
+N must refuse the finalized store with `fleet_outside_writable`. SQLite has
+no separate contract phase because migration changes the whole store set
+on open. The exclusive migration lock remains required. The separate
+`sqlite_migration_overlap_refused` check deliberately opens N+1 while N
+holds the store, requires the typed `MigrationOpenElsewhere` refusal naming
+the database and directory, then proves the open succeeds after N closes.
 
 Every deployment registers at a fresh URI; no build ever re-registers over
 another build's URI (ADR 0115 §3.5). A node that stops is killed the way a
@@ -99,15 +123,15 @@ set to the PostgreSQL test database. Every command uses the Bazel-built
 | `lashctl version` | once per build; record each CLI build's ranges | nodes identify themselves in ready files | `lashctl version --json` |
 | `lashctl migrate` | N before its first start; N+1 before its first start | migrates on open | `lashctl migrate --json` |
 | `lashctl preflight` | before N and N+1 start, and before each return deployment | opens and checks stores on node start | `lashctl preflight --json` |
-| `lashctl drain` | reverse drain before N+1 retires in rollback | no PostgreSQL generation drain | `lashctl drain "$NEW_GENERATION" --json` |
-| `lashctl drain-status` | require drained after N+1 retires | no PostgreSQL generation drain | `lashctl drain-status "$NEW_GENERATION" --json` |
-| `lashctl end-drain` | clear reverse drain after N+1 retires | no PostgreSQL generation drain | `lashctl end-drain "$NEW_GENERATION" --json` |
-| `lashctl drain` | forward drain at the half roll, ended by the rollback, and again before N retires in roll | no PostgreSQL generation drain | `lashctl drain "$OLD_GENERATION" --json` |
-| `lashctl drain-status` | require drained after N retires | no PostgreSQL generation drain | `lashctl drain-status "$OLD_GENERATION" --json` |
+| `lashctl drain` | reverse drain before N+1 retires in rollback | node uses the SQLite generation drain API | `lashctl drain "$NEW_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N+1 retires | node uses the SQLite generation drain API | `lashctl drain-status "$NEW_GENERATION" --json` |
+| `lashctl end-drain` | clear reverse drain after N+1 retires | node uses the SQLite generation drain API | `lashctl end-drain "$NEW_GENERATION" --json` |
+| `lashctl drain` | forward drain at the half roll, ended by the rollback, and again before N retires in roll | node uses the SQLite generation drain API | `lashctl drain "$OLD_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N retires | node uses the SQLite generation drain API | `lashctl drain-status "$OLD_GENERATION" --json` |
 | `lashctl finalize` | refused while N's deployments are registered and while held, then finalizes after they are removed | SQLite finalize is `SqliteStoreSet::finalize`, not a `lashctl` verb | `lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json` |
 | `lashctl finalize-hold` | set before finalize to prove the hold, then cleared | no SQLite hold | `lashctl finalize-hold set --reason <text> --json`, `lashctl finalize-hold clear --json` |
-| `lashctl end-drain` | clear forward drain after finalize | no PostgreSQL generation drain | `lashctl end-drain "$OLD_GENERATION" --json` |
-| `lashctl migrate` | contract: refused before finalize, runs after the backfills | migrates on open | `lashctl migrate --phase contract --json` |
+| `lashctl end-drain` | clear forward drain after finalize | node uses the SQLite generation drain API | `lashctl end-drain "$OLD_GENERATION" --json` |
+| `lashctl migrate` | contract: refused before finalize, runs after the backfills | no separate contract; whole-set migration on open | `lashctl migrate --phase contract --json` |
 
 The N+1 operator binary runs N+1's migrate, preflight, version and drain
 commands. `OLD_GENERATION` and `NEW_GENERATION` are the node ready-file values.
@@ -143,8 +167,8 @@ The judge answers each item from the bundle and cites the file:
 2. **Ten answered turns.** `rolling-report.json` has ten records, five per
    case, and every `status` is `Answered`.
 3. **Routing.** In each record where `expected_driver` is set, the reply names
-   that build and its `G`. In the half roll, record which build drove each
-   host's turn. Either is correct, but a host N turn driven by N+1 shows that
+   that build and its `G`. In the PostgreSQL half roll, record which build
+   drove each host's turn. Either is correct, but a host N turn driven by N+1 shows that
    the newest deployment took new invocations.
 4. **Fresh URIs.** Across the `ready-*.json` of one case, every `uri` is
    distinct, and each `generation` matches its build's.
@@ -155,6 +179,8 @@ The judge answers each item from the bundle and cites the file:
    `deployments_retained`, then refused `held`; `lashctl migrate --phase
    contract` refused `contract_before_finalize`; `lashctl finalize` answering
    `{"outcome":"finalized","from":1,"to":2}` with every backfill `applied`;
-   and `lashctl migrate --phase contract` executing its step.
+   and `lashctl migrate --phase contract` executing its step. SQLite records
+   its finalize flip, has no separate contract step, and N refuses its
+   finalized fleet epoch.
 
 Any failed item is an Abort/RCA under [../RULES.md](../RULES.md).

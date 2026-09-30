@@ -423,7 +423,7 @@ e2e-rolling:
     python3 scripts/ci/restate_suite.py serve --name e2e-rolling
       --keep-log "$artifacts/restate-server.log"
       -- cargo test --locked -p lash-upgrade-harness --test rolling
-      -- --ignored --exact roll_and_rollback_smoke --nocapture
+      -- --ignored --nocapture --test-threads=1
   )
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"

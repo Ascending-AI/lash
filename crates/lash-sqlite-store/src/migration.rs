@@ -875,12 +875,10 @@ impl Migration<'_> {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err(Stop::Failed(storage(format!(
-                    "the {} is open elsewhere, and its migration needs the store to itself: \
-                     close every other connection to {} and open again",
-                    database.name(),
-                    self.root.display()
-                ))));
+                return Err(Stop::Failed(StoreError::MigrationOpenElsewhere {
+                    database: database.name().to_owned(),
+                    location: self.root.to_path_buf(),
+                }));
             }
             std::thread::sleep(Duration::from_millis(10));
         }

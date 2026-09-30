@@ -296,11 +296,11 @@ impl NodeBinary {
     pub fn probe(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
         let report = self.probe_report(case, session)?;
         ensure!(
-            report.refusal.is_none(),
+            report.refusal.is_none() && report.open_elsewhere.is_none(),
             "{} refused {}: {:?}",
             self.label,
             case.name,
-            report.refusal
+            (report.refusal, report.open_elsewhere)
         );
         Ok(report)
     }
@@ -315,6 +315,24 @@ impl NodeBinary {
                 case.name
             )
         })
+    }
+
+    /// Run a SQLite lifecycle operation in this build's process.
+    pub fn sqlite_upgrade(
+        &self,
+        case: &Case,
+        action: &str,
+        generation: &str,
+    ) -> Result<serde_json::Value> {
+        let output = Command::new(&self.path)
+            .arg("sqlite-upgrade")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--action", action, "--generation", generation])
+            .output()?;
+        let answer = report(&self.path, "sqlite-upgrade", output)?;
+        println!("{}: SQLite {action}: {answer}", case.name);
+        Ok(answer)
     }
 
     /// Serve a deployment of this build over `case`'s store, registered at

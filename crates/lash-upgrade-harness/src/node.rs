@@ -61,6 +61,8 @@ pub struct Cli {
 pub enum Command {
     /// Open a store and optionally read one existing session without serving.
     Probe(ProbeArgs),
+    /// Drain, clear a drain, or finalize an embedded SQLite store.
+    SqliteUpgrade(SqliteUpgradeArgs),
     /// Serve a Restate deployment over a store until killed.
     Serve(ServeArgs),
     /// Send one input to a session and wait for its turn to settle.
@@ -178,6 +180,32 @@ pub struct ProbeArgs {
     pub session: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum SqliteUpgradeAction {
+    Drain,
+    EndDrain,
+    Finalize,
+}
+
+#[derive(Debug, Args)]
+pub struct SqliteUpgradeArgs {
+    #[command(flatten)]
+    pub store: StoreArgs,
+    #[command(flatten)]
+    pub restate: RestateArgs,
+    #[arg(long)]
+    pub generation: lash_core::engine::BuildGeneration,
+    #[arg(long, value_enum)]
+    pub action: SqliteUpgradeAction,
+}
+
+/// The open refusal carried across the node process boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MigrationOpenElsewhere {
+    pub database: String,
+    pub location: PathBuf,
+}
+
 /// A store a node opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreSpec {
@@ -266,6 +294,7 @@ pub struct ProbeReport {
     pub backend: String,
     pub session_present: Option<bool>,
     pub refusal: Option<lash_core::compat::CompatRefusal>,
+    pub open_elsewhere: Option<MigrationOpenElsewhere>,
 }
 
 /// The reply the scripted provider gives on `build` at `generation`.
@@ -277,6 +306,7 @@ pub fn served_by(build: BuildLabel, generation: &str) -> String {
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Probe(args) => print(&probe(args).await?),
+        Command::SqliteUpgrade(args) => print(&sqlite_upgrade(args).await?),
         Command::Serve(args) => serve(args).await,
         Command::Turn(args) => print(&turn(args).await?),
         Command::Register(args) => print(&register(args).await?),
@@ -310,6 +340,26 @@ async fn probe(args: ProbeArgs) -> Result<ProbeReport> {
                     backend,
                     session_present: None,
                     refusal: Some(refusal),
+                    open_elsewhere: None,
+                });
+            }
+            if let Some(refusal) = error.chain().find_map(|cause| {
+                match cause.downcast_ref::<lash_core::StoreError>() {
+                    Some(lash_core::StoreError::MigrationOpenElsewhere { database, location }) => {
+                        Some(MigrationOpenElsewhere {
+                            database: database.clone(),
+                            location: location.clone(),
+                        })
+                    }
+                    _ => None,
+                }
+            }) {
+                return Ok(ProbeReport {
+                    build,
+                    backend,
+                    session_present: None,
+                    refusal: None,
+                    open_elsewhere: Some(refusal),
                 });
             }
             return Err(error);
@@ -333,7 +383,45 @@ async fn probe(args: ProbeArgs) -> Result<ProbeReport> {
         backend,
         session_present,
         refusal: None,
+        open_elsewhere: None,
     })
+}
+
+async fn sqlite_upgrade(args: SqliteUpgradeArgs) -> Result<serde_json::Value> {
+    use lash::StoreSet as _;
+    use lash_core::ClockWallTime as _;
+    use lash_core::store::generation_drain::GenerationDrainStatus;
+    let StoreSpec::Sqlite(dir) = &args.store.store else {
+        bail!("sqlite-upgrade requires a SQLite store");
+    };
+    let stores = open_sqlite(dir).await?;
+    let now = lash_core::facade_support::SystemClock.timestamp_ms();
+    let drain = stores.generation_drain();
+    match args.action {
+        SqliteUpgradeAction::Drain => {
+            drain.mark_draining(&args.generation, now).await?;
+            let status = GenerationDrainStatus::collect(
+                drain.as_ref(),
+                stores.session_delete_ledger().as_ref(),
+                |kind| stores.obligation_ledger(kind),
+                &args.generation,
+                now,
+            )
+            .await?;
+            Ok(serde_json::json!({"generation": args.generation, "drained": status.drained()}))
+        }
+        SqliteUpgradeAction::EndDrain => {
+            let cleared = drain.clear_draining(&args.generation).await?;
+            Ok(serde_json::json!({"generation": args.generation, "cleared": cleared}))
+        }
+        SqliteUpgradeAction::Finalize => {
+            let registry = lash_restate::RestateDeploymentRegistry::new(
+                lash_restate::RestateAdminClient::new(args.restate.admin_url),
+            );
+            let flip = stores.finalize(&args.generation, &registry, now).await?;
+            Ok(serde_json::to_value(flip)?)
+        }
+    }
 }
 
 fn print(report: &impl Serialize) -> Result<()> {
