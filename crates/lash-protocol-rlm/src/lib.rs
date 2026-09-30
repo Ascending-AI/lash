@@ -28,8 +28,8 @@ mod tool_catalog;
 
 pub use control_tools::continue_as_tool_definition;
 pub use dialect::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
-    DialectRefusalKind, ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
+    ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RLM_SNAPSHOT_VERSION;

@@ -11,9 +11,9 @@ fn main() {
     .expect("seam proof worker entry");
 }
 
-use lashlang::{AssignTarget, Expr, Program, ResourceRefExpr, Span};
-use lashlang::LashlangHostEnvironment;
 use lash_vm_worker::{Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal};
+use lashlang::LashlangHostEnvironment;
+use lashlang::{AssignTarget, Expr, Program, ResourceRefExpr, Span};
 
 pub struct SeamProofFrontend;
 

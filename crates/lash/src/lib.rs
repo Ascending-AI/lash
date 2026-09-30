@@ -423,10 +423,6 @@ pub mod persistence {
     /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out
     /// as a trait object (FIG-4373).
     pub use lash_core::store::ArtifactCleanupLedger;
-    pub use lash_core::store::worker_recovery::{
-        WorkerRecoveryClaim, WorkerRecoveryError, WorkerRecoveryLimits, WorkerRecoveryStore,
-        WorkerRecoveryTotals,
-    };
     /// The current state of an obligation a custom ledger exposes.
     pub use lash_core::store::ObligationStanding;
     /// A process park write accepted by a custom registry.
@@ -438,6 +434,10 @@ pub mod persistence {
     /// [`LashCore::drain_generation`](crate::LashCore::drain_generation).
     pub use lash_core::store::generation_drain::{
         DrainingGeneration, GenerationDrainStore, GenerationWork,
+    };
+    pub use lash_core::store::worker_recovery::{
+        WorkerRecoveryClaim, WorkerRecoveryError, WorkerRecoveryLimits, WorkerRecoveryStore,
+        WorkerRecoveryTotals,
     };
     /// The store halves a storage integrator's [`StoreSet`](crate::StoreSet)
     /// supplies: the obligation ledgers and the recovery leader lease

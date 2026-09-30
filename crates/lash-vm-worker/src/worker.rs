@@ -179,7 +179,8 @@ impl<'frontend> Server<'frontend> {
                     self.owner = Some(owner);
                     self.progress(WorkerPhase::Computing)?;
                     self.codec.check_payload(&request.0)?;
-                    let response = crate::service::perform(self.frontend, &mut self.instance, &request)?;
+                    let response =
+                        crate::service::perform(self.frontend, &mut self.instance, &request)?;
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(WorkerMessage::Prepared { response })?;
                 }

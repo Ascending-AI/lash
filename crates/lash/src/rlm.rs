@@ -176,9 +176,8 @@ pub use lash_protocol_rlm::{
 /// The code-mode dialect seam: a host selects one [`Dialect`] where it
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
 pub use lash_protocol_rlm::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
-    DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation,
-    TypescriptDialect,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
+    ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation, TypescriptDialect,
 };
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.

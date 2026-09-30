@@ -11,9 +11,8 @@
 //! ```
 
 use lash::rlm::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
-    DialectRefusalKind, ExecutionSectionRequest, ResolvedToolBinding,
-    RlmChannel, ShapeNotation,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
+    ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, ShapeNotation,
 };
 
 pub const LANGUAGE_ID: &str = "seam-proof";

@@ -1,6 +1,6 @@
 use super::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal,
-    DialectRefusalKind, ExecutionSectionRequest, ShapeNotation,
+    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
+    ExecutionSectionRequest, ShapeNotation,
 };
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";

@@ -354,7 +354,9 @@ impl RlmCheckpointPerfFixture {
     ) -> Result<Self, SessionError> {
         let mut state = RlmExecutionState::for_engine_with_workers(
             dialect.language_id(),
-            dialect.worker_service().with_recovery_store(backend.worker_recovery()),
+            dialect
+                .worker_service()
+                .with_recovery_store(backend.worker_recovery()),
         );
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
@@ -777,13 +779,11 @@ async fn execute_code_in_worker_scope(
         Ok(lash_vm_client::service::Response::Module(module)) => Ok(*module),
         Ok(lash_vm_client::service::Response::CompileRefused { error, policy }) => {
             let message = match error {
-                lashlang::ModuleCompileError::Parse(_) => {
-                    format_rlm_parse_diagnostic(
-                        dialect.render_parse_diagnostic(&error),
-                        channel,
-                        dialect.prompt_vocabulary().cell_tags,
-                    )
-                }
+                lashlang::ModuleCompileError::Parse(_) => format_rlm_parse_diagnostic(
+                    dialect.render_parse_diagnostic(&error),
+                    channel,
+                    dialect.prompt_vocabulary().cell_tags,
+                ),
                 _ => error.to_string(),
             };
             Err((
