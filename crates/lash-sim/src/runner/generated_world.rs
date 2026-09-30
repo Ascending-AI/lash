@@ -92,6 +92,7 @@ struct SuspendingTurn {
 /// What the durable-content oracle needs from a suspend session after its
 /// resumed turn finished.
 struct FinishedSuspend {
+    _core: lash::LashCore,
     session: String,
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
@@ -249,6 +250,9 @@ impl GeneratedRuntimeWorld {
             }
         }
         history.extend_from(&self.recorder);
+        for engine in self.session_engines.values() {
+            super::generated_recovery::recover_scope_closes(engine.restate()).await?;
+        }
         crate::invariants::capture_engines(
             &mut history,
             std::iter::once(("world".to_owned(), self.engine.restate())).chain(
@@ -1298,6 +1302,7 @@ impl GeneratedRuntimeWorld {
             );
         let resolve_accepted = matches!(accepted, lash_core::ResolveOutcome::Accepted);
         self.finished_suspends.push(FinishedSuspend {
+            _core: turn.core,
             session: event.actor_alias.clone(),
             transport: Arc::clone(&turn.transport),
             scripts: turn.scripts.clone(),
@@ -1577,5 +1582,62 @@ impl SimProviderMutationHarness {
             .augment_observation(event, observed)
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn generated_history_recovers_a_scope_close_left_due_after_its_attempt_budget() {
+        let workload = generate_workload(29, "fast-random", 32).expect("workload");
+        let mut world = GeneratedRuntimeWorld::new(29).await.expect("world");
+        let (events, _) =
+            super::super::generated_driver::drive_generated_workload(&mut world, &workload)
+                .await
+                .expect("drive fixture workload");
+        world
+            .global_history("before-timeout", &events)
+            .await
+            .expect("settle drives");
+        let engine = world
+            .session_engines
+            .get("suspend-exec-code")
+            .expect("suspend engine");
+        let connection = rusqlite::Connection::open_with_flags(
+            engine
+                .restate()
+                .stores()
+                .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .expect("fault injection connection");
+        let due = engine.restate().server().now_ms();
+        assert_eq!(
+            connection.execute(
+                "UPDATE session_roots SET obligation_state = 'due', obligation_due_at_ms = ?1, \
+                 obligation_attempts = 1, obligation_claim_token = NULL, obligation_settled_at_ms = NULL, \
+                 obligation_last_error = 'the delivery ran past its 30000 ms attempt budget' \
+                 WHERE session_id = 'suspend-exec-code' AND root = 'suspend-exec-code:suspend-turn'",
+                [due],
+            ).expect("plant the CI timeout's durable retry"),
+            1,
+        );
+        let history = world
+            .global_history("after-timeout", &events)
+            .await
+            .expect("history");
+        let scope_close = history
+            .stores
+            .iter()
+            .flat_map(|store| &store.obligations)
+            .find(|row| {
+                row.table == "session_roots"
+                    && row.key == "suspend-exec-code/suspend-exec-code:suspend-turn"
+            })
+            .expect("scope close");
+        assert_eq!(scope_close.state.as_deref(), Some("delivered"));
+        assert!(crate::invariants::check(&history).violations.is_empty());
     }
 }

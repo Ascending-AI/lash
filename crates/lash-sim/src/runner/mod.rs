@@ -178,6 +178,7 @@ mod contract_support;
 mod fixed_script;
 mod generated_driver;
 mod generated_profiles;
+mod generated_recovery;
 mod generated_world;
 mod harness;
 mod provider_proofs;

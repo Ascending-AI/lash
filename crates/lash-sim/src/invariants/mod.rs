@@ -639,7 +639,9 @@ const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// that point sees a close still in flight. A drive that does not settle
 /// within [`SETTLE_LIMIT`] (a turn the scenario leaves parked) is judged as
 /// it stands.
-async fn settle_drives(engine: &lash_restate_test::RestateTestBackend) -> Result<(), String> {
+pub(crate) async fn settle_drives(
+    engine: &lash_restate_test::RestateTestBackend,
+) -> Result<(), String> {
     let sessions = lash_sqlite_store::testing::read_rows_for_testing(
         engine.stores(),
         lash_sqlite_store::SqliteDatabase::DurableCore,
