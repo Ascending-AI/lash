@@ -568,6 +568,7 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
     "scripts/profile_monty_comparison.sh": "run by hand to measure the TypeScript VM against Monty's published workloads",
+    "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 

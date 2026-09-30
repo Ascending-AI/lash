@@ -121,7 +121,7 @@ the registrar reads the delivery's binding in the same transaction. A bound
 delivery registers nothing and refuses as `TriggerDeliveryBound`, and its
 emitter answers the bound process (FIG-4369). The binding is written once, and
 a bind precedes the prune of its process, so the check sees every bind whose
-process the key no longer finds.
+process is absent from the key lookup.
 
 Evidence: `crates/lash-core-execution/src/triggers/router.rs:666`.
 

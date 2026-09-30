@@ -115,7 +115,30 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
             text=True,
             check=True,
         )
-        rendered.append(result.stdout)
+        commands = []
+        verifier_prefix = "python3 tools/bazel/libtest_selection.py "
+        for line in result.stdout.splitlines():
+            if line.startswith(verifier_prefix):
+                dialect = "bazel" if trusted == "true" else "cargo"
+                if not commands or not line.startswith(f"{verifier_prefix}{dialect} "):
+                    raise AssertionError(f"unexpected selection verifier: {line}")
+                if dialect == "cargo" and not line.endswith(commands[-1]):
+                    raise AssertionError(f"verifier lost the Cargo selection: {line}")
+                continue
+            if not line.startswith(("bazel test ", "cargo ")):
+                raise AssertionError(f"unexpected store suite output: {line}")
+            commands.append(line)
+        dialect = "bazel" if trusted == "true" else "cargo"
+        expected_verifiers = len(commands) if trusted == "true" else sum(
+            command.startswith("cargo test ") for command in commands
+        )
+        actual_verifiers = sum(
+            line.startswith(f"{verifier_prefix}{dialect} ")
+            for line in result.stdout.splitlines()
+        )
+        if actual_verifiers != expected_verifiers:
+            raise AssertionError(f"{suite} lost selection verification: {result.stdout}")
+        rendered.append("\n".join(commands) + "\n")
     return rendered[0], rendered[1]
 
 

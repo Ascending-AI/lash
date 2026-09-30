@@ -1157,6 +1157,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                 "crates/lash-restate",
                 "crates/lash-restate-test",
                 "examples/agent-workbench",
+                "runbooks/restate-postgres-workers",
             },
             set(ci_plan.restate_suite_dirs()),
         )
