@@ -108,6 +108,12 @@ and raises the engine's own `404`-class terminal naming the address nothing
 binds. A retryable 404 would turn a forgotten `bind` into an invocation backing
 off forever with no operator told what is wrong.
 
+`RestateHttpError::classification` distinguishes transient ingress failures
+from definitive answers. A process await reattaches after connection failures,
+EOF, timeouts, overload, and ingress-generated 5xx responses, preserving the
+durable process and its wait address. An invocation's terminal error stays
+terminal even with a 5xx code. See ADR 0019's FIG-4260 amendment.
+
 ## Stuck effect-group dispatcher retirement
 
 Effect-group retirement tombstones the index before it cancels and durably

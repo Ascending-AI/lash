@@ -668,7 +668,7 @@ impl RestateProcessIngressRunner {
             )
             .await;
         let wait = outcome.map(ProcessTerminalWait::Terminal).or_else(|err| {
-            if err.is_timeout() {
+            if err.classification() == crate::RestateHttpErrorClass::Transient {
                 Ok(ProcessTerminalWait::Reattach)
             } else if err.is_service_unregistered() {
                 // A shared handler, so the 404 has two readings and this

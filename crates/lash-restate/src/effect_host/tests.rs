@@ -19,10 +19,19 @@ fn effect_group_ingress_404_is_restate_service_unregistered() {
 }
 
 #[test]
-fn effect_group_ingress_non_registration_failure_stays_a_shape_error() {
+fn effect_group_ingress_unavailability_is_retryable() {
     let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
 
+    assert_eq!(error.code, RuntimeErrorCode::EngineAwaitEventAwait);
+    assert!(error.code.is_retryable());
+}
+
+#[test]
+fn effect_group_ingress_definitive_refusal_keeps_its_shape_code() {
+    let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(400));
+
     assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
+    assert!(error.code.is_terminal());
 }
 
 /// Eight threads registering different resolvers on one host: exactly one

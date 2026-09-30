@@ -1141,9 +1141,9 @@ pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_termi
 }
 
 #[tokio::test]
-pub(super) async fn restate_process_attach_maps_ingress_error_to_plugin_error() {
+pub(super) async fn restate_process_attach_maps_definitive_ingress_error_to_plugin_error() {
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "500 Internal Server Error",
+        status: "400 Bad Request",
         body: r#"{"message":"boom"}"#,
     }])
     .await;
@@ -1164,7 +1164,7 @@ pub(super) async fn restate_process_attach_maps_ingress_error_to_plugin_error() 
         err.to_string()
             .contains(&format!("ingress await for process `{process_ref}` failed"))
     );
-    assert!(err.to_string().contains("status 500"));
+    assert!(err.to_string().contains("status 400"));
     assert!(err.to_string().contains("boom"));
 }
 

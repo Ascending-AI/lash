@@ -1534,6 +1534,7 @@ mod durable_wait_root_retirement;
 mod durable_wait_turn_gate_peek;
 mod effect_execution;
 mod failure_settlement;
+mod ingress_recovery;
 mod observer_intent_on_the_double;
 mod postgres_ingress;
 mod process_await_redrive;

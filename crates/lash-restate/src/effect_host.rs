@@ -39,6 +39,7 @@ use crate::effect_group::{
 use crate::{LashService, RestateAuthorityId, RestateConnection, RestateIngressClient};
 
 mod journal_verdict;
+use crate::effect_group::ingress_group_error;
 pub use journal_verdict::RestateJournalAuthority;
 
 /// Deployment-level Restate effect host for long-lived Lash cores.
@@ -537,22 +538,6 @@ struct RestateEffectHostController {
     /// the lazy handle [`RestateHostGroupExecutors`], so the open, a redriven
     /// child and preflight all consult the same cell.
     group_executors: OnceLock<Arc<dyn GroupExecutors>>,
-}
-
-fn ingress_group_error(
-    operation: &str,
-    error: crate::RestateHttpError,
-) -> RuntimeEffectControllerError {
-    if let Some(refusal) = crate::object_state::ingress_stored_format_refusal(&error) {
-        return refusal;
-    }
-    let service_unregistered = error.is_service_unregistered();
-    let message = format!("Restate effect-group operation {operation} failed: {error}");
-    if service_unregistered {
-        RuntimeEffectControllerError::new(RuntimeErrorCode::EngineServiceUnregistered, message)
-    } else {
-        group_shape_error(message)
-    }
 }
 
 #[async_trait::async_trait]

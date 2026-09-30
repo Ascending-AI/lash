@@ -1546,6 +1546,25 @@ pub(crate) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectCont
     RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupShape, message)
 }
 
+pub(crate) fn ingress_group_error(
+    operation: &str,
+    error: crate::RestateHttpError,
+) -> RuntimeEffectControllerError {
+    if let Some(refusal) = crate::object_state::ingress_stored_format_refusal(&error) {
+        return refusal;
+    }
+    let message = format!("Restate effect-group operation {operation} failed: {error}");
+    match error.classification() {
+        crate::RestateHttpErrorClass::Transient => {
+            RuntimeEffectControllerError::new(RuntimeErrorCode::EngineAwaitEventAwait, message)
+        }
+        crate::RestateHttpErrorClass::Terminal if error.is_service_unregistered() => {
+            RuntimeEffectControllerError::new(RuntimeErrorCode::EngineServiceUnregistered, message)
+        }
+        crate::RestateHttpErrorClass::Terminal => group_shape_error(message),
+    }
+}
+
 pub(crate) fn decode_wait_resolution(
     resolution: Resolution,
 ) -> Result<EffectGroupWaitResolution, RuntimeEffectControllerError> {

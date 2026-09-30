@@ -192,7 +192,62 @@ pub enum RestateHttpError {
     UnexpectedSendStatus { url: String, status: String },
 }
 
+/// Whether ingress supplied a definitive failure or lost contact with durable work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestateHttpErrorClass {
+    /// No definitive answer was received. An observation may reattach, and an
+    /// idempotent command may retry under its original key.
+    Transient,
+    /// A target or request was refused, an invocation failed, or the complete
+    /// response violated the protocol. Repeating it cannot repair the contract.
+    Terminal,
+}
+
 impl RestateHttpError {
+    /// Exhaustive classification of this client's failures (FIG-4260).
+    ///
+    /// Invocation terminal errors can carry a user-selected 5xx code. Restate's
+    /// typed error source takes precedence over HTTP availability semantics.
+    /// An EOF while decoding still has no complete answer; other decode
+    /// failures and local encoding failures are protocol errors.
+    pub fn classification(&self) -> RestateHttpErrorClass {
+        use RestateHttpErrorClass::{Terminal, Transient};
+        match self {
+            Self::Request { source, .. } => match source.retry_verdict {
+                lash_http_transport::TransportRetryVerdict::Forbidden => Terminal,
+                lash_http_transport::TransportRetryVerdict::RetryableThrottle { .. }
+                | lash_http_transport::TransportRetryVerdict::RetryableTransient
+                | lash_http_transport::TransportRetryVerdict::NotRetryable => Transient,
+            },
+            Self::Status { status, body, .. } => {
+                #[derive(serde::Deserialize)]
+                struct ErrorBody {
+                    source: String,
+                }
+                let invocation_terminal = serde_json::from_str::<ErrorBody>(body)
+                    .is_ok_and(|body| body.source == "invocation");
+                if invocation_terminal
+                    || crate::object_state::ingress_stored_format_refusal(self).is_some()
+                {
+                    Terminal
+                } else {
+                    match status {
+                        408 | 429 | 500..=599 => Transient,
+                        _ => Terminal,
+                    }
+                }
+            }
+            Self::Decode { source, .. } => {
+                if source.is_eof() {
+                    Transient
+                } else {
+                    Terminal
+                }
+            }
+            Self::Encode { .. } | Self::UnexpectedSendStatus { .. } => Terminal,
+        }
+    }
+
     /// Whether this failure elapsed a configured transport deadline.
     pub fn is_timeout(&self) -> bool {
         matches!(
@@ -749,7 +804,9 @@ impl RestateIngressClient {
             .send_object_json_idempotent(object, key, handler, body, idempotency_key)
             .await;
         for attempt in 1..ATTEMPTS {
-            if !matches!(&verdict, Err(error) if retryable_send_error(error)) {
+            if !matches!(&verdict, Err(error)
+                if error.classification() == RestateHttpErrorClass::Transient)
+            {
                 return verdict;
             }
             tokio::time::sleep(std::time::Duration::from_millis(25 << (attempt - 1))).await;
@@ -1631,19 +1688,6 @@ async fn status_error(
             url,
             source,
         },
-    }
-}
-
-/// Whether a failed send is worth one more attempt under the same key:
-/// transport and decode failures plus throttling and server statuses; a
-/// malformed request or an unexpected send status is not.
-fn retryable_send_error(error: &RestateHttpError) -> bool {
-    match error {
-        RestateHttpError::Request { .. } | RestateHttpError::Decode { .. } => true,
-        RestateHttpError::Status { status, .. } => {
-            *status == 408 || *status == 429 || *status >= 500
-        }
-        RestateHttpError::Encode { .. } | RestateHttpError::UnexpectedSendStatus { .. } => false,
     }
 }
 

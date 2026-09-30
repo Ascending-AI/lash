@@ -91,6 +91,23 @@ state instead: recovery never claims it (it is outside the live worklist),
 retention reclaims it like a terminal row. Elapsed time still terminalizes
 nothing.
 
+Amended 2026-09-30 (FIG-4260): an ingress failure is not a process outcome.
+Connection refusal, reset, response-read EOF, a truncated JSON response,
+timeout, HTTP 408 or 429, and ingress-generated 5xx errors are transient.
+The process terminal wait returns `Reattach` and observes the same durable
+process again. It neither writes an outcome nor changes the process's status.
+
+Definitive target failures and typed refusals remain errors: an unregistered
+service or an unresolvable workflow key, other HTTP refusals, a host transport's
+explicit refusal, local encoding errors, complete malformed responses, and
+unexpected send acceptance statuses. Restate's error body
+`source: "invocation"` identifies a definitive invocation failure even when
+its user-selected HTTP code is 5xx. A typed stored-format refusal also stays
+terminal. Cancel watches and bounded idempotent sends use this same exhaustive
+classification. A transient retry keeps the original workflow key and payload;
+a command retry also keeps its idempotency key. `CallerDeparted` still refuses
+before ingress is contacted.
+
 ## Why
 
 The recovery sweep already implements a policy: it re-runs every non-terminal

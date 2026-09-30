@@ -146,8 +146,9 @@ pub use engine::{RestateConfig, RestateEngine, RestateRegistrationError, deploym
 pub use formats::{EngineDurableFormat, durable_formats};
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
-    RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,
-    RestateInvocationLifecycle, RestateInvocationStatus, RestatePausedInvocation,
+    RestateConnectionConfig, RestateHttpError, RestateHttpErrorClass, RestateIngressClient,
+    RestateInvocationId, RestateInvocationLifecycle, RestateInvocationStatus,
+    RestatePausedInvocation,
 };
 pub use object_state::ObjectUpgradeResponse;
 pub use object_upgrade::{

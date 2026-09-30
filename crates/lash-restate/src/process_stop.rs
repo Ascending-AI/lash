@@ -81,18 +81,34 @@ impl ProcessStopDelivery {
                     Ok(RestateProcessCancelSignal::SegmentFinished) => {
                         return std::future::pending().await;
                     }
-                    Err(error) if error.is_timeout() => {
+                    Err(error)
+                        if error.is_timeout()
+                            && error.classification()
+                                == crate::RestateHttpErrorClass::Transient =>
+                    {
                         // The attach ceiling bounds one transport connection,
                         // not the watch: re-attach.
                         faults = 0;
                         delay = WATCH_RETRY_FIRST_DELAY;
                     }
-                    Err(error) if error.is_service_unregistered() => {
-                        // Retrying cannot make the binding appear (FIG-1579).
-                        return crate::ingress::unregistered_service_terminal(
-                            &service,
-                            "await_cancel",
-                            &error,
+                    Err(error)
+                        if error.classification() == crate::RestateHttpErrorClass::Terminal =>
+                    {
+                        if error.is_service_unregistered() {
+                            return crate::ingress::unregistered_service_terminal(
+                                &service,
+                                "await_cancel",
+                                &error,
+                            )
+                            .into();
+                        }
+                        let code = match &error {
+                            crate::RestateHttpError::Status { status, .. } => *status,
+                            _ => 500,
+                        };
+                        return restate_sdk::errors::TerminalError::new_with_code(
+                            code,
+                            format!("process {workflow_key} cancel watch was refused: {error}"),
                         )
                         .into();
                     }

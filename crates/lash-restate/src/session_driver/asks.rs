@@ -272,11 +272,82 @@ async fn drive_ended(engine: &RestateSessionWork, session: &SessionId, request: 
                 }
                 None => return,
             },
-            Err(crate::RestateHttpError::Request { .. }) => {
+            Err(error) if error.classification() == crate::RestateHttpErrorClass::Transient => {
                 tokio::time::sleep(pause).await;
                 pause = (pause * 2).min(ATTACH_PAUSE_CEILING);
             }
             Err(_) => return,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_http_transport::{
+        HttpRequest, HttpResponse, HttpResponseBody, HttpTransport, LlmTransportError,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug, Default)]
+    struct RestartingIngress {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl HttpTransport for RestartingIngress {
+        async fn send(
+            &self,
+            _request: HttpRequest,
+            _timeout: Option<Duration>,
+        ) -> Result<HttpResponse, LlmTransportError> {
+            let restarting = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
+            Ok(HttpResponse {
+                status: if restarting { 503 } else { 200 },
+                headers: Vec::new(),
+                body: if restarting {
+                    HttpResponseBody::buffered(
+                        r#"{"source":"ingress","message":"node restarting"}"#,
+                    )
+                } else {
+                    HttpResponseBody::buffered(
+                        serde_json::to_vec(&crate::Reply::at(
+                            crate::RESTATE_WIRE_VERSION,
+                            lash_core::engine::DriveOutcome {
+                                ran: Vec::new(),
+                                stop: lash_core::engine::DriveStop::Idle,
+                            },
+                        ))
+                        .expect("encode the drive's real outcome"),
+                    )
+                },
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_drive_observer_waits_for_the_real_end_after_ingress_unavailability() {
+        let ingress = Arc::new(RestartingIngress::default());
+        let backend = crate::tests::memory_engine().await;
+        let mut engine = backend.session_work_engine().as_ref().clone();
+        engine.ingress = crate::RestateIngressClient::new(
+            crate::RestateConnection::with_transport("https://restate.invalid", ingress.clone()),
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            drive_ended(
+                &engine,
+                &SessionId::new("restarting-drive"),
+                &DriveRequestId::new("drive-1"),
+            ),
+        )
+        .await
+        .expect("the real outcome follows one availability fault");
+        assert_eq!(
+            ingress.calls.load(Ordering::SeqCst),
+            2,
+            "an unavailable ingress cannot count as the end of a durable drive"
+        );
     }
 }
