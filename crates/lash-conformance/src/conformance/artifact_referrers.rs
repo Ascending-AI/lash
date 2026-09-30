@@ -373,10 +373,6 @@ where
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-        ArtifactReferrer::DefinitionRevision(
-            lash_core::DefinitionRevisionId::new("definition".into(), 1)
-                .expect("definition revision"),
-        ),
         ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
             lash_core::SessionId::from("canonical-session"),

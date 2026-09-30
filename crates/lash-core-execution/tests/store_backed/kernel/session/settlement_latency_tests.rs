@@ -261,7 +261,6 @@ fn probe_context_with<'run>(
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes,
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: scoped,
         direct_completions: crate::DirectCompletionClient::unavailable(

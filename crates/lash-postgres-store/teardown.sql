@@ -118,8 +118,6 @@ DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_subscriptions CASCADE;
 
-DROP TABLE IF EXISTS lash_process_definitions CASCADE;
-
 DROP TABLE IF EXISTS lash_trigger_occurrences CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_deliveries CASCADE;

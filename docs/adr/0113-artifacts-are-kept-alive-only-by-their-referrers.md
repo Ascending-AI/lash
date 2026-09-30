@@ -2,8 +2,7 @@
 
 ## Status
 
-Accepted. The definition vocabulary depends on FIG-4178, which removes the
-definition-revision referrer and the named definition registry.
+Accepted.
 
 ## Context
 
@@ -549,7 +548,7 @@ fixture selects SQLite memory or PostgreSQL from
 Definition store laws cover retention while any reader holds a descriptor,
 reclamation after the last referrer, byte verification on an existing id,
 and replay at six create/publication/start boundaries
-(`crates/lash-conformance/src/conformance/process_definitions.rs:444,560,679-1035`).
+(`crates/lash-conformance/src/conformance/definitions.rs`).
 Prepared-frame laws cover an aborted activation and retention after a
 committed activation
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:1088,1175`).

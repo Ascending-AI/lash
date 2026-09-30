@@ -629,6 +629,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // rows, and `lash migrate` seeds it on every run (FIG-4075, changed in place
 // under the version freeze): an open reads `F` and never records it, so a
 // catalog without the row refuses `fleet_unrecorded` until migrate runs.
+//
+// Version 141 also drops the named process-definition registry (FIG-4178,
+// changed in place under the version freeze): its catalog table is gone and
+// `lash_artifact_referrers` no longer admits a definition-revision kind —
+// definitions are immutable and content-addressed, retained by their
+// referrers rather than by a catalog name. A catalog provisioned before the
+// change fails the open-time shape check and is recreated.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
@@ -1518,8 +1525,6 @@ mod obligation_ledger;
 #[path = "postgres/pending_turn_inputs.rs"]
 mod pending_turn_inputs;
 mod preflight;
-#[path = "postgres/process_definitions.rs"]
-mod process_definitions;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
 #[cfg(test)]
@@ -1590,7 +1595,6 @@ pub use connection_budget::{
     PostgresConnectionCapacity,
 };
 pub use preflight::PostgresStorePreflight;
-pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::verify_schema_shape;
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,

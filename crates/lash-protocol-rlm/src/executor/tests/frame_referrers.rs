@@ -291,7 +291,7 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
         );
         let backend = store.double.get().expect("double").lash_backend();
         let definition = backend
-            .process_definitions()
+            .definition_store()
             .get_process_definition(ids.first().expect("map candidate"))
             .await
             .expect("descriptor read");

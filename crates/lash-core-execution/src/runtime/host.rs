@@ -292,11 +292,6 @@ impl RuntimeHostConfig {
         self.backend.trigger_store()
     }
 
-    /// The backend's named process-definition registry (FIG-2995).
-    pub fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
-        self.backend.process_definition_registry()
-    }
-
     /// Replace the runtime time source. Hosts that need deterministic replay or
     /// test-driven time inject their own [`Clock`](super::Clock); the default is
     /// [`SystemClock`](super::SystemClock).

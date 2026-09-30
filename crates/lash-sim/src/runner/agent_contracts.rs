@@ -1163,7 +1163,7 @@ async fn agent_contract_process_origin(
         return Ok(None);
     };
     let bytes = backend
-        .process_definitions()
+        .definition_store()
         .get_process_definition(id)
         .await
         .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?

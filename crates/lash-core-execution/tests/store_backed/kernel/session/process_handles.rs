@@ -142,7 +142,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host,
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -334,7 +333,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -447,7 +445,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -611,7 +608,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -979,7 +975,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             // The completion presents through the journaled boundary, so the
             // context runs on the open handler's lent controller.

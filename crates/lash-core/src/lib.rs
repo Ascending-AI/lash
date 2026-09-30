@@ -65,7 +65,6 @@ pub mod panic_containment {
 }
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
-pub use lash_core_execution::process_registry;
 pub(crate) use lash_core_execution::protocol_build;
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
@@ -596,9 +595,8 @@ pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
-    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
-    ResolvedArtifactCleanup, RuntimeOwner, SubscriptionRevisionId, UploadReferrerId,
-    artifact_referrer_ended, trigger_incarnation,
+    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup, RuntimeOwner,
+    SubscriptionRevisionId, UploadReferrerId, artifact_referrer_ended, trigger_incarnation,
 };
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
@@ -686,10 +684,6 @@ pub use lash_core_execution::runtime::publish_process_execution_env;
 /// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
 /// outside `RuntimeHostConfig`.
 pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
-pub use process_registry::{
-    ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
-    ProcessDefinitionRegistration, ProcessDefinitionRegistry,
-};
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
     AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantStreamHookState,

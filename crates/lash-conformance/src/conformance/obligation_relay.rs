@@ -115,13 +115,6 @@ impl ArtifactCleanupAuthorities for NoGuardAuthorities {
     ) -> Result<SubscriptionRevisionStanding, String> {
         unreachable!("a host pin has no subscription revision")
     }
-
-    async fn definition_revision_current(
-        &self,
-        _revision: &crate::DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        unreachable!("a host pin has no definition revision")
-    }
 }
 
 /// What one relay law runs over: a backend's store set, fresh per law.
@@ -856,7 +849,7 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
         authorities: Arc::new(NoGuardAuthorities),
         process_env: fixture.stores.process_env_store(),
         modules: fixture.stores.module_artifacts(),
-        definitions: fixture.stores.process_definitions(),
+        definitions: fixture.stores.definition_store(),
         engines,
         attachments: fixture.stores.attachment_referrers(),
         clock: fixture.stores.clock(),
@@ -943,13 +936,6 @@ impl ArtifactCleanupAuthorities for ScriptedJournals {
     ) -> Result<SubscriptionRevisionStanding, String> {
         unreachable!("the law arms no subscription guard")
     }
-
-    async fn definition_revision_current(
-        &self,
-        _revision: &crate::DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        unreachable!("the law arms no definition guard")
-    }
 }
 
 /// ADR 0113 §2.5, FIG-4359: a cleanup a relay pass deferred at its maximum
@@ -999,7 +985,7 @@ pub async fn a_settled_journal_nudges_only_the_cleanups_awaiting_it(fixture: Obl
         authorities: Arc::clone(&journals) as Arc<dyn ArtifactCleanupAuthorities>,
         process_env: fixture.stores.process_env_store(),
         modules: fixture.stores.module_artifacts(),
-        definitions: fixture.stores.process_definitions(),
+        definitions: fixture.stores.definition_store(),
         engines: crate::ProcessEngineRegistry::new(),
         attachments: fixture.stores.attachment_referrers(),
         clock: fixture.stores.clock(),

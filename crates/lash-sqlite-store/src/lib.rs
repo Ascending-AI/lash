@@ -120,7 +120,6 @@ mod obligation_ledger;
 mod pending_turn_inputs;
 mod persistence;
 mod preflight;
-mod process_definitions;
 mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
@@ -184,7 +183,6 @@ use schema::{apply_pragmas, ensure_versioned_schema};
 /// `lash_compat` row in each physical database.
 pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
 
-pub use process_definitions::SqliteProcessDefinitionRegistry;
 pub use triggers::SqliteTriggerStore;
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and

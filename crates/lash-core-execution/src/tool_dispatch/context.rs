@@ -68,10 +68,7 @@ pub struct ToolDispatchContext<'run> {
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
     pub trigger_router: Option<crate::TriggerRouter>,
-    /// Durable home for the named process-definition registry (FIG-2995).
-    /// Unset only in fixtures that exercise no registration intent.
-    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
-    /// The engines a definition registration resolves against.
+    /// The engines a definition resolves against.
     pub process_engines: crate::ProcessEngineRegistry,
     pub effect_controller: crate::runtime::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
@@ -253,7 +250,6 @@ pub enum RebindField {
     SessionGraph,
     Processes,
     TriggerRouter,
-    ProcessDefinitions,
     ProcessEngines,
     EffectController,
     DirectCompletions,
@@ -286,7 +282,6 @@ impl RebindField {
             Self::SessionGraph => "session_graph",
             Self::Processes => "processes",
             Self::TriggerRouter => "trigger_router",
-            Self::ProcessDefinitions => "process_definitions",
             Self::ProcessEngines => "process_engines",
             Self::EffectController => "effect_controller",
             Self::DirectCompletions => "direct_completions",
@@ -340,7 +335,6 @@ impl RebindField {
             | Self::SessionGraph
             | Self::Processes
             | Self::TriggerRouter
-            | Self::ProcessDefinitions
             | Self::ProcessEngines
             | Self::Observer
             | Self::AttachmentStore
@@ -374,7 +368,6 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::SessionGraph,
     RebindField::Processes,
     RebindField::TriggerRouter,
-    RebindField::ProcessDefinitions,
     RebindField::ProcessEngines,
     RebindField::EffectController,
     RebindField::DirectCompletions,
@@ -412,7 +405,6 @@ impl<'run> ToolDispatchContext<'run> {
             session_graph: Arc::clone(&self.session_graph),
             processes: Arc::clone(&self.processes),
             trigger_router: self.trigger_router.clone(),
-            process_definitions: self.process_definitions.clone(),
             process_engines: self.process_engines.clone(),
             effect_controller: self.effect_controller.to_static()?,
             direct_completions: self.direct_completions.to_static()?,
@@ -461,7 +453,6 @@ impl<'run> ToolDispatchContext<'run> {
             session_graph: Arc::clone(&self.session_graph),
             processes: Arc::clone(&self.processes),
             trigger_router: self.trigger_router.clone(),
-            process_definitions: self.process_definitions.clone(),
             process_engines: self.process_engines.clone(),
             effect_controller: controller.clone(),
             direct_completions: self.direct_completions.lend_static(controller),

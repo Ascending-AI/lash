@@ -344,10 +344,6 @@ mod tests {
             &env.core.trigger_store(),
             &backend.trigger_store()
         ));
-        assert!(Arc::ptr_eq(
-            &env.core.process_definitions(),
-            &backend.process_definition_registry()
-        ));
     }
 
     #[tokio::test]

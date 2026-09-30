@@ -266,7 +266,7 @@ fn carried_then_reclaimed(
                 if !matches!(
                     world
                         .backend()
-                        .process_definitions()
+                        .definition_store()
                         .get_process_definition(&id)
                         .await,
                     Ok(Some(_))
@@ -291,7 +291,7 @@ fn carried_then_reclaimed(
             }
             match world
                 .backend()
-                .process_definitions()
+                .definition_store()
                 .get_process_definition(&id)
                 .await
             {

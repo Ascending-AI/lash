@@ -264,10 +264,6 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("trigger store")
     }
 
-    fn process_definition_registry(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
-        Self::no_second_substrate("process-definition registry")
-    }
-
     fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore)
     }
@@ -280,7 +276,7 @@ impl crate::StoreSet for StoreLawStores {
         Arc::new(UnavailableModuleArtifacts)
     }
 
-    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
         Arc::new(UnavailableProcessDefinitions)
     }
 

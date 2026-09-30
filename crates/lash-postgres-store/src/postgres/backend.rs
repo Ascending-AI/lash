@@ -10,8 +10,8 @@ use std::sync::Arc;
 use lash_core_execution::{AttachmentStore, Clock};
 
 use crate::{
-    PostgresLashlangArtifactStore, PostgresProcessDefinitionRegistry, PostgresProcessRegistry,
-    PostgresStorage, PostgresStore, PostgresTriggerStore,
+    PostgresLashlangArtifactStore, PostgresProcessRegistry, PostgresStorage, PostgresStore,
+    PostgresTriggerStore,
 };
 
 /// Every persistence port of one PostgreSQL database: the
@@ -33,7 +33,6 @@ struct StoreParts {
     session_store_factory: Arc<PostgresStore>,
     process_registry: Arc<PostgresProcessRegistry>,
     trigger_store: Arc<PostgresTriggerStore>,
-    process_definitions: Arc<PostgresProcessDefinitionRegistry>,
     process_env_store: Arc<PostgresLashlangArtifactStore>,
     attachment_store: Arc<dyn AttachmentStore>,
 }
@@ -72,9 +71,6 @@ impl PostgresStoreSet {
                         .with_clock(Arc::clone(&clock)),
                 ),
                 trigger_store: Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock))),
-                process_definitions: Arc::new(
-                    PostgresProcessDefinitionRegistry::new(storage).with_clock(Arc::clone(&clock)),
-                ),
                 process_env_store: Arc::new(storage.process_env_store()),
                 attachment_store,
                 clock,
@@ -101,11 +97,6 @@ impl PostgresStoreSet {
     /// The trigger subscriptions and occurrences.
     pub fn trigger_store(&self) -> Arc<PostgresTriggerStore> {
         Arc::clone(&self.inner.trigger_store)
-    }
-
-    /// The named process-definition registry.
-    pub fn process_definition_registry(&self) -> Arc<PostgresProcessDefinitionRegistry> {
-        Arc::clone(&self.inner.process_definitions)
     }
 
     /// The store that serves process execution environments and Lashlang
@@ -148,12 +139,6 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::trigger_store(self)
     }
 
-    fn process_definition_registry(
-        &self,
-    ) -> Arc<dyn lash_core_execution::ProcessDefinitionRegistry> {
-        PostgresStoreSet::process_definition_registry(self)
-    }
-
     fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
         PostgresStoreSet::process_env_store(self)
     }
@@ -170,7 +155,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
 
     /// Definition descriptors live beside the modules and environments their
     /// manifests name, so one transaction holds a whole closure.
-    fn process_definitions(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
         PostgresStoreSet::process_env_store(self)
     }
 

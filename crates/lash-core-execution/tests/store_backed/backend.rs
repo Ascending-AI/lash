@@ -76,8 +76,8 @@ async fn backend_ports_remain_coherent_through_wrappers() {
             ));
             assert!(Arc::ptr_eq(&clone.trigger_store(), &stores.trigger_store()));
             assert!(Arc::ptr_eq(
-                &clone.process_definition_registry(),
-                &stores.process_definition_registry()
+                &clone.definition_store(),
+                &stores.definition_store()
             ));
             assert!(Arc::ptr_eq(
                 &clone.process_env_store(),
@@ -158,8 +158,7 @@ captured_ports! {
     process_registry: crate::ProcessRegistry,
     process_continuations: crate::ProcessContinuationStore,
     trigger_store: crate::TriggerStore,
-    process_definition_registry: crate::ProcessDefinitionRegistry,
-    process_definitions: crate::ProcessDefinitionStore,
+    definition_store: crate::ProcessDefinitionStore,
     process_env_store: crate::ProcessExecutionEnvStore,
     attachment_store: crate::AttachmentStore,
     attachment_referrers: crate::AttachmentReferrers,

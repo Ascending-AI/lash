@@ -657,7 +657,7 @@ impl crate::ToolProvider for LawLeafProvider {
                                 owner: crate::RuntimeOwner::Session(self.session_id.clone()),
                                 draft: crate::ProcessDefinitionDraft::new(
                                     "law",
-                                    serde_json::Value::Null,
+                                    serde_json::json!({ "leaf": "fence", "call_id": call_id }),
                                     [],
                                 )
                                 .expect("draft"),
@@ -1624,7 +1624,7 @@ struct Scenario {
     provider: Arc<LawLeafProvider>,
     registry: Arc<dyn crate::ProcessRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
+    definition_store: Arc<dyn crate::ProcessDefinitionStore>,
     attachment_store: Arc<dyn crate::AttachmentStore>,
     env_ref: crate::ProcessExecutionEnvRef,
     intent_target: crate::ProcessId,
@@ -1654,7 +1654,7 @@ async fn scenario_on(
 ) -> Scenario {
     let registry = stores.process_registry();
     let process_env_store = stores.process_env_store();
-    let process_definitions = stores.process_definition_registry();
+    let definition_store = stores.definition_store();
     let attachment_store = stores.attachment_store();
     let intent_target = match intent_target {
         Some(intent_target) => intent_target,
@@ -1674,7 +1674,7 @@ async fn scenario_on(
         observation,
         registry,
         process_env_store,
-        process_definitions,
+        definition_store,
         attachment_store,
         env_ref,
         intent_target,

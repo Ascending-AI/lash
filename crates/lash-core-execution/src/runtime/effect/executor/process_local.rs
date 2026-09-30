@@ -439,12 +439,12 @@ impl ProcessLocalExecution {
                     result.realization,
                 ))
             }
-            ProcessCommand::PublishDefinition { .. }
-            | ProcessCommand::GetDefinition { .. }
-            | ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "register-definition requires the process-definition registry executor",
-            )),
+            ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. } => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    "publish/get-definition requires the definition executor",
+                ))
+            }
         };
         if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
             observer(outcome, *realization);
@@ -454,91 +454,61 @@ impl ProcessLocalExecution {
 }
 
 impl ProcessDefinitionLocalExecution {
-    /// Runs the journaled definition CAS write (FIG-3470).
-    ///
-    /// `operation_id` is the envelope's replay key: the registry keys the
-    /// idempotent CAS on it, so a redrive of the same admission re-attaches to
-    /// the recorded registration instead of writing a second one.
+    /// Runs the journaled immutable-definition command: `PublishDefinition`
+    /// stores the descriptor and its closure's edges, `GetDefinition`
+    /// acquires the closure under the claim, both through the engine's
+    /// artifact ports.
     pub async fn execute(
         self,
-        operation_id: &str,
         command: ProcessCommand,
     ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
-        let registry = match self {
-            Self::Artifacts { engines, claim } => {
-                let ports = engines.artifact_ports().ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                        "definition artifact ports are unavailable",
-                    )
-                })?;
-                let definition = match command {
-                    ProcessCommand::PublishDefinition { draft, module } => {
-                        if let Some(module) = module {
-                            ports
-                                .modules()
-                                .publish_module_artifact(
-                                    &claim,
-                                    &module.module_ref,
-                                    module.bytes.as_bytes(),
-                                )
-                                .await
-                                .map_err(crate::PluginError::from)?;
-                        }
-                        ports.publish_definition(&engines, &claim, &draft).await?
-                    }
-                    ProcessCommand::GetDefinition { definition_id } => {
-                        match ports
-                            .acquire_definition(&engines, &claim, &definition_id)
-                            .await?
-                        {
-                            crate::DefinitionAcquisition::Held(resolved) => resolved.definition,
-                            crate::DefinitionAcquisition::Ended => {
-                                return Err(crate::PluginError::from(
-                                    crate::ArtifactStoreError::ReferrerEnded {
-                                        referrer: claim.referrer().clone(),
-                                    },
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                            "definition artifacts serve only publish/get",
-                        ));
-                    }
-                };
-                return Ok(ProcessEffectOutcome::Definition {
-                    definition: Box::new(definition),
-                });
-            }
-            Self::Registry { registry } => registry,
-        };
-        let ProcessCommand::RegisterDefinition {
-            owner_scope,
-            name,
-            pinned,
-            expectation,
-        } = command
-        else {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "process-definition registry serves only the register-definition command",
-            ));
-        };
-        let registration = registry
-            .register_definition(
-                operation_id,
-                owner_scope,
-                &name,
-                pinned,
-                expectation.as_ref(),
+        let Self { engines, claim } = self;
+        let ports = engines.artifact_ports().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "definition artifact ports are unavailable",
             )
-            .await?;
-        Ok(ProcessEffectOutcome::RegisterDefinition {
-            registration: Box::new(registration),
+        })?;
+        let definition = match command {
+            ProcessCommand::PublishDefinition { draft, module } => {
+                if let Some(module) = module {
+                    ports
+                        .modules()
+                        .publish_module_artifact(
+                            &claim,
+                            &module.module_ref,
+                            module.bytes.as_bytes(),
+                        )
+                        .await
+                        .map_err(crate::PluginError::from)?;
+                }
+                ports.publish_definition(&engines, &claim, &draft).await?
+            }
+            ProcessCommand::GetDefinition { definition_id } => {
+                match ports
+                    .acquire_definition(&engines, &claim, &definition_id)
+                    .await?
+                {
+                    crate::DefinitionAcquisition::Held(resolved) => resolved.definition,
+                    crate::DefinitionAcquisition::Ended => {
+                        return Err(crate::PluginError::from(
+                            crate::ArtifactStoreError::ReferrerEnded {
+                                referrer: claim.referrer().clone(),
+                            },
+                        )
+                        .into());
+                    }
+                }
+            }
+            _ => {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    "the definition executor serves only publish/get-definition",
+                ));
+            }
+        };
+        Ok(ProcessEffectOutcome::Definition {
+            definition: Box::new(definition),
         })
     }
 }

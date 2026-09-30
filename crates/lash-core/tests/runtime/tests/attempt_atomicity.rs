@@ -443,7 +443,6 @@ fn tool_context_with_provider<'run>(
             Arc::clone(&fixtures.trigger_store),
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
-        process_definitions: None,
         process_engines: lash_core::testing::process_engine_fixture(),
         effect_controller,
         direct_completions,

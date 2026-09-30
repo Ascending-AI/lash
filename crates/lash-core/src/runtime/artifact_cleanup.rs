@@ -17,12 +17,12 @@ use super::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, 
 use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactStoreError, ArtifactStoreId, DefinitionRevisionId, EffectHost, JournalReplay,
-    ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
-    ProcessDefinitionRegistry, ProcessDefinitionStore, ProcessEngineRegistry,
-    ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
-    ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
-    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
+    ArtifactStoreError, ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore,
+    PluginError, ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStore,
+    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId,
+    ProcessInput, ProcessRegistry, ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode,
+    StartKey, SubscriptionRevisionId, TriggerStore, TriggerSubscriptionFilter,
+    TriggerSubscriptionLifecycle, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -65,12 +65,6 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
         &self,
         revision: &SubscriptionRevisionId,
     ) -> Result<SubscriptionRevisionStanding, String>;
-
-    /// Whether `revision` is its slot's current resolvable revision.
-    async fn definition_revision_current(
-        &self,
-        revision: &DefinitionRevisionId,
-    ) -> Result<bool, String>;
 }
 
 /// The authorities of one store set and its engine.
@@ -79,7 +73,6 @@ pub struct StoreSetAuthorities {
     pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
-    pub definitions: Arc<dyn ProcessDefinitionRegistry>,
 }
 
 #[async_trait::async_trait]
@@ -151,20 +144,6 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
             current,
             unbound_deliveries,
         })
-    }
-
-    async fn definition_revision_current(
-        &self,
-        revision: &DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        Ok(self
-            .definitions
-            .definition_state(revision.definition_id())
-            .await
-            .map_err(|error| error.to_string())?
-            .is_some_and(|record| {
-                record.revision == revision.revision() && record.lifecycle.resolvable()
-            }))
     }
 }
 
@@ -287,19 +266,6 @@ impl ArtifactCleanupRelay {
                     .await
                     .map_err(retryable_text("subscription read"))?;
                 if standing.current || standing.unbound_deliveries {
-                    return Ok(Resolution::NotYet);
-                }
-                Ok(settled_or_not_yet(self.journal_settled(creator).await?))
-            }
-            (
-                ArtifactCleanupPlan::AwaitDefinitionRevision { creator },
-                ArtifactReferrer::DefinitionRevision(revision),
-            ) => {
-                if authorities
-                    .definition_revision_current(revision)
-                    .await
-                    .map_err(retryable_text("definition read"))?
-                {
                     return Ok(Resolution::NotYet);
                 }
                 Ok(settled_or_not_yet(self.journal_settled(creator).await?))

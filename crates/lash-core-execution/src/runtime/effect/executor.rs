@@ -180,18 +180,14 @@ pub struct ProcessLocalExecution {
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
-/// Local execution target for the journaled process-definition CAS write
-/// (FIG-3470): unlike [`ProcessLocalExecution`], which serves the process
-/// service, this target binds only the definition registry the
-/// `RegisterDefinition` command writes through.
-pub enum ProcessDefinitionLocalExecution {
-    Registry {
-        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
-    },
-    Artifacts {
-        engines: crate::ProcessEngineRegistry,
-        claim: crate::ReferrerClaim,
-    },
+/// Local execution target for the journaled immutable-definition commands:
+/// unlike [`ProcessLocalExecution`], which serves the process service, this
+/// target binds only the engine registry and the parent's admitted claim that
+/// `PublishDefinition` and `GetDefinition` acquire their artifact closures
+/// under (ADR 0113 §3.6).
+pub struct ProcessDefinitionLocalExecution {
+    pub(crate) engines: crate::ProcessEngineRegistry,
+    pub(crate) claim: crate::ReferrerClaim,
 }
 
 pub(super) struct LocalDirectEffectRunner {
@@ -271,7 +267,7 @@ enum LocalTarget {
         clock: Arc<dyn crate::Clock>,
     },
     Process(ProcessLocalExecution),
-    ProcessDefinitions(ProcessDefinitionLocalExecution),
+    Definition(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
@@ -730,28 +726,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Binds the process-definition registry for the journaled
-    /// `RegisterDefinition` write (FIG-3470). This is the only command this
-    /// executor serves; every other process command still requires
-    /// [`Self::processes`].
-    pub fn process_definitions(registry: Arc<dyn crate::ProcessDefinitionRegistry>) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
-                ProcessDefinitionLocalExecution::Registry { registry },
-            )),
-            replay_trace: None,
-            served_only: None,
-        }
-    }
-
-    /// Bind immutable definition mechanics under the parent's admitted claim.
+    /// Binds the definition executor for the journaled `PublishDefinition` /
+    /// `GetDefinition` commands: the engine registry the commands resolve
+    /// against and the parent's admitted claim their artifact closures pin.
+    /// Every other process command still requires [`Self::processes`].
     pub fn definition_artifacts(
         engines: crate::ProcessEngineRegistry,
         claim: crate::ReferrerClaim,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
-                ProcessDefinitionLocalExecution::Artifacts { engines, claim },
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(
+                ProcessDefinitionLocalExecution { engines, claim },
             )),
             replay_trace: None,
             served_only: None,
@@ -1072,7 +1057,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     ),
                 ))
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(_)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(_)) => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                     format!(
@@ -1149,18 +1134,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the process-definition registry for the journaled
-    /// `RegisterDefinition` write (FIG-3470).
-    pub fn into_process_definitions(
+    /// Extracts the definition executor for the journaled `PublishDefinition`
+    /// / `GetDefinition` commands.
+    pub fn into_definition_execution(
         self,
     ) -> Result<ProcessDefinitionLocalExecution, RuntimeEffectControllerError> {
         match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(execution)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(execution)) => {
                 Ok(execution)
             }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no process-definition registry is available for the register-definition command",
+                "no definition executor is available for the publish/get-definition command",
             )),
         }
     }

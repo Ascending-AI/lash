@@ -799,9 +799,7 @@ impl TriggerOwnerScope {
 /// Three states, one carrier. The tombstone's deletion time lives in the only
 /// variant where it means anything, so a tombstone without a time — and a time
 /// without a tombstone — is unrepresentable in the type, in both backends'
-/// column pair, and in the wire tag simultaneously. Mirrors
-/// [`crate::process_registry::ProcessDefinitionLifecycle`], the sibling
-/// registry that already carries its lifecycle this way.
+/// column pair, and in the wire tag simultaneously.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "lifecycle",

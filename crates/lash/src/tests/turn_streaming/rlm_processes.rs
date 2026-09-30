@@ -722,7 +722,7 @@ finish(value);"#,
         .expect("definition id");
     let bytes = core
         .backend()
-        .process_definitions()
+        .definition_store()
         .get_process_definition(definition_id)
         .await
         .map_err(lash_core::PluginError::from)?

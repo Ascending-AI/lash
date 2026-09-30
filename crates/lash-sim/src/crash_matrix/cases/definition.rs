@@ -177,7 +177,7 @@ fn started_once(id: lash_core::ProcessDefinitionId, seed: u64) -> CustomCheck {
             }
             match world
                 .backend()
-                .process_definitions()
+                .definition_store()
                 .get_process_definition(&id)
                 .await
             {

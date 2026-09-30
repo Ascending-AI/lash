@@ -10,7 +10,7 @@
 //!   needs `ProcessEngineContributionContext` to be nameable; without the
 //!   forward the Lashlang process engine is dropped;
 //! * a [`StoreSet`](lash::StoreSet) decorator that overrides
-//!   `process_definitions`, which needs every trait object the store set hands
+//!   `definition_store`, which needs every trait object the store set hands
 //!   out to be nameable.
 //!
 //! The law runs a real code-mode turn through both on SQLite memory, SQLite
@@ -88,7 +88,7 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
 
 // ---- the decorating store set -----------------------------------------------
 
-/// The host's store set: the tier's, with `process_definitions` counted.
+/// The host's store set: the tier's, with `definition_store` counted.
 /// Every other half is the inner store set's.
 struct HostStores {
     inner: Arc<dyn lash::StoreSet>,
@@ -124,17 +124,13 @@ impl lash::StoreSet for HostStores {
         self.inner.trigger_store()
     }
 
-    fn process_definition_registry(&self) -> Arc<dyn lash::process::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
     fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
         self.inner.process_env_store()
     }
 
-    fn process_definitions(&self) -> Arc<dyn lash::persistence::ProcessDefinitionStore> {
+    fn definition_store(&self) -> Arc<dyn lash::persistence::ProcessDefinitionStore> {
         self.definition_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.process_definitions()
+        self.inner.definition_store()
     }
 
     fn attachment_store(&self) -> Arc<dyn lash::persistence::AttachmentStore> {
@@ -284,7 +280,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier, seed: u6
 
     let reads_before = definition_reads.load(Ordering::SeqCst);
     let definitions: Arc<dyn lash::persistence::ProcessDefinitionStore> =
-        backend.process_definitions();
+        backend.definition_store();
     assert_eq!(
         definition_reads.load(Ordering::SeqCst),
         reads_before + 1,

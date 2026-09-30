@@ -97,11 +97,7 @@ fn published(session: lash_core::SessionId) -> CustomCheck {
                 Err(error) => return vec![format!("create exposed no definition ID: {error}")],
             };
             let backend = world.backend();
-            let bytes = match backend
-                .process_definitions()
-                .get_process_definition(&id)
-                .await
-            {
+            let bytes = match backend.definition_store().get_process_definition(&id).await {
                 Ok(Some(bytes)) => bytes,
                 other => return vec![format!("committed definition is missing: {other:?}")],
             };

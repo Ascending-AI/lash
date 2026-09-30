@@ -57,7 +57,7 @@ async fn wait_definition_reclaimed(
     let backend = fixture.double.lash_backend();
     loop {
         let descriptor = backend
-            .process_definitions()
+            .definition_store()
             .get_process_definition(id)
             .await
             .expect("read definition reclamation");

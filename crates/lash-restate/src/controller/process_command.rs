@@ -340,11 +340,9 @@ where
         command,
         ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. }
     ) {
-        let execution = local_executor.into_process_definitions()?;
+        let execution = local_executor.into_definition_execution()?;
         return recorded_process_step(context, invocation, "process-definition", async move {
-            let outcome = execution
-                .execute(invocation.effect_replay_key(), command)
-                .await?;
+            let outcome = execution.execute(command).await?;
             if let Some(observer) = outcome_observer {
                 observer(&outcome, lash_core::StoreRealization::Realized);
             }
@@ -355,16 +353,6 @@ where
         })
         .await
         .map(|recorded| recorded.outcome);
-    }
-    if matches!(command, ProcessCommand::RegisterDefinition { .. }) {
-        let outcome = local_executor
-            .into_process_definitions()?
-            .execute(invocation.effect_replay_key(), command)
-            .await?;
-        if let Some(observer) = outcome_observer {
-            observer(&outcome, lash_core::StoreRealization::Realized);
-        }
-        return Ok(outcome);
     }
     // Read before the executor is taken apart: a start answers its served-only
     // mark at its frontier marker (FIG-3779).
@@ -1056,15 +1044,15 @@ where
             .await
             .map(|recorded| (recorded.outcome, recorded.realization))
         }
-        // Served by the early arm above against the process-definition
-        // executor; it never reaches the process executor.
-        ProcessCommand::PublishDefinition { .. }
-        | ProcessCommand::GetDefinition { .. }
-        | ProcessCommand::RegisterDefinition { .. } => Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-            "register-definition is served by the process-definition executor, \
-             which the early arm requires before the process executor runs",
-        )),
+        // Served by the early arm above against the definition executor;
+        // it never reaches the process executor.
+        ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. } => {
+            Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "publish/get-definition is served by the definition executor, \
+                 which the early arm requires before the process executor runs",
+            ))
+        }
     };
     if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
         observer(outcome, *realization);

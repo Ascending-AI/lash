@@ -109,7 +109,6 @@ pub const TABLES: &[&str] = &[
     draining_generations::TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
-    process::definitions::TABLE,
     process::events::TABLE,
     process::observers::TABLE,
     process::parent_end_plans::TABLE,
@@ -185,7 +184,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
-    statements.extend_from_slice(process::definitions::DefinitionStatements::NEUTRAL);
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
     statements.extend_from_slice(process::park_events::ProcessParkEventStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);

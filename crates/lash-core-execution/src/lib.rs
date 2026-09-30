@@ -24,9 +24,8 @@ pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::artifact_referrer::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
-    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
-    ResolvedArtifactCleanup, SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
-    UploadReferrerId,
+    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+    SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId, UploadReferrerId,
 };
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
@@ -68,7 +67,6 @@ pub mod panic_containment {
 pub use lash_core_ids::perf_witness;
 pub mod plugin;
 pub mod plugin_stack;
-pub mod process_registry;
 pub mod protocol_build;
 /// Provider components for pluggable LLM backends.
 ///
@@ -742,10 +740,6 @@ pub use runtime::fail_parent_end_once;
 // effect hosts (e.g. lash-restate's workflows) and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
-pub use process_registry::{
-    ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
-    ProcessDefinitionRegistration, ProcessDefinitionRegistry,
-};
 pub use runtime::ExecutionOwner;
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;

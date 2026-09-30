@@ -873,11 +873,10 @@ pub async fn execute_effect_locally(
                 command.as_ref(),
                 crate::ProcessCommand::PublishDefinition { .. }
                     | crate::ProcessCommand::GetDefinition { .. }
-                    | crate::ProcessCommand::RegisterDefinition { .. }
             ) {
                 let result = local_executor
-                    .into_process_definitions()?
-                    .execute(envelope.invocation.effect_replay_key(), *command)
+                    .into_definition_execution()?
+                    .execute(*command)
                     .await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }

@@ -980,34 +980,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
     ON lash_trigger_subscriptions(source_type, source_key, lifecycle);
 
--- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
--- name, revision, pinned definition fingerprint, lifecycle tombstone and
--- change sequence, unique on owner scope and name. The pinned
--- ProcessDefinitionRef travels in record_json; the fingerprint column is what
--- the revision-and-fingerprint compare-and-swap compares. The lifecycle is
--- the FIG-1951 one-column enum with a paired-nullable delete timestamp.
--- Session-scoped names follow the ADR 0049 deletion frontier; host- and
--- platform-scoped tombstones are never collected (ADR 0067).
-CREATE TABLE IF NOT EXISTS lash_process_definitions (
-    definition_id TEXT PRIMARY KEY,
-    owner_scope TEXT NOT NULL,
-    name TEXT NOT NULL,
-    revision BIGINT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    lifecycle TEXT NOT NULL,
-    deleted_at_ms BIGINT,
-    change_seq BIGINT NOT NULL,
-    created_at_ms BIGINT NOT NULL,
-    updated_at_ms BIGINT NOT NULL,
-    record_json TEXT NOT NULL,
-    CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
-    UNIQUE(owner_scope, name)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_registrant
-    ON lash_process_definitions(owner_scope, name);
-CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_change
-    ON lash_process_definitions(change_seq);
-
 CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
     occurrence_id TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -1075,7 +1047,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -1083,13 +1055,13 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
     ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     awaited_journal_key TEXT,

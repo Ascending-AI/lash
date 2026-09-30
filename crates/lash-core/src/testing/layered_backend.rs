@@ -12,9 +12,8 @@ use std::sync::Arc;
 use crate::engine::BuildGeneration;
 use crate::{
     AttachmentStore, Backend, Clock, DeploymentStore, EffectEngine, EffectHost,
-    ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
-    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, StoreBindingId, StoreSet,
-    TriggerStore,
+    ModuleArtifactStore, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
+    ProcessWorkWiring, StoreBindingId, StoreSet, TriggerStore,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -37,7 +36,6 @@ pub struct LayeredBackend {
     effect_host: Arc<dyn EffectHost>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    process_definitions: Arc<dyn ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
@@ -56,7 +54,6 @@ impl LayeredBackend {
             effect_host: inner.effect_host(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
-            process_definitions: inner.process_definition_registry(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
@@ -123,15 +120,6 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
     ) -> Self {
         self.trigger_store = layer(self.trigger_store);
-        self
-    }
-
-    /// Replace the process-definition registry with `layer` over it.
-    pub fn map_process_definition_registry(
-        mut self,
-        layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = layer(self.process_definitions);
         self
     }
 
@@ -233,7 +221,6 @@ impl LayeredBackend {
             session_store_factory: self.session_store_factory,
             process_registry: self.process_registry,
             trigger_store: self.trigger_store,
-            process_definitions: self.process_definitions,
             process_env_store: self.process_env_store,
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
@@ -267,7 +254,6 @@ impl LayeredStores {
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
-            process_definitions: inner.process_definition_registry(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
@@ -307,15 +293,6 @@ impl LayeredStores {
         layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
     ) -> Self {
         self.0.trigger_store = layer(self.0.trigger_store);
-        self
-    }
-
-    /// Replace the process-definition registry with `layer` over it.
-    pub fn map_process_definition_registry(
-        mut self,
-        layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.0.process_definitions = layer(self.0.process_definitions);
         self
     }
 
@@ -418,7 +395,6 @@ struct LayeredStoreSet {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    process_definitions: Arc<dyn ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
@@ -455,10 +431,6 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.trigger_store)
     }
 
-    fn process_definition_registry(&self) -> Arc<dyn ProcessDefinitionRegistry> {
-        Arc::clone(&self.process_definitions)
-    }
-
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
         Arc::clone(&self.process_env_store)
     }
@@ -471,8 +443,8 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.module_artifacts)
     }
 
-    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
-        self.inner.process_definitions()
+    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        self.inner.definition_store()
     }
 
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {

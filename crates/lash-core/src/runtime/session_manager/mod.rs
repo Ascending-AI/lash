@@ -510,14 +510,6 @@ impl RuntimeSessionServices {
         DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)
     }
 
-    /// The backend's durable home for the named process-definition registry
-    /// (FIG-2995).
-    pub(in crate::runtime) fn process_definition_registry(
-        self: &Arc<Self>,
-    ) -> Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>> {
-        Some(self.current.host.core.process_definitions())
-    }
-
     pub(in crate::runtime) fn process_engines(&self) -> &crate::ProcessEngineRegistry {
         &self.current.host.core.process_engines
     }

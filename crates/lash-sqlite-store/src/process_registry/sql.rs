@@ -12,12 +12,12 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    abandoned_consumer_holds::AbandonedConsumerHoldStatements, definitions::DefinitionStatements,
-    events::EventStatements, observers::ObserverStatements,
-    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
-    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
-    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
-    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    abandoned_consumer_holds::AbandonedConsumerHoldStatements, events::EventStatements,
+    observers::ObserverStatements, parent_end_plans::ParentEndPlanStatements,
+    park_events::ProcessParkEventStatements, processes::ProcessStatements,
+    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
+    wake_allocation_floors::WakeAllocationFloorStatements, wake_deliveries::WakeDeliveryStatements,
+    wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -882,8 +882,6 @@ pub(crate) struct ProcessSql {
     pub(crate) process_sqlite: ProcessSqliteStatements,
     /// Registry-wide statements only SQLite issues.
     pub(crate) registry_sqlite: ProcessRegistrySqliteStatements,
-    /// `process_definitions` statements, all of them shared.
-    pub(crate) definition: DefinitionStatements,
     /// `process_events` statements both backends issue verbatim.
     pub(crate) event: EventStatements,
     /// `process_events` statements only SQLite issues.
@@ -933,7 +931,6 @@ impl ProcessSql {
             process: ProcessStatements::render(dialect),
             process_sqlite: ProcessSqliteStatements::render(dialect),
             registry_sqlite: ProcessRegistrySqliteStatements::render(dialect),
-            definition: DefinitionStatements::render(dialect),
             event: EventStatements::render(dialect),
             event_sqlite: EventSqliteStatements::render(dialect),
             observer: ObserverStatements::render(dialect),

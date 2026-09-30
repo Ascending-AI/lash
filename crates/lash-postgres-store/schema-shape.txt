@@ -216,20 +216,6 @@ table lash_process_change_clock
   column singleton boolean not-null default
   column tombstone_compaction_horizon bigint not-null default
   primary-key (singleton)
-table lash_process_definitions
-  column change_seq bigint not-null
-  column created_at_ms bigint not-null
-  column definition_id text not-null
-  column deleted_at_ms bigint nullable
-  column fingerprint text not-null
-  column lifecycle text not-null
-  column name text not-null
-  column owner_scope text not-null
-  column record_json text not-null
-  column revision bigint not-null
-  column updated_at_ms bigint not-null
-  unique (owner_scope, name)
-  primary-key (definition_id)
 table lash_process_events
   column event_json text not-null
   column event_type text not-null

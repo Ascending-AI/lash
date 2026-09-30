@@ -145,7 +145,6 @@ struct Authorities {
     settled: Mutex<Vec<String>>,
     retained: Mutex<Option<RetainedStart>>,
     subscription: Mutex<Option<SubscriptionRevisionStanding>>,
-    definition_current: Mutex<bool>,
     frame_retained: Mutex<bool>,
 }
 
@@ -204,16 +203,6 @@ impl ArtifactCleanupAuthorities for Authorities {
                 current: false,
                 unbound_deliveries: false,
             }))
-    }
-
-    async fn definition_revision_current(
-        &self,
-        _revision: &DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        Ok(*self
-            .definition_current
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }
 
@@ -958,40 +947,6 @@ async fn a_subscription_revision_waits_for_currency_bindings_and_its_creator() {
         .subscription
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-    assert_eq!(harness.deliver(guard).await, Ok(()));
-}
-
-/// ADR 0113 §3.6: a definition revision ends when it is no longer its slot's
-/// current resolvable revision and its creator settled.
-#[tokio::test]
-async fn a_definition_revision_ends_once_replaced_and_its_creator_settles() {
-    let harness = harness();
-    let creator = journal("register-definition");
-    let guard = ArtifactCleanup {
-        referrer: ArtifactReferrer::DefinitionRevision(
-            DefinitionRevisionId::new("lash.process-definition:ns:name".to_owned(), 1)
-                .expect("revision"),
-        ),
-        plan: ArtifactCleanupPlan::AwaitDefinitionRevision {
-            creator: creator.clone(),
-        },
-        gate: None,
-    };
-    *harness
-        .authorities
-        .definition_current
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
-    harness.authorities.settle(&creator);
-    assert_eq!(
-        harness.deliver(guard.clone()).await,
-        Err(DeliveryFailure::NotYet)
-    );
-    *harness
-        .authorities
-        .definition_current
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
     assert_eq!(harness.deliver(guard).await, Ok(()));
 }
 

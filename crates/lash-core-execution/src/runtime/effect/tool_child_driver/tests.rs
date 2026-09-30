@@ -144,7 +144,6 @@ fn lent_with_direct_completions(
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::ScopedEffectController::shared(
             Arc::new(crate::testing::UnavailableEffectController),

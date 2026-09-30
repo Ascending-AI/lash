@@ -483,7 +483,6 @@ async fn fig790_process_await_context(
         session_graph: host,
         processes,
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: crate::runtime::ScopedEffectController::shared(
             controller,

@@ -32,7 +32,7 @@ use crate::{
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
 /// its guards arm in (ADR 0113 §2.1, §2.4): what a process start, a trigger
-/// revision and a definition revision need to hold every artifact a
+/// revision and a definition publication need to hold every artifact a
 /// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
 /// name points at, whichever store holds it.
 #[derive(Clone)]
@@ -79,7 +79,7 @@ impl ArtifactReferrerPorts {
         Self::new(
             backend.module_artifacts(),
             backend.process_env_store(),
-            backend.process_definitions(),
+            backend.definition_store(),
             backend.attachment_referrers(),
             backend.artifact_cleanup(),
             backend.clock(),

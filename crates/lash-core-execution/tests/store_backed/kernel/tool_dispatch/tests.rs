@@ -763,7 +763,6 @@ async fn strict_mcp_dispatch_context<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -816,7 +815,6 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -877,7 +875,6 @@ async fn projection_policy_dispatch_context<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1051,7 +1048,6 @@ async fn pinned_contract_dispatch_context<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1125,7 +1121,6 @@ async fn authority_hidden_dispatch_context<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1176,7 +1171,6 @@ async fn exact_dispatch_context_with_plugins<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1311,7 +1305,6 @@ async fn pending_dispatch_context<'h>(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: Default::default(),
         effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(

@@ -657,15 +657,6 @@ impl ArtifactCleanupAuthorities for KeyRecords {
             "the law asks no subscription revision `{revision:?}`"
         ))
     }
-
-    async fn definition_revision_current(
-        &self,
-        revision: &crate::DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        Err(format!(
-            "the law asks no definition revision `{revision:?}`"
-        ))
-    }
 }
 
 /// The store set's cleanup ledger, where arming `start`'s `Ended` record has

@@ -100,7 +100,6 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::ScopedEffectController::shared(
             Arc::new(crate::testing::UnavailableEffectController),
@@ -173,7 +172,6 @@ fn test_execution_context_with_env_store(
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
-        process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::ScopedEffectController::shared(
             Arc::new(crate::testing::UnavailableEffectController),
