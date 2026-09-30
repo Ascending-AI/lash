@@ -443,6 +443,10 @@ mod blake3_domain_tests {
         // FIG-3607: a process id is minted by the registrar, never derived,
         // so the deterministic Lashlang child-process id is retired.
         "lashlang-process-start/v3",
+        // FIG-4379: session config is owner-namespaced and the protocol
+        // materialization format is deleted; the tag remains permanently
+        // reserved so it cannot identify another format.
+        "lash-protocol-materialization/v1",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {
