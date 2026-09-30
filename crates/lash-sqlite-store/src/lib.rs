@@ -521,6 +521,7 @@ pub enum PersistedArtifactKind {
     CheckpointComponent,
     LashlangModule,
     ProcessExecutionEnv,
+    ProcessDefinition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -567,6 +568,10 @@ impl BlobArtifactDescriptor {
     }
 
     pub fn process_execution_env() -> Self {
+        Self::new(vec![BlobStorageHint::Compressible])
+    }
+
+    pub fn process_definition() -> Self {
         Self::new(vec![BlobStorageHint::Compressible])
     }
 }

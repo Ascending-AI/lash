@@ -533,8 +533,10 @@ impl LashCore {
         crate::artifacts::HostArtifacts::new(
             self.backend().module_artifacts(),
             Arc::clone(&self.env.core.durability.process_env_store),
+            self.backend().process_definitions(),
             self.backend().artifact_cleanup(),
             Arc::clone(&self.env.core.clock),
+            self.host_process_engines.clone(),
         )
     }
 

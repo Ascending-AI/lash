@@ -65,11 +65,17 @@ impl ProcessEngine for SignedEngine {
         unreachable!("deriving a definition never runs a process")
     }
 
+    /// A program reads the module named after it.
     fn start_artifacts(
         &self,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
-        Ok(Vec::new())
+        Ok(payload
+            .get("program")
+            .and_then(serde_json::Value::as_str)
+            .map(|program| module(&format!("module:{program}")))
+            .into_iter()
+            .collect())
     }
 
     async fn end_artifact_referrer(
@@ -472,6 +478,135 @@ fn definition_id_golden_vectors_are_frozen() {
         bare.id().as_str(),
         "lash.definition:sha256:7a20a0ebea1d71f890b6b5935ebfb1f6353c13d491e0f588fa98bf3216a252c4"
     );
+
+    // The definition store's tag is 4, after the three frozen ones.
+    let naming_a_descriptor = draft(
+        "scripted-engine",
+        serde_json::json!({}),
+        [ArtifactName {
+            store: ArtifactStoreId::ProcessDefinition,
+            artifact_ref: "def:1".to_string(),
+        }],
+    );
+    assert_eq!(
+        hex(&naming_a_descriptor.canonical_preimage()),
+        concat!(
+            "6c6173682d737461626c652d6964656e74697479",
+            "02",
+            "01",
+            "000000000000001a",
+            "6c6173682e70726f636573732d646566696e6974696f6e2d6964",
+            "000000000000000f",
+            "73637269707465642d656e67696e65",
+            "0000000000000002",
+            "7b7d",
+            "0000000000000001",
+            // process_definition "def:1"
+            "000000000000000e",
+            "04",
+            "0000000000000005",
+            "6465663a31",
+        )
+    );
+    assert_eq!(
+        naming_a_descriptor.id().as_str(),
+        "lash.definition:sha256:159144ab18b2e24c97e4a600274065478f4532f854ed37c114b8c53793d87e29"
+    );
+}
+
+/// A manifest is exactly what the owning engine resolves the value to: a
+/// descriptor that names less, more or other artifacts is refused, typed,
+/// before anything is derived from it.
+#[tokio::test]
+async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
+    let registry = registry();
+    registry
+        .derive_definition(&signed_draft())
+        .await
+        .expect("the engine's own manifest is admitted");
+    for artifacts in [
+        Vec::new(),
+        vec![module("module:refund")],
+        vec![module("module:payout"), env("env:1")],
+    ] {
+        let declared = draft(
+            SIGNED_ENGINE_KIND,
+            serde_json::json!({"program": "payout"}),
+            artifacts,
+        );
+        assert_eq!(
+            registry.derive_definition(&declared).await,
+            Err(ProcessDefinitionRefusal::ManifestMismatch {
+                engine_kind: ProcessEngineKind::from(SIGNED_ENGINE_KIND),
+                declared: declared.artifacts().to_vec(),
+                resolved: vec![module("module:payout")],
+            })
+        );
+        assert!(matches!(
+            registry
+                .verify_definition_claim(
+                    &declared,
+                    &ProcessDefinition::new(declared.id(), ProcessSignature::Unknown)
+                )
+                .await,
+            Err(ProcessDefinitionRefusal::ManifestMismatch { .. })
+        ));
+    }
+    assert_eq!(
+        registry.check_definition_manifest(&draft("absent-engine", serde_json::json!({}), [])),
+        Err(ProcessDefinitionRefusal::UnknownEngine {
+            engine_kind: ProcessEngineKind::from("absent-engine"),
+        })
+    );
+}
+
+/// The store keeps a descriptor as its canonical bytes: equal descriptors
+/// encode equally, and stored bytes decode only to the descriptor of the id
+/// they are stored under.
+#[test]
+fn a_descriptor_round_trips_through_its_canonical_store_bytes() {
+    let first = draft(
+        "lashlang",
+        serde_json::from_str(r#"{"b":[1,-0.0],"a":"x"}"#).expect("parse value"),
+        [module("module:1"), env("env:1")],
+    );
+    let reordered = draft(
+        "lashlang",
+        serde_json::from_str(r#"{"a":"x","b":[1,0.0]}"#).expect("parse value"),
+        [env("env:1"), module("module:1"), env("env:1")],
+    );
+    assert_eq!(first.to_store_bytes(), reordered.to_store_bytes());
+    assert_eq!(
+        String::from_utf8(first.to_store_bytes()).expect("utf-8"),
+        concat!(
+            r#"{"artifacts":[{"artifact_ref":"env:1","store":{"store":"process_env"}},"#,
+            r#"{"artifact_ref":"module:1","store":{"store":"lashlang_module"}}],"#,
+            r#""engine_kind":"lashlang","value":{"a":"x","b":[1,0.0]}}"#,
+        )
+    );
+    let decoded = ProcessDefinitionDraft::from_store_bytes(&first.id(), &first.to_store_bytes())
+        .expect("the stored descriptor decodes");
+    assert_eq!(decoded.id(), first.id());
+    assert_eq!(decoded.to_store_bytes(), first.to_store_bytes());
+
+    let other = signed_draft();
+    assert_eq!(
+        ProcessDefinitionDraft::from_store_bytes(&other.id(), &first.to_store_bytes()),
+        Err(ProcessDefinitionStoredError::OtherId {
+            derived: first.id()
+        })
+    );
+    let spaced = String::from_utf8(first.to_store_bytes())
+        .expect("utf-8")
+        .replace(':', ": ");
+    assert_eq!(
+        ProcessDefinitionDraft::from_store_bytes(&first.id(), spaced.as_bytes()),
+        Err(ProcessDefinitionStoredError::NotCanonical)
+    );
+    assert!(matches!(
+        ProcessDefinitionDraft::from_store_bytes(&first.id(), b"not json"),
+        Err(ProcessDefinitionStoredError::Undecodable(_))
+    ));
 }
 
 #[test]

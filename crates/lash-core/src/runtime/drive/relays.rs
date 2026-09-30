@@ -270,6 +270,7 @@ pub fn obligation_relays(
                         }),
                         process_env: backend.process_env_store(),
                         modules: backend.module_artifacts(),
+                        definitions: backend.process_definitions(),
                         engines: administration.process_engines().clone(),
                     })
                     .with_policy(policy),

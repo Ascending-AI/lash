@@ -39,6 +39,7 @@ use crate::{
 pub struct ArtifactReferrerPorts {
     modules: Arc<dyn ModuleArtifactStore>,
     env: Arc<dyn ProcessExecutionEnvStore>,
+    definitions: Arc<dyn super::ProcessDefinitionStore>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
 }
@@ -57,12 +58,14 @@ impl ArtifactReferrerPorts {
     pub fn new(
         modules: Arc<dyn ModuleArtifactStore>,
         env: Arc<dyn ProcessExecutionEnvStore>,
+        definitions: Arc<dyn super::ProcessDefinitionStore>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             modules,
             env,
+            definitions,
             cleanup,
             clock,
         }
@@ -73,6 +76,7 @@ impl ArtifactReferrerPorts {
         Self::new(
             backend.module_artifacts(),
             backend.process_env_store(),
+            backend.process_definitions(),
             backend.artifact_cleanup(),
             backend.clock(),
         )
@@ -84,6 +88,10 @@ impl ArtifactReferrerPorts {
 
     pub fn env(&self) -> &Arc<dyn ProcessExecutionEnvStore> {
         &self.env
+    }
+
+    pub fn definitions(&self) -> &Arc<dyn super::ProcessDefinitionStore> {
+        &self.definitions
     }
 
     pub fn cleanup(&self) -> &Arc<dyn ArtifactCleanupLedger> {
@@ -124,6 +132,20 @@ impl ArtifactReferrerPorts {
                             claim,
                             &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
                         )
+                        .await
+                }
+                // A descriptor name alone: its manifest is held through
+                // `acquire_definition`, which reads it.
+                ArtifactStoreId::ProcessDefinition => {
+                    let id =
+                        super::ProcessDefinitionId::parse(&name.artifact_ref).map_err(|error| {
+                            crate::PluginError::Session(format!(
+                                "artifact `{}` is not a process definition id: {error}",
+                                name.artifact_ref
+                            ))
+                        })?;
+                    self.definitions
+                        .acquire_process_definition(claim, &id, &[])
                         .await
                 }
                 ArtifactStoreId::Engine(_) => continue,
@@ -250,6 +272,23 @@ impl RegisteredProcessStart {
     pub fn realization(&self) -> StoreRealization {
         StoreRealization::from_wrote(self.disposition == crate::ProcessRegistrationOutcome::Created)
     }
+
+    /// The registration the started process runs, from the one the start
+    /// submitted. A start by id is resolved at realization (ADR 0113 §3.6):
+    /// the process runs the engine input, identity and event types its
+    /// record holds, never the unresolved id. Any other start runs what it
+    /// submitted.
+    #[must_use]
+    pub fn running_registration(&self, registration: ProcessRegistration) -> ProcessRegistration {
+        if !matches!(registration.input.as_ref(), ProcessInput::Definition { .. }) {
+            return registration;
+        }
+        let mut resolved = registration;
+        resolved.input = Arc::clone(&self.record.input);
+        resolved.identity = self.record.identity.clone();
+        resolved.event_types = self.record.event_types.clone();
+        resolved
+    }
 }
 
 /// Stages and registers one process start.
@@ -343,6 +382,7 @@ async fn stage_and_register(
         },
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let definition = stage_definition(stores, &claim, &mut registration, env_spec).await?;
     let env = stage_env(stores, &claim, &mut registration, env_spec).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     let submitted_env_ref = registration.env_ref.clone();
@@ -364,7 +404,32 @@ async fn stage_and_register(
     // (`abandon_start`, FIG-4111). The guard then carries nothing onto the
     // row: this start holds what it staged under `ProcessRecord` itself.
     let start_ended = (adopts_env || adopts_engine)
-        && start_ended_after_staging(stores, &claim, env.as_ref(), engine.as_ref()).await?;
+        && start_ended_after_staging(
+            stores,
+            &claim,
+            definition.as_ref(),
+            env.as_ref(),
+            engine.as_ref(),
+        )
+        .await?;
+    if let Some(definition) = definition.as_ref()
+        && (!definition.staged || start_ended)
+        && adopts_engine
+        && definition
+            .ports
+            .acquire_definition(definition.engines, &process_claim, &definition.id)
+            .await?
+            == super::DefinitionAcquisition::Ended
+    {
+        return Err(RuntimeEffectControllerError::foreign(
+            "process_record_ended",
+            TurnFailureCause::Outcome,
+            format!(
+                "process `{}` ended before it could hold definition `{}`",
+                record.id, definition.id
+            ),
+        ));
+    }
     if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref())
         && (!env.staged || start_ended)
         && adopts_env
@@ -393,9 +458,19 @@ async fn stage_and_register(
 async fn start_ended_after_staging(
     stores: &ProcessStartStores<'_>,
     claim: &ReferrerClaim,
+    definition: Option<&StagedDefinition<'_>>,
     env: Option<&StagedEnv>,
     engine: Option<&StagedEngine<'_>>,
 ) -> Result<bool, RuntimeEffectControllerError> {
+    if let Some(definition) = definition
+        && definition.staged
+    {
+        let acquired = definition
+            .ports
+            .acquire_definition(definition.engines, claim, &definition.id)
+            .await?;
+        return Ok(acquired == super::DefinitionAcquisition::Ended);
+    }
     if let (Some(env_store), Some(env)) = (stores.env_store, env)
         && env.staged
     {
@@ -542,6 +617,86 @@ async fn stage_engine<'a>(
         names,
         staged,
     }))
+}
+
+/// A start by definition id (ADR 0113 §3.6, the crash table's "before start
+/// admission" row): hold the definition's closure under `Start(key)`, have
+/// its engine check the descriptor and derive its signature, then admit the
+/// engine start it resolves to exactly as every engine start is admitted.
+/// The registration then carries that engine input, and its identity names
+/// the id, so the key's record holds the descriptor from then on.
+///
+/// Every refusal happens here, before any row exists: a start of a
+/// definition nothing holds, or one its engine refuses, creates no process.
+/// A `Start(key)` that is already fenced (an earlier attempt settled the key)
+/// holds nothing more: the definition is read, and the row's record holds it
+/// once registered.
+async fn stage_definition<'a>(
+    stores: &'a ProcessStartStores<'a>,
+    claim: &ReferrerClaim,
+    registration: &mut ProcessRegistration,
+    env_spec: Option<&ProcessExecutionEnvSpec>,
+) -> Result<Option<StagedDefinition<'a>>, RuntimeEffectControllerError> {
+    let ProcessInput::Definition {
+        definition_id,
+        args,
+    } = registration.input.as_ref()
+    else {
+        return Ok(None);
+    };
+    let (Some(engines), Some(ports)) = (stores.engines, stores.ports()) else {
+        return Err(RuntimeEffectControllerError::foreign(
+            "process_definition_store_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "admitted {} starts definition `{definition_id}` but the executor has no \
+                 definition store to hold it",
+                stores.executor
+            ),
+        ));
+    };
+    let (resolved, staged) = match ports
+        .acquire_definition(engines, claim, definition_id)
+        .await?
+    {
+        super::DefinitionAcquisition::Held(resolved) => (resolved, true),
+        super::DefinitionAcquisition::Ended => {
+            let Some(resolved) = ports.read_definition(engines, definition_id).await? else {
+                return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::DefinitionMissing,
+                    format!(
+                        "process definition `{definition_id}` is not stored: no referrer holds it"
+                    ),
+                ))
+                .into());
+            };
+            (resolved, false)
+        }
+    };
+    let kind = resolved.draft.engine_kind().as_str().to_owned();
+    let payload = resolved.start_payload(args)?;
+    let (mut identity, signals) = engines.admit(&kind, &payload, env_spec).await?.into_parts();
+    identity.definition_id = Some(resolved.id().clone());
+    let id = resolved.id().clone();
+    let mut resolved_registration = registration.clone();
+    resolved_registration.input = Arc::new(ProcessInput::Engine { kind, payload });
+    *registration = resolved_registration
+        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity, signals));
+    Ok(Some(StagedDefinition {
+        engines,
+        ports,
+        id,
+        staged,
+    }))
+}
+
+struct StagedDefinition<'a> {
+    engines: &'a ProcessEngineRegistry,
+    ports: &'a ArtifactReferrerPorts,
+    id: super::ProcessDefinitionId,
+    /// Whether `Start(key)` holds the closure: `false` when it was already
+    /// fenced.
+    staged: bool,
 }
 
 struct StagedEnv {

@@ -144,10 +144,14 @@ pub(super) fn project_trigger_draft(
     project_process_schema_leaf(identity, &payload_schema.schema);
     project_trigger_source_capture(identity, source_capture);
     project_trigger_process_input(identity, target);
+    // The id a start by id admitted from is not projected: a target that
+    // starts by id names it in its input (tag 5), and projecting the field
+    // would move every existing subscription's identity.
     let crate::ProcessIdentity {
         kind,
         label,
         definition,
+        definition_id: _,
     } = target_identity;
     identity.string(kind.as_str());
     identity.optional(label.as_deref(), |identity, label| identity.string(label));
@@ -236,6 +240,14 @@ fn project_trigger_process_input(
         crate::ProcessInput::External { metadata } => {
             identity.tag(4);
             project_process_payload_leaf(identity, metadata);
+        }
+        crate::ProcessInput::Definition {
+            definition_id,
+            args,
+        } => {
+            identity.tag(5);
+            identity.string(definition_id.as_str());
+            project_process_payload_leaf(identity, &serde_json::Value::Object(args.clone()));
         }
     }
 }

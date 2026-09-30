@@ -563,6 +563,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
         }),
         process_env: stores.process_env_store(),
         modules: stores.module_artifacts(),
+        definitions: stores.process_definitions(),
         engines: admin.process_engines().clone(),
     }));
     let ttl = relay.policy().claim_ttl_ms;

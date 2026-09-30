@@ -849,6 +849,7 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
         authorities: Arc::new(NoGuardAuthorities),
         process_env: fixture.stores.process_env_store(),
         modules: fixture.stores.module_artifacts(),
+        definitions: fixture.stores.process_definitions(),
         engines,
     });
     assert_eq!(

@@ -983,6 +983,38 @@ keeps in its own tables, holds nothing; an id rebuilt by hand resolves only
 while some referrer still holds its artifacts. Availability between starts
 with no other durable reader needs an explicit host pin.
 
+**Where it lives (FIG-4176).** `ProcessDefinitionStore`
+(`crates/lash-core-execution/src/runtime/process/definition_store.rs`) is the
+store set's port, `StoreSet::process_definitions`. SQLite and PostgreSQL keep
+descriptors in the artifact family's own tables under the namespace
+`process_definition`, beside the modules and environments a manifest names, so
+one transaction takes the referrer's lock, checks its fence, arms its guard and
+adds the descriptor's edge and every store-set manifest edge together. The
+stored bytes are the draft's canonical JSON; a read re-derives the id from them
+and refuses bytes that are not the descriptor of the id they are stored under.
+`ArtifactReferrerPorts::{publish_definition, acquire_definition,
+read_definition}` have the owning engine check the manifest and derive the
+signature before anything is written, and acquire an engine-store share first
+under the claim's guard. A start by id is `ProcessInput::Definition
+{definition_id, args}`: realization acquires the closure under `Start(key)`,
+admits the engine start it resolves to, and registers that, its identity naming
+the id; the start's guard then carries the descriptor and its manifest onto
+`ProcessRecord(id)`. The host holds a definition with
+`HostArtifacts::{publish_definition, pin_definition}`.
+
+The laws, on SQLite (file and memory) and PostgreSQL
+(`process_definition_tests!`): `definition_is_not_reclaimed_while_any_referrer_holds_it`,
+`definition_is_eventually_reclaimed_after_its_last_referrer`,
+`definition_publication_verifies_bytes_on_an_existing_id`, and
+`start_by_id_replays_exactly_at_<boundary>` for every row of the crash table
+below the create compile: `before_create_attempt_commit`,
+`after_attempt_commit_before_publication`,
+`after_publication_before_frame_commit`, `before_start_admission`,
+`after_registration_before_result` and `after_recorded_start`. On the engine,
+the crash matrix's `definition_start` cells replay a host's start by id cut
+before and after its registration's result is journaled, on the Restate double
+and a live `restate-server`.
+
 #### 3.7 `execution`: replay settlement
 
 **Acquisition.**

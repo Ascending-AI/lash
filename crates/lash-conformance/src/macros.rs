@@ -1278,6 +1278,37 @@ macro_rules! process_start_staging_tests {
     };
 }
 
+/// Register the immutable process-definition laws (ADR 0113 §3.6): no
+/// reclamation while a referrer holds a definition, eventual reclamation after
+/// the last, and exact start-by-id replay at every crash boundary. The fixture
+/// yields `(guard, process registry, artifact referrer ports)`.
+#[macro_export]
+macro_rules! process_definition_tests {
+    ($fixture:block) => {
+        $crate::process_definition_tests!(@catalogue $fixture; [
+            (definition_is_not_reclaimed_while_any_referrer_holds_it, "definition-held-by-every-referrer"),
+            (definition_is_eventually_reclaimed_after_its_last_referrer, "definition-reclaimed-after-last-referrer"),
+            (definition_publication_verifies_bytes_on_an_existing_id, "definition-publication-immutable"),
+            (start_by_id_replays_exactly_at_before_create_attempt_commit, "start-by-id-before-create-commit"),
+            (start_by_id_replays_exactly_at_after_attempt_commit_before_publication, "start-by-id-before-publication"),
+            (start_by_id_replays_exactly_at_after_publication_before_frame_commit, "start-by-id-before-frame-commit"),
+            (start_by_id_replays_exactly_at_before_start_admission, "start-by-id-before-admission"),
+            (start_by_id_replays_exactly_at_after_registration_before_result, "start-by-id-after-registration"),
+            (start_by_id_replays_exactly_at_after_recorded_start, "start-by-id-after-recorded-start"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, ports) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(registry, ports).await;
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! attachment_store_tests {
     ($fixture:block) => {

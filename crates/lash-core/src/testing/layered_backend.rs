@@ -439,6 +439,10 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.module_artifacts)
     }
 
+    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        self.inner.process_definitions()
+    }
+
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
         self.inner.recovery_leader()
     }

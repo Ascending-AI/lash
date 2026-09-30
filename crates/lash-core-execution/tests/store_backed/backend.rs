@@ -155,6 +155,7 @@ captured_ports! {
     process_continuations: crate::ProcessContinuationStore,
     trigger_store: crate::TriggerStore,
     process_definition_registry: crate::ProcessDefinitionRegistry,
+    process_definitions: crate::ProcessDefinitionStore,
     process_env_store: crate::ProcessExecutionEnvStore,
     attachment_store: crate::AttachmentStore,
     module_artifacts: crate::ModuleArtifactStore,

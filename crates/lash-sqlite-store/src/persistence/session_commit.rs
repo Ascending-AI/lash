@@ -14,7 +14,7 @@ fn commit_frame_transition_tx(
     left: &[lash_core_execution::FrameNodeId],
     now_ms: u64,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
+    use lash_core_execution::ArtifactReferrer;
     let source = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     if crate::artifact_store::artifact_fenced_tx(tx, &successor).map_err(sqlite_error)? {
@@ -24,14 +24,10 @@ fn commit_frame_transition_tx(
     }
     let sql = crate::artifact_store::artifact_sql();
     for carry in &transition.carries {
-        let namespace = match &carry.store {
-            ArtifactStoreId::LashlangModule => crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
-            ArtifactStoreId::ProcessEnv => crate::artifact_store::PROCESS_ENV_NAMESPACE,
-            ArtifactStoreId::Engine(_) => {
-                return Err(StoreError::Backend(
-                    "a frame transition cannot carry an engine artifact".into(),
-                ));
-            }
+        let Some(namespace) = crate::artifact_store::store_namespace(&carry.store) else {
+            return Err(StoreError::Backend(
+                "a frame transition cannot carry an engine artifact".into(),
+            ));
         };
         let exists: bool = tx
             .query_row(

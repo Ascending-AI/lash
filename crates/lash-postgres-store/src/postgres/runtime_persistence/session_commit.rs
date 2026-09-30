@@ -80,7 +80,7 @@ async fn carry_into_successor_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     transition: &lash_core_execution::store::FrameTransition,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
+    use lash_core_execution::ArtifactReferrer;
     let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     let sql = crate::artifact_store::artifact_sql();
@@ -99,15 +99,10 @@ async fn carry_into_successor_tx(
         .carries
         .iter()
         .map(|artifact| {
-            let namespace = match &artifact.store {
-                ArtifactStoreId::LashlangModule => {
-                    Ok(crate::artifact_store::MODULE_ARTIFACT_NAMESPACE)
-                }
-                ArtifactStoreId::ProcessEnv => Ok(crate::artifact_store::PROCESS_ENV_NAMESPACE),
-                ArtifactStoreId::Engine(_) => Err(StoreError::Backend(
-                    "frame carry names an engine artifact".into(),
-                )),
-            }?;
+            let namespace =
+                crate::artifact_store::store_namespace(&artifact.store).ok_or_else(|| {
+                    StoreError::Backend("frame carry names an engine artifact".into())
+                })?;
             Ok((namespace, artifact.artifact_ref.as_str()))
         })
         .collect::<Result<Vec<_>, StoreError>>()?;

@@ -273,6 +273,10 @@ impl crate::StoreSet for StoreLawStores {
         Arc::new(UnavailableModuleArtifacts)
     }
 
+    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        Arc::new(UnavailableProcessDefinitions)
+    }
+
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
         Self::no_second_substrate("recovery leader lease")
     }
@@ -332,6 +336,44 @@ impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
         _: &str,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         StoreLawStores::no_second_substrate("Lashlang artifact store")
+    }
+}
+
+struct UnavailableProcessDefinitions;
+
+#[async_trait::async_trait]
+impl crate::ProcessDefinitionStore for UnavailableProcessDefinitions {
+    async fn publish_process_definition(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &crate::ProcessDefinitionId,
+        _: &[u8],
+        _: &[crate::ArtifactName],
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("process-definition store")
+    }
+
+    async fn acquire_process_definition(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &crate::ProcessDefinitionId,
+        _: &[crate::ArtifactName],
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("process-definition store")
+    }
+
+    async fn end_process_definition_referrer(
+        &self,
+        _: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("process-definition store")
+    }
+
+    async fn get_process_definition(
+        &self,
+        _: &crate::ProcessDefinitionId,
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("process-definition store")
     }
 }
 

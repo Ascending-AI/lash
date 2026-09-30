@@ -8,6 +8,7 @@
 //! checks the detection bound and that every live session still drives.
 
 mod child_cancel;
+mod definition;
 mod ingress;
 
 pub use ingress::a_waiter_follows_its_input_past_a_lost_ask;
@@ -218,6 +219,7 @@ async fn stage(spec: &CaseSpec, seed: u64) -> Result<Staged, String> {
         Seam::ScopeClose => Box::pin(scope::stage_scope_close(spec.point, seed)).await,
         Seam::ParentEnd => Box::pin(scope::stage_parent_end(spec.point, seed)).await,
         Seam::ProcessStart => Box::pin(process::stage_start(spec.point, seed)).await,
+        Seam::DefinitionStart => Box::pin(definition::stage(spec.point, seed)).await,
         Seam::ProcessTerminal => Box::pin(process::stage(spec.point, seed)).await,
         Seam::ChildCancel => Box::pin(child_cancel::stage(spec.point, seed)).await,
     }

@@ -27,6 +27,13 @@ pub enum RuntimeErrorCode {
     ArtifactReferrerEnded,
     /// An artifact acquire named bytes that are not stored.
     ArtifactMissing,
+    /// A process definition id names no stored descriptor: nothing holds it
+    /// (ADR 0113 §3.6). A missing definition is never an empty success.
+    DefinitionMissing,
+    /// The owning engine refuses a stored or published definition: no engine
+    /// of its kind, a value it cannot resolve, a forged signature claim, or a
+    /// manifest that disagrees with the engine's resolution.
+    DefinitionRefused,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -558,6 +565,8 @@ impl RuntimeErrorCode {
             Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
             Self::ArtifactReferrerEnded => "artifact_referrer_ended",
             Self::ArtifactMissing => "artifact_missing",
+            Self::DefinitionMissing => "definition_missing",
+            Self::DefinitionRefused => "definition_refused",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -808,6 +817,8 @@ impl RuntimeErrorCode {
         Self::AttachmentSourcePolicyDenied,
         Self::ArtifactReferrerEnded,
         Self::ArtifactMissing,
+        Self::DefinitionMissing,
+        Self::DefinitionRefused,
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,
@@ -990,6 +1001,8 @@ impl RuntimeErrorCode {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
             "artifact_referrer_ended" => Self::ArtifactReferrerEnded,
             "artifact_missing" => Self::ArtifactMissing,
+            "definition_missing" => Self::DefinitionMissing,
+            "definition_refused" => Self::DefinitionRefused,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,

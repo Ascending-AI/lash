@@ -86,6 +86,9 @@ pub enum Seam {
     SessionDelete,
     /// A registered process start that must survive a host crash.
     ProcessStart,
+    /// A start by definition id (ADR 0113 §3.6): the host's journaled start
+    /// replays exactly, holding the definition through its own referrers.
+    DefinitionStart,
     /// S-14: a process's terminal and its publication to engine waiters.
     ProcessTerminal,
     /// A control intent's cancel reaching a running effect-group child: the
@@ -97,13 +100,14 @@ pub enum Seam {
 
 impl Seam {
     /// Every seam, in registry order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
         Self::ParentEnd,
         Self::SessionDelete,
         Self::ProcessStart,
+        Self::DefinitionStart,
         Self::ProcessTerminal,
         Self::ChildCancel,
     ];
@@ -118,6 +122,7 @@ impl Seam {
             Self::ParentEnd => "parent_end",
             Self::SessionDelete => "session_delete",
             Self::ProcessStart => "process_start",
+            Self::DefinitionStart => "definition_start",
             Self::ProcessTerminal => "process_terminal",
             Self::ChildCancel => "child_cancel",
         }
@@ -133,6 +138,7 @@ impl Seam {
             Self::ParentEnd => &["S-10", "S-11"],
             Self::SessionDelete => &["S-21"],
             Self::ProcessStart => &[],
+            Self::DefinitionStart => &[],
             Self::ProcessTerminal => &["S-14"],
             Self::ChildCancel => &[],
         }
@@ -520,6 +526,24 @@ pub const MATRIX: &[CaseSpec] = &[
         CrashPoint::AfterStateCommit,
         DetectionBound::LostImmediateSqliteFailover,
         "a process committed immediately before its host died starts through its registered obligation",
+    ),
+    // --- Start by definition id (ADR 0113 §3.6) ---------------------------
+    // Both cuts are in the host's journaled start. On the double the host's
+    // handler replays on the next deployment; on a live server the host's
+    // job dies with it, and the start's own obligation starts the process.
+    // A cut before the registration's result leaves that obligation due; a
+    // cut after it leaves the claim the dead attempt took, which lapses.
+    today(
+        Seam::DefinitionStart,
+        CrashPoint::MidJournalStep,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a start by id whose registration committed before its result was journaled starts one process, which holds the definition",
+    ),
+    today(
+        Seam::DefinitionStart,
+        CrashPoint::AfterStateCommit,
+        DetectionBound::LapsedClaim,
+        "a start by id whose registration result was journaled never registers again, and its one process starts and holds the definition",
     ),
     // --- Process terminal (S-14) ------------------------------------------
     today(

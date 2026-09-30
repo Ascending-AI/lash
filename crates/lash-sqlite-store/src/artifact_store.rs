@@ -101,6 +101,18 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 /// disjoint. The composite key does.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
+pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
+
+/// The namespace of a store-set artifact store; an engine's own store has
+/// none here.
+pub(crate) fn store_namespace(store: &ArtifactStoreId) -> Option<&'static str> {
+    match store {
+        ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
+        ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
+        ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
+        ArtifactStoreId::Engine(_) => None,
+    }
+}
 
 /// The [`PersistedArtifactKind`] a pointer-table row carries, derived from the
 /// row's own namespace key — the namespace is the sole owner of the
@@ -112,6 +124,7 @@ pub(crate) fn artifact_namespace_kind(
     match namespace {
         MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::LashlangModule),
         PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
+        PROCESS_DEFINITION_NAMESPACE => Ok(PersistedArtifactKind::ProcessDefinition),
         unknown => Err(stored_data_corrupt(
             "artifact_refs namespace",
             format!("unknown artifact namespace `{unknown}`"),
@@ -310,6 +323,7 @@ impl SqliteStore {
         let expected_store = match namespace {
             MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::LashlangModule,
             PROCESS_ENV_NAMESPACE => ArtifactStoreId::ProcessEnv,
+            PROCESS_DEFINITION_NAMESPACE => ArtifactStoreId::ProcessDefinition,
             _ => {
                 return Err(ArtifactStoreError::Backend(
                     "unknown artifact namespace".into(),
@@ -364,6 +378,100 @@ impl SqliteStore {
             }
             Ok(())
         }).await.map_err(artifact_sqlite_error)
+    }
+
+    /// Hold one definition closure under the claim in one transaction: the
+    /// referrer's fence, every manifest artifact stored, the descriptor
+    /// published (verified byte for byte against a stored one) or stored,
+    /// the claim's guard, then every edge (ADR 0113 §3.6).
+    async fn hold_definition_closure(
+        &self,
+        claim: ReferrerClaim,
+        id: String,
+        descriptor: Option<Vec<u8>>,
+        manifest: Vec<(&'static str, String)>,
+    ) -> Result<(), ArtifactStoreError> {
+        let blob_profile = self.options.blob_profile;
+        let now_ms = self.clock.timestamp_ms();
+        self.conn
+            .write(move |tx| {
+                let referrer = claim.referrer();
+                if artifact_fenced_tx(tx, referrer)? {
+                    return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
+                        referrer: referrer.clone(),
+                    }));
+                }
+                let stored = |namespace: &str, artifact_ref: &str| -> rusqlite::Result<bool> {
+                    tx.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
+                        params![namespace, artifact_ref],
+                        |row| row.get(0),
+                    )
+                };
+                for (namespace, artifact_ref) in &manifest {
+                    if !stored(namespace, artifact_ref)? {
+                        return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                            artifact_ref: artifact_ref.clone(),
+                        }));
+                    }
+                }
+                match &descriptor {
+                    Some(bytes) => {
+                        let blob_ref = Self::insert_artifact_blob_conn(
+                            tx,
+                            BlobArtifactDescriptor::process_definition(),
+                            bytes,
+                            blob_profile,
+                            tx.fleet(),
+                        )?;
+                        crate::conn::cached_execute(
+                            tx,
+                            artifact_sql().refs.insert_pointer.sql(),
+                            params![PROCESS_DEFINITION_NAMESPACE, id, blob_ref.as_str()],
+                        )?;
+                        let stored_blob_ref: String = tx.query_row(
+                            artifact_sql().refs.select_blob_ref.sql(),
+                            params![PROCESS_DEFINITION_NAMESPACE, id],
+                            |row| row.get(0),
+                        )?;
+                        if stored_blob_ref != blob_ref.as_str() {
+                            return Err(artifact_failure(ArtifactStoreError::Immutable {
+                                artifact_ref: id,
+                            }));
+                        }
+                    }
+                    None => {
+                        if !stored(PROCESS_DEFINITION_NAMESPACE, &id)? {
+                            return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                                artifact_ref: id,
+                            }));
+                        }
+                    }
+                }
+                if let Some(cleanup) = claim.guard_cleanup() {
+                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
+                        .map_err(sqlite_conversion_error)?;
+                }
+                for (namespace, artifact_ref) in manifest
+                    .iter()
+                    .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
+                    .chain(std::iter::once((PROCESS_DEFINITION_NAMESPACE, id.as_str())))
+                {
+                    crate::conn::cached_execute(
+                        tx,
+                        artifact_sql().edges.insert_edge.sql(),
+                        params![
+                            namespace,
+                            artifact_ref,
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(artifact_sqlite_error)
     }
 
     async fn get_artifact_ref_blob(
@@ -564,6 +672,89 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_owned(),
             format!("process execution env `{env_ref}`"),
+        )
+        .await
+        .map_err(Into::into)
+    }
+}
+
+/// A manifest's store-set share as `(namespace, reference)` pairs. Only the
+/// module and environment stores share a definition's transaction.
+fn definition_manifest(
+    manifest: &[lash_core_execution::ArtifactName],
+) -> Result<Vec<(&'static str, String)>, ArtifactStoreError> {
+    manifest
+        .iter()
+        .map(|artifact| {
+            let namespace = match &artifact.store {
+                ArtifactStoreId::LashlangModule => MODULE_ARTIFACT_NAMESPACE,
+                ArtifactStoreId::ProcessEnv => PROCESS_ENV_NAMESPACE,
+                other => {
+                    return Err(ArtifactStoreError::Backend(format!(
+                        "a definition manifest held in the descriptor's transaction names \
+                         store {other:?}"
+                    )));
+                }
+            };
+            if !crate::namespace::is_valid_opaque_key(&artifact.artifact_ref) {
+                return Err(ArtifactStoreError::Encode(
+                    "invalid definition manifest reference".into(),
+                ));
+            }
+            Ok((namespace, artifact.artifact_ref.clone()))
+        })
+        .collect()
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessDefinitionStore for SqliteStore {
+    async fn publish_process_definition(
+        &self,
+        claim: &ReferrerClaim,
+        id: &lash_core_execution::ProcessDefinitionId,
+        descriptor: &[u8],
+        manifest: &[lash_core_execution::ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        self.hold_definition_closure(
+            claim.clone(),
+            id.as_str().to_owned(),
+            Some(descriptor.to_vec()),
+            definition_manifest(manifest)?,
+        )
+        .await
+    }
+
+    async fn acquire_process_definition(
+        &self,
+        claim: &ReferrerClaim,
+        id: &lash_core_execution::ProcessDefinitionId,
+        manifest: &[lash_core_execution::ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        self.hold_definition_closure(
+            claim.clone(),
+            id.as_str().to_owned(),
+            None,
+            definition_manifest(manifest)?,
+        )
+        .await
+    }
+
+    async fn end_process_definition_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_artifact_referrer(PROCESS_DEFINITION_NAMESPACE, cleanup.clone())
+            .await
+    }
+
+    async fn get_process_definition(
+        &self,
+        id: &lash_core_execution::ProcessDefinitionId,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        self.get_artifact_ref_blob(
+            PROCESS_DEFINITION_NAMESPACE,
+            id.as_str().to_owned(),
+            format!("process definition `{id}`"),
         )
         .await
         .map_err(Into::into)

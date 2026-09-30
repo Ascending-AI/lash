@@ -302,6 +302,14 @@ pub enum ProcessDefinitionRefusal {
         claimed: lash_sansio::ProcessDefinitionId,
         derived: lash_sansio::ProcessDefinitionId,
     },
+    /// The descriptor's artifact manifest is not the set of artifacts its
+    /// owning engine resolves the value to: a definition that would hold
+    /// less, or other, than what its starts read.
+    ManifestMismatch {
+        engine_kind: ProcessEngineKind,
+        declared: Vec<crate::ArtifactName>,
+        resolved: Vec<crate::ArtifactName>,
+    },
 }
 
 impl std::fmt::Display for ProcessDefinitionRefusal {
@@ -335,6 +343,15 @@ impl std::fmt::Display for ProcessDefinitionRefusal {
                 formatter,
                 "process definition `{claimed}` is not the definition presented for it, \
                  which is `{derived}`"
+            ),
+            Self::ManifestMismatch {
+                engine_kind,
+                declared,
+                resolved,
+            } => write!(
+                formatter,
+                "process definition manifest {declared:?} disagrees with the `{engine_kind}` \
+                 engine's resolution {resolved:?}"
             ),
         }
     }

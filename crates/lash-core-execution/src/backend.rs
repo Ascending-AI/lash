@@ -159,6 +159,11 @@ impl Backend {
         self.stores().process_env_store()
     }
 
+    /// The store of immutable process-definition descriptors.
+    pub fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        self.stores().process_definitions()
+    }
+
     /// The attachment byte store sessions write through.
     pub fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
         self.stores().attachment_store()
@@ -267,6 +272,11 @@ pub trait StoreSet: Send + Sync {
 
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;
+
+    /// The store of immutable process-definition descriptors (ADR 0113
+    /// §3.6), in the same database as the modules and environments their
+    /// manifests name.
+    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore>;
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;

@@ -491,6 +491,12 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::process_env_store(self)
     }
 
+    /// Definition descriptors live beside the modules and environments their
+    /// manifests name, so one transaction holds a whole closure.
+    fn process_definitions(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+        SqliteStoreSet::process_env_store(self)
+    }
+
     fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
         self.inner.recovery_leader.clone()
     }

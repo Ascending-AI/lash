@@ -453,6 +453,11 @@ impl DurableProcessWorker {
                 "process `{}` is externally-owned and has no execution runtime",
                 process_id
             ))),
+            // Registration refuses an unresolved start by id, so no row
+            // holds one.
+            ProcessInput::Definition { definition_id, .. } => Err(PluginError::Session(format!(
+                "process `{process_id}` names definition `{definition_id}` unresolved"
+            ))),
         }
     }
 

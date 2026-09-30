@@ -29,6 +29,7 @@ pub use super::presentation_divergence_park::*;
 pub use super::process_change_feed::*;
 pub use super::process_change_horizon::*;
 pub use super::process_continuation_store::*;
+pub use super::process_definitions::*;
 pub use super::process_event_append_arms::*;
 pub use super::process_event_batch::*;
 pub use super::process_filters::*;

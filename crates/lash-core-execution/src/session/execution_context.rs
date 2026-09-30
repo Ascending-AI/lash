@@ -1260,7 +1260,9 @@ impl<'run> RuntimeExecutionContext<'run> {
             return (registration, None);
         }
         match registration.input.as_ref() {
-            crate::ProcessInput::Engine { .. } => {
+            // A start by id resolves to an engine start, which runs in an
+            // environment like every other.
+            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. } => {
                 match self.inherited_process_execution_env_ref() {
                     Some(env_ref) => (registration.with_execution_env_ref(Some(env_ref)), None),
                     None => (registration, Some(self.execution_env_spec.clone())),

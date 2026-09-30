@@ -18,7 +18,8 @@ use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactStoreError, ArtifactStoreId, DefinitionRevisionId, EffectHost, JournalReplay,
-    ModuleArtifactStore, PluginError, ProcessDefinitionRegistry, ProcessEngineRegistry,
+    ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
+    ProcessDefinitionRegistry, ProcessDefinitionStore, ProcessEngineRegistry,
     ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
     ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
     TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
@@ -30,6 +31,9 @@ pub struct RetainedStart {
     pub process_id: ProcessId,
     pub env_ref: Option<ProcessExecutionEnvRef>,
     pub input: Arc<ProcessInput>,
+    /// The definition a start by id admitted the record from: its record
+    /// holds the descriptor and its manifest too (ADR 0113 §3.6).
+    pub definition_id: Option<ProcessDefinitionId>,
 }
 
 /// Where a subscription revision stands (ADR 0113 §3.4).
@@ -97,6 +101,7 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
                 process_id: record.id,
                 env_ref: record.env_ref,
                 input: record.input,
+                definition_id: record.identity.definition_id,
             }))
     }
 
@@ -161,6 +166,7 @@ pub struct ArtifactCleanupPorts {
     pub authorities: Arc<dyn ArtifactCleanupAuthorities>,
     pub process_env: Arc<dyn ProcessExecutionEnvStore>,
     pub modules: Arc<dyn ModuleArtifactStore>,
+    pub definitions: Arc<dyn ProcessDefinitionStore>,
     /// Every installed engine: a start's engine names, and each engine's own
     /// store.
     pub engines: ProcessEngineRegistry,
@@ -237,7 +243,7 @@ impl ArtifactCleanupRelay {
                     .await
                     .map_err(retryable_text("start-key read"))?
                 {
-                    Some(retained) => Ok(Resolution::Carry(self.start_carries(&retained)?)),
+                    Some(retained) => Ok(Resolution::Carry(self.start_carries(&retained).await?)),
                     None => Ok(settled_or_not_yet(self.journal_settled(starter).await?)),
                 }
             }
@@ -277,13 +283,14 @@ impl ArtifactCleanupRelay {
     /// A registered start's carries: the retained record's environment and
     /// engine artifacts, onto its `ProcessRecord` (ADR 0113 §4.3). Never this
     /// attempt's content: the record is what the registrar kept.
-    fn start_carries(
+    async fn start_carries(
         &self,
         retained: &RetainedStart,
     ) -> Result<Vec<ArtifactCarry>, DeliveryFailure> {
         let to = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
         Ok(self
-            .retained_names(retained)?
+            .retained_names(retained)
+            .await?
             .into_iter()
             .map(|artifact| ArtifactCarry {
                 artifact,
@@ -321,8 +328,21 @@ impl ArtifactCleanupRelay {
         let record = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
         let claim = ReferrerClaim::unguarded(record.clone())
             .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
-        for name in self.retained_names(&retained)? {
+        for name in self.retained_names(&retained).await? {
             let acquired = match &name.store {
+                ArtifactStoreId::ProcessDefinition => {
+                    let id = ProcessDefinitionId::parse(&name.artifact_ref).map_err(|error| {
+                        DeliveryFailure::Undecodable(format!(
+                            "the retained record names definition `{}`: {error}",
+                            name.artifact_ref
+                        ))
+                    })?;
+                    self.ports
+                        .definitions
+                        .acquire_process_definition(&claim, &id, &[])
+                        .await
+                        .map_err(PluginError::from)
+                }
                 ArtifactStoreId::ProcessEnv => self
                     .ports
                     .process_env
@@ -368,13 +388,38 @@ impl ArtifactCleanupRelay {
         Ok(())
     }
 
-    /// Every artifact the retained record names: its environment and its
-    /// engine's start artifacts.
-    fn retained_names(
+    /// Every artifact the retained record names: its environment, its
+    /// engine's start artifacts and, for a start by id, its definition's
+    /// descriptor and manifest.
+    async fn retained_names(
         &self,
         retained: &RetainedStart,
     ) -> Result<Vec<ArtifactName>, DeliveryFailure> {
         let mut names = Vec::new();
+        if let Some(definition_id) = &retained.definition_id {
+            names.push(ArtifactName {
+                store: ArtifactStoreId::ProcessDefinition,
+                artifact_ref: definition_id.as_str().to_owned(),
+            });
+            // The descriptor is still held by `Start(key)` here; with it gone
+            // the carry of its name alone stalls, which is the invariant's
+            // own signal.
+            if let Some(bytes) = self
+                .ports
+                .definitions
+                .get_process_definition(definition_id)
+                .await
+                .map_err(|error| DeliveryFailure::Retryable(format!("definition read: {error}")))?
+            {
+                let draft = ProcessDefinitionDraft::from_store_bytes(definition_id, &bytes)
+                    .map_err(|error| {
+                        DeliveryFailure::Undecodable(format!(
+                            "stored definition `{definition_id}`: {error}"
+                        ))
+                    })?;
+                names.extend(draft.artifacts().iter().cloned());
+            }
+        }
         if let Some(env_ref) = &retained.env_ref {
             names.push(ArtifactName {
                 store: ArtifactStoreId::ProcessEnv,
@@ -419,6 +464,15 @@ impl ArtifactCleanupRelay {
             ))
             .await
             .map_err(store_failure("module store"))?;
+        self.ports
+            .definitions
+            .end_process_definition_referrer(&ResolvedArtifactCleanup::for_store(
+                referrer,
+                carries,
+                &ArtifactStoreId::ProcessDefinition,
+            ))
+            .await
+            .map_err(store_failure("process-definition store"))?;
         let engine_carries: Vec<ArtifactCarry> = carries
             .iter()
             .filter(|carry| matches!(carry.artifact.store, ArtifactStoreId::Engine(_)))

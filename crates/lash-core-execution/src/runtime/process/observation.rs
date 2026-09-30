@@ -508,6 +508,8 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
         ProcessInput::SessionTurn { create_request, .. } => {
             create_request.session_id.clone().map(Into::into)
         }
-        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
+        ProcessInput::Engine { .. }
+        | ProcessInput::External { .. }
+        | ProcessInput::Definition { .. } => None,
     }
 }

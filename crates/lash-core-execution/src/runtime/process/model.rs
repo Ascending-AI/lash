@@ -113,6 +113,17 @@ pub enum ProcessInput {
         #[serde(default)]
         metadata: serde_json::Value,
     },
+    /// A start of the immutable definition `definition_id` names, with its
+    /// arguments (ADR 0095, ADR 0113 §3.6). A start request and its journal
+    /// entry carry it; no process row does. Realization acquires the
+    /// definition's closure under the start's referrer, has its engine check
+    /// it, and registers the engine start it resolves to, whose identity
+    /// names the id ([`register_process_start`](crate::runtime::register_process_start)).
+    Definition {
+        definition_id: super::ProcessDefinitionId,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 /// What a `ProcessInput::SessionTurn` runner answers with when the child's
@@ -155,6 +166,13 @@ impl Clone for ProcessInput {
             Self::External { metadata } => Self::External {
                 metadata: metadata.clone(),
             },
+            Self::Definition {
+                definition_id,
+                args,
+            } => Self::Definition {
+                definition_id: definition_id.clone(),
+                args: args.clone(),
+            },
         }
     }
 }
@@ -172,6 +190,7 @@ impl ProcessInput {
             Self::Engine { .. } => "engine",
             Self::SessionTurn { .. } => "session_turn",
             Self::External { .. } => "external",
+            Self::Definition { .. } => "definition",
         }
     }
 
@@ -1020,6 +1039,11 @@ pub struct ProcessIdentity {
     /// it when the row was created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<ProcessDefinitionRef>,
+    /// The immutable definition a start by id admitted this row from
+    /// (ADR 0113 §3.6): the row's `ProcessRecord` holds its descriptor and
+    /// manifest for as long as it holds the row's other inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<super::ProcessDefinitionId>,
 }
 
 /// Reads a durable identity, including one written before the definition
@@ -1042,12 +1066,15 @@ impl<'de> Deserialize<'de> for ProcessIdentity {
             label: Option<String>,
             #[serde(default)]
             definition: Option<serde_json::Value>,
+            #[serde(default)]
+            definition_id: Option<super::ProcessDefinitionId>,
         }
 
         let StoredIdentity {
             kind,
             label,
             definition,
+            definition_id,
         } = StoredIdentity::deserialize(deserializer)?;
         let definition = match definition {
             None | Some(serde_json::Value::Null) => None,
@@ -1062,6 +1089,7 @@ impl<'de> Deserialize<'de> for ProcessIdentity {
             kind,
             label,
             definition,
+            definition_id,
         })
     }
 }
@@ -1074,6 +1102,7 @@ impl ProcessIdentity {
             kind: kind.into(),
             label: None,
             definition: None,
+            definition_id: None,
         }
     }
 
@@ -1084,6 +1113,7 @@ impl ProcessIdentity {
             kind: kind.into(),
             label: label.map(Into::into),
             definition: None,
+            definition_id: None,
         }
     }
 
@@ -1096,6 +1126,7 @@ impl ProcessIdentity {
             kind: reference.engine_kind.clone(),
             label: label.map(Into::into),
             definition: Some(reference),
+            definition_id: None,
         }
     }
 
@@ -1122,6 +1153,13 @@ impl ProcessIdentity {
                     .map(str::to_string);
                 Self::labelled("external", label)
             }
+            // Realization replaces it with the engine's admitted identity.
+            ProcessInput::Definition { definition_id, .. } => Self {
+                kind: ProcessEngineKind::from("definition"),
+                label: None,
+                definition: None,
+                definition_id: Some(definition_id.clone()),
+            },
         }
     }
 }
@@ -1478,7 +1516,9 @@ fn recorded_lineage(
                 .clone()
                 .unwrap_or_else(|| process_child_session_id(process_id)),
         ),
-        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
+        ProcessInput::Engine { .. }
+        | ProcessInput::External { .. }
+        | ProcessInput::Definition { .. } => None,
     };
     ProcessLineage::of_process(
         process_id,

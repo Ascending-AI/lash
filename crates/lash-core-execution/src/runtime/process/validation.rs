@@ -1100,6 +1100,9 @@ pub enum ProcessRegistrationRefusal {
     ReservedRuntimeEventType,
     NonTerminalTerminalStatus,
     TerminalEventWithoutAwaitOutput,
+    /// A start by definition id reached registration unresolved: only
+    /// realization resolves one, into the engine start its definition is.
+    UnresolvedDefinitionInput,
 }
 
 impl ProcessRegistrationRefusal {
@@ -1116,6 +1119,7 @@ impl ProcessRegistrationRefusal {
         Self::ReservedRuntimeEventType,
         Self::NonTerminalTerminalStatus,
         Self::TerminalEventWithoutAwaitOutput,
+        Self::UnresolvedDefinitionInput,
     ];
 }
 
@@ -1217,6 +1221,16 @@ pub(crate) fn classify_process_registration(
                     ),
                 ));
             }
+        }
+        super::model::ProcessInput::Definition { definition_id, .. } => {
+            return Err(refuse(
+                ProcessRegistrationRefusal::UnresolvedDefinitionInput,
+                format!(
+                    "process `{}` names definition `{definition_id}` unresolved; a start by id \
+                     registers the engine start its definition resolves to",
+                    registration_name(registration)
+                ),
+            ));
         }
         super::model::ProcessInput::SessionTurn { definition_key, .. } => {
             if definition_key.trim().is_empty() {

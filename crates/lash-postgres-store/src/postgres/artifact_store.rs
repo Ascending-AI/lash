@@ -58,6 +58,50 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
+pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
+
+/// The namespace of a store-set artifact store; an engine's own store has
+/// none here.
+pub(crate) fn store_namespace(
+    store: &lash_core_execution::ArtifactStoreId,
+) -> Option<&'static str> {
+    use lash_core_execution::ArtifactStoreId;
+    match store {
+        ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
+        ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
+        ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
+        ArtifactStoreId::Engine(_) => None,
+    }
+}
+
+/// A manifest's store-set share as `(namespace, reference)` pairs. Only the
+/// module and environment stores share a definition's transaction.
+fn definition_manifest(
+    manifest: &[lash_core_execution::ArtifactName],
+) -> Result<Vec<(&'static str, String)>, ArtifactStoreError> {
+    use lash_core_execution::ArtifactStoreId;
+    manifest
+        .iter()
+        .map(|artifact| {
+            let namespace = match &artifact.store {
+                ArtifactStoreId::LashlangModule => MODULE_ARTIFACT_NAMESPACE,
+                ArtifactStoreId::ProcessEnv => PROCESS_ENV_NAMESPACE,
+                other => {
+                    return Err(ArtifactStoreError::Backend(format!(
+                        "a definition manifest held in the descriptor's transaction names \
+                         store {other:?}"
+                    )));
+                }
+            };
+            if !crate::namespace::is_valid_opaque_key(&artifact.artifact_ref) {
+                return Err(ArtifactStoreError::Encode(
+                    "invalid definition manifest reference".into(),
+                ));
+            }
+            Ok((namespace, artifact.artifact_ref.clone()))
+        })
+        .collect()
+}
 
 fn backend(error: impl ToString) -> ArtifactStoreError {
     ArtifactStoreError::Backend(error.to_string())
@@ -203,6 +247,112 @@ impl PostgresLashlangArtifactStore {
             .execute(&mut **tx)
             .await
             .map_err(backend)?;
+        tx.commit().await.map_err(backend)
+    }
+
+    /// Hold one definition closure under the claim in one transaction: the
+    /// referrer's lock and fence, then every artifact's lock in key order,
+    /// every manifest artifact stored, the descriptor published (verified
+    /// byte for byte against a stored one) or stored, the claim's guard, then
+    /// every edge (ADR 0113 §3.6).
+    async fn hold_definition_closure(
+        &self,
+        claim: &ReferrerClaim,
+        id: &str,
+        descriptor: Option<&[u8]>,
+        manifest: &[(&'static str, String)],
+    ) -> Result<(), ArtifactStoreError> {
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        lock_referrer_tx(&mut tx, claim.referrer())
+            .await
+            .map_err(backend)?;
+        if is_fenced_tx(&mut tx, claim.referrer()).await? {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: claim.referrer().clone(),
+            });
+        }
+        let mut locked: Vec<(&str, &str)> = manifest
+            .iter()
+            .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
+            .chain(std::iter::once((PROCESS_DEFINITION_NAMESPACE, id)))
+            .collect();
+        locked.sort_by_key(|(namespace, artifact_ref)| {
+            format!("lash-artifact:{namespace}:{artifact_ref}")
+        });
+        locked.dedup();
+        for (namespace, artifact_ref) in &locked {
+            lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
+        }
+        for (namespace, artifact_ref) in manifest {
+            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+                .bind(*namespace)
+                .bind(artifact_ref)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(backend)?;
+            if !exists {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: artifact_ref.clone(),
+                });
+            }
+        }
+        match descriptor {
+            Some(bytes) => {
+                sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+                    .bind(PROCESS_DEFINITION_NAMESPACE)
+                    .bind(id)
+                    .bind(bytes)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(backend)?;
+                let stored: Vec<u8> =
+                    sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+                        .bind(PROCESS_DEFINITION_NAMESPACE)
+                        .bind(id)
+                        .fetch_one(&mut **tx)
+                        .await
+                        .map_err(backend)?;
+                if stored != bytes {
+                    return Err(ArtifactStoreError::Immutable {
+                        artifact_ref: id.to_owned(),
+                    });
+                }
+            }
+            None => {
+                let exists: bool =
+                    sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+                        .bind(PROCESS_DEFINITION_NAMESPACE)
+                        .bind(id)
+                        .fetch_one(&mut **tx)
+                        .await
+                        .map_err(backend)?;
+                if !exists {
+                    return Err(ArtifactStoreError::ArtifactMissing {
+                        artifact_ref: id.to_owned(),
+                    });
+                }
+            }
+        }
+        if let Some(cleanup) = claim.guard_cleanup() {
+            let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+        }
+        for (namespace, artifact_ref) in &locked {
+            sqlx::query(artifact_sql().edges.insert_edge.sql())
+                .bind(*namespace)
+                .bind(*artifact_ref)
+                .bind(claim.referrer().kind().as_str())
+                .bind(claim.referrer().canonical_id())
+                .execute(&mut **tx)
+                .await
+                .map_err(backend)?;
+        }
         tx.commit().await.map_err(backend)
     }
 
@@ -474,6 +624,51 @@ impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactS
             ));
         }
         self.get_namespaced(PROCESS_ENV_NAMESPACE, env_ref.as_str())
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessDefinitionStore for PostgresLashlangArtifactStore {
+    async fn publish_process_definition(
+        &self,
+        claim: &ReferrerClaim,
+        id: &lash_core_execution::ProcessDefinitionId,
+        descriptor: &[u8],
+        manifest: &[lash_core_execution::ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        self.hold_definition_closure(
+            claim,
+            id.as_str(),
+            Some(descriptor),
+            &definition_manifest(manifest)?,
+        )
+        .await
+    }
+
+    async fn acquire_process_definition(
+        &self,
+        claim: &ReferrerClaim,
+        id: &lash_core_execution::ProcessDefinitionId,
+        manifest: &[lash_core_execution::ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        self.hold_definition_closure(claim, id.as_str(), None, &definition_manifest(manifest)?)
+            .await
+    }
+
+    async fn end_process_definition_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_namespaced(PROCESS_DEFINITION_NAMESPACE, cleanup)
+            .await
+    }
+
+    async fn get_process_definition(
+        &self,
+        id: &lash_core_execution::ProcessDefinitionId,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        self.get_namespaced(PROCESS_DEFINITION_NAMESPACE, id.as_str())
             .await
     }
 }

@@ -124,7 +124,7 @@ pub(crate) fn model_spec() -> Result<lash_core::ModelSpec, String> {
 }
 
 /// An RLM core: the process runs no model; the provider only has to exist.
-fn rlm_core() -> CoreBuild {
+pub(super) fn rlm_core() -> CoreBuild {
     Arc::new(|backend, owner| {
         let provider = lash_core::testing::TestProvider::builder()
             .kind("crash-matrix-process")

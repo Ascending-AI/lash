@@ -170,10 +170,13 @@ impl From<RemoteDeclaredProcessIdentity> for lash_core::DeclaredProcessIdentity 
 
 impl From<lash_core::ProcessIdentity> for RemoteProcessIdentity {
     fn from(value: lash_core::ProcessIdentity) -> Self {
+        // A peer's identity carries no definition id yet: the record a
+        // start by id admitted holds the descriptor on this side only.
         let lash_core::ProcessIdentity {
             kind,
             label,
             definition,
+            definition_id: _,
         } = value;
         Self {
             kind: kind.into(),

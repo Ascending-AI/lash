@@ -76,6 +76,7 @@ const PROCESS_DEFINITION_ID_FAMILY_VERSION: u8 = 1;
 const STORE_TAG_PROCESS_ENV: u8 = 1;
 const STORE_TAG_LASHLANG_MODULE: u8 = 2;
 const STORE_TAG_ENGINE: u8 = 3;
+const STORE_TAG_PROCESS_DEFINITION: u8 = 4;
 
 /// The canonical descriptor of one immutable process definition.
 ///
@@ -178,7 +179,8 @@ impl ProcessDefinitionDraft {
     /// || len:u64 || canonical JSON of the value (identity_json::payload_leaf)
     /// || count:u64 || each artifact, sorted by its leaf bytes, deduplicated:
     ///      len:u64 || leaf, where leaf =
-    ///        tag:u8 (1 process_env, 2 lashlang_module, 3 engine)
+    ///        tag:u8 (1 process_env, 2 lashlang_module, 3 engine,
+    ///                4 process_definition)
     ///        [|| len:u64 || engine kind (UTF-8), for tag 3]
     ///        || len:u64 || artifact reference (UTF-8)
     /// ```
@@ -205,11 +207,68 @@ impl ProcessDefinitionDraft {
         )
     }
 
+    /// The descriptor as the definition store keeps it: the canonical JSON
+    /// (sorted keys, signed zero normalized, `identity_json`'s payload leaf)
+    /// of `{artifacts, engine_kind, value}`. Equal descriptors have equal
+    /// bytes, so a publication of the same id verifies them byte for byte.
+    pub fn to_store_bytes(&self) -> Vec<u8> {
+        let artifacts: Vec<serde_json::Value> = self
+            .artifacts
+            .iter()
+            .map(|artifact| {
+                serde_json::json!({
+                    "store": artifact.store,
+                    "artifact_ref": artifact.artifact_ref,
+                })
+            })
+            .collect();
+        crate::identity_json::payload_leaf(&serde_json::json!({
+            "engine_kind": self.engine_kind.as_str(),
+            "value": self.value.as_json(),
+            "artifacts": artifacts,
+        }))
+    }
+
+    /// The descriptor stored under `id`.
+    ///
+    /// # Errors
+    ///
+    /// [`ProcessDefinitionStoredError`] when the bytes do not decode, are not
+    /// the canonical encoding of what they decode to, or are the descriptor
+    /// of another id.
+    pub fn from_store_bytes(
+        id: &ProcessDefinitionId,
+        bytes: &[u8],
+    ) -> Result<Self, ProcessDefinitionStoredError> {
+        let draft: Self = serde_json::from_slice(bytes)
+            .map_err(|error| ProcessDefinitionStoredError::Undecodable(error.to_string()))?;
+        if draft.to_store_bytes() != bytes {
+            return Err(ProcessDefinitionStoredError::NotCanonical);
+        }
+        let derived = draft.id();
+        if derived != *id {
+            return Err(ProcessDefinitionStoredError::OtherId { derived });
+        }
+        Ok(draft)
+    }
+
     /// The engine reference this descriptor resolves through, claiming no
     /// signature.
     fn unclaimed_reference(&self) -> ProcessDefinitionRef {
         ProcessDefinitionRef::unclaimed(self.engine_kind.clone(), self.value.clone())
     }
+}
+
+/// Why stored descriptor bytes are not the descriptor of their id.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ProcessDefinitionStoredError {
+    #[error("the stored descriptor does not decode: {0}")]
+    Undecodable(String),
+    #[error("the stored descriptor is not in its canonical encoding")]
+    NotCanonical,
+    #[error("the stored descriptor is the definition `{derived}`")]
+    OtherId { derived: ProcessDefinitionId },
 }
 
 /// One artifact's leaf in the preimage, which is also its sort key: the order
@@ -223,6 +282,7 @@ fn artifact_preimage(artifact: &ArtifactName) -> Vec<u8> {
             bytes.push(STORE_TAG_ENGINE);
             push_framed(&mut bytes, kind.as_bytes());
         }
+        ArtifactStoreId::ProcessDefinition => bytes.push(STORE_TAG_PROCESS_DEFINITION),
     }
     push_framed(&mut bytes, artifact.artifact_ref.as_bytes());
     bytes
@@ -293,8 +353,53 @@ impl ProcessEngineRegistry {
         &self,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ProcessDefinition, ProcessDefinitionRefusal> {
+        self.check_definition_manifest(draft)?;
         let resolution = self.resolve(&draft.unclaimed_reference()).await?;
         Ok(ProcessDefinition::new(draft.id(), resolution.signature))
+    }
+
+    /// Refuses a draft whose manifest is not exactly the set of artifacts its
+    /// owning engine resolves its value to
+    /// ([`ProcessEngine::start_artifacts`](super::engine::ProcessEngine::start_artifacts)):
+    /// a manifest is what every reader holds, so one that says less or other
+    /// than what the engine reads would let a start outlive its bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`ProcessDefinitionRefusal::UnknownEngine`], an
+    /// [`ProcessDefinitionRefusal::UnresolvableDefinition`] for a value the
+    /// engine cannot name artifacts for, and
+    /// [`ProcessDefinitionRefusal::ManifestMismatch`].
+    pub fn check_definition_manifest(
+        &self,
+        draft: &ProcessDefinitionDraft,
+    ) -> Result<(), ProcessDefinitionRefusal> {
+        let engine = self.get(draft.engine_kind.as_str()).ok_or_else(|| {
+            ProcessDefinitionRefusal::UnknownEngine {
+                engine_kind: draft.engine_kind.clone(),
+            }
+        })?;
+        let unresolvable = |message: String| ProcessDefinitionRefusal::UnresolvableDefinition {
+            engine_kind: draft.engine_kind.clone(),
+            message,
+        };
+        let resolved = engine
+            .start_artifacts(draft.value.as_json())
+            .map_err(|error| unresolvable(error.to_string()))?;
+        // The engine's names in the draft's own order: sorted by leaf bytes
+        // and deduplicated.
+        let resolved =
+            ProcessDefinitionDraft::new(draft.engine_kind.clone(), draft.value.clone(), resolved)
+                .map_err(|error| unresolvable(error.to_string()))?
+                .artifacts;
+        if resolved != draft.artifacts {
+            return Err(ProcessDefinitionRefusal::ManifestMismatch {
+                engine_kind: draft.engine_kind.clone(),
+                declared: draft.artifacts.clone(),
+                resolved,
+            });
+        }
+        Ok(())
     }
 
     /// Checks a held definition value against the descriptor its id names,

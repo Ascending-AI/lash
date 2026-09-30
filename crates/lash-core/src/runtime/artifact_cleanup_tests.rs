@@ -202,7 +202,10 @@ impl ArtifactCleanupAuthorities for Authorities {
 struct Applied {
     env: Mutex<Vec<ResolvedArtifactCleanup>>,
     modules: Mutex<Vec<ResolvedArtifactCleanup>>,
+    definitions: Mutex<Vec<ResolvedArtifactCleanup>>,
     engine: Mutex<Vec<ResolvedArtifactCleanup>>,
+    /// Descriptors the definition store holds, by id.
+    descriptors: Mutex<BTreeMap<String, Vec<u8>>>,
     module_failure: Mutex<Option<fn() -> ArtifactStoreError>>,
     engine_failure: Mutex<Option<fn() -> ArtifactStoreError>>,
     /// Every edge an acquisition added, in any store.
@@ -340,6 +343,51 @@ impl ModuleArtifactStore for Modules {
     }
 }
 
+struct Definitions(Arc<Applied>);
+
+#[async_trait::async_trait]
+impl ProcessDefinitionStore for Definitions {
+    async fn publish_process_definition(
+        &self,
+        _claim: &ReferrerClaim,
+        _id: &ProcessDefinitionId,
+        _descriptor: &[u8],
+        _manifest: &[ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_process_definition(
+        &self,
+        claim: &ReferrerClaim,
+        id: &ProcessDefinitionId,
+        _manifest: &[ArtifactName],
+    ) -> Result<(), ArtifactStoreError> {
+        self.0.acquire(claim, id.as_str())
+    }
+
+    async fn end_process_definition_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        record(&self.0.definitions, cleanup);
+        Ok(())
+    }
+
+    async fn get_process_definition(
+        &self,
+        id: &ProcessDefinitionId,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        Ok(self
+            .0
+            .descriptors
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id.as_str())
+            .cloned())
+    }
+}
+
 const ENGINE_KIND: &str = "cleanup-test-engine";
 
 /// An engine whose start payload names one module and one artifact of its
@@ -416,6 +464,7 @@ fn harness() -> Harness {
         authorities: Arc::clone(&authorities) as Arc<dyn ArtifactCleanupAuthorities>,
         process_env: Arc::new(EnvStore(Arc::clone(&applied))),
         modules: Arc::new(Modules(Arc::clone(&applied))),
+        definitions: Arc::new(Definitions(Arc::clone(&applied))),
         engines,
     });
     Harness {
@@ -478,7 +527,10 @@ impl Harness {
 
     fn nothing_applied(&self) -> bool {
         let (env, modules, engine) = self.applied();
-        env.is_empty() && modules.is_empty() && engine.is_empty()
+        env.is_empty()
+            && modules.is_empty()
+            && engine.is_empty()
+            && taken(&self.applied.definitions).is_empty()
     }
 }
 
@@ -601,6 +653,7 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
             kind: ENGINE_KIND.to_owned(),
             payload: serde_json::json!({}),
         }),
+        definition_id: None,
     });
     let start = ArtifactReferrer::Start(start_key());
     let guard = ArtifactCleanup {
@@ -643,6 +696,86 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
     );
 }
 
+/// ADR 0113 §3.6: a start by id carries its definition's descriptor and its
+/// whole manifest onto its record, beside the retained record's own content,
+/// and every store, the definition store included, ends the start's key.
+#[tokio::test]
+async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
+    let harness = harness();
+    let draft = crate::ProcessDefinitionDraft::new(
+        ENGINE_KIND,
+        serde_json::json!({"program": "p"}),
+        [
+            name(ArtifactStoreId::module(), "mod-definition"),
+            name(ArtifactStoreId::ProcessEnv, "env-definition"),
+        ],
+    )
+    .expect("a well-formed draft");
+    let id = draft.id();
+    harness
+        .applied
+        .descriptors
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id.as_str().to_owned(), draft.to_store_bytes());
+    let process_id = ProcessId::fixture("by-id");
+    *harness
+        .authorities
+        .retained
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RetainedStart {
+        process_id: process_id.clone(),
+        env_ref: Some(ProcessExecutionEnvRef::new("env-retained")),
+        input: Arc::new(ProcessInput::Engine {
+            kind: ENGINE_KIND.to_owned(),
+            payload: serde_json::json!({}),
+        }),
+        definition_id: Some(id.clone()),
+    });
+    let start = ArtifactReferrer::Start(start_key());
+    let guard = ArtifactCleanup {
+        referrer: start.clone(),
+        plan: ArtifactCleanupPlan::AwaitStart {
+            starter: journal("starter"),
+        },
+        gate: None,
+    };
+    assert_eq!(harness.deliver(guard).await, Ok(()));
+    let to = ArtifactReferrer::ProcessRecord(process_id);
+    let carry = |artifact: ArtifactName| ArtifactCarry {
+        artifact,
+        to: to.clone(),
+    };
+    assert_eq!(
+        taken(&harness.applied.definitions),
+        vec![resolved(
+            &start,
+            vec![carry(name(ArtifactStoreId::ProcessDefinition, id.as_str()))]
+        )]
+    );
+    let (env, modules, _) = harness.applied();
+    assert_eq!(
+        env,
+        vec![resolved(
+            &start,
+            vec![
+                carry(name(ArtifactStoreId::ProcessEnv, "env-definition")),
+                carry(name(ArtifactStoreId::ProcessEnv, "env-retained")),
+            ]
+        )]
+    );
+    assert_eq!(
+        modules,
+        vec![resolved(
+            &start,
+            vec![
+                carry(name(ArtifactStoreId::module(), "mod-definition")),
+                carry(name(ArtifactStoreId::module(), "mod-start")),
+            ]
+        )]
+    );
+}
+
 impl Harness {
     fn retain(&self, process_id: &ProcessId) {
         *self
@@ -656,6 +789,7 @@ impl Harness {
                 kind: ENGINE_KIND.to_owned(),
                 payload: serde_json::json!({}),
             }),
+            definition_id: None,
         });
     }
 

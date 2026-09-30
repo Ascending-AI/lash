@@ -23,6 +23,7 @@ async fn intent_law_world() -> IntentLawWorld {
         artifact_ports: crate::runtime::ArtifactReferrerPorts::new(
             crate::StoreSet::module_artifacts(backend.as_ref()),
             backend.process_env_store(),
+            crate::StoreSet::process_definitions(backend.as_ref()),
             crate::StoreSet::artifact_cleanup(backend.as_ref()),
             Arc::new(crate::SystemClock),
         ),

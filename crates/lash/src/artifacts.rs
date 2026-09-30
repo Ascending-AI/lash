@@ -5,14 +5,21 @@
 //! for good. The pin is opaque; hosts never name a referrer of any other kind,
 //! and a released pin can never publish again — a host that wants to publish
 //! again mints a fresh one.
+//!
+//! A process definition is held the same way (ADR 0113 §3.6): an id is data
+//! and holds nothing, so a host that wants a definition available between
+//! starts pins it. Lash keeps no names or versions; a host that wants them
+//! keeps `(name, version) -> (id, pin)` in its own tables.
 
 use std::sync::Arc;
 
 pub use lash_core::HostArtifactPin;
 use lash_core::store::ArtifactCleanupLedger;
 use lash_core::{
-    ArtifactCleanup, ArtifactReferrer, Clock, ModuleArtifactStore, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ReferrerClaim,
+    ArtifactCleanup, ArtifactReferrer, ArtifactReferrerPorts, Clock, DefinitionAcquisition,
+    ModuleArtifactStore, ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId,
+    ProcessDefinitionStore, ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ReferrerClaim,
 };
 
 use crate::Result;
@@ -28,20 +35,35 @@ pub struct HostArtifacts {
     process_env: Arc<dyn ProcessExecutionEnvStore>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
+    /// The ports a definition's closure is held through, and the engines
+    /// that check a definition before anything holds it.
+    definition_ports: ArtifactReferrerPorts,
+    engines: ProcessEngineRegistry,
 }
 
 impl HostArtifacts {
     pub(crate) fn new(
         modules: Arc<dyn ModuleArtifactStore>,
         process_env: Arc<dyn ProcessExecutionEnvStore>,
+        definitions: Arc<dyn ProcessDefinitionStore>,
         cleanup: Arc<dyn ArtifactCleanupLedger>,
         clock: Arc<dyn Clock>,
+        engines: ProcessEngineRegistry,
     ) -> Self {
+        let definition_ports = ArtifactReferrerPorts::new(
+            Arc::clone(&modules),
+            Arc::clone(&process_env),
+            definitions,
+            Arc::clone(&cleanup),
+            Arc::clone(&clock),
+        );
         Self {
             modules,
             process_env,
             cleanup,
             clock,
+            definition_ports,
+            engines,
         }
     }
 
@@ -72,6 +94,49 @@ impl HostArtifacts {
             spec,
         )
         .await?)
+    }
+
+    /// Publish `draft` and hold it under `pin`: its descriptor and every
+    /// artifact of its manifest, which the host published under the same pin
+    /// first. Answers the definition with the signature its engine derives.
+    /// Equal content publishes to the same id and changes nothing; a released
+    /// pin, a draft its engine refuses and conflicting bytes under an
+    /// existing id are refused.
+    pub async fn publish_definition(
+        &self,
+        pin: &HostArtifactPin,
+        draft: &ProcessDefinitionDraft,
+    ) -> Result<ProcessDefinition> {
+        Ok(self
+            .definition_ports
+            .publish_definition(&self.engines, &claim(pin)?, draft)
+            .await?)
+    }
+
+    /// Hold the definition `id` names under `pin`: its descriptor and its
+    /// whole manifest, checked by its engine first. This is how a host keeps
+    /// a definition available between starts; the id alone holds nothing. A
+    /// definition nothing holds any more is `DefinitionMissing`, and a
+    /// released pin is refused.
+    pub async fn pin_definition(
+        &self,
+        pin: &HostArtifactPin,
+        id: &ProcessDefinitionId,
+    ) -> Result<()> {
+        let claim = claim(pin)?;
+        match self
+            .definition_ports
+            .acquire_definition(&self.engines, &claim, id)
+            .await?
+        {
+            DefinitionAcquisition::Held(_) => Ok(()),
+            DefinitionAcquisition::Ended => Err(lash_core::PluginError::from(
+                lash_core::ArtifactStoreError::ReferrerEnded {
+                    referrer: claim.referrer().clone(),
+                },
+            )
+            .into()),
+        }
     }
 
     /// Ends the pin: its `Ended` record, and on the store set's own

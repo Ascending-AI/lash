@@ -354,6 +354,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         authorities: Arc::new(KeyRecords(Arc::clone(&registry))),
         process_env: Arc::clone(ports.env()),
         modules: Arc::clone(ports.modules()),
+        definitions: Arc::clone(ports.definitions()),
         engines: engines(),
     }));
     let relay_on_end = Arc::new(RelayOnEnd {
@@ -365,6 +366,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let ports_a = crate::ArtifactReferrerPorts::new(
         Arc::clone(ports.modules()),
         Arc::clone(ports.env()),
+        Arc::clone(ports.definitions()),
         Arc::clone(&relay_on_end) as Arc<dyn crate::ArtifactCleanupLedger>,
         Arc::new(crate::SystemClock),
     );
@@ -587,6 +589,7 @@ impl ArtifactCleanupAuthorities for KeyRecords {
                 process_id: record.id,
                 env_ref: record.env_ref,
                 input: record.input,
+                definition_id: record.identity.definition_id,
             }))
     }
 

@@ -87,6 +87,7 @@ impl<'run> TestExecutionPorts<'run> {
         self.artifact_ports = Some(crate::runtime::ArtifactReferrerPorts::new(
             modules,
             Arc::clone(&self.process_env_store),
+            backend.process_definitions(),
             backend.artifact_cleanup(),
             Arc::clone(&self.clock),
         ));

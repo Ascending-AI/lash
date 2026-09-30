@@ -1,6 +1,7 @@
 mod awaiter;
 mod definition;
 mod definition_ref;
+mod definition_store;
 mod effect_summary;
 mod engine;
 mod events;
@@ -34,11 +35,15 @@ pub use awaiter::{
 };
 pub use definition::{
     InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,
-    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionTarget,
+    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionStoredError,
+    ProcessDefinitionTarget,
 };
 pub use definition_ref::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
+};
+pub use definition_store::{
+    DefinitionAcquisition, ProcessDefinitionStore, ResolvedProcessDefinition,
 };
 pub use effect_summary::{
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,

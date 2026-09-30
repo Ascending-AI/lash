@@ -277,6 +277,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
                 }),
                 process_env: stores.process_env_store(),
                 modules: stores.module_artifacts(),
+                definitions: stores.process_definitions(),
                 engines: lash_core::ProcessEngineRegistry::new(),
             });
             let pass = relay_due(&relay, stores.clock().as_ref(), page())

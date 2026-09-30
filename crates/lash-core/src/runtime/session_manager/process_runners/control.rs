@@ -387,7 +387,9 @@ impl ProcessCapability {
             return Ok((None, Some(spec.clone()), Some(spec)));
         }
         match registration.input.as_ref() {
-            crate::ProcessInput::Engine { .. } => {
+            // A start by id resolves to an engine start, which runs in an
+            // environment like every other.
+            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. } => {
                 let spec = self.current_execution_env_spec(current);
                 Ok((None, Some(spec.clone()), Some(spec)))
             }

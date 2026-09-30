@@ -135,6 +135,7 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
                 kind: kind.into(),
                 label,
                 definition: definition.map(Into::into),
+                definition_id: None,
             },
             status.into(),
         );

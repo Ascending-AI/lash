@@ -75,6 +75,8 @@ crash_matrix! {
     session_delete_after_delivery_before_settle => (SessionDelete, AfterDeliveryBeforeSettle);
 
     process_start_after_state_commit => (ProcessStart, AfterStateCommit);
+    definition_start_mid_journal_step => (DefinitionStart, MidJournalStep);
+    definition_start_after_state_commit => (DefinitionStart, AfterStateCommit);
     process_terminal_mid_journal_step => (ProcessTerminal, MidJournalStep);
     process_terminal_invocation_lost => (ProcessTerminal, InvocationLost);
     process_terminal_caller_killed => (ProcessTerminal, CallerKilled);

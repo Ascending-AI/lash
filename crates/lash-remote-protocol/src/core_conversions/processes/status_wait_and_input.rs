@@ -221,6 +221,16 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 result: result.into(),
             }),
             lash_core::ProcessInput::External { metadata } => Ok(Self::External { metadata }),
+            // Realization resolves a start by id into its engine start before
+            // any row exists, so no peer ever holds one.
+            lash_core::ProcessInput::Definition { definition_id, .. } => {
+                Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessInput",
+                    message: format!(
+                        "a start of definition `{definition_id}` is resolved before a peer sees it"
+                    ),
+                })
+            }
         }
     }
 }

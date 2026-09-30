@@ -225,6 +225,7 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
             lash_core::ArtifactReferrerPorts::new(
                 lash_core::StoreSet::module_artifacts(&stores),
                 stores.process_env_store(),
+                lash_core::StoreSet::process_definitions(&stores),
                 lash_core::StoreSet::artifact_cleanup(&stores),
                 Arc::new(lash_core::facade_support::SystemClock),
             ),

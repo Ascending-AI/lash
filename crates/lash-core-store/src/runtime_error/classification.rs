@@ -76,6 +76,10 @@ impl RuntimeErrorCode {
             Self::ArtifactReferrerEnded => Terminal,
             // the bytes are not stored; a redrive reads the same state.
             Self::ArtifactMissing => Terminal,
+            // no referrer holds the descriptor; a redrive reads the same state.
+            Self::DefinitionMissing => Terminal,
+            // the engine judges the immutable descriptor, so it refuses it again.
+            Self::DefinitionRefused => Terminal,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.

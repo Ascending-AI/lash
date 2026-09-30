@@ -385,7 +385,9 @@ where
             };
             let started: lash_core::runtime::RegisteredProcessStart = recorded?;
             let disposition = started.disposition;
-            let registration = registration.with_execution_env_ref(started.env_ref.clone());
+            let registration = started
+                .running_registration(registration)
+                .with_execution_env_ref(started.env_ref.clone());
             let (record, realization) = schedule_restate_process(
                 Arc::clone(&registry),
                 execution.process_starts.clone(),

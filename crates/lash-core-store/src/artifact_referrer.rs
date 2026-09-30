@@ -599,6 +599,10 @@ pub enum ArtifactStoreId {
     LashlangModule,
     /// A process engine's own store, by engine kind.
     Engine(String),
+    /// The immutable process-definition descriptors, keyed by their
+    /// `ProcessDefinitionId` (ADR 0113 §3.6). A collectible artifact like the
+    /// others: a descriptor lives exactly as long as some referrer holds it.
+    ProcessDefinition,
 }
 
 impl ArtifactStoreId {

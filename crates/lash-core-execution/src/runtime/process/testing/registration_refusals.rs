@@ -167,6 +167,12 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
                 },
             ))]
         }
+        ProcessRegistrationRefusal::UnresolvedDefinitionInput => {
+            vec![host_registration(ProcessInput::Definition {
+                definition_id: crate::ProcessDefinitionId::from_sha256_digest([0; 32]),
+                args: serde_json::Map::new(),
+            })]
+        }
         ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput => {
             vec![with_event_type(custom_event_type(
                 "app.terminal",
