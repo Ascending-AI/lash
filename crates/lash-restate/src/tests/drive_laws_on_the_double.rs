@@ -112,3 +112,32 @@ lash_conformance::queued_after_commit_redrive_tests!({
         Box::leak(format!("restate-queued-redrive-{}", harness.run_nonce()).into_boxed_str());
     (harness, prefix, effect_host, stores, turn_runner)
 });
+
+// FIG-4258: the frame-open laws where every await suspends and every
+// resumption replays the handler's journal from its start, the e2e replay
+// leg's mode. A drive that applies an administrative compaction and then runs
+// the input queued behind it replays the compaction after the input's root
+// sealed a newer drive epoch; the laws hold only if that replay never
+// presents the command root's superseded fence again.
+mod frame_open_under_replay {
+    use super::{HarnessServer, LiveConformanceHarness};
+
+    lash_conformance::frame_open_redrive_tests!({
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+                seed,
+                always_replay: true,
+            })
+            .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str = Box::leak(
+            format!("restate-frame-open-replay-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    });
+}

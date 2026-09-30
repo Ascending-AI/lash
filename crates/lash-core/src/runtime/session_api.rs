@@ -1221,12 +1221,16 @@ impl LashRuntime {
                 .collect::<Vec<_>>();
             // A replayed read may name a run this root already applied. An
             // administrative compaction runs again: it replays the steps it
-            // journaled and meets its commit's receipt. Any other command
-            // journals nothing, so a settled run is simply passed.
+            // journaled, then finds its command settled and adopts the head
+            // its commit published without committing again (FIG-4258). Any
+            // other command journals nothing, so a settled run is simply
+            // passed.
             if !matches!(
                 commands.as_slice(),
                 [crate::SessionCommand::CompactContext { .. }]
-            ) && self.session_command_run_settled(&store, &run).await?
+            ) && self
+                .session_command_run_settled(&store, &run.completion())
+                .await?
             {
                 return Ok(receipts.into_iter().next());
             }
@@ -1251,11 +1255,11 @@ impl LashRuntime {
     /// The first execution reads the lane live, acknowledging the run's
     /// obligations delivered under `drive_fence`. A replay of the root reads
     /// back the run it recorded, even after the commit that applied it
-    /// settled the lane: the root applies the same run again, an
-    /// administrative compaction replays the base and the summary it
-    /// journaled, and each commit meets its receipt or finds its rows
-    /// settled. The live lane would skip the settled command and run the
-    /// root's next steps where its journal holds the compaction's.
+    /// settled the lane: an administrative compaction replays the base and
+    /// the summary it journaled and adopts its settled commit, and any other
+    /// settled run is passed. The live lane would skip the settled command
+    /// and run the root's next steps where its journal holds the
+    /// compaction's.
     async fn read_session_command_run(
         &self,
         store: crate::store::SessionStore,
@@ -1293,14 +1297,14 @@ impl LashRuntime {
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
     }
 
-    /// Whether the commit that applies `run` has landed: its first batch's
-    /// completion is recorded.
-    async fn session_command_run_settled(
+    /// Whether the commit that applies the command run `completion` names
+    /// has landed: its first batch's completion is recorded.
+    pub(super) async fn session_command_run_settled(
         &self,
         store: &crate::store::SessionStore,
-        run: &crate::AdmittedQueuedWork,
+        completion: &crate::QueuedWorkCompletion,
     ) -> Result<bool, RuntimeError> {
-        let Some(batch_id) = run.batch_ids().into_iter().next() else {
+        let Some(batch_id) = completion.batch_ids.first() else {
             return Ok(false);
         };
         store

@@ -7,10 +7,10 @@
 //! the frame. A redrive replays the step and adopts the recorded base, so
 //! even after the compaction's own commit moved the head it summarizes the
 //! same history, reads its summary back from the journal, derives the same
-//! frame key and meets its commit's receipt. From the moved head alone a
-//! redrive could not tell itself from a repeated compaction; the step tells
-//! them apart: a repeated compaction is the run's next compaction, which
-//! records a base of its own.
+//! frame key and adopts its settled commit (FIG-4258). From the moved head
+//! alone a redrive could not tell itself from a repeated compaction; the
+//! step tells them apart: a repeated compaction is the run's next
+//! compaction, which records a base of its own.
 
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::CompactionBase;

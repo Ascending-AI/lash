@@ -319,7 +319,10 @@ A compaction queued before an input applies before it.
 * It applies alone, under the command root's sealed fence, and runs its
   effects under its own scope, the queue drain its batch names. A redrive of
   the unsettled command replays the base it recorded and the summary it
-  journaled.
+  journaled. A replay of the settled command replays the same steps, then
+  adopts the head its commit published and commits nothing (FIG-4258): the
+  input the same drive ran after it sealed a newer epoch, so the command
+  root's fence is stale.
 * One commit opens the frame with its seed, resets the stored execution
   state and the prompt usage, persists the compaction's billed usage and
   settles the command.

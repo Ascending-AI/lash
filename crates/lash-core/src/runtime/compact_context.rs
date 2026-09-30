@@ -8,7 +8,8 @@
 //! once no root is bound (ADR 0101 §4). The compaction's effects are
 //! journaled under the command's own scope, named by its batch, so a redrive
 //! of the command reads its recorded base and its summary back, and a
-//! settled command is never applied again. One commit opens the frame,
+//! settled command is never committed again: its replay adopts the head its
+//! commit published (FIG-4258). One commit opens the frame,
 //! resets the stored execution state and the prompt usage, persists the
 //! compaction's billed usage and settles the command with its outcome
 //! ([`CompactContextOutcome`](super::CompactContextOutcome)), which the
@@ -238,6 +239,15 @@ impl LashRuntime {
     /// staged billed usage and the command's settlement with its outcome,
     /// under the command root's fence.
     ///
+    /// A replay of a command this root already settled commits nothing
+    /// (FIG-4258): it adopts the durable head and drops the billed usage its
+    /// journaled summary re-recorded, which the settling commit persisted.
+    /// The replay must not present the fence again. The drive that applied
+    /// the command goes on to the input queued behind it, whose seal
+    /// supersedes the command root's fence, and Restate replays the whole
+    /// drive from its journal: the store checks a commit's fence before its
+    /// receipt, so the settled commit would be refused as superseded.
+    ///
     /// A frame whose recorded base the head has moved from, which only a
     /// writer outside the lane can do, can never commit: the command settles
     /// [`CompactContextOutcome::Failed`](super::CompactContextOutcome::Failed)
@@ -284,6 +294,19 @@ impl LashRuntime {
         let staged =
             session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
                 .map_err(super::runtime_error_from_store_commit)?;
+        if self
+            .session_command_run_settled(&store, &completion)
+            .await?
+        {
+            staged.discard_staged();
+            self.invalidate_resident_session_state();
+            self.reload_invalidated_resident_session_state().await?;
+            drop(RuntimeNamedPhase::begin(
+                self.turn_phase_probe.clone(),
+                COMPACT_CONTEXT_COMMITTED_PHASE,
+            ));
+            return Ok(true);
+        }
         loop {
             for delta in staged.deltas() {
                 self.state
@@ -329,14 +352,9 @@ impl LashRuntime {
                     staged
                         .confirm_identities(&result.committed_usage_delta_identities)
                         .map_err(super::runtime_error_from_store_commit)?;
-                    let receipt_replayed = result.receipt_replayed;
                     self.state.apply_persisted_commit_result(result);
                     self.state.mark_node_ids_persisted(persisted_node_ids);
-                    if receipt_replayed {
-                        // The durable head is the replayed commit's.
-                        self.invalidate_resident_session_state();
-                        self.reload_invalidated_resident_session_state().await?;
-                    } else if switch.is_some() {
+                    if switch.is_some() {
                         // Every accepted open restarts the live interpreter
                         // from the new frame's seed, on the drive's own
                         // resident runtime (F5).
