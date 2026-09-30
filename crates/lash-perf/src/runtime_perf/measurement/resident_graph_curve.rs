@@ -349,3 +349,126 @@ fn assert_allocations_flat_in_resident_size(
     }
     Ok(())
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod commit_scaling_tests {
+    use super::*;
+    use lash_sansio::core_support::MessageSequenceCoreSupport;
+
+    #[expect(unsafe_code, reason = "clock_gettime writes to this local timespec")]
+    fn thread_cpu_ns() -> anyhow::Result<u64> {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: time is a valid writable timespec for this call.
+        if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(u64::try_from(time.tv_sec)? * 1_000_000_000 + u64::try_from(time.tv_nsec)?)
+    }
+
+    fn commit(
+        state: &mut RuntimeSessionState,
+        turn: usize,
+    ) -> anyhow::Result<lash_core::SessionReadView> {
+        let base_graph = Arc::new(state.session_graph.clone());
+        let base = base_graph.read_model();
+        let message =
+            checkpoint_message(format!("turn-{turn}"), MessageRole::User, "one turn".into());
+        let messages =
+            lash_sansio::MessageSequence::from_base_and_delta(base.messages, vec![message.clone()]);
+        let view = lash_core::SessionReadView::derived_from_persisted_state(
+            state,
+            state.policy.clone(),
+            turn,
+            state.protocol_turn_options.clone(),
+            base_graph.clone(),
+            messages,
+        );
+        // The editor releases its base before the resident adopts its appended tail.
+        drop(base_graph);
+        let mut graph = state.session_graph.clone();
+        let nodes = graph
+            .append_builder_in_namespace(format!("turn-{turn}"))
+            .append_messages_at([message], "2026-09-30T00:00:00Z".into());
+        let draft = nodes[0].node_id.clone();
+        graph.apply_append(&GraphAppend::Extend { nodes })?;
+        graph.remap_node_ids(
+            &state.session_id,
+            &[(draft, format!("committed-{turn}").into())],
+        );
+        graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
+            node_id: format!("committed-{turn}").into(),
+            timestamp: "2026-09-30T00:00:01Z".into(),
+        }]);
+        let mut snapshot = state.to_snapshot();
+        snapshot.session_graph = graph;
+        state.adopt_snapshot(snapshot);
+        std::hint::black_box(state.read_model());
+        Ok(view)
+    }
+
+    fn measure(turns: usize) -> anyhow::Result<(f64, f64, f64)> {
+        const SAMPLES: usize = 256;
+        let mut state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ));
+        state.ensure_agent_frame_initialized();
+        let mut held = Vec::with_capacity(turns + SAMPLES);
+        for turn in 0..turns {
+            held.push(commit(&mut state, turn)?);
+        }
+        let before = allocator_stats();
+        let cpu_before = thread_cpu_ns()?;
+        for turn in turns..turns + SAMPLES {
+            held.push(commit(&mut state, turn)?);
+        }
+        let cpu = (thread_cpu_ns()? - cpu_before) as f64 / SAMPLES as f64;
+        let allocations = alloc_delta(before, allocator_stats());
+        assert_eq!(state.agent_frames.len(), 1, "one frame without compaction");
+        assert_eq!(held[turns - 1].messages().len(), turns);
+        assert_eq!(held[turns + SAMPLES - 1].messages().len(), turns + SAMPLES);
+        Ok((
+            cpu,
+            allocations.bytes_allocated as f64 / SAMPLES as f64,
+            allocations.allocations as f64 / SAMPLES as f64,
+        ))
+    }
+
+    #[test]
+    fn one_lane_commit_cpu_and_allocations_stay_flat_at_200_and_1000_turns() -> anyhow::Result<()> {
+        // Alternate the sizes to avoid attributing allocator warmup to frame size.
+        let mut small = Vec::new();
+        let mut large = Vec::new();
+        for _ in 0..3 {
+            small.push(measure(200)?);
+            large.push(measure(1000)?);
+        }
+        let mean = |samples: &[(f64, f64, f64)]| {
+            (
+                samples.iter().map(|s| s.0).sum::<f64>() / samples.len() as f64,
+                samples.iter().map(|s| s.1).sum::<f64>() / samples.len() as f64,
+                samples.iter().map(|s| s.2).sum::<f64>() / samples.len() as f64,
+            )
+        };
+        let small = mean(&small);
+        let large = mean(&large);
+        println!(
+            "one-lane commit: 200 turns {small:?}; 1000 turns {large:?} (CPU ns, bytes, allocations per commit)"
+        );
+        assert!(
+            large.1 <= small.1 * 1.4,
+            "allocated bytes grow with frame length: {small:?} -> {large:?}"
+        );
+        assert!(
+            large.2 <= small.2 * 1.4,
+            "allocation count grows with frame length: {small:?} -> {large:?}"
+        );
+        assert!(
+            large.0 <= small.0 * 1.7,
+            "thread CPU grows with frame length: {small:?} -> {large:?}"
+        );
+        Ok(())
+    }
+}

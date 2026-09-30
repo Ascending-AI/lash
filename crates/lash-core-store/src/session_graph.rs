@@ -83,6 +83,14 @@ pub mod facade_ops {
         }
 
         fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId> {
+            if leaf_node_id == self.leaf_node_id.as_deref() {
+                return self
+                    .try_cache()
+                    .ok()?
+                    .active_frame_indices
+                    .last()
+                    .map(|index| &self.nodes[*index].node_id);
+            }
             let idx = self
                 .nearest_ancestor_index(leaf_node_id, |node| {
                     matches!(node.payload, SessionNodePayload::FrameOpen { .. })
@@ -1077,12 +1085,9 @@ impl SessionGraph {
         if mapping.is_empty() {
             return;
         }
-        // Only the mapped records are rewritten; the rest of the resident
-        // sequence stays pointer-identical to every snapshot. The
-        // parent-rewrite pass scans every resident node: nothing enforces
-        // parent-before-child order in a loaded graph, so a child can sit
-        // ahead of a mapped parent anywhere in the sequence. The scan reads
-        // ids only; just the records whose id or parent moves are replaced.
+        // The cache indexes children by stable resident position, so a
+        // parent's children resolve even in a child-before-parent layout.
+        // Renaming ids does not change positions or topology.
         let positions = self.resident_node_indices(mapping.iter().map(|(draft, _)| draft.as_str()));
         let derived_by_id = mapping
             .iter()
@@ -1100,18 +1105,15 @@ impl SessionGraph {
                 .node_id = derived.clone();
             renamed.push((draft.clone(), derived.clone(), index));
         }
-        for (index, node) in self.nodes.iter().enumerate() {
-            let Some(mapped_parent) = node
-                .parent_node_id
-                .as_ref()
-                .and_then(|parent| derived_by_id.get(parent).map(|id| (*id).clone()))
-            else {
-                continue;
-            };
-            edits
-                .entry(index)
-                .or_insert_with(|| node.as_ref().clone())
-                .parent_node_id = Some(mapped_parent);
+        for (draft, derived, index) in &renamed {
+            for child_index in self.cache().children_of(*index).iter().copied() {
+                let node = &self.nodes[child_index];
+                debug_assert_eq!(node.parent_node_id.as_ref(), Some(draft));
+                edits
+                    .entry(child_index)
+                    .or_insert_with(|| node.as_ref().clone())
+                    .parent_node_id = Some(derived.clone());
+            }
         }
         let leaf = self
             .leaf_node_id
@@ -1280,15 +1282,6 @@ impl SessionGraph {
         self.append_node_draft(SessionNodeDraft::plugin(plugin_type, body))
     }
 
-    fn try_active_path_nodes(&self) -> Result<Vec<&SessionNodeRecord>, crate::StoreError> {
-        Ok(self
-            .try_cache()?
-            .active_path_indices
-            .iter()
-            .map(|idx| self.nodes[*idx].as_ref())
-            .collect())
-    }
-
     /// The one shared projection of the active path, from the nearest
     /// `FrameOpen` ancestor of the leaf (the current frame, whether it is the
     /// window base or a later pending `FrameOpen`) to the leaf. A graph with
@@ -1365,7 +1358,8 @@ impl SessionGraph {
             .anchor()
             .and_then(|anchor| anchor.previous_frame_node_id.clone());
         let mut frames = Vec::new();
-        for node in self.try_active_path_nodes()? {
+        for index in self.try_cache()?.active_frame_indices.iter() {
+            let node = &self.nodes[*index];
             let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
                 continue;
             };
@@ -1436,33 +1430,13 @@ impl SessionGraph {
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
-        for node in self.nodes.iter().map(Arc::as_ref).chain(append.nodes()) {
+        for node in append.nodes() {
             crate::session_graph_integrity::validate_node_id(&node.node_id)?;
         }
-
-        // The resident id set is the uniqueness and parent-residency domain
-        // for the incoming batch. A warm cache's index answers membership
-        // directly; the cold path builds the borrowed set once (not twice as
-        // the previous implementation did).
-        let cold_resident_ids = if self.cache.get().is_none() {
-            Some(
-                self.nodes
-                    .iter()
-                    .map(|node| node.node_id.as_str())
-                    .collect::<HashSet<_>>(),
-            )
-        } else {
-            None
-        };
-        let resident_occupied = |node_id: &str| {
-            if let Some(cache) = self.cache.get() {
-                cache.by_id.get(node_id).is_some()
-            } else {
-                cold_resident_ids
-                    .as_ref()
-                    .is_some_and(|ids| ids.contains(node_id))
-            }
-        };
+        // Construction or the cold-cache build validates resident ids once.
+        // A warm graph only needs to validate the incoming batch.
+        let resident_index = &self.try_cache()?.by_id;
+        let resident_occupied = |node_id: &str| resident_index.get(node_id).is_some();
         let mut batch_ids = HashSet::with_capacity(append.nodes().len());
         for node in append.nodes() {
             if resident_occupied(node.node_id.as_str()) || !batch_ids.insert(node.node_id.as_str())

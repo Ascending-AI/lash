@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::borrow::Borrow;
+use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::session_graph::facade_ops::SessionNodeProjection;
@@ -8,86 +10,170 @@ use crate::session_model::SessionHistoryRecord;
 use crate::{BaseRenderCache, Message, NodeId};
 use lash_sansio::{AppendVec, same_history_record, same_message};
 
-/// Bound on the shared-base append delta. While `base` is shared, inserts
-/// accumulate in `appended` and every builder creation or cache detach
-/// clones them; the bound rebuilds a private base before that clone cost
-/// can grow toward the full resident set.
-const APPENDED_FOLD_BOUND: usize = 256;
-
-/// Resident node-id → position index shared across a graph's snapshots.
-///
-/// The bulk map lives behind an `Arc` so detaching a shared cache for an
-/// append copies the `Arc` rather than N ids. Whenever the base map is
-/// privately held, inserts — and any accumulated delta — fold straight
-/// into it, keeping `appended` empty. While the base is shared, inserts
-/// and removals accumulate in `appended` (consulted first on lookup; `None`
-/// removes a base id) and the fold bound rebuilds a private base rather
-/// than letting the delta — and therefore every index clone — grow to the
-/// whole resident set.
-#[derive(Clone, Debug)]
-pub(crate) struct NodeIdIndex {
-    base: Arc<HashMap<NodeId, usize>>,
-    appended: HashMap<NodeId, Option<usize>>,
+/// An index snapshot sees the writes preceding its length. Appends at the
+/// shared tip add one write without copying entries held by older readers.
+/// A writer branching from an older snapshot gets a private index of that
+/// prefix; ordinary commits always advance the tip.
+#[derive(Debug)]
+struct SnapshotIndex<K, V> {
+    data: Arc<StdMutex<IndexWrites<K, V>>>,
+    len: usize,
 }
 
-impl NodeIdIndex {
-    fn from_resident(by_id: HashMap<NodeId, usize>) -> Self {
+#[derive(Debug)]
+struct IndexWrites<K, V> {
+    writes: Vec<(K, V)>,
+    by_key: HashMap<K, Vec<usize>>,
+    holders: BTreeMap<usize, usize>,
+}
+
+impl<K: Eq + Hash + Clone, V: Clone> SnapshotIndex<K, V> {
+    fn from_entries(entries: impl IntoIterator<Item = (K, V)>) -> Self {
+        let mut data = IndexWrites {
+            writes: Vec::new(),
+            by_key: HashMap::new(),
+            holders: BTreeMap::new(),
+        };
+        for (key, value) in entries {
+            data.push(key, value);
+        }
+        let len = data.writes.len();
+        data.holders.insert(len, 1);
         Self {
-            base: Arc::new(by_id),
-            appended: HashMap::new(),
+            len,
+            data: Arc::new(StdMutex::new(data)),
         }
     }
 
-    pub(crate) fn get(&self, node_id: &str) -> Option<usize> {
-        match self.appended.get(node_id) {
-            Some(index) => *index,
-            None => self.base.get(node_id).copied(),
-        }
+    fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+    {
+        let data = self
+            .data
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let versions = data.by_key.get(key)?;
+        let ordinal = versions
+            .partition_point(|position| *position < self.len)
+            .checked_sub(1)?;
+        Some(data.writes[versions[ordinal]].1.clone())
     }
 
-    fn insert(&mut self, node_id: NodeId, index: usize) {
-        self.write(node_id, Some(index));
-    }
-
-    /// A node's id changed in place (a commit derives its drafts' ids).
-    pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
-        self.write(from.clone(), None);
-        self.write(to, Some(index));
-    }
-
-    fn write(&mut self, node_id: NodeId, index: Option<usize>) {
-        if let Some(base) = Arc::get_mut(&mut self.base) {
-            fold_into(base, self.appended.drain());
-            fold_into(base, [(node_id, index)]);
+    fn insert(&mut self, key: K, value: V) {
+        let mut data = self
+            .data
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let visible_tip = data.holders.last_key_value().map_or(0, |(len, _)| *len);
+        data.truncate(visible_tip);
+        if self.len < data.writes.len() {
+            let private = Self::from_entries(data.writes[..self.len].iter().cloned());
+            drop(data);
+            *self = private;
+            self.insert(key, value);
             return;
         }
-        self.appended.insert(node_id, index);
-        if self.appended.len() >= APPENDED_FOLD_BOUND {
-            let mut folded = (*self.base).clone();
-            folded.reserve(self.appended.len());
-            fold_into(&mut folded, self.appended.drain());
-            self.base = Arc::new(folded);
-        }
+        data.push(key, value);
+        data.unregister(self.len);
+        self.len += 1;
+        *data.holders.entry(self.len).or_default() += 1;
     }
 
     fn reserve(&mut self, additional: usize) {
-        self.appended.reserve(additional);
+        let mut data = self
+            .data
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        data.writes.reserve(additional);
+        data.by_key.reserve(additional);
     }
 }
 
-fn fold_into(
-    base: &mut HashMap<NodeId, usize>,
-    delta: impl IntoIterator<Item = (NodeId, Option<usize>)>,
-) {
-    for (node_id, index) in delta {
-        match index {
-            Some(index) => {
-                base.insert(node_id, index);
-            }
-            None => {
-                base.remove(&node_id);
+impl<K, V> Clone for SnapshotIndex<K, V> {
+    fn clone(&self) -> Self {
+        let mut data = self
+            .data
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *data.holders.entry(self.len).or_default() += 1;
+        Self {
+            data: Arc::clone(&self.data),
+            len: self.len,
+        }
+    }
+}
+
+impl<K, V> Drop for SnapshotIndex<K, V> {
+    fn drop(&mut self) {
+        self.data
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unregister(self.len);
+    }
+}
+
+impl<K, V> IndexWrites<K, V> {
+    fn unregister(&mut self, len: usize) {
+        if let Some(count) = self.holders.get_mut(&len) {
+            *count -= 1;
+            if *count == 0 {
+                self.holders.remove(&len);
             }
         }
+    }
+}
+
+impl<K: Eq + Hash + Clone, V> IndexWrites<K, V> {
+    // A discarded speculative writer must not force the next writer to copy
+    // the resident prefix. Only writes no remaining snapshot can see retire.
+    fn truncate(&mut self, len: usize) {
+        while self.writes.len() > len {
+            if let Some((key, _)) = self.writes.pop()
+                && let Some(versions) = self.by_key.get_mut(&key)
+            {
+                versions.pop();
+                if versions.is_empty() {
+                    self.by_key.remove(&key);
+                }
+            }
+        }
+    }
+
+    fn push(&mut self, key: K, value: V) {
+        self.by_key
+            .entry(key.clone())
+            .or_default()
+            .push(self.writes.len());
+        self.writes.push((key, value));
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NodeIdIndex(SnapshotIndex<NodeId, Option<usize>>);
+
+impl NodeIdIndex {
+    fn from_resident(by_id: HashMap<NodeId, usize>) -> Self {
+        Self(SnapshotIndex::from_entries(
+            by_id.into_iter().map(|(id, index)| (id, Some(index))),
+        ))
+    }
+
+    pub(crate) fn get(&self, node_id: &str) -> Option<usize> {
+        self.0.get(node_id).flatten()
+    }
+
+    fn insert(&mut self, node_id: NodeId, index: usize) {
+        self.0.insert(node_id, Some(index));
+    }
+
+    pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
+        self.0.insert(from.clone(), None);
+        self.0.insert(to, Some(index));
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        self.0.reserve(additional);
     }
 }
 
@@ -114,6 +200,8 @@ struct ActiveReadModel {
 pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
     pub(crate) active_path_indices: AppendVec<usize>,
+    pub(crate) active_frame_indices: AppendVec<usize>,
+    children: SnapshotIndex<usize, AppendVec<usize>>,
     /// The one memoized projection, of the active path from its last
     /// `FrameOpen` (ADR 0112 §9).
     ///
@@ -133,6 +221,8 @@ impl Clone for SessionGraphCache {
         Self {
             by_id: self.by_id.clone(),
             active_path_indices: self.active_path_indices.clone(),
+            active_frame_indices: self.active_frame_indices.clone(),
+            children: self.children.clone(),
             active_read: StdMutex::new(
                 self.active_read
                     .lock()
@@ -150,9 +240,31 @@ impl SessionGraphCache {
             ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
         active_path_indices.reverse();
 
+        let active_frame_indices = active_path_indices
+            .iter()
+            .copied()
+            .filter(|index| {
+                matches!(
+                    graph.nodes[*index].payload,
+                    SessionNodePayload::FrameOpen { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut children = HashMap::<usize, Vec<usize>>::new();
+        for (index, node) in graph.nodes.iter().enumerate() {
+            if let Some(parent) = node.parent_node_id.as_ref().and_then(|id| by_id.get(id)) {
+                children.entry(*parent).or_default().push(index);
+            }
+        }
         let mut cache = Self {
             by_id: NodeIdIndex::from_resident(by_id),
             active_path_indices: AppendVec::from(active_path_indices),
+            active_frame_indices: AppendVec::from(active_frame_indices),
+            children: SnapshotIndex::from_entries(
+                children
+                    .into_iter()
+                    .map(|(index, children)| (index, AppendVec::from(children))),
+            ),
             active_read: StdMutex::new(ActiveReadModel {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
@@ -167,13 +279,12 @@ impl SessionGraphCache {
 
     pub(crate) fn rebuild_read_model(&mut self, graph: &SessionGraph) {
         let frame_start = self
-            .active_path_indices
-            .iter()
-            .rposition(|idx| {
-                matches!(
-                    graph.nodes[*idx].payload,
-                    SessionNodePayload::FrameOpen { .. }
-                )
+            .active_frame_indices
+            .last()
+            .and_then(|frame_index| {
+                self.active_path_indices
+                    .iter()
+                    .position(|index| index == frame_index)
             })
             .unwrap_or(0);
         let frame_path = &self.active_path_indices[frame_start..];
@@ -240,12 +351,24 @@ impl SessionGraphCache {
         node: &SessionNodeRecord,
         previous_leaf_node_id: Option<&str>,
     ) {
+        if let Some(parent_index) = node
+            .parent_node_id
+            .as_deref()
+            .and_then(|id| self.by_id.get(id))
+        {
+            let mut children = self.children.get(&parent_index).unwrap_or_default();
+            children.push(node_index);
+            self.children.insert(parent_index, children);
+        }
         self.by_id.insert(node.node_id.clone(), node_index);
         let parent_matches_leaf = node.parent_node_id.as_deref() == previous_leaf_node_id;
         if !parent_matches_leaf {
             return;
         }
         self.active_path_indices.push(node_index);
+        if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+            self.active_frame_indices.push(node_index);
+        }
         let read = self
             .active_read
             .get_mut()
@@ -271,6 +394,10 @@ impl SessionGraphCache {
         }
     }
 
+    pub(crate) fn children_of(&self, node_index: usize) -> AppendVec<usize> {
+        self.children.get(&node_index).unwrap_or_default()
+    }
+
     pub(crate) fn reserve_append_capacity(
         &mut self,
         additional_nodes: usize,
@@ -291,45 +418,61 @@ impl SessionGraphCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
-    fn appended_delta_folds_at_the_bound_and_stays_resolvable() {
-        let mut index = NodeIdIndex::from_resident(HashMap::new());
-        // A shared base forces inserts into the delta; the fold bound keeps
-        // the delta — and therefore every index clone — bounded.
-        let held = index.clone();
-        for ordinal in 0..APPENDED_FOLD_BOUND + 8 {
-            index.insert(format!("n{ordinal}").into(), ordinal);
+    fn index_snapshots_keep_their_version_across_appends_and_renames() {
+        let mut index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
+        let initial = index.clone();
+        for ordinal in 1..2000 {
+            let draft = NodeId::from(format!("draft-{ordinal}"));
+            index.insert(draft.clone(), ordinal);
+            let before_rename = index.clone();
+            index.rename(&draft, format!("derived-{ordinal}").into(), ordinal);
+            assert_eq!(before_rename.get(draft.as_str()), Some(ordinal));
+            assert_eq!(before_rename.get(&format!("derived-{ordinal}")), None);
         }
-        assert!(index.appended.len() < APPENDED_FOLD_BOUND);
-        for ordinal in 0..APPENDED_FOLD_BOUND + 8 {
-            assert_eq!(index.get(&format!("n{ordinal}")), Some(ordinal));
-        }
-        // The held clone's view froze at clone time.
-        assert!(held.get("n0").is_none());
+        assert!(
+            Arc::ptr_eq(&initial.0.data, &index.0.data),
+            "advancing commits never copy the base"
+        );
+        assert_eq!(initial.get("root"), Some(0));
+        assert_eq!(initial.get("derived-1"), None);
+        assert_eq!(index.get("draft-1"), None);
+        assert_eq!(index.get("derived-1"), Some(1));
+        assert_eq!(index.get("derived-1999"), Some(1999));
     }
 
     #[test]
-    fn privately_held_base_absorbs_appends_without_a_delta() {
-        let mut index = NodeIdIndex::from_resident(HashMap::new());
-        for ordinal in 0..APPENDED_FOLD_BOUND * 2 {
-            index.insert(format!("n{ordinal}").into(), ordinal);
-        }
-        assert!(index.appended.is_empty());
-        assert_eq!(index.base.len(), APPENDED_FOLD_BOUND * 2);
-        assert_eq!(index.get("n511"), Some(511));
+    fn an_index_branch_never_sees_another_branches_writes() {
+        let mut first = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
+        let mut branch = first.clone();
+        first.insert("first".into(), 1);
+        first.rename(&"root".into(), "renamed".into(), 0);
+        branch.insert("branch".into(), 1);
+        assert_eq!(branch.get("root"), Some(0));
+        assert_eq!(branch.get("first"), None);
+        assert_eq!(branch.get("renamed"), None);
+        assert_eq!(first.get("branch"), None);
+        assert_eq!(first.get("renamed"), Some(0));
+        branch.rename(&"root".into(), "branch-root".into(), 0);
+        assert_eq!(branch.get("branch-root"), Some(0));
+        assert_eq!(first.get("branch-root"), None);
+    }
 
-        // Once a sharing clone drops, the next insert folds the accumulated
-        // delta into the now-private base.
-        let mut shared = NodeIdIndex::from_resident(HashMap::new());
-        let held = shared.clone();
-        shared.insert("a".into(), 0);
-        shared.insert("b".into(), 1);
-        drop(held);
-        shared.insert("c".into(), 2);
-        assert!(shared.appended.is_empty());
-        assert_eq!(shared.get("a"), Some(0));
-        assert_eq!(shared.get("c"), Some(2));
+    #[test]
+    fn discarded_index_writes_are_reclaimed_without_copying_the_prefix() {
+        let index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
+        for ordinal in 0..300 {
+            let mut speculative = index.clone();
+            speculative.insert(format!("discarded-{ordinal}").into(), 1);
+            assert!(Arc::ptr_eq(&index.0.data, &speculative.0.data));
+            assert_eq!(index.get(&format!("discarded-{ordinal}")), None);
+        }
+        let mut committed = index.clone();
+        committed.insert("committed".into(), 1);
+        assert!(Arc::ptr_eq(&index.0.data, &committed.0.data));
+        assert_eq!(committed.get("discarded-299"), None);
+        assert_eq!(committed.get("committed"), Some(1));
+        assert_eq!(index.get("committed"), None);
     }
 }
