@@ -4,7 +4,7 @@
 //! A root's follow-on physical turn admits a row at its `AfterWork`
 //! checkpoint, the model answers it, and the worker dies at the commit that
 //! would settle it. The row stays bound to the unfinished root: nothing a
-//! worker's death does releases it (ADR 0101, FIG-3927 amendment). Then
+//! worker's death does releases it (ADR 0101 §7). Then
 //! another drive runs the session on a fresh journal with a peer's input
 //! waiting, the dead drive is redriven on its own journal, and later drives
 //! run until the session is idle.

@@ -102,7 +102,7 @@ the answer decided FIG-526, and it will decide the next one.
   invocation keeps its journal. Every host settles the same failure the same
   way.
 - Decided 2026-09-24, not yet implemented (FIG-3600, [ADR 0101's
-  amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)):
+  section A1](0101-one-session-ingress-carries-every-admitted-item.md#a1-the-ingress-is-the-only-way-a-turn-starts)):
   continuation is the substrate's for **every** turn, because no caller-driven
   turn exists after that cutover. The backend's work driver runs each turn.
   A live fault is re-driven under the substrate's policy with the same turn id,

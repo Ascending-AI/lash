@@ -2,80 +2,52 @@
 
 Status: Accepted
 
-Amended 2026-09-24 (FIG-2997): static trigger facts no longer live in the
-linker's `Scope`, and compilation derives no default trigger key. A supplied
-`subscription_key` must be a non-empty string literal outside the
-`lash.internal/` prefix (`LinkError::InvalidTriggerSubscriptionKey`). An absent
-key is derived when the registration is materialized at run time, from the
-process name and trigger source (`derived_trigger_subscription_key`). The
-trigger-scope paragraph and the generated-trigger-key consequence below are
-historical.
-
 ## Context
 
-Lashlang previously interpreted an expression through several independent
-recursive walks. Lowering, inferred bindings, workflow type facets, completion
-facts, and compiler-generated trigger subscription keys each encoded their own
-variant dispatch or lexical scope rules. Those copies had already diverged:
-JavaScript operators and maps could report different types to the linker and
-editor, index and unary operands could escape validation, and the trigger-key
-collector treated a `try` body assignment as visible in its catch path even
-though normal lowering does not.
-
-That last mismatch changed durable identity. Given an outer static trigger
-source, a different source assignment in a `try` body, and a registration in
-the catch path, the collector selected the body source. The catch path actually
-starts from the pre-`try` scope, so the generated subscription key had been
-derived from a source that was not visible on that path.
+Validation, inferred outputs, completion facts, and workflow type facets need
+the same expression and lexical-scope semantics. Independent recursive walks
+can disagree about operands, shadowing, and branch visibility.
 
 ## Decision
 
-The linker's lowering pass is the sole recursive structural dispatcher and
-lexical-scope authority for `Expr`. Every expression lowers to one total
-`Binding`; an empty block has the `any` binding. Optional bindings remain only
-for lookups and save/restore operations.
+The linker's lowering pass owns recursive structural dispatch and lexical
+scope for `Expr`. Every successful lowering returns one total `Binding`; an
+empty block has the `any` binding. Optional bindings represent lookups and
+save/restore operations, not successful expression results.
 
-Completion and workflow-facet observations attach to lowering entry and exit.
-They may record facts or best-effort diagnostics, but do not recurse or maintain
-a second scope table. Workflow facets retain their AST-pointer association.
-The existing bounded lowering methods remain separate so the 2 MiB stack-budget
-mechanism does not acquire one large recursive frame.
+Completion, expected-type, and workflow observations attach to lowering entry
+and exit. Facts use the expression's `AstPath` in the program. Observers consume
+that walk rather than implement another expression dispatcher or scope table.
 
-Static trigger facts live beside ordinary bindings in the same `Scope`. Binding
-or restoring a name changes both facts together. Branch joins retain a static
-fact only when it is identical on every reachable path. Comprehension binders
-hide and later restore an outer fact. A `try` body and catch each start from the
-pre-`try` scope, their results join before `finally`, and the body cannot leak a
-source into the catch. Default-trigger analysis consumes these lowering facts
-and writes the derived key into its lowered registration at that site. If
-lowering cannot prove one static source and target there, compilation refuses
-the derived key rather than selecting another path's value. A key is not
-carried in a positional queue for a later tree walk: assignment indexes and
-other nested expression positions must retain both their lowered AST and their
-own identity.
+Each variant lowers in a bounded method, and dispatch arms return its `Result`
+directly. Combining variants or result temporaries into one recursive frame
+exceeds the host's 2 MiB stack budget at admitted nesting depth.
 
-The shared result rules are `bool` for JavaScript comparisons, `bool`, `str`,
-or `float` for the supported JavaScript unary operators, and `any` for maps and
-other JavaScript binary operators. A `try` retains its prior `any` result while
-its body and catch are still lowered for validation, scope effects, and
-completion facts. Index and unary expressions always lower their operands.
+`try` body and catch scopes each start from the pre-`try` scope. The catch
+binder hides and restores its outer binding. Body and catch results join before
+`finally`; a body assignment cannot define the catch's incoming scope. A `try`
+has the `any` binding while all paths lower for validation, scope effects, and
+completion. Index expressions lower both target and index operands.
 
-The corrected `try` scope is an accepted canonical-output change: the same
-accepted program AST now generates its catch-path subscription key from the
-outer source that is actually visible. The Lashlang semantic hash therefore
-advances from v7 to v8. A v7 module is not reinterpreted as v8; deployments that
-require the current generation must refuse it and recompile and republish its
-source, recomputing compiler-generated registrations. The parser and AST,
-bytecode, continuation format, and VM ABI do not change.
+Trigger subscription-key materialization belongs to runtime registration.
+Lowering validates supplied keys; the runtime derives an absent key from the
+process and trigger source. Scope stores no static trigger facts.
+
+Evidence: `crates/lashlang/src/linker/lower_expr.rs:4`, `:19`, `:60`, `:206`,
+`:1251`, `:1269`. Trigger-key validation and derivation live in
+`crates/lashlang/src/linker/pass_validation.rs` and
+`crates/lash-core-execution/src/triggers/router.rs:299` and
+`crates/lash-lashlang-runtime/src/trigger_commands.rs:511`.
+
+## Alternatives considered
+
+A separate observer walk duplicates structural and scope semantics. Entry and
+exit observations attach facts to validated lowering. One large recursive
+method increases stack cost at every nesting level; variant methods preserve
+the stack bound.
 
 ## Consequences
 
-- Linker diagnostics, inferred process outputs, completion facts, and workflow
-  facets observe the same expression traversal and binding result.
-- New expression variants or scope forms have one structural implementation
-  point. Observers can add facts without becoming traversal authorities.
-- Generated trigger keys follow the scope of the execution path that registers
-  them. Shadowed or path-dependent sources are rejected when no single static
-  key can be proven.
-- All identities rooted in the Lashlang semantic hash move to v8 even when a
-  particular module does not contain the corrected `try` shape.
+- Diagnostics, inferred outputs, completion facts, and facets share lowering.
+- Expression variants have one structural implementation point.
+- Durable trigger keys depend on materialized registration inputs.
