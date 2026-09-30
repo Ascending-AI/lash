@@ -139,15 +139,13 @@ and this ADR's language carve-outs remain as defined above.
 surface, so there is no second dialect for a fragment to be written in by
 mistake. The defect this ADR closes cannot recur.
 
-**Dead.** `DialectPromptVocabulary` and the words it owned (language name, cell
-tag, cell noun, print call and statement, finish form, continue-as forms,
-`tool_call_path`). The two-dialect prompt walker and its cross-dialect
-assertion. The registered-but-inactive cell recognition rule, which existed
-because two tag sets could collide. The `{{…}}` tool-prose token mechanism and
-`dialect::TOOL_PROSE_TOKENS`, together with the registration check that refused
-prose naming *any* registered dialect — with one dialect that check would refuse
-the only correct spelling. Tool prose may name TypeScript. FIG-3021 owns the
-mechanics.
+**Historical two-dialect rules.** The cross-dialect assertion and the
+registered-but-inactive cell recognition rule are retired because there is
+only one language. `DialectPromptVocabulary`, `tool_call_path`, and the
+single-language prompt walker remain, as the amendment below states. The
+`{{…}}` tool-prose token mechanism, `dialect::TOOL_PROSE_TOKENS`, and the
+registration check that refused prose naming any dialect are retired. Tool
+prose may name TypeScript; FIG-4093 completed that cutover.
 
 Amended 2026-09-24: `DialectPromptVocabulary`, `tool_call_path`, and the prompt
 walker with its `SUBSTRATE_CARVE_OUTS` remain over the single TypeScript
@@ -160,7 +158,15 @@ reserved `__` namespace are hidden from the host-environment section rather
 than renamed, because renaming moves durable identity. `lashlang_step`,
 `process:lashlang:v3:…` and `lashlang:effect:…` keep their spellings for the
 same reason; under 0096 they name the IR and VM, which is what they always
-described, so they are no longer foreign words in the prompt and the carve-out
-register that tracked them as debt is retired. The trace record's `language`
+described. Their treatment as cross-dialect debt is historical; the retained
+walker still lists explicit substrate carve-outs so those identities do not
+fail its retired-word check. The trace record's `language`
 field and the Lashlang-named event, JSONL file and graph API are unchanged. A
 host that assembles its own prompt copy still owns the same rule for it.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The single-TypeScript vocabulary and walker remain; retirement applies to the two-language rules and tool-prose token machinery.
+`no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
+[the walker tests](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
+checks prompt fragments while retaining explicit substrate carve-outs.

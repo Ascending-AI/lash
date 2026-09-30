@@ -36,29 +36,29 @@ present, then open. The remote protocol gains no verb: the serving host maps a
 `RemoteTurnRequest` to create-or-use, then send, and decides whether a request
 may create. The Decision below is edited to match.
 
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+Amended 2026-09-30 (FIG-4163): the FIG-3669 pending-implementation note and
+Session Execution Lease passages are historical under
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the live session's Session Execution Lease; the
-split between the two authorities stays. Those passages stay as written until
-the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session
-lease) rewrites them.
+and ADR 0101's drive-fence cutover. Restate owns serialized session drives,
+and the sealed drive fence gates execution writes. The live/durable authority
+split remains.
 
 ## Context
 
 Reaching a session's durable queue required `LashSession`, and the only way to
-get one was `core.session(id).open()`. Open builds a whole runtime: it
-reconciles persisted process-observer intents, admits and leases the store,
-materialises every plugin, restores the tool registry and protocol state,
-emits `SessionRestored`, and admits the session's pending processes. A host
+get one was `core.session(id).open()`. At the original split, open built a
+whole runtime: it reconciled persisted process-observer intents, admitted and
+leased the store, materialised every plugin, restored the tool registry and
+protocol state, emitted `SessionRestored`, and admitted pending processes. A host
 that only wanted to list pending turn input paid all of it. On a core whose
 plugin stack does not carry a persisted session's tool sources, it also
 orphaned every persisted tool and warned — once per poll (FIG-3353).
 
 The shape was the defect. `LashSession` fused two authorities: the operations
 that need a core able to *run* this session, and the operations that are
-answerable from its store and stay correct while another process holds the
-Session Execution Lease. Nothing in the types told a host which was which.
+answerable from its store and stay correct beside another process's engine-owned
+session drive. The Session Execution Lease described in the original split is
+historical under ADR 0104. Nothing in the types told a host which was which.
 
 The split was already under way and had drifted. `LashCore::enqueue_turn_input`
 ("persist host input without opening a competing session writer"),
@@ -75,8 +75,8 @@ The session builder has three terminal verbs, and exactly one of them creates.
 
 * `core.session(id).open()` yields the **live session**. It never creates: a
   missing id is `EmbedError::UnknownSession` (FIG-4112).
-* `core.session(id).durable()` yields a **Durable Session**: no Session
-  Execution Lease, no plugin session, no tool registry, no lifecycle events, no
+* `core.session(id).durable()` yields a **Durable Session**: no live runtime
+  or execution authority, no plugin session, no tool registry, no lifecycle events, no
   observer-intent reconcile, no process admission. It never creates.
 * `core.session(id).create(creation)` writes the session's catalog entry and
   its initial config head — the `SessionCreation`'s spec, relation and
@@ -89,7 +89,7 @@ The session builder has three terminal verbs, and exactly one of them creates.
 The Durable Session owns every operation that is correct beside another
 process's writer: enqueue turn input (validation, driver wake and receipt
 preserved), `pending_turn_inputs`, the three pending-input cancels,
-`queued_work`, `cancel_queued_work_batch`, both `abandon_*_claim`,
+`queued_work`, `cancel_queued_work_batch`,
 `turn_input_applications` and its remote form, and the settled `read` /
 `exists` / `was_deleted`. They no longer exist on
 `LashSession`, and `LashCore::{enqueue_turn_input, read_session,
@@ -108,8 +108,8 @@ behaves identically whichever handle issued it.
 ### Membership rule
 
 An operation belongs to the Durable Session when it is answerable from the
-session's store and remains correct while another process holds the Session
-Execution Lease. Everything else stays on the live session or on Session
+session's store and remains correct beside another process's engine-owned
+session drive. Everything else stays on the live session or on Session
 Administration:
 
 * `delete` needs a scoped `SessionDeleteContext` and closure-pin checks.
@@ -267,12 +267,12 @@ authority is either `Open(policy)` or `LiveInstall`, and `LiveInstall` has
 nowhere to put a policy, so a future install site cannot acquire the power to
 refuse by passing one.
 
-A refusal promises: no config or state commit, no protocol restore, no
-`SessionRestored`, and a released Session Execution Lease (a following open
-acquires it). It does not promise zero side effects. By the time tool state is
-installed, the observer-intent reconcile has run, the admitted load has claimed
-and released its lease, plugins have materialised and `initialize_session` has
-run. A zero-side-effect refusal would need a separate preflight contract.
+A refusal promises no config or state commit, no protocol restore and no
+`SessionRestored`. The old released-Session-Execution-Lease promise is
+historical under ADR 0104; a following open needs no SQL execution lease.
+It does not promise zero side effects. By the time tool state is installed,
+observer-intent reconcile and admitted load have run, plugins have materialised
+and `initialize_session` has run. A zero-side-effect refusal would need a separate preflight contract.
 
 ### What an orphaned commit leaves durable
 
@@ -324,3 +324,12 @@ The facade exposes it as
 config (`RuntimeControlConfig::tool_surface_open_mode`), so every construction
 the open performs sees the same choice. Hosts that need durable input without
 a runtime at all should still prefer `durable()`, which builds nothing.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The pending SQL-engine cutover and lease-based membership rule are historical; durable operations remain valid beside engine-owned execution, and the removed claim-abandon methods are not current handle operations.
+[The Durable Session API](../../crates/lash/src/durable_session.rs),
+[shared durable operations](../../crates/lash-core/src/runtime/durable_queue.rs),
+and [the Restate session driver](../../crates/lash-restate/src/session_driver.rs)
+define the current split; `durable_acquisition_is_non_creating_and_happens_once_per_handle`
+in [the durable-session tests](../../crates/lash/src/tests/durable_session.rs) pins non-creating acquisition.

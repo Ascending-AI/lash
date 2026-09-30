@@ -23,10 +23,9 @@ hand.
 - **Both modes route through it.** A standard native tool call and a tool
   invoked inside a code-block (Lashlang) execution both go through
   `tool_execution`, so each call produces exactly one Started + one Completed
-  pair on every channel. Containment metadata — `graph_key` (the enclosing code
-  block) and `parent_call_id` (the parent `batch` dispatch) — is attached at the
-  seam, so consumers read containment from the events instead of reconstructing
-  it from emission order.
+  pair on every channel. The execution context retains the enclosing code-block
+  graph key, and trace events carry the issuing language node id when present.
+  Tool identity and provider correlation remain explicit event fields.
 - **Consumers derive from the typed model.** `TraceEvent::kind()` is the single
   source of truth for the `type` tag strings; the trace viewer builds a typed
   `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*
@@ -96,3 +95,11 @@ consumers in sync" into a compile error instead of a code-review hope.
 Item 26: The closed `TraceEvent` vocabulary and its kind mapping are exhaustive
 within trace, but compilation does not force every `TurnEvent` to map to a
 `TraceEvent`. The mapping claim above is narrowed accordingly.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+Parent-batch dispatch and its `parent_call_id` field are historical, removed by `04ed702406` under ADR 0116; the shared per-tool emission seam survives.
+[The execution context](../../crates/lash-core-execution/src/session/execution_context.rs)
+and `rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step` in
+[the RLM streaming tests](../../crates/lash/src/tests/turn_streaming/rlm_streaming.rs)
+pin the current trace pair.

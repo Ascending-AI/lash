@@ -15,16 +15,17 @@ recovery policies for that condition.
 
 Containment also creates child-task join boundaries. If those joins collapse a
 panic into a generic task failure, production and simulation commit different
-typed outcomes for the same host defect. In-memory store transactions add a
-related constraint: recovering a poisoned guard is safe only while a critical
-section cannot call arbitrary host code and unwind again through partially
-updated state.
+typed outcomes for the same host defect. The former in-memory store transaction
+constraint is historical: ADR 0104 removed that effect-engine implementation.
+Standard-lock poison recovery remains the shared lock acquisition contract.
 
 ## Decision
 
-- Lash has exactly two dynamic containment seams: `Provider::complete` and
-  `ToolProvider::execute`. They convert a panic into the non-retryable typed
-  outcomes `provider_panicked` and `tool_panicked`.
+- Lash has two attempt containment seams: `Provider::complete` and
+  `ToolProvider::execute`, which convert panics into non-retryable typed
+  `provider_panicked` and `tool_panicked` outcomes. Auxiliary provider callbacks
+  `close` and `reconcile_usage` also contain panics as non-retryable
+  `ProviderPanicked`, with the same process-scoped loudness policy.
 - Child/effect task joins inspect `JoinError::is_panic`, preserve those typed
   panic outcomes rather than generic join failures, and apply loudness only
   after the typed result has been formed. Cancellation remains a distinct join
@@ -37,10 +38,9 @@ updated state.
   with `PoisonError::into_inner`. Poison is not a typed error tier. The shared
   `lash_sansio::sync` traits, re-exported through `lash_core::sync` and
   `lash::sync`, are the canonical acquisition vocabulary.
-- In-memory store write transactions deliberately recover poison. Their
-  critical sections must remain free of host-supplied code. Host clock reads and
-  any other dynamic calls happen before the transaction lock is acquired, and
-  only inert values cross into the closure.
+- Historical under [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md):
+  the removed in-memory store write transactions recovered poison and kept
+  host calls outside their critical sections. This is not a current store API.
 
 ## Consequences
 
@@ -52,8 +52,7 @@ updated state.
   provider and tool hosts own replacement or repair before reuse.
 - Lock recovery stays uniform and greppable. Domain invariants are repaired by
   the operation that owns them rather than by a generic poison-error taxonomy.
-- Adding host calls to an in-memory write transaction violates this ADR and
-  requires hoisting those calls out of the critical section.
+- The removed in-memory transaction rule imposes no current store API requirement.
 
 ## Amendment (FIG-4125, 2026-09-29)
 
@@ -61,3 +60,9 @@ Item 23:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 supersedes obsolete SQL effect-engine assumptions. The host panic-containment
 rule survives.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The two attempt seams coexist with auxiliary provider callback containment and child/effect task joins; the removed memory-transaction paragraphs are historical under ADR 0104.
+[`ProviderHandle::close`, `reconcile_usage`, and `provider_close_panicked`](../../crates/lash-core-llm/src/provider/handle.rs)
+form the typed callback failure before applying process-scoped loudness.

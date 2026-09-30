@@ -132,40 +132,27 @@ That release carries `Release-Notes` and updates the README and relevant docs so
 existing direct-package consumers can move to `lash-runtime`, its features, and
 the facade module that owns their contract.
 
-### 6. Facade evidence is compiled and mechanically gated
+### 6. Facade evidence and current enforcement
 
 The FIG-861 successor doctrine is:
 
-> Every facade API is exercised by a compiled example or doctest. Enforced
-> mechanically wherever FIG-2090's compiler derivation reaches; the remainder
-> is a review-time expectation recorded in this ADR — never a prose ledger.
+> Every facade API should be exercised by a compiled example or doctest. This
+> is review doctrine, not a universal compiler-derived coverage gate; it does
+> not require a handwritten prose ledger.
 
 The hand ledger — `docs/api-example-coverage.toml` and its prose disposition,
 alias, evidence, and tombstone machinery — is retired unconditionally by
 FIG-2094. It is not narrowed to facade items or recreated under another name.
 
-The replacement enforcement is a generated facade snapshot diff,
-`cargo-semver-checks` (advisory until the cutover release ships, so it cannot
-block the intentionally breaking release this ADR mandates), an external-type
-allowlist, a facade-only import scan, and `deny(missing_docs)`. Together these gates answer which facade paths exist,
-whether a release breaks them, whether internal dependency types leak through
-them, whether repository consumers bypass them, and whether they are
-documented. Compiled examples and doctests answer whether the facade is
-exercised; review covers only the part FIG-2090 cannot yet derive mechanically,
-without creating handwritten inventory rows.
+Historical enforcement, removed under FIG-2933 (`8698820631`), comprised the
+generated facade snapshot diff, semver checks, an external-type allowlist,
+missing-docs enforcement and compiler scraping. Their original blocking or
+advisory plans no longer describe current release or pull-request gates.
 
-The restored mechanical backstop compiler-scrapes direct function and method
-calls from `agent-service`, `agent-workbench`, and `slack-clone` against the
-default-feature `lash` facade and the public, non-hidden `lash_restate`
-choreography surface. The Restate scrape enables `agent-service/restate`; the
-upstream `restate_sdk` re-export is not adapter-owned surface. These callable
-identities are the blocking scope once the mechanically reported residual gap
-set reaches zero. Until then the pull-request job remains explicitly advisory
-and publishes every gap rather than silently waiving it. Fields, variants,
-types, concrete trait implementations, doctests, and other uses the stock
-scraper cannot derive remain a review-time expectation. Including the adapter
-in this evidence scope does not make its internal package a second promised
-package.
+Current enforced scope is the facade-only import scan, the feature-plan check
+and compile-fail fixtures. They check consumer imports, the declared feature
+plan and forbidden API access respectively; none certifies universal semantic
+example coverage. Reviewers retain the compiled-example doctrine above.
 
 ## Alternatives considered
 
@@ -181,8 +168,8 @@ package.
   migrations.
 * **Keep a facade-only prose inventory.** Rejected. It retains the recurring
   manual judgment and alias bookkeeping this decision replaces. Generated
-  surface, compatibility, leakage, import, documentation, and compiled-usage
-  facts are the enforcement model.
+  facts were the original enforcement model; the removed gates are historical
+  under FIG-2933, and section 6 states the current scope.
 
 ## Consequences
 
@@ -198,10 +185,9 @@ package.
   This is intentionally breaking and has no shim period.
 * Optional facade features add dependency and compile-time cost only when a host
   selects the corresponding backend or extension; the default remains empty.
-* Surface review moves from handwritten per-item explanations to generated
-  diffs and compiler-backed facts. FIG-861's compiled-example doctrine remains,
-  with review-time judgment only where derivation is not yet mechanically
-  complete.
+* Surface review no longer uses a handwritten per-item ledger. Section 6
+  states the current bounded enforcement, and FIG-861's universal
+  compiled-example expectation remains review doctrine.
 
 ### Migration
 
@@ -211,3 +197,10 @@ surface and compatibility gates, integrator-home completion, documentation and
 release migration, and unconditional ledger retirement. Those tickets own the
 mechanics and validation. This ADR records the end-state contract and makes no
 code, manifest, release-gate, or source change itself.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The FIG-2933 deletion supersedes the former facade snapshot, semver, external-type, missing-docs and compiler-scraping gate promises; universal-example coverage remains review doctrine.
+Current enforcement is [import scanning](../../scripts/check_facade_only_examples.py),
+[feature-plan validation](../../scripts/check_feature_coverage.py), and
+[compile-fail fixtures](../../crates/lash/tests/ui.rs).

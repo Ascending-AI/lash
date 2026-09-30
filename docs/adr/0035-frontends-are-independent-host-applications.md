@@ -9,8 +9,10 @@ releases.
 Lash owns reusable runtime, protocol, provider, persistence, plugin, tooling,
 and performance contracts. A frontend consumes those contracts at one reviewed,
 exact Lash revision and advances that revision through an explicit compatibility
-change. Lash releases publish the SDK crates and no binaries or installer
-assets.
+change. The blanket prohibition on binaries is historical, superseded by
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md): Lash
+publishes the SDK crates and the `lashctl` operator binary. Frontend binaries
+and installers remain the frontend host's responsibility.
 
 This boundary makes every frontend an honest external embedder: it can choose
 plugin composition and Execution Modes without forcing runtime releases, while
@@ -24,3 +26,8 @@ frontend-independent contract with credible use by another host.
 Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
 the promised Lash package API. Independent frontend ownership and host policy
 remain as stated here.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+ADR 0115 admits the `lashctl` operator binary without moving frontend ownership or host policy into Lash.
+[Its package manifest](../../crates/lashctl/Cargo.toml) declares the binary.

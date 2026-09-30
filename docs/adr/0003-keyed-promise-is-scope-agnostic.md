@@ -41,9 +41,10 @@ replay, wait keys, cancellation, tracing, and environment binding.
 - Execution Scope owns effect/replay/wait/cancel/trace identity. It is not the
   Execution Environment: processes still run from captured environment refs, and
   turns run from the session's current environment.
-- Key identity splits across the two ends: the await side keys with a Replay Key
-  (re-derived deterministically on replay); inbound `resolve` is an idempotent
-  ingress governed by an Idempotency Key.
+- The await side uses a deterministic Replay Key. Inbound `resolve` uses an
+  ordinary object call, not a transport Idempotency Key; the serialized wait
+  registry and the keyed promise deduplicate settlement by retaining the
+  first terminal resolution.
 - Resolving a wait is terminal-state idempotent: the first resolution is
   accepted, duplicate delivery reports the already-recorded terminal result, and
   unknown or revoked keys are distinguishable without being treated as runtime
@@ -58,3 +59,12 @@ Item 5: The native in-process park described above is historical.
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 places durable execution on Restate. The separate wait-key authority and seed
 ruling belongs to FIG-4123.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The transport Idempotency Key description is historical; ordinary inbound object calls converge through keyed-promise and serialized retained-terminal deduplication.
+[The ingress call](../../crates/lash-restate/src/effect_host/ingress.rs),
+[the wait registry's `resolve`](../../crates/lash-restate/src/durable_wait.rs), and
+`effect_host_await_event_duplicate_resolution_is_terminal` in
+[the wait laws](../../crates/lash-conformance/src/conformance/effect_host.rs)
+pin first-resolution retention, including different-payload duplicates.

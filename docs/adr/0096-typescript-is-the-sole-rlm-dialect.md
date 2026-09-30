@@ -119,10 +119,11 @@ Ruled by Sam on 2026-09-13, following the processes-are-values design session
   doubled battery, no per-session dialect choice and no default to preserve.
   Its naming rule (`typescript`, spelled out, everywhere) and its cutover
   stance (no migration decoders) are carried forward by this ADR.
-- **ADR 0063 is superseded in full.** One dialect cannot be prompted in the
-  wrong one. The `DialectPromptVocabulary` indirection, the prompt walker and
-  its carve-out register exist to police a boundary that is gone. Its one
-  durable residue survives on its own merits and is restated below.
+- **ADR 0063's two-language rules are superseded.** The single-TypeScript
+  `DialectPromptVocabulary`, `tool_call_path`, and prompt walker with its
+  explicit substrate carve-outs remain. The walker checks that assembled
+  fragments carry no retired source-language words; it no longer enforces
+  parity between two languages.
 - **Substrate identifiers keep their spellings.** `lashlang_step`,
   `process:lashlang:v2:…` and `lashlang:effect:…` still name the engine, which
   is still the lashlang VM. They were carved out in ADR 0063 because renaming
@@ -135,19 +136,18 @@ Ruled by Sam on 2026-09-13, following the processes-are-values design session
 - **Tool prose may name TypeScript.** FIG-4093 removed the registration guard
   that refused the sole dialect's name and retired the `{{…}}` prose token
   mechanism. Tool descriptions and schema prose render verbatim.
-- **The workflow-graph lens loses its stated limit.** ADR 0037's lens laws
-  demanded a canonical printer whose source → graph → source round trip is an
-  exact textual fixpoint, and ADR 0061 scoped the lens to Lashlang because only
-  Lashlang had that printer. With the surface retired the lens operates on the
-  IR and the graph; a *TypeScript* canonical printer and its round-trip laws
-  remain unbuilt and are separate future work with their own ADR. Host-facing
-  features that reach through the lens are scoped accordingly.
+- **The workflow-graph lens has a TypeScript canonical printer.** The
+  former unbuilt-printer description is historical under ADR 0037's FIG-3469
+  amendment. The implemented source, graph and IR lens holds canonical
+  get-put and put-get laws, with typed refusals for IR the printer cannot
+  spell.
 - **"Lashlang" in prose means the IR and VM.** ADRs 0037, 0055, 0060, 0062 and
   0064 carry a dated amendment to that effect; the root `CONTEXT.md` glossary
   says it directly, and adds "TypeScript dialect" as the only RLM language.
-  Where those ADRs describe Lashlang's *value semantics*, its isolation copies
-  or its durable-boundary validator, they are describing the IR's semantics and
-  are unchanged.
+  The claim that isolation copies and dialect-scoped durable validation stay
+  unchanged is historical under ADR 0060's FIG-3019 amendment. The compiler
+  emits ECMA reference semantics, and durable capture preserves shared acyclic
+  identity through validated graph encoding while refusing cycles.
 - **One breaking window, already scheduled.** The dialect tag leaves the
   session record, bytecode and wire in FIG-3019, which coordinates its format
   bump with FIG-2996 rather than spending a second window.
@@ -175,3 +175,13 @@ Items 4 and 24: During the version freeze, shapes change in place;
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
 1.0 cut. The FIG-3021 tool-prose cutover is complete via FIG-4093, so its former
 pending status and transitional prose are historical.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The single-language prompt walker, TypeScript canonical lens and ECMA reference semantics are implemented contracts, not pending retirement or printer work.
+`no_assembled_prompt_fragment_carries_the_retired_surfaces_words` in
+[the prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs),
+`canonical_get_put_and_put_get` in [the lens tests](../../crates/lash-typescript/tests/workflow_graph.rs),
+and `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
+in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs)
+pin the retained behavior.

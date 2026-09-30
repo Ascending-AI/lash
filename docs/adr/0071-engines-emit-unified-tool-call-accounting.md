@@ -58,24 +58,33 @@ Owner promotion intentionally commits attachment scratch created by a turn even
 when core cannot inspect the opaque state that retains it. Failed or superseded
 turns are not promoted: their uncommitted rows remain live through recovery and
 become reclaimable only after durable supersession proof plus the retention
-window. Explicit `SessionAttachmentStore::delete()` and session deletion still
-drop references eagerly; normal attachment GC then reclaims unrooted bytes.
+window. Explicit `SessionAttachmentStore::delete()` and session deletion
+release eligible roots, while committed roots remain if retained history keeps
+their owner alive. Attachment GC reclaims bytes only after the final root ends.
 
-## Shared-history ruling (implementation pending)
+## Shared-history retention
 
-The receipt-based GC oracle and eager per-session reference deletion above
-describe the current implementation. ADR 0028 and ADR 0047 supersede those
-mechanics as a ruling, not as shipped fact. The FIG-653 L7 retention work owns
-the explicit attachment-edge relations and read-guard deletion.
+The pending-retention description is historical. Shared history and attachment
+roots are retained under ADRs 0028 and 0047: a session deletion or explicit
+attachment delete does not reclaim committed roots while retained graph nodes
+still keep them alive, including another session's shared prefix. The current
+manifest keeps attachment roots conservatively at owner granularity, rather
+than claiming an exact attachment-to-node edge for every reference.
 
-When that layer lands, attachment liveness will derive from stored edges rather
-than durable supersession proof plus receipt retention. Session deletion will
-remove that session's roots and edges without reclaiming attachment edges still
-reachable through another session's shared historical prefix. The tool-call
-accounting ruling and its attachment-preservation bounds are unchanged.
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) governs
+artifact retention through explicit referrer edges and durable cleanup
+obligations. It is landed, not pending. The tool-call accounting and its
+attachment-preservation bounds are unchanged.
 
 ## Amendment (FIG-4125, 2026-09-29)
 
 Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
 the promised facade. The shared accounting rule survives for current tool
 execution.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+Shared-history retention is current, and ADR 0113's artifact referrers replace pending artifact-retention language without changing tool-call accounting.
+[SQLite attachment root predicates](../../crates/lash-sqlite-store/src/attachments.rs)
+and [the artifact cleanup executor](../../crates/lash-core/src/runtime/artifact_cleanup.rs)
+enforce the separate attachment and artifact retention mechanisms.

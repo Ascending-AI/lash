@@ -6,14 +6,15 @@ Status: accepted, superseded in part by [ADR 0079](0079-one-promised-package-fac
 ADR 0079 is authoritative for the single promised package and for replacing the
 hand-maintained API example-coverage ledger. Its successor doctrine is:
 
-> Every facade API is exercised by a compiled example or doctest. Enforced
-> mechanically wherever compiler derivation reaches; the remainder is a
-> review-time expectation recorded in this ADR — never a prose ledger.
+> Every facade API should be exercised by a compiled example or doctest. This
+> is review doctrine, not a universal compiler-derived coverage gate; it does
+> not require a handwritten prose ledger.
 
-The generated facade surface snapshot, semver baseline, external-type allowlist,
-facade-only import scan, and missing-documentation checks are the successor
-gates. The inventory and its checker are historical context below, not current
-enforcement.
+The generated facade snapshot diff, semver baseline, external-type allowlist,
+missing-docs enforcement and compiler scraping are historical gates removed
+under FIG-2933 (`8698820631`). Current enforcement is facade-only import
+scanning, the feature-plan check and compile-fail fixtures. The old inventory
+and its checker below are historical, not current enforcement.
 
 ## Decision
 
@@ -373,3 +374,10 @@ field are deleted.
 
 Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
 the promised package API; the host/core ownership distinction here survives.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The facade remains the promised host API; universal compiled-example coverage is review doctrine, and the deleted facade gates must not be read as current enforcement.
+Current checks are [import scanning](../../scripts/check_facade_only_examples.py),
+[the feature plan](../../scripts/check_feature_coverage.py), and
+[compile-fail fixtures](../../crates/lash/tests/ui.rs).

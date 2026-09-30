@@ -161,8 +161,10 @@ through a scoped controller. Restate records effect envelopes and outcomes,
 admission and root claims, timers, keyed waits, group operations, and cancel
 races. The drive's commit and park paths use fenced, idempotent store writes;
 commit replay also checks the stored receipt. They are not separate command
-variants. The local determinism harness implements the same controller to
-compare fresh and replayed decisions. ADR 0105 records the detailed contract.
+variants. The earlier deterministic-test doctrine is historical under the G2
+ruling, carried by [ADR 0009](0009-deterministic-simulation-harness.md).
+Tests use production controllers with random chaos and virtual time;
+deterministic scheduling is not a goal. ADR 0105 records the detailed contract.
 A future engine must implement these observable outcomes through the
 controller and pass its laws. This ADR does not require a second context
 trait layer.
@@ -282,7 +284,8 @@ registration over another deployment's names is refused.
 Tests run on production semantics, in three kinds:
 
 1. **The `lash-restate-test` runtime** (FIG-3665). It is in-process,
-   pool-executable and deterministic. A test-only invoker drives lash-restate's
+   pool-executable, with random chaos and virtual time; deterministic scheduling
+   is not a goal under G2. A test-only invoker drives lash-restate's
    real endpoint (`Endpoint::handle`) and the real `restate-sdk-shared-core` VM
    (pinned 7.0.3). It keeps an in-memory journal per invocation, simulates a
    crash as drop-and-replay, fires timers on command under virtual time, and has
@@ -463,3 +466,10 @@ shared decisions were written twice more, once per dialect. Most fixes since
 August were engine fixes. The tests that ran on them certified an engine
 production does not run, and no consumer used PostgreSQL as an engine. What the
 SQL stores do well, storage, they keep.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+G2 supersedes the deterministic-harness doctrine with random chaos and virtual time; production drive replay still preserves recorded effects, order and keys under section 3.
+[The server test runtime](../../crates/lash-restate-test/src/lib.rs) runs
+concurrent handlers, and [the simulation clock](../../crates/lash-sim/src/clock.rs)
+advances virtual time without controlling Tokio task interleaving.

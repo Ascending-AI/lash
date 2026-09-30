@@ -716,12 +716,13 @@ that each entry is a limit taken knowingly.
     that would skip an index rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`, and a
     negative or non-index write rejects as
     `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`. Neither path mutates an element.
-    An elision in an array literal — a hole anywhere, including a trailing one
-    as in `[1, , ]`, where a single trailing comma is not an elision — creates
-    the same hole, so it rejects statically as `TS_SPARSE_ARRAY_UNSUPPORTED`
-    rather than silently storing `undefined` (FIG-3702). Holes are
-    indistinguishable from explicit `undefined` in the v1 dense
-    representation, which is why they are refused rather than approximated.
+    Array literal elisions are deliberately admitted under FIG-3656
+    (`1553112a94`, #2200), superseding FIG-3702's static-refusal ruling.
+    `Lash.SparseArray` records holes in the heap's side table, distinct from
+    explicit `undefined`, so `in` and `hasOwnProperty` answer as Node does.
+    This includes trailing elisions such as `[1, , ]`; a single trailing
+    comma is not an elision. The gap-write and non-index-write refusals above
+    remain.
 13. **`console.log` is host-defined**, not ECMA-262. *(Superseded on the
     coercion point by FIG-2767: this ruling originally said the arguments are
     printed as their ECMA `ToString`, so `console.log({a: 1})` printed
@@ -827,3 +828,12 @@ that each entry is a limit taken knowingly.
   a resource diagnostic.
 - Cycle-capable durable graph encoding remains owed work; several rejections
   above stand in for it.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+FIG-3656 supersedes FIG-3702 for array literal elisions only: holes are admitted and tracked by `Lash.SparseArray`, while gap and non-index writes retain their named refusals.
+[Array lowering](../../crates/lash-typescript/src/adapter/mod.rs),
+[the sparse constructor](../../crates/lashlang/src/runtime/vm/javascript_stdlib.rs),
+and [the heap hole table](../../crates/lashlang/src/runtime/heap/javascript_exotics.rs)
+implement this contract; `array_literal_elisions_admit_and_commas_and_pattern_holes_do_not`
+in [the admission tests](../../crates/lash-typescript/tests/rejections.rs) pins it.

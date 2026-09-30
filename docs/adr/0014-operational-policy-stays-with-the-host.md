@@ -44,7 +44,7 @@ trace buffers) lives inside lash. The capability set:
   claimability and lease-less host views (ADR 0029), rather than inheriting a
   renewal deadline from `LeaseTimings`.
 - **Quiesce and handoff**: `LashSession::park(self)` flushes dirty state
-  through a fresh-lease commit and returns a resumable `ParkedSession`;
+  to its bound store and returns a resumable `ParkedSession`;
   `LashCore::resume` rebuilds it. `LashSession::close(self)` is park-without-
   a-handle (flush + discard). Both consume the session and fail with
   `SessionStillInUse` when other live handles exist, making mid-turn quiesce an
@@ -55,11 +55,13 @@ trace buffers) lives inside lash. The capability set:
   hooks without draining turns), and
   `TraceSink::flush()` (default no-op; the OTel sink documents that span-export
   durability is the host provider's duty).
-- **Claim and wait handback**: host-facing `abandon_queued_work_claim` /
-  `abandon_turn_input_claim` return claimed work immediately instead of leaving
-  the batch held, and hidden from pending views, until this owner's generation
-  stops holding the session lease; `revoke_durable_waits` resolves a session's
-  outstanding Durable Waits as `Cancelled` without deleting the session.
+- **Durable ingress and obligation ownership**: accepted inputs and commands
+  remain durable ingress under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md),
+  and [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md)
+  owns recoverable delivery to the engine. The sealed drive fence owns
+  execution; hosts inspect or cancel durable queued work rather than handing
+  back execution claims. `revoke_durable_waits` resolves the session's current
+  Durable Waits as `Cancelled` without deleting the session.
 - **Trigger reconciliation**: registered subscriptions are durable runtime
   state. Compiling or executing a module does not publish a current declaration
   set, and removing a registration call from source does not unregister its
@@ -87,8 +89,8 @@ same boundary discipline keeps drain policy inside the host.
   `park()`/`close()` sessions, `close()` providers, release plugin factories,
   `flush()` sinks, and exit — each step an explicit call, no hidden drain
   orchestration.
-- Failover latency is a host decision (`LeaseTimings`), traded explicitly
-  against false-takeover risk, instead of a constant chosen by lash.
+- Host drain and failover budgets remain host decisions. The former
+  `LeaseTimings` mechanism is historical under ADR 0104.
 - `AwaitEventResolver` gained `cancel_await_events_for_session` with a
   loud-failing default, so durable effect hosts (Restate/Temporal adapters)
   must decide how wait revocation maps onto their engine rather than silently
@@ -146,3 +148,12 @@ Item 23:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 supersedes the SQL effect-engine assumptions. This ADR still assigns operational
 policy to the host.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+The removed `abandon_queued_work_claim` and `abandon_turn_input_claim` handback APIs are historical under ADRs 0101 and 0109; host shutdown ordering, deadlines and intake policy remain host-owned.
+[`DurableSessionOps`](../../crates/lash-core/src/runtime/durable_queue.rs)
+and [the obligation relay](../../crates/lash-core-execution/src/runtime/drive/relay.rs)
+own ingress mechanics; [`LashCore::shutdown`](../../crates/lash/src/core.rs)
+and `core_shutdown_visits_protocol_then_common_factories_and_continues_after_error`
+in [the plugin tests](../../crates/lash/src/tests/plugin_stack.rs) pin factory release without a host drain policy.

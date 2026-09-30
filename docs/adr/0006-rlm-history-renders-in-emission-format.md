@@ -14,7 +14,7 @@ completes and stored with its typed value. Prompt builds reuse the stored text.
 
 ## Decision
 
-The RLM history renderer presents each prior step in the exact grammar the model must emit. A prior executed step renders as an **assistant** message containing `{prose}\n<typescript>\n{code}\n</typescript>` — the canonical cell produced by `render_cell_text` — followed by a **user** message carrying that step's stored printed text, error, and final value. Plain user turns and prose-only finishes render their content verbatim by role. The `--- history[N] · … ---` header, the `Code:` framing, and the indented source are removed entirely: **history format equals emission format**. The model's reasoning lane and the `history[N].output[M]` runtime binding are unchanged. A trajectory print now stores both its model-facing text and its typed value.
+The RLM history renderer presents each prior step in the exact grammar the model must emit. A prior executed step renders as an **assistant** message containing `{prose}\n<typescript>\n{code}\n</typescript>` — the canonical cell produced by `render_cell_text` — followed by a **user** message carrying that step's stored printed text, error, and final value. Plain user turns and prose-only finishes keep their roles and render bounded prompt previews, with a `history[N].content` reference for retrieving full content when truncated. The `--- history[N] · … ---` header, the `Code:` framing, and the indented source are removed entirely: **history format equals emission format**. The model's reasoning lane and the `history[N].output[M]` runtime binding are unchanged. A trajectory print now stores both its model-facing text and its typed value.
 
 ## Why
 
@@ -34,10 +34,17 @@ The root cause is a representation mismatch — the input history format differs
 ## Considered Alternatives
 
 - **Keep the meta-format, add an anti-echo system instruction.** Rejected: it patches the representation mismatch with prose instead of removing it; weaker models still imitate the salient in-context format.
-- **Native tool-call transport (cell as `tool_use`, result as `tool_result`).** Rejected: it pushes lashlang source into a JSON-string argument — the encoding code-as-action exists to avoid — and contradicts RLM's deliberate empty tool array (`tools: Arc::new(Vec::new())`, `tool_choice: LlmToolChoice::None`). It buys no caching or robustness the in-format text rendering lacks.
+- **Native tool-call transport (cell as `tool_use`, result as `tool_result`).** Historical rejection, superseded by [ADR 0083](0083-rlm-native-tool-channel.md), which admits and pins both channels. The original rationale was: it pushes lashlang source into a JSON-string argument — the encoding code-as-action exists to avoid — and contradicts RLM's deliberate empty tool array (`tools: Arc::new(Vec::new())`, `tool_choice: LlmToolChoice::None`). It buys no caching or robustness the in-format text rendering lacks.
 - **Two assistant messages (prose, then cell) instead of folding.** Rejected: back-to-back assistant turns do not match how the model emits and stress provider role-alternation; folding yields clean `User → Assistant → User` alternation, one step per pair.
 
 ## Amendment (FIG-4125, 2026-09-29)
 
 Item 23: [ADR 0116](0116-tools-are-opaque.md) supersedes the old tool-output
 rendering path. The emission-format rule for RLM cells survives.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+Plain-message history uses bounded previews with retrievable full content; emission-format cell rendering remains the cell-channel contract, while ADR 0083 governs native exchanges.
+[`message_text`](../../crates/lash-protocol-rlm/src/driver/history.rs) and
+`long_user_message_gets_full_history_reference` in
+[the history tests](../../crates/lash-protocol-rlm/src/driver/tests.rs) pin the preview and retrieval reference.

@@ -27,9 +27,11 @@ The native ABI is one `execute_code` tool, auto choice, with exactly one require
 string property `code` and no additional properties. `finish` remains inside the
 program. More than one call executes nothing and returns identical repair text
 for every distinct call id, consuming one no-progress attempt. Unknown tools,
-invalid JSON, missing/empty code and duplicate ids have distinct repair decisions.
-Duplicate ids cannot form a valid provider exchange: all original Parts remain
-recorded, but projection emits one error pair per distinct id.
+invalid JSON and missing/empty code have distinct repair decisions. The separate
+duplicate-id repair decision is historical, superseded by
+[ADR 0117](0117-lash-names-every-tool-call.md): shared response assembly
+normalizes missing, blank and duplicate provider ids before native admission.
+Native normalization checks tool arity and schema on those normalized calls.
 
 Execution, finish-schema validation, semantic trajectory, catalog, control tools,
 bound variables and checkpoint identity are shared. Drivers, history projectors,
@@ -63,7 +65,18 @@ model strings, route, dialect and budgets in randomized order, preflights native
 support, and records per-attempt decisions, billed retry/cache usage and timings.
 The complete benchmark and recommendation are follow-ups.
 
-Live code streaming and serial multi-call execution are non-goals. `LlmRequest`
-has no parallel-tool-call flag; this change does not add one. Arity is enforced
-by normalization, independently of provider behavior. Semantic-only frame seeds
+Live code streaming and serial multi-call execution are non-goals. The original
+absence of a parallel-call option is historical: provider generation options
+expose `parallel_tool_calls`, governed by
+[ADR 0121](0121-host-generation-settings-are-sent-or-refused.md).
+Native arity is enforced by normalization independently of that option or
+provider behavior. Semantic-only frame seeds
 render as user context; they do not authorize reconstruction of provider calls.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+ADR 0117 moves provider-id normalization upstream, and ADR 0121 governs the parallel-call generation option; the native single-code-call contract survives.
+[Response assembly](../../crates/lash-core/src/runtime/assembly.rs),
+[native normalization](../../crates/lash-protocol-rlm/src/native/tool.rs), and
+[provider generation options](../../crates/lash-core-llm/src/provider/options.rs)
+define these boundaries.

@@ -26,9 +26,9 @@ is never reused there. Deleting an id that never materialized is a no-op.
 
 ## Decision
 
-A host-facing session id is host-provided, non-empty, identifies exactly one
-session lifetime, and is used at most once in a store. Lash otherwise treats it
-as an opaque UTF-8 string; host transports may impose narrower syntax and
+A host-facing session id is host-provided, nonempty, NUL-free UTF-8, identifies
+exactly one session lifetime, and is used at most once in a store. Lash otherwise
+treats it as opaque; host transports may impose narrower syntax and
 length rules. Deleting a materialized host-facing id writes a permanent
 tombstone. Creating or forking to a deleted id fails with
 `StoreError::SessionDeleted`, whose message states that the id was used and
@@ -229,3 +229,10 @@ in the shared conformance law rather than papered over.
 Item 7: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
 governs drive-fenced claim supersession. Earlier lease-generation reclaim text
 is historical; session IDs remain single-use.
+
+## Amendment (FIG-4163, 2026-09-30)
+
+Session ids must be nonempty, NUL-free UTF-8; narrower transport syntax remains host-owned.
+[`validate_session_id`](../../crates/lash-core-store/src/store/mod.rs) enforces
+this shared representability boundary in [SQLite admission](../../crates/lash-sqlite-store/src/catalog.rs)
+and [PostgreSQL admission](../../crates/lash-postgres-store/src/postgres/session_factory/store.rs).
