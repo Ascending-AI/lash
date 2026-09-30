@@ -267,9 +267,13 @@ fn parse_llm_query_result(text: &str, schema: &Value) -> Result<Value, String> {
         serde_json::from_str::<Value>(&trimmed[start..=end])
             .map_err(|parse_err| format!("llm_query returned malformed JSON output: {parse_err}"))
     })?;
-    let compiled = jsonschema::JSONSchema::compile(schema)
+    let compiled = jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft7.detect(schema))
+        .should_validate_formats(true)
+        .build(schema)
         .map_err(|err| format!("llm_query output schema is invalid: {err}"))?;
-    if let Err(errors) = compiled.validate(&value) {
+    if !compiled.is_valid(&value) {
+        let errors = compiled.iter_errors(&value);
         let message = errors
             .map(|err| err.to_string())
             .collect::<Vec<_>>()
@@ -449,6 +453,36 @@ mod tests {
         });
         lash_core::testing::ToolCallFixture::with_host_and_direct_completions(manager, completions)
             .attempt("test-turn")
+    }
+
+    #[test]
+    fn query_result_validation_preserves_formats_and_all_errors() {
+        let output = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "email": { "type": "string", "format": "email" },
+                "count": { "type": "integer" }
+            }
+        });
+        let schema = serde_json::json!({ "type": "object", "properties": { "value": output } });
+        let valid = serde_json::json!({ "email": "sam@example.com", "count": 1 });
+        assert_eq!(
+            parse_llm_query_result(
+                &serde_json::json!({ "kind": "value", "value": valid }).to_string(),
+                &schema
+            )
+            .unwrap(),
+            valid
+        );
+        let error = parse_llm_query_result(
+            r#"{"kind":"value","value":{"email":"invalid","count":"invalid"}}"#,
+            &schema,
+        )
+        .unwrap_err();
+        assert!(error.contains("schema"), "{error}");
+        assert!(error.contains("email"), "{error}");
+        assert!(error.contains("integer"), "{error}");
+        assert!(error.contains("; "), "{error}");
     }
 
     #[test]

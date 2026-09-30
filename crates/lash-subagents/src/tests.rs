@@ -276,7 +276,7 @@ fn spawn_schema_is_strict_and_nameless() {
         Some(&serde_json::Value::Bool(false))
     );
 
-    let compiled = jsonschema::JSONSchema::compile(&schema).expect("spawn schema compiles");
+    let compiled = jsonschema::validator_for(&schema).expect("spawn schema compiles");
     assert!(
         compiled
             .validate(&json!({ "task": "inspect routing", "capability": "explore" }))

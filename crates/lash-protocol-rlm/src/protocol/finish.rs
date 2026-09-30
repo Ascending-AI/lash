@@ -162,9 +162,13 @@ pub(super) fn output_limit_retry_message(
 }
 
 pub(crate) fn validate_finish_value(value: &Value, schema: &Value) -> Result<(), String> {
-    let compiled = jsonschema::JSONSchema::compile(schema)
+    let compiled = jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft7.detect(schema))
+        .should_validate_formats(true)
+        .build(schema)
         .map_err(|err| format!("required output schema is invalid: {err}"))?;
-    if let Err(errors) = compiled.validate(value) {
+    if !compiled.is_valid(value) {
+        let errors = compiled.iter_errors(value);
         let message = errors
             .map(|err| err.to_string())
             .collect::<Vec<_>>()
@@ -196,5 +200,46 @@ pub(super) fn no_progress_stop_message(id: String, attempts: usize) -> Message {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_finish_value;
+    use serde_json::json;
+
+    #[test]
+    fn finish_validation_keeps_formats_and_all_errors() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "email": { "type": "string", "format": "email" },
+                "count": { "type": "integer" }
+            }
+        });
+        assert!(
+            validate_finish_value(&json!({ "email": "sam@example.com", "count": 1 }), &schema)
+                .is_ok()
+        );
+        let error =
+            validate_finish_value(&json!({ "email": "invalid", "count": "invalid" }), &schema)
+                .unwrap_err();
+        assert!(error.contains("email"), "{error}");
+        assert!(error.contains("integer"), "{error}");
+        assert!(error.contains("; "), "{error}");
+    }
+
+    #[test]
+    fn finish_validation_honors_draft202012() {
+        let schema = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "array",
+            "prefixItems": [{ "type": "string", "format": "email" }],
+            "items": false
+        });
+        assert!(validate_finish_value(&json!(["sam@example.com"]), &schema).is_ok());
+        assert!(validate_finish_value(&json!([42]), &schema).is_err());
+        assert!(validate_finish_value(&json!(["invalid"]), &schema).is_err());
+        assert!(validate_finish_value(&json!(["sam@example.com", "extra"]), &schema).is_err());
     }
 }

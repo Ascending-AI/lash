@@ -18,7 +18,7 @@ fn workload_schema_is_current_and_every_field_has_provenance() {
     let expected: Value = serde_json::from_str(V1_SCHEMA_JSON).unwrap();
     assert_eq!(expected, serde_json::to_value(schema()).unwrap());
     assert!(
-        jsonschema::JSONSchema::compile(&expected)
+        jsonschema::validator_for(&expected)
             .unwrap()
             .is_valid(&value().unwrap())
     );
@@ -46,8 +46,7 @@ fn workload_schema_is_current_and_every_field_has_provenance() {
 #[test]
 fn workload_rejects_unknown_missing_null_and_duplicate_fields_at_every_object() {
     let original = value().unwrap();
-    let validator =
-        jsonschema::JSONSchema::compile(&serde_json::to_value(schema()).unwrap()).unwrap();
+    let validator = jsonschema::validator_for(&serde_json::to_value(schema()).unwrap()).unwrap();
     let mut objects = vec![String::new()];
     objects.extend(
         original
@@ -191,9 +190,8 @@ fn synthetic_text_and_nested_json_hit_every_size_fixture() {
         serde_json::from_str(include_str!("../workloads/fixtures/sizes-v1.json")).unwrap();
     let workload = Workload::v1().unwrap();
     let generator = Generator::new(&workload, "sizes").unwrap();
-    let arguments = jsonschema::JSONSchema::compile(&lash_perf::workload::tool_schema()).unwrap();
-    let results =
-        jsonschema::JSONSchema::compile(&lash_perf::workload::tool_result_schema()).unwrap();
+    let arguments = jsonschema::validator_for(&lash_perf::workload::tool_schema()).unwrap();
+    let results = jsonschema::validator_for(&lash_perf::workload::tool_result_schema()).unwrap();
     for size in fixture["text_bytes"].as_array().unwrap() {
         let bytes = size.as_u64().unwrap() as u32;
         let text = generator.text(1, 2, "fixture", bytes);

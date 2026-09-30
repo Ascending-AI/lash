@@ -2097,23 +2097,20 @@ fn rlm_compile_link_outcomes_have_pinned_wire_tags() {
     }
 }
 
-fn published_schema(document: &str) -> Result<jsonschema::JSONSchema, String> {
+fn published_schema(document: &str) -> Result<jsonschema::Validator, String> {
     let schema: serde_json::Value = serde_json::from_str(document)
         .map_err(|error| format!("published trace schema does not parse: {error}"))?;
-    jsonschema::JSONSchema::compile(&schema)
+    jsonschema::validator_for(&schema)
         .map_err(|error| format!("published trace schema does not compile: {error}"))
 }
 
-fn assert_schema_accepts(
-    validator: &jsonschema::JSONSchema,
-    value: &serde_json::Value,
-    what: &str,
-) {
-    if let Err(errors) = validator.validate(value) {
+fn assert_schema_accepts(validator: &jsonschema::Validator, value: &serde_json::Value, what: &str) {
+    if !validator.is_valid(value) {
+        let errors = validator.iter_errors(value);
         panic!(
             "published schema rejected {what}:\n{}",
             errors
-                .map(|error| format!("{} at {}", error, error.instance_path))
+                .map(|error| format!("{} at {}", error, error.instance_path()))
                 .collect::<Vec<_>>()
                 .join("\n")
         );

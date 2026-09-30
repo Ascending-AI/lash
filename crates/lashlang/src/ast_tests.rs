@@ -40,7 +40,7 @@ fn process_signature_construction_and_wire_shape_are_checked() {
     assert_eq!(format_type_expr(&unknown), "Process");
 
     let schema = serde_json::to_value(schemars::schema_for!(TypeExpr)).unwrap();
-    let validator = jsonschema::JSONSchema::compile(&schema).expect("type schema compiles");
+    let validator = jsonschema::validator_for(&schema).expect("type schema compiles");
     for value in [
         serde_json::to_value(&process).unwrap(),
         serde_json::to_value(&unknown).unwrap(),
@@ -125,7 +125,7 @@ fn union_members_hold_at_least_two_variants() {
     }
 
     let schema = serde_json::to_value(schemars::schema_for!(TypeExpr)).unwrap();
-    let validator = jsonschema::JSONSchema::compile(&schema).expect("type schema compiles");
+    let validator = jsonschema::validator_for(&schema).expect("type schema compiles");
     for (members, accepted) in [
         (serde_json::json!([]), false),
         (serde_json::json!(["Str"]), false),
