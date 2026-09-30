@@ -868,6 +868,29 @@ lash_conformance::session_store_factory_tests!({
     )
 });
 
+// The settlement laws run a facade runtime over a fresh backend per law: the
+// Restate double's engine is built over this test's PostgreSQL store set, so
+// the runtime takes its durable ports from PostgreSQL while the guard keeps
+// the database, attachment and backend lifetimes.
+lash_conformance::session_config_settlement_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres config-settlement conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let ((attachments, double), _stores, _host, _runner) = double_law_backend(&storage).await;
+    let make = {
+        let double = double.clone();
+        move || {
+            let double = double.clone();
+            async move { double.lash_backend() }
+        }
+    };
+    ((database_lock, attachments, double), make)
+});
+
 lash_conformance::fresh_session_admission_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
