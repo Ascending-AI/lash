@@ -9,7 +9,6 @@ import os
 import pathlib
 import re
 import runpy
-import shlex
 import subprocess
 import tempfile
 import tomllib
@@ -993,10 +992,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             def git(*args: str) -> str:
                 return subprocess.run(["git", "-C", str(root), *args], check=True, text=True, capture_output=True).stdout
             self.assertEqual(git("diff"), "")
-            review = (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md").read_text().split("```sh", 1)[1].split("```", 1)[0]
-            command = shlex.split(review.replace("\\\n", " "))
-            flags = [arg for arg in command[1:] if arg == "add" or arg.startswith("-")]
-            git(*flags, str(source.relative_to(root)))
+            script = ROOT / "scripts" / "scenario-review.sh"
+            # The command lives in the checked script; the ADR names it
+            # rather than carrying a second copy for the two to drift.
+            self.assertIn(
+                "scripts/scenario-review.sh",
+                (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md")
+                .read_text(encoding="utf-8"),
+            )
+            for path in re.findall(r"crates/[a-z0-9_/.-]+", script.read_text()):
+                self.assertTrue((ROOT / path).exists(), path)
+            subprocess.run(
+                ["bash", str(script), str(source.relative_to(root))],
+                cwd=root,
+                check=True,
+            )
             self.assertIn("+#[test] fn new_scenario() {}", git("diff"))
             self.assertEqual(git("diff", "--cached"), "")
             source.write_text("#[test] fn new_scenario() { assert!(true); }\n")

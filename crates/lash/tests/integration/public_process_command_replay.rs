@@ -472,7 +472,7 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
                 lash::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(
                     error,
                 )) => {
-                    if current == 1 && id == &record.id {
+                    if current == 1 && id == record.id {
                         assert_eq!(
                             error.code,
                             lash_core::RuntimeErrorCode::ProcessNoLongerRetained

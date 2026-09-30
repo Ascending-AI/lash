@@ -23,6 +23,10 @@ Runtime invariants need narrow reproductions at their owning boundary. Protocol 
 
 Coverage metadata records the test name, display name and owned boundary. Macros derive names and retain test function pointers; metadata checks require unique names and non-empty ownership text. Focused prompt/history and white-box driver tests stay outside the protocol scenario index.
 
+## Review
+
+`scripts/scenario-review.sh` intent-to-adds the four harness roots, so `git diff` shows untracked scenario sources without staging them.
+
 ## Ownership boundaries
 
 Runtime Scenarios own admission ordering, checkpoint behavior, commands, cancellation, observation replay and commits. Persistence conformance owns backend permutations. The storage matrix is SQLite file, SQLite memory and PostgreSQL. Host laws run on the in-process Restate server double, live Restate and lash-sim's in-process effect host; upgrade proofs use the synthetic-next tier. These are evidence dimensions, not extra scenario layers.
