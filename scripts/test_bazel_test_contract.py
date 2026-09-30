@@ -1134,6 +1134,7 @@ class BazelTestContractTests(unittest.TestCase):
             [
                 "pg-store",
                 "pg-artifact-referrers",
+                "pg-attachment-referrers",
                 "pg-rlm-frame-open",
                 "pg-pool-wait",
                 "pg-sim-backend-faults",

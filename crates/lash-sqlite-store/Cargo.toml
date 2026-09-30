@@ -25,6 +25,12 @@ testing = ["lash-core-execution/testing"]
 # descriptors move with the migration catalog that reaches them.
 synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
 
+# cargo-shear resolves `use` statements per crate directory and cannot see
+# inside macro expansions: `lash_conformance::queue_observation_tests!` in
+# tests/conformance/suite.rs expands to `lash::LashCore` and friends.
+[package.metadata.cargo-shear]
+ignored = ["lash"]
+
 [lints]
 workspace = true
 
