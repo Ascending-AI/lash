@@ -103,30 +103,47 @@ impl SqliteStore {
             .map_err(sqlite_error)?
     }
 
-    pub(super) async fn queued_work_batch_completed_sqlite(
+    pub(super) async fn queued_work_batch_completion_sqlite(
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let marker =
             lash_core_execution::store_backend_support::session_command_batch_completion_key(
                 &session_id,
                 batch_id,
             )?;
+        let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
-                conn.query_row(
-                    crate::session_sql::session_sql()
-                        .turn_commits
-                        .exists_for_turn
-                        .sql(),
-                    params![session_id.as_str(), marker],
-                    |row| row.get(0),
-                )
+                let outcome = (|| {
+                    let result_json: Option<String> = conn
+                        .query_row(
+                            crate::session_sql::session_sql()
+                                .turn_commits
+                                .select_receipt
+                                .sql(),
+                            params![session_id.as_str(), marker],
+                            |row| row.get(1),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    result_json
+                        .map(|json| {
+                            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                                &session_id,
+                                &marker,
+                                &json,
+                                fleet,
+                            )
+                        })
+                        .transpose()
+                })();
+                Ok(outcome)
             })
             .await
-            .map_err(sqlite_error)
+            .map_err(sqlite_error)?
     }
 
     pub(super) async fn list_queued_work_sqlite(

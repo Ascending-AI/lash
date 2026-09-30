@@ -194,6 +194,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             config_revision: 0,
         },
         current_frame_node_id: None,
+        published_by_drive: false,
     })
     .expect("serialize committed session head");
     let decoded: SessionHeadPayload = decode_versioned_json_record(
@@ -230,6 +231,7 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             config_revision: 0,
         },
         current_frame_node_id: None,
+        published_by_drive: false,
     })
     .expect("serialize committed session head");
     let decoded: SessionHeadPayload = decode_versioned_json_record(
@@ -254,6 +256,7 @@ fn persisted_head_and_frame_open_reject_legacy_slot_fields() {
         session_id: "slot-body-session".into(),
         config: crate::PersistedSessionConfig::from(&policy),
         current_frame_node_id: None,
+        published_by_drive: false,
     };
     let mut head_json = serde_json::to_value(&head).unwrap();
     assert!(

@@ -579,9 +579,10 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
         .expect("the live fence applies the command");
     assert!(
         store
-            .queued_work_batch_completed(&session, command.batch_id.as_str())
+            .queued_work_batch_completion(&session, command.batch_id.as_str())
             .await
-            .expect("read the command's completion"),
+            .expect("read the command's completion")
+            .is_some(),
         "the live fence's command commit settles the command"
     );
 }
@@ -659,9 +660,10 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         .expect("the applying commit settles its command");
     assert!(
         store
-            .queued_work_batch_completed(&session, applied.batch_id.as_str())
+            .queued_work_batch_completion(&session, applied.batch_id.as_str())
             .await
-            .expect("read the command's completion"),
+            .expect("read the command's completion")
+            .is_some(),
         "the applied command is settled"
     );
 

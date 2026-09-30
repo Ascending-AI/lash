@@ -768,127 +768,6 @@ impl LashRuntime {
         self.session.as_ref().map(|s| Arc::clone(s.plugins()))
     }
 
-    pub async fn compact_context(
-        &mut self,
-        instructions: Option<String>,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
-    ) -> Result<bool, PluginOperationInvokeError> {
-        self.reload_invalidated_resident_session_state()
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        // The compaction runs over its recorded base, never over a head its
-        // own commit moved: a redrive summarizes the same history, reads the
-        // summary back from its journal, derives the same frame key and meets
-        // the frame commit's receipt (FIG-4133, F3).
-        // `compact_context` writes beside the drive: its frame commit presents the
-        // drive fence its base recorded, as every frame commit presents one,
-        // so an admission sealed while it summarizes refuses it typed instead
-        // of letting a superseded command publish a frame (FIG-4134).
-        let drive_fence = self
-            .adopt_recorded_compaction_base(&scoped_effect_controller)
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?
-            .drive_fence;
-        let services = self.runtime_session_services()?;
-        let compaction_boundary = scoped_effect_controller.scope_id().to_string();
-        // The frame a compaction switch ends, and the execution that commits
-        // the switch and gates its cleanup (ADR 0113 §3.1).
-        let compacted_frame = self.state.current_frame_node_id.clone();
-        let compaction_scope = scoped_effect_controller.execution_scope().clone();
-        let Some(session) = self.session.as_ref() else {
-            return Err(PluginOperationInvokeError::Unknown(
-                "runtime session not available".to_string(),
-            ));
-        };
-        let plugin_session = Arc::clone(session.plugins());
-        let state = self.read_view();
-        let system_prompt = Self::compaction_system_prompt(
-            session.context_prompt_contributions().to_vec(),
-            Arc::clone(&plugin_session),
-            Arc::clone(&services),
-            self.state.session_id.clone(),
-            state.clone(),
-            self.protocol_turn_options().clone(),
-            self.host.core.prompt.prompt.clone(),
-            self.state.effective_policy().prompt.clone(),
-        )
-        .await?;
-        let ctx = crate::CompactionContext {
-            session_id: self.state.session_id.clone(),
-            state,
-            instructions,
-            system_prompt,
-            traces: services.trace_emitter(),
-            scoped_effect_controller: scoped_effect_controller.clone(),
-            direct_completions: services
-                .direct_completion_client(scoped_effect_controller.clone(), None),
-        };
-        let outcome = async {
-            let Some(compaction) = plugin_session.compact_context(&ctx).await.map_err(|err| {
-                PluginOperationInvokeError::Unknown(format!("context compaction failed: {err}"))
-            })?
-            else {
-                return Ok(None);
-            };
-            let frame_key = compaction_frame_key(
-                &self.state.session_id,
-                &compaction_boundary,
-                self.state
-                    .current_frame_node_id
-                    .as_deref()
-                    .unwrap_or_default(),
-            );
-            let opened = self
-                .stage_agent_frame(
-                    crate::OpenAgentFrameRequest::new(
-                        frame_key.clone(),
-                        crate::AgentFrameReason::compaction(),
-                    )
-                    .with_initial_nodes(compaction.initial_nodes),
-                    super::frame_open::StagedOpen::Compaction,
-                )
-                .await
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            Ok(opened.result.opened.then_some((frame_key, opened.carries)))
-        }
-        .await;
-        // Usage settlement runs on every exit past the reload gate, not only
-        // a successful frame switch: a compaction that produced no summary or
-        // failed outright can still have staged billed usage into the shared
-        // ledger, and this boundary is the only place it persists.
-        let (outcome, frame_switch) = match outcome {
-            Ok(Some((frame_key, carries))) => (
-                Ok(true),
-                Some(CompactionFrameSwitch {
-                    ended: compacted_frame,
-                    carries,
-                    committing: compaction_scope,
-                    operation: compaction_frame_operation(&self.state.session_id, &frame_key),
-                    drive_fence,
-                }),
-            ),
-            Ok(None) => (Ok(false), None),
-            Err(error) => (Err(error), None),
-        };
-        let settlement = Box::pin(self.settle_pending_compaction_usage(frame_switch)).await;
-        match (outcome, settlement) {
-            (Ok(opened), Ok(())) => {
-                if opened {
-                    // Every accepted open resets the live interpreter from
-                    // the new frame's seed, with a store or without (F5).
-                    self.restore_protocol_session_after_frame_open()
-                        .await
-                        .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-                }
-                Ok(opened)
-            }
-            (Ok(_), Err(err)) | (Err(err), Ok(())) => Err(err),
-            (Err(err), Err(settle_err)) => Err(PluginOperationInvokeError::Unknown(format!(
-                "{err}; usage settlement also failed: {settle_err}"
-            ))),
-        }
-    }
-
     /// Renders the system prompt a compaction completion carries (`FIG-3374`).
     ///
     /// A turn resolves capability contributions, the core layer, the session
@@ -949,149 +828,6 @@ impl LashRuntime {
         });
         let system_prompt = rendered.system_prompt.trim();
         Ok((!system_prompt.is_empty()).then(|| Arc::from(system_prompt)))
-    }
-
-    /// Persists pending graph nodes and staged usage an administrative
-    /// compaction left behind (`FIG-3374`).
-    ///
-    /// Administrative compaction has no owning turn to settle usage at a
-    /// commit (`direct_outcome.rs` stages into the shared ledger only), so
-    /// `compact_context` runs this on every exit past the reload gate —
-    /// including the no-summary and error paths. A frame switch commits
-    /// under the operation its frame key names, so a redrive meets the first
-    /// commit's receipt (FIG-4133). Anything else mirrors `park()`: pending
-    /// state persists at this explicit boundary with the same content-derived
-    /// operation, so a retried compact_context reuses byte-identical row
-    /// identities.
-    async fn settle_pending_compaction_usage(
-        &mut self,
-        frame_switch: Option<CompactionFrameSwitch>,
-    ) -> Result<(), PluginOperationInvokeError> {
-        let Some(store) = self.services.store.clone() else {
-            return Ok(());
-        };
-        let pending_usage = self
-            .shared_token_ledger
-            .lock_recover()
-            .iter()
-            .map(|pending| pending.entry.clone())
-            .collect::<Vec<_>>();
-        if self.state.pending_graph_commit().nodes().is_empty() && pending_usage.is_empty() {
-            return Ok(());
-        }
-        // A frame's commit is named by the frame, so a redrive meets its
-        // receipt; any other settlement is named by its content, as a park is.
-        let operation = match frame_switch.as_ref() {
-            Some(switch) => switch.operation.clone(),
-            None => {
-                let proposed = super::lifecycle::initial_park_preview(
-                    &self.state,
-                    &pending_usage,
-                    self.host.core.durability.commit_budget,
-                    self.fleet_format(),
-                )
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-                super::lifecycle::initial_park_operation(&proposed)
-                    .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?
-            }
-        };
-        let staged =
-            session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        for delta in staged.deltas() {
-            self.state
-                .usage
-                .fold_checked(&delta.entry)
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        }
-        let fleet_format = self.fleet_format();
-        let (mut commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
-                &mut self.state,
-                staged.deltas(),
-                operation,
-                self.host.core.durability.commit_budget,
-                fleet_format,
-            )
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        // The frame this compaction opens, which its first execution may
-        // already have committed.
-        let opened_frame = frame_switch
-            .as_ref()
-            .and(self.state.current_frame_node_id.clone());
-        // A compaction that opened a frame ends the one it left and carries
-        // what its seed names into the new one (ADR 0113 §3.1), under the
-        // drive fence current when it started.
-        if let Some(CompactionFrameSwitch {
-            ended,
-            carries,
-            committing,
-            drive_fence,
-            ..
-        }) = frame_switch
-        {
-            commit.drive_fence = drive_fence.map(Box::new);
-            commit.frame_transition = super::turn_boundary::committed_frame_transition(
-                &self.state,
-                ended,
-                carries,
-                &committing,
-                &persisted_node_ids,
-            )
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        }
-        let commit_result = store.commit_runtime_state_verified(commit).await;
-        let commit_result = match commit_result {
-            Ok(result) => result,
-            Err(err) => {
-                // The frame switch and the staged usage merge above live only
-                // in resident state until this commit lands. On failure,
-                // discard them and reload the durable head: the facade must
-                // not publish a mutation that never persisted. The staged
-                // pending rows are discarded too — the journaled completion
-                // effect re-records the billed usage when a retry replays it,
-                // so retaining them would double-merge the same usage.
-                staged.discard_staged();
-                self.invalidate_resident_session_state();
-                if let Err(reload_err) = self.reload_invalidated_resident_session_state().await {
-                    return Err(PluginOperationInvokeError::Unknown(format!(
-                        "{err}; resident-state reload after commit failure also failed: \
-                         {reload_err}"
-                    )));
-                }
-                // A redrive whose first execution committed the frame, after
-                // which an admission sealed, presents a fence the store now
-                // refuses; the head already holds its frame, which opened
-                // exactly once.
-                if matches!(err, crate::StoreError::StaleDriveFence { .. })
-                    && opened_frame.is_some()
-                    && self.state.current_frame_node_id == opened_frame
-                {
-                    return Ok(());
-                }
-                // Otherwise the store's refusal is kept typed: an admission
-                // sealed while the compaction ran answers `StaleDriveFence`,
-                // with nothing of the compaction durable.
-                return Err(PluginOperationInvokeError::Store(err));
-            }
-        };
-        let confirmed_usage = commit_result.committed_usage_delta_identities.clone();
-        staged
-            .confirm_identities(&confirmed_usage)
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        let receipt_replayed = commit_result.receipt_replayed;
-        self.state.apply_persisted_commit_result(commit_result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
-        if receipt_replayed {
-            // A redrive met the commit its first execution made: the durable
-            // head is that commit's, and the resident frame rebuilt over the
-            // recorded base gives way to it.
-            self.invalidate_resident_session_state();
-            self.reload_invalidated_resident_session_state()
-                .await
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        }
-        Ok(())
     }
 
     pub fn session_policy(&self) -> SessionPolicy {
@@ -1284,15 +1020,15 @@ impl LashRuntime {
             .iter()
             .any(|batch| batch.batch_id == handle.receipt.batch_id);
         if !still_pending {
-            let completed = store
-                .queued_work_batch_completed(&handle.receipt.batch_id)
+            let Some(completion) = store
+                .queued_work_batch_completion(&handle.receipt.batch_id)
                 .await
-                .map_err(super::runtime_error_from_store_commit)?;
-            if !completed {
+                .map_err(super::runtime_error_from_store_commit)?
+            else {
                 return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
                     handle.receipt,
                 ));
-            }
+            };
             let previous_policy = previous_policy.unwrap_or_else(|| self.session_policy());
             self.refresh_session_graph_from_store()
                 .await
@@ -1314,9 +1050,15 @@ impl LashRuntime {
             // no edge that needs the patch re-published residently.
             // Reapplying it here would overwrite a newer settled head
             // with this command's older values, resident-only.
-            Ok(crate::runtime::SessionCommandSettlement::Durable(
-                handle.receipt,
-            ))
+            Ok(match completion.compact_context_outcome {
+                // An administrative compaction answers what it settled as,
+                // on whichever runtime applied it (FIG-4201).
+                Some(outcome) => crate::runtime::SessionCommandSettlement::Compaction {
+                    receipt: handle.receipt,
+                    outcome,
+                },
+                None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
+            })
         } else {
             Ok(crate::runtime::SessionCommandSettlement::Pending(
                 handle.receipt,
@@ -1399,7 +1141,7 @@ impl LashRuntime {
         self.drain_next_session_command_with_cancellation(
             drive_fence,
             tokio_util::sync::CancellationToken::new(),
-            controller.controller(),
+            &controller,
         )
         .await
     }
@@ -1408,7 +1150,7 @@ impl LashRuntime {
         &mut self,
         drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.drain_next_session_command_fenced(drive_fence, cancellation, effect_controller)
             .await
@@ -1427,7 +1169,7 @@ impl LashRuntime {
         &mut self,
         drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         loop {
             self.reload_invalidated_resident_session_state().await?;
@@ -1438,10 +1180,9 @@ impl LashRuntime {
             else {
                 return Ok(None);
             };
-            let batches = store
-                .open_session_command_run(drive_fence)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?;
+            let batches = self
+                .read_session_command_run(store.clone(), drive_fence, effect_controller)
+                .await?;
             if batches.is_empty() {
                 return Ok(None);
             }
@@ -1477,32 +1218,119 @@ impl LashRuntime {
                 .into_iter()
                 .map(|(_, command)| command.clone())
                 .collect::<Vec<_>>();
-            if self
-                .apply_session_command(
-                    commands,
-                    run.completion(),
-                    drive_fence,
-                    cancellation.clone(),
-                    effect_controller,
-                )
-                .await?
+            // A replayed read may name a run this root already applied. An
+            // administrative compaction runs again: it replays the steps it
+            // journaled and meets its commit's receipt. Any other command
+            // journals nothing, so a settled run is simply passed.
+            if !matches!(
+                commands.as_slice(),
+                [crate::SessionCommand::CompactContext { .. }]
+            ) && self.session_command_run_settled(&store, &run).await?
+            {
+                return Ok(receipts.into_iter().next());
+            }
+            if Box::pin(self.apply_session_command(
+                commands,
+                run.completion(),
+                drive_fence,
+                cancellation.clone(),
+                effect_controller,
+            ))
+            .await?
             {
                 return Ok(receipts.into_iter().next());
             }
         }
     }
 
+    /// Read the session's leading open command run as one recorded step
+    /// under `effect_controller`, keyed by the read's ordinal among its
+    /// reads (FIG-4201).
+    ///
+    /// The first execution reads the lane live, acknowledging the run's
+    /// obligations delivered under `drive_fence`. A replay of the root reads
+    /// back the run it recorded, even after the commit that applied it
+    /// settled the lane: the root applies the same run again, an
+    /// administrative compaction replays the base and the summary it
+    /// journaled, and each commit meets its receipt or finds its rows
+    /// settled. The live lane would skip the settled command and run the
+    /// root's next steps where its journal holds the compaction's.
+    async fn read_session_command_run(
+        &self,
+        store: crate::store::SessionStore,
+        drive_fence: &crate::store::DriveFence,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
+        let ordinal = effect_controller.next_command_run_ordinal();
+        let session_id = self.state.session_id.clone();
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                effect_controller.execution_scope().clone(),
+                format!("session-command-run:{ordinal}"),
+            )?,
+            crate::RuntimeAttribution::for_session(session_id.clone()),
+            format!("session-command-run:{ordinal}"),
+        );
+        effect_controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::ReadSessionCommandRun {
+                        session: session_id,
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(ReadSessionCommandRunRunner {
+                        store,
+                        fence: drive_fence.clone(),
+                    }),
+                    None,
+                ),
+            )
+            .await
+            .and_then(crate::RuntimeEffectOutcome::into_session_command_run)
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
+    }
+
+    /// Whether the commit that applies `run` has landed: its first batch's
+    /// completion is recorded.
+    async fn session_command_run_settled(
+        &self,
+        store: &crate::store::SessionStore,
+        run: &crate::AdmittedQueuedWork,
+    ) -> Result<bool, RuntimeError> {
+        let Some(batch_id) = run.batch_ids().into_iter().next() else {
+            return Ok(false);
+        };
+        store
+            .queued_work_batch_completion(batch_id.as_str())
+            .await
+            .map(|completion| completion.is_some())
+            .map_err(super::runtime_error_from_store_commit)
+    }
+
     /// Apply `commands` and commit them, settling `completion`'s rows.
     /// `false` when a row was withdrawn since the lane was read: nothing was
-    /// applied.
+    /// applied. An administrative compaction applies alone, under its own
+    /// scope (FIG-4201).
     async fn apply_session_command(
         &mut self,
         commands: Vec<crate::SessionCommand>,
         completion: crate::QueuedWorkCompletion,
         drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
+        if let [crate::SessionCommand::CompactContext { instructions }] = commands.as_slice() {
+            return Box::pin(self.apply_compact_context_command(
+                instructions.clone(),
+                completion,
+                drive_fence,
+                effect_controller,
+            ))
+            .await;
+        }
+        let effect_controller = effect_controller.controller();
         let has_durable_store = self
             .session
             .as_ref()
@@ -1600,6 +1428,16 @@ impl LashRuntime {
                     }
                     crate::SessionCommand::ApplyConfigPatch { .. } => {
                         unreachable!("config commands use the cloned publication path")
+                    }
+                    // The drive's command lane applies a persisted compaction
+                    // before this point; only a storeless runtime's inline
+                    // command reaches here, and it compacts directly.
+                    crate::SessionCommand::CompactContext { .. } => {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::ContextCompaction,
+                            "a storeless runtime compacts directly through \
+                             `compact_storeless_context`, not through a session command",
+                        ));
                     }
                 }
             }
@@ -1701,24 +1539,6 @@ fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeErr
     }
 }
 
-fn compaction_frame_key(
-    session_id: &SessionId,
-    boundary_id: &str,
-    previous_frame_node_id: &str,
-) -> crate::FrameKey {
-    crate::FrameKey::from_compaction_material(session_id, boundary_id, previous_frame_node_id)
-}
-
-/// The operation a compaction frame's commit is written under: named by the
-/// frame, which the session, the compaction's scope and the frame it left
-/// derive, so a redriven compaction meets its receipt (FIG-4133).
-fn compaction_frame_operation(
-    session_id: &SessionId,
-    frame_key: &crate::FrameKey,
-) -> crate::OperationId {
-    crate::runtime::state::boundary_operation(session_id, frame_key.as_str(), "frame-commit")
-}
-
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::StoreCommitFailed,
@@ -1726,29 +1546,42 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
     )
 }
 
-/// The frame switch an administrative compaction commits (ADR 0113 §3.1):
-/// the frame it left, and the compaction's own execution, which gates the
-/// ended frame's cleanup.
-struct CompactionFrameSwitch {
-    ended: Option<crate::FrameNodeId>,
-    carries: super::turn_boundary::SeedCarries,
-    committing: crate::ExecutionScope,
-    operation: crate::OperationId,
-    drive_fence: Option<DriveFence>,
+/// The first execution of one `ReadSessionCommandRun` step: the live read of
+/// the command lane under the root's fence (FIG-4201).
+struct ReadSessionCommandRunRunner {
+    store: crate::store::SessionStore,
+    fence: crate::store::DriveFence,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::compaction_frame_key;
-    use crate::SessionId;
-
-    #[test]
-    fn compaction_frame_identity_is_replay_stable() {
-        let first = compaction_frame_key(&SessionId::from("session"), "turn", "frame-before");
-        let replay = compaction_frame_key(&SessionId::from("session"), "turn", "frame-before");
-        let next = compaction_frame_key(&SessionId::from("session"), "turn", "frame-after");
-
-        assert_eq!(first, replay);
-        assert_ne!(first, next);
+#[async_trait::async_trait]
+impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ReadSessionCommandRunRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::ReadSessionCommandRun { .. } = &envelope.command else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "session-command-run executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        match self.store.open_session_command_run(&self.fence).await {
+            Ok(batches) => Ok(crate::RuntimeEffectOutcome::ReadSessionCommandRun { batches }),
+            // A superseded fence is the root's settled fact: every replay
+            // decodes the same refusal.
+            Err(error @ crate::StoreError::StaleDriveFence { .. }) => {
+                Err(crate::RuntimeEffectControllerError::from(
+                    super::runtime_error_from_store_commit(error),
+                ))
+            }
+            // A store that did not answer is this attempt's fault.
+            Err(error) => Err(crate::RuntimeEffectControllerError::from(
+                super::runtime_error_from_store_commit(error),
+            )
+            .retryable_uncommitted_derivation()),
+        }
     }
 }

@@ -221,12 +221,14 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         "initial frame should contain the original request"
     );
 
-    // Boxed: the future carries the scoped controller, which now also carries
-    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
-    let compacted = Box::pin(session.admin().state().compact_context(
-        Some("focus on durable summary".to_string()),
-        runtime_operation_scope(&core, "compact-context-test").await,
-    ))
+    // The compaction is a session command the engine's drive applies at the
+    // next turn boundary; the admin call awaits its settlement (FIG-4201).
+    let compacted = Box::pin(
+        session
+            .admin()
+            .state()
+            .compact_context(Some("focus on durable summary".to_string())),
+    )
     .await?;
 
     assert!(compacted);
@@ -401,13 +403,7 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
         .send(TurnInput::text("content to compact"))
         .output()
         .await?;
-    assert!(
-        Box::pin(session.admin().state().compact_context(
-            None,
-            runtime_operation_scope(&core, "compact-prompt-stack-test").await,
-        ))
-        .await?
-    );
+    assert!(Box::pin(session.admin().state().compact_context(None)).await?);
     Ok(())
 }
 

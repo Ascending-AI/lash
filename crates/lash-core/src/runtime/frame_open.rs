@@ -78,9 +78,9 @@ impl LashRuntime {
     /// would replace session configuration without a commanded config patch.
     /// Refuses with [`RuntimeErrorCode::ExecutionStateCaptureFailed`], before
     /// anything is opened, a seed that carries artifacts: only an open that
-    /// commits its own frame (a context-pressure hook, `compact_context`,
-    /// `continue_as`) can hand them to the new frame, so a staged one would
-    /// lose them.
+    /// commits its own frame (a context-pressure hook, an administrative
+    /// compaction, `continue_as`) can hand them to the new frame, so a staged
+    /// one would lose them.
     pub async fn open_agent_frame(
         &mut self,
         request: crate::OpenAgentFrameRequest,
@@ -139,30 +139,10 @@ impl LashRuntime {
                 RuntimeErrorCode::ExecutionStateCaptureFailed,
                 "a staged frame open cannot carry its seed's artifacts into the new frame; \
                  open the frame through a commit that carries them (a context-pressure \
-                 hook, `compact_context` or `continue_as`)",
+                 hook, an administrative compaction or `continue_as`)",
             ));
         }
         self.open_frame(request).await
-    }
-
-    /// The drive fence a writer beside the drive presents (ADR 0109 §7): the
-    /// one of the admission that last raised the session's drive epoch, or
-    /// `None` for a storeless runtime, a store with no drive epoch, or a
-    /// session never admitted.
-    pub(in crate::runtime) async fn beside_drive_fence(
-        &self,
-    ) -> Result<Option<DriveFence>, crate::StoreError> {
-        let Some(store) = self.services.store.as_ref() else {
-            return Ok(None);
-        };
-        match crate::store::current_drive_fence(store.store().as_ref(), store.session_id()).await {
-            Ok(fence) => Ok(fence),
-            Err(
-                crate::StoreError::DriveEpochUnavailable { .. }
-                | crate::StoreError::UnsupportedStoreOperation { .. },
-            ) => Ok(None),
-            Err(error) => Err(error),
-        }
     }
 
     /// Restores the live protocol session from the resident state after a
@@ -201,11 +181,9 @@ pub(in crate::runtime) enum StagedOpen {
     /// historical frame, which is refused, and the open commits nothing of
     /// its own, so a seed that carries artifacts is refused too.
     Caller,
-    /// `compact_context`, whose key core derives from the compaction and the
-    /// frame current at its base, as a pressure frame's is: it names a new
-    /// frame,
-    /// or on a redrive the one its own first execution committed, whose
-    /// receipt its commit meets (FIG-4133). It commits its frame with the
-    /// artifacts its seed carries.
+    /// An administrative compaction, whose key core derives from the
+    /// compaction's scope and the frame current at its recorded base, as a
+    /// pressure frame's is: it names a new frame (FIG-4133, FIG-4201). It
+    /// commits its frame with the artifacts its seed carries.
     Compaction,
 }

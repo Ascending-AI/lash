@@ -61,6 +61,7 @@ impl<'run> ScopedEffectController<'run> {
                 journal_guard: self.journal_guard,
                 keyless_starts: self.keyless_starts,
                 compactions: self.compactions,
+                command_runs: self.command_runs,
             }),
         }
     }

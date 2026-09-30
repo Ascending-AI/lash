@@ -487,6 +487,7 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
                         lash_core_execution::TurnBudget::Unbounded,
                     ),
                     current_frame_node_id: None,
+                    published_by_drive: false,
                 })
                 .expect("encode witness head");
             sqlx::query(

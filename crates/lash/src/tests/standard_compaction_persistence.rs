@@ -348,13 +348,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
             .await?;
     }
     let before = session.read_view();
-    assert!(
-        Box::pin(session.admin().state().compact_context(
-            None,
-            runtime_operation_scope(&core, "standard-compaction-explicit-frame").await,
-        ))
-        .await?
-    );
+    assert!(Box::pin(session.admin().state().compact_context(None)).await?);
     let after = session.read_view();
     let frame = assert_resident_in_fresh_compaction_frame(&before, &after, "explicit summary");
     assert_eq!(after.messages().len(), 1);
@@ -837,22 +831,13 @@ fn sqlite_messages(
         .collect()
 }
 
-#[derive(Clone, Copy)]
-enum RepeatedAdminCompactionScope {
-    ParentTurn,
-    RuntimeOperation,
-}
-
-async fn assert_repeated_admin_compactions_with_changed_snapshot(
-    scope_kind: RepeatedAdminCompactionScope,
-    expected_summaries: &[&str],
-) -> Result<()> {
-    let session_id = match scope_kind {
-        RepeatedAdminCompactionScope::ParentTurn => "standard-compaction-repeat-parent-turn",
-        RepeatedAdminCompactionScope::RuntimeOperation => {
-            "standard-compaction-repeat-runtime-operation"
-        }
-    };
+/// Repeated administrative compactions over a changed snapshot each open
+/// their own frame, and each settles its summarizer's billed usage in the
+/// commit that opens it (FIG-3374, FIG-4201).
+#[tokio::test]
+async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()> {
+    let session_id = "standard-compaction-repeat-admin";
+    let expected_summaries = ["first summary", "second summary", "third summary"];
     let mut responses = vec![
         response_with_usage("first response", 1),
         response_with_usage("second response", 1),
@@ -884,30 +869,16 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
             .output()
             .await?;
     }
-    let execution_scope = match scope_kind {
-        RepeatedAdminCompactionScope::ParentTurn => {
-            lash_core::ExecutionScope::turn(session_id, "standard-compaction-same-parent-two")
-        }
-        RepeatedAdminCompactionScope::RuntimeOperation => {
-            lash_core::ExecutionScope::runtime_operation(format!(
-                "standard-compaction-repeat-admin:{session_id}"
-            ))
-        }
-    };
-    let shared_scope_handler = held_double(&core)
-        .expect("the core runs on its held double")
-        .open_handler(lash_core::AdmittedScope::new(execution_scope))
-        .await
-        .expect("open the admin handler");
-    let shared_scope = shared_scope_handler.scoped();
 
     for expected_summary in expected_summaries {
         let usage_before = session.usage_report().usage.usage.output_tokens;
         assert!(
-            Box::pin(session.admin().state().compact_context(
-                Some("keep the same administrative focus".to_string()),
-                shared_scope.clone(),
-            ))
+            Box::pin(
+                session
+                    .admin()
+                    .state()
+                    .compact_context(Some("keep the same administrative focus".to_string()))
+            )
             .await?,
             "each changed snapshot remains a valid administrative compaction request"
         );
@@ -919,34 +890,15 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
                 .contains(expected_summary)
         );
         // The administrative compaction owns no turn, so its direct completion
-        // usage must settle at the compact_context boundary (FIG-3374).
+        // usage settles in the commit that applies its command.
         let usage_after = session.usage_report().usage.usage.output_tokens;
         assert_eq!(
             usage_after,
             usage_before + 1,
-            "the summarizer's usage must settle at the compaction boundary"
+            "the summarizer's usage must settle at the compaction's commit"
         );
     }
     Ok(())
-}
-
-#[tokio::test]
-async fn repeated_admin_compaction_with_parent_turn_distinguishes_changed_snapshot() -> Result<()> {
-    Box::pin(assert_repeated_admin_compactions_with_changed_snapshot(
-        RepeatedAdminCompactionScope::ParentTurn,
-        &["first summary", "second summary"],
-    ))
-    .await
-}
-
-#[tokio::test]
-async fn repeated_admin_compaction_with_runtime_scope_distinguishes_changed_snapshot() -> Result<()>
-{
-    Box::pin(assert_repeated_admin_compactions_with_changed_snapshot(
-        RepeatedAdminCompactionScope::RuntimeOperation,
-        &["first summary", "second summary", "third summary"],
-    ))
-    .await
 }
 
 #[tokio::test]
@@ -1023,10 +975,12 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     );
 
     assert!(
-        Box::pin(session.admin().state().compact_context(
-            Some("retain the durable ancestry result".to_string()),
-            runtime_operation_scope(&core, "standard-compaction-explicit-compaction").await,
-        ))
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .compact_context(Some("retain the durable ancestry result".to_string()))
+        )
         .await?,
         "standard-compaction compaction should open a summary frame after the threshold turn commits"
     );
@@ -1114,67 +1068,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 }
 
 #[tokio::test]
-async fn compaction_accepts_parent_turn_authority() -> Result<()> {
-    let session_id = "standard-compaction-turn-parent";
-    let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(standard_compaction_provider(vec![
-        response_with_usage("first response", 1),
-        response_with_usage("second response", 1),
-        response_with_usage("turn-authorized summary", 1),
-    ]))
-    .model(model_spec("standard-compaction-model", None, 40_000))
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
-
-    session
-        .send(TurnInput::text("first request"))
-        .id("standard-compaction-parent-one")
-        .output()
-        .await?;
-    session
-        .send(TurnInput::text("second request"))
-        .id("standard-compaction-parent-two")
-        .output()
-        .await?;
-    let parent_scope_handler = held_double(&core)
-        .expect("the core runs on its held double")
-        .open_handler(lash_core::AdmittedScope::turn(
-            session_id,
-            "standard-compaction-parent-two",
-        ))
-        .await
-        .expect("open the admin handler");
-    let parent_scope = parent_scope_handler.scoped();
-
-    assert!(
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .compact_context(Some("retain both requests".to_string()), parent_scope)
-        )
-        .await?,
-        "a validated runtime-internal child may preserve its parent Turn authority"
-    );
-    assert_eq!(session.read_view().messages().len(), 1);
-    assert!(
-        session.read_view().messages()[0].parts[0]
-            .content()
-            .contains("turn-authorized summary")
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_parents() -> Result<()> {
-    let session_id = "standard-compaction-repeated-shared-scope";
+async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
+    let session_id = "standard-compaction-repeated-compactions";
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
@@ -1194,14 +1089,6 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
-    let shared_scope_handler = held_double(&core)
-        .expect("the core runs on its held double")
-        .open_handler(lash_core::AdmittedScope::runtime_operation(
-            "standard-compaction-repeated-compaction",
-        ))
-        .await
-        .expect("open the admin handler");
-    let shared_scope = shared_scope_handler.scoped();
 
     for (turn_id, text) in [
         ("standard-compaction-repeat-one", "first request"),
@@ -1218,7 +1105,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
             session
                 .admin()
                 .state()
-                .compact_context(Some("first compaction".to_string()), shared_scope.clone(),)
+                .compact_context(Some("first compaction".to_string()))
         )
         .await?
     );
@@ -1238,7 +1125,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
             session
                 .admin()
                 .state()
-                .compact_context(Some("second compaction".to_string()), shared_scope)
+                .compact_context(Some("second compaction".to_string()))
         )
         .await?,
         "a later physical parent must not replay the earlier compaction child"
@@ -2052,9 +1939,13 @@ impl lash_core::store::RuntimeStoreDecorator for FailArmedCommitFactory {
 
 impl lash_core::DeploymentStoreDecorator for FailArmedCommitFactory {}
 
+/// An administrative compaction whose commit fails once is applied on the
+/// engine's retry of its command drive: the command stays open, its
+/// journaled summary is read back rather than requested again, the summary
+/// lands once, and the summarizer's billed usage settles exactly once
+/// (FIG-4201).
 #[tokio::test]
-async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_on_retry()
--> Result<()> {
+async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> Result<()> {
     let session_id = "standard-compaction-commit-failure";
     let sqlite = double_backend().await;
     let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2064,10 +1955,9 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     let (provider, provider_calls) = standard_compaction_provider_counted(vec![
         response_with_usage("first response", 1),
         response_with_usage("second response", 1),
-        response_with_usage("rolled-back-then-summarized", 1),
-        // A spare covers the case where the retry makes a fresh provider call
-        // rather than replaying the journaled effect.
-        response_with_usage("rolled-back-then-summarized", 1),
+        response_with_usage("failed-then-summarized", 1),
+        // A spare the retry must not ask for: its summary is journaled.
+        response_with_usage("failed-then-summarized", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
@@ -2090,87 +1980,46 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
         .id("standard-compaction-commit-failure-two")
         .output()
         .await?;
-    let shared_scope_handler = held_double(&core)
-        .expect("the core runs on its held double")
-        .open_handler(lash_core::AdmittedScope::runtime_operation(
-            "standard-compaction-commit-failure:admin",
-        ))
-        .await
-        .expect("open the admin handler");
-    let shared_scope = shared_scope_handler.scoped();
     let usage_before = session.usage_report().usage.usage.output_tokens;
-    let message_count_before = session.read_view().messages().len();
+    let calls_before = provider_calls.load(Ordering::SeqCst);
 
     commit_failure.store(true, Ordering::SeqCst);
-    let err = Box::pin(
-        session
-            .admin()
-            .state()
-            .compact_context(Some("summarize".to_string()), shared_scope.clone()),
-    )
-    .await
-    .expect_err("the settlement commit failure must surface");
-    assert!(
-        err.to_string()
-            .contains("injected compaction settlement commit failure"),
-        "unexpected error: {err}"
-    );
-    // The rejected commit must not leak into the resident view: the frame
-    // switch rolls back to the durable head, so the pre-compaction history is
-    // still what the facade publishes.
-    let view = session.read_view();
-    assert_eq!(view.messages().len(), message_count_before);
-    assert!(
-        view.messages()
-            .iter()
-            .all(|message| !message.parts[0].content().contains("summarized")),
-        "a rolled-back compaction must not leave its summary resident: {:?}",
-        view.messages()
-            .iter()
-            .map(|message| message.parts[0].content().to_string())
-            .collect::<Vec<_>>()
-    );
-    // The staged usage rows are discarded with the rolled-back merge — the
-    // journaled completion effect re-records them when a retry replays it —
-    // so the report returns to the pre-compaction total.
-    assert_eq!(
-        session.usage_report().usage.usage.output_tokens,
-        usage_before,
-        "a rolled-back settlement must not retain the uncommitted usage merge"
-    );
-
-    let calls_before_retry = provider_calls.load(Ordering::SeqCst);
-
-    // A retry re-merges the still-staged usage exactly once: the durable head
-    // reload discarded the uncommitted merge, so the settled ledger grows by
-    // the summarizer's usage, not twice it.
     assert!(
         Box::pin(
             session
                 .admin()
                 .state()
-                .compact_context(Some("summarize".to_string()), shared_scope)
+                .compact_context(Some("summarize".to_string()))
         )
         .await?,
-        "the retried compaction commits after the injected failure clears"
+        "the engine's retry applies the compaction once the injected failure clears"
+    );
+    assert!(
+        !commit_failure.load(Ordering::SeqCst),
+        "the compaction's commit met the injected failure"
     );
     let view = session.read_view();
-    assert!(
+    assert_eq!(
         view.messages()
             .iter()
-            .any(|message| message.parts[0].content().contains("summarized")),
-        "the retried compaction's summary lands: {:?}",
+            .filter(|message| message.parts[0].content().contains("summarized"))
+            .count(),
+        1,
+        "the summary lands once: {:?}",
         view.messages()
             .iter()
             .map(|message| message.parts[0].content().to_string())
             .collect::<Vec<_>>()
     );
-    let replayed = provider_calls.load(Ordering::SeqCst) == calls_before_retry;
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        calls_before + 1,
+        "the retry reads the journaled summary back"
+    );
     assert_eq!(
         session.usage_report().usage.usage.output_tokens,
         usage_before + 1,
-        "the retried compaction settles the summarizer's billed usage exactly \
-         once (replayed={replayed})"
+        "the summarizer's billed usage settles exactly once"
     );
     Ok(())
 }

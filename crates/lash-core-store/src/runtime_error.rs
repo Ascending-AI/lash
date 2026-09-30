@@ -150,6 +150,11 @@ pub enum RuntimeErrorCode {
     PluginCheckpoint,
     PluginPrepareTurn,
     ContextPrepareTurn,
+    /// An administrative compaction failed before it opened its frame: its
+    /// compactor, its prompt or its frame open refused (FIG-4201). The
+    /// command that carried it settles with this code and is never applied
+    /// again.
+    ContextCompaction,
     ProtocolBeforeLlmCall,
     TurnStreamJoin,
     EmptyAgentFrameRun,
@@ -602,6 +607,7 @@ impl RuntimeErrorCode {
             Self::PluginCheckpoint => "plugin_checkpoint",
             Self::PluginPrepareTurn => "plugin_prepare_turn",
             Self::ContextPrepareTurn => "context_prepare_turn",
+            Self::ContextCompaction => "context_compaction",
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
             Self::TurnStreamJoin => "turn_stream_join",
             Self::EmptyAgentFrameRun => "empty_agent_frame_run",
@@ -850,6 +856,7 @@ impl RuntimeErrorCode {
         Self::PluginCheckpoint,
         Self::PluginPrepareTurn,
         Self::ContextPrepareTurn,
+        Self::ContextCompaction,
         Self::ProtocolBeforeLlmCall,
         Self::TurnStreamJoin,
         Self::EmptyAgentFrameRun,
@@ -1038,6 +1045,7 @@ impl RuntimeErrorCode {
             "plugin_checkpoint" => Self::PluginCheckpoint,
             "plugin_prepare_turn" => Self::PluginPrepareTurn,
             "context_prepare_turn" => Self::ContextPrepareTurn,
+            "context_compaction" => Self::ContextCompaction,
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
             "turn_stream_join" => Self::TurnStreamJoin,
             "empty_agent_frame_run" => Self::EmptyAgentFrameRun,

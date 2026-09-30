@@ -130,9 +130,10 @@ pub use process_identity::process_id_for_test;
 pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
-    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkKind, QueuedWorkPayload, SessionCommand, TurnLaneAdmissionPolicy,
+    AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    TurnLaneAdmissionPolicy,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{

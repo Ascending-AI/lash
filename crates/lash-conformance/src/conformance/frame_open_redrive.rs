@@ -11,12 +11,14 @@
 //!   then runs in the new frame on resident state.
 //! - **`continue_as`.** The turn's own `AgentFrameSwitch` outcome, opened by
 //!   the turn's commit; the task runs as a follow-on physical turn.
-//! - **`compact_context`.** An administrative compaction: core records the head
-//!   and frame it compacts as one recorded step, a compactor returns seed
-//!   nodes over that base, and core opens and commits the frame through an
-//!   idempotent fenced write the compaction names. A redrive replays the
-//!   recorded base, reads the summary back over it and meets the commit's
-//!   receipt, even after the commit moved the head.
+//! - **`compact_context`.** An administrative compaction: a session command
+//!   the drive's command lane applies at a turn boundary, under the command
+//!   root's sealed fence (FIG-4201). Core records the head and frame it
+//!   compacts as one recorded step under the command's own scope, a
+//!   compactor returns seed nodes over that base, and core opens and commits
+//!   the frame in the commit that settles the command. A redrive of the
+//!   unsettled command replays the recorded base and reads the summary back
+//!   over it; a settled command is never applied again.
 //!
 //! Each law kills the execution at one point and redrives it on the tier's
 //! runner: before `compact_context`'s summarizer runs, after the summarizer's
@@ -42,9 +44,8 @@
 //! Beyond the crash matrix (FIG-4134): the production standard compactor and
 //! its overflow recovery replay exactly as the laws' synthetic compactor does
 //! (a redrive's admitted window hashes to the request identity the first
-//! execution journaled); an administrative compaction writes under the drive
-//! fence current when it starts, so an admission sealed while it summarizes
-//! refuses it typed; a
+//! execution journaled); an administrative compaction waits for the bound
+//! turn, and one queued before an input applies before it (FIG-4201); a
 //! session deleted while a frame opens takes nothing of the open, and a fork
 //! made meanwhile never sees a partial seed; an empty seed opens a frame; a
 //! frame whose commit the store refuses leaves nothing visible; two plugins
@@ -205,7 +206,8 @@ pub enum FrameOpenCrash {
     /// The summarizer's completion is journaled; the frame's commit is not.
     AfterSummary,
     /// The frame's own commit is durable: the pressure frame's, before its
-    /// turn runs, or an administrative compaction's, before it reports.
+    /// turn runs, or an administrative compaction's, before its command root
+    /// goes on.
     AfterFrameCommit,
     /// The turn's model and tool effects are journaled; its commit is not.
     BeforeTurnCommit,
@@ -268,7 +270,13 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashProbe {
         }
     }
 
-    fn begin_named(&self, _phase: &str) {}
+    fn begin_named(&self, phase: &str) {
+        if self.crash == FrameOpenCrash::AfterFrameCommit
+            && phase == lash_core::runtime::COMPACT_CONTEXT_COMMITTED_PHASE
+        {
+            panic!("injected crash after the administrative compaction's commit");
+        }
+    }
 
     fn end_named(&self, phase: &str) {
         // A hook the law does not own (the production standard compactor)
@@ -621,8 +629,8 @@ enum LawCompactor {
     DuplicateHookIds,
 }
 
-/// Holds an administrative compaction once its summary is journaled, before
-/// its frame commit, until the law releases it. Released, it holds nothing
+/// Holds a summarizer once its summary is journaled, before its frame
+/// commit, until the law releases it. Released, it holds nothing
 /// again: a tier that replays the compaction's handler from the top
 /// (Restate's replay leg) replays every step up to the hold, and must not
 /// wait for a second release. Holding after the last journaled step keeps
@@ -1035,6 +1043,57 @@ impl LawSession {
             .input_id
     }
 
+    /// Submits an administrative compaction to the session's command lane,
+    /// as `submit_session_command` records it: the command's batch, which
+    /// the next drive applies at its turn boundary (FIG-4201). The law
+    /// submits through the store so the submission itself drives nothing.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    async fn submit_compaction(&self, key: &str) -> crate::SessionCommandReceipt {
+        let command = crate::SessionCommand::CompactContext { instructions: None };
+        let source_key = command.source_key(format!("{}-{key}", self.prefix));
+        let batch = self
+            .store
+            .enqueue_queued_work(
+                crate::QueuedWorkBatchDraft::new(
+                    self.session_id.clone(),
+                    crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                    command,
+                )
+                .with_source_key(source_key.clone()),
+            )
+            .await
+            .expect("accept the compaction command");
+        crate::SessionCommandReceipt {
+            session_id: self.session_id.clone(),
+            batch_id: batch.batch_id,
+            source_key,
+        }
+    }
+
+    /// How the compaction `receipt` names settled: its batch's completion
+    /// receipt, read from the store; `None` while it is unsettled.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    async fn compaction_outcome(
+        &self,
+        receipt: &crate::SessionCommandReceipt,
+    ) -> Option<crate::CompactContextOutcome> {
+        self.store
+            .queued_work_batch_completion(&self.session_id, receipt.batch_id.as_str())
+            .await
+            .expect("read the compaction's completion")
+            .map(|completion| {
+                completion
+                    .compact_context_outcome
+                    .expect("a settled compaction carries its outcome")
+            })
+    }
+
     async fn head(&self) -> LawHead {
         self.head_of(&self.session_id).await
     }
@@ -1113,6 +1172,24 @@ impl LawSession {
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn run_root_crashed_at(&self, drive: &str, crash: FrameOpenCrash) {
+        self.drive_crashed_at(drive, crash)
+            .await
+            .ran()
+            .expect("the redrive runs the root to its end");
+    }
+
+    /// Runs one drive of the session, killing it at `crash` and redriving
+    /// it, and answers how the redrive ended: the turn root it ran, or the
+    /// empty drain of a drive that only applied the command lane.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    async fn drive_crashed_at(
+        &self,
+        drive: &str,
+        crash: FrameOpenCrash,
+    ) -> crate::facade_support::QueuedTurnDrain<crate::AssembledTurn> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::time::timeout(
             std::time::Duration::from_secs(90),
@@ -1133,8 +1210,6 @@ impl LawSession {
             .await
             .expect("the tier's runner ran the redriven drive")
             .unwrap_or_else(|error| panic!("the redrive after {crash:?} replays: {error:?}"))
-            .ran()
-            .expect("the redrive runs the root to its end");
     }
 }
 
@@ -1383,11 +1458,12 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
     );
 }
 
-/// An administrative compaction, killed at `crash` and redriven, opens its
-/// frame once: one summarizer call, one compaction frame, one commit.
-/// Killed after its commit, the redrive loads the moved head, replays the
-/// recorded base and the summary over it, and meets the commit's receipt
-/// instead of opening a second frame from the moved head (FIG-4133).
+/// An administrative compaction the command lane applies, its drive killed
+/// at `crash` and redriven, opens its frame once: one summarizer call, one
+/// compaction frame, one commit, and the command settles with the frame it
+/// opened. Killed before its commit, the redrive replays the recorded base
+/// and reads the summary back over it (FIG-4133); killed after, the settled
+/// command is never applied again (FIG-4201).
 pub async fn a_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -1416,14 +1492,22 @@ pub async fn a_compaction_frame_opens_once_whatever_its_crash(
 #[macro_export]
 macro_rules! frame_open_protocol_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
-        #[ignore = "FIG-4165: pressure CAS loss leaves the root bound to its old admission; recovery needs an admission policy"]
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn reverse_compact_pressure_overlap_redrives_once() {
-            let (_guard, prefix, host, stores, runner, protocol) = $fixture;
-            $crate::registration_macro_support::reverse_compact_pressure_overlap_redrives_once(
-                prefix, host, stores, runner, protocol,
-            ).await;
-        }
+        $crate::frame_open_protocol_redrive_tests!(@bound [$(#[$attr])*] $fixture;
+            (an_administrative_compaction_waits_for_the_bound_turn, None),
+            (an_administrative_compaction_waits_for_a_bound_turn_crashed_before_its_pressure_commit,
+                Some(PressureBeforeCommit)),
+            (an_administrative_compaction_waits_for_a_bound_turn_crashed_after_its_pressure_commit,
+                Some(PressureAfterCommit)),
+            (an_administrative_compaction_waits_for_a_bound_turn_crashed_after_its_commit,
+                Some(AfterTurnCommit)),
+            (an_administrative_compaction_after_the_bound_turn_crashed_before_its_summary,
+                Some(CompactionBeforeSummary)),
+            (an_administrative_compaction_after_the_bound_turn_crashed_after_its_provider_answered,
+                Some(CompactionAfterProviderAnswer)),
+            (an_administrative_compaction_after_the_bound_turn_crashed_after_its_summary,
+                Some(CompactionAfterSummary)),
+            (an_administrative_compaction_after_the_bound_turn_crashed_after_its_commit,
+                Some(CompactionAfterFrameCommit)));
         $crate::frame_open_protocol_redrive_tests!(@law [$(#[$attr])*] $fixture;
             (a_pressure_frame_crashed_after_its_provider_answered_opens_once,
                 a_pressure_frame_opens_once_whatever_its_crash, AfterProviderAnswer),
@@ -1464,6 +1548,36 @@ macro_rules! frame_open_protocol_redrive_tests {
         $crate::frame_open_protocol_redrive_tests!(@law [$($attrs)*] $fixture; $($rest),*);
     };
     (@law [$($attrs:tt)*] $fixture:block;) => {};
+    (@bound [$($attrs:tt)*] $fixture:block; ($name:ident, None) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner, protocol) = $fixture;
+            $crate::registration_macro_support::an_administrative_compaction_waits_for_the_bound_turn(
+                prefix, host, stores, runner, protocol, None,
+            )
+            .await;
+        }
+        $crate::frame_open_protocol_redrive_tests!(@bound [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@bound [$($attrs:tt)*] $fixture:block; ($name:ident, Some($crash:ident)) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner, protocol) = $fixture;
+            $crate::registration_macro_support::an_administrative_compaction_waits_for_the_bound_turn(
+                prefix,
+                host,
+                stores,
+                runner,
+                protocol,
+                Some($crate::registration_macro_support::BoundTurnCrash::$crash),
+            )
+            .await;
+        }
+        $crate::frame_open_protocol_redrive_tests!(@bound [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@bound [$($attrs:tt)*] $fixture:block;) => {};
 }
 
 /// Register the execution-state frame-open laws (FIG-4110, F5; FIG-4134)
@@ -1511,15 +1625,17 @@ macro_rules! frame_open_execution_state_tests {
 /// Register the frame-open laws (FIG-4110) on the standard protocol: the
 /// protocol laws of [`frame_open_protocol_redrive_tests`]; an administrative
 /// compaction killed before its summary, after its provider answered, after
-/// its summary and after its commit (FIG-4133); and the FIG-4134 laws: the
+/// its summary and after its commit (FIG-4133), and one queued before an
+/// input, killed at the same points (FIG-4201); the FIG-4134 laws: the
 /// production standard compactor and its overflow recovery across the crash
-/// matrix, an administrative compaction superseded by a newer admission or
-/// by a pressure frame, a session deleted and a fork made during an open, an
-/// empty seed, a refused frame commit, and pressure hooks sharing an id; and
-/// FIG-4200's root whose held pressure frame another runtime overtakes,
-/// ending typed on the drive loop and the engine path, uninterrupted, across
-/// a crash before its end and on a fresh journal. The fixture hands back a
-/// guard, a prefix, the tier's effect host, the store set under test and its
+/// matrix, a session deleted and a fork made during an open, an empty seed,
+/// a refused frame commit, and pressure hooks sharing an id; FIG-4200's root
+/// whose held pressure frame another runtime overtakes, ending typed on the
+/// drive loop and the engine path, uninterrupted, across a crash before its
+/// end and on a fresh journal; and a root resumed on a fresh journal after
+/// its own pressure frame committed, which continues from that frame on both
+/// paths (FIG-4201). The fixture hands back a guard, a prefix, the tier's
+/// effect host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 #[macro_export]
 macro_rules! frame_open_redrive_tests {
@@ -1544,6 +1660,14 @@ macro_rules! frame_open_redrive_tests {
                 a_compaction_frame_opens_once_whatever_its_crash, AfterSummary),
             (a_compaction_crashed_after_its_commit_opens_once,
                 a_compaction_frame_opens_once_whatever_its_crash, AfterFrameCommit),
+            (a_compaction_queued_before_an_input_crashed_before_its_summary_applies_before_it,
+                a_compaction_queued_before_an_input_applies_before_it, BeforeSummary),
+            (a_compaction_queued_before_an_input_crashed_after_its_provider_answered_applies_before_it,
+                a_compaction_queued_before_an_input_applies_before_it, AfterProviderAnswer),
+            (a_compaction_queued_before_an_input_crashed_after_its_summary_applies_before_it,
+                a_compaction_queued_before_an_input_applies_before_it, AfterSummary),
+            (a_compaction_queued_before_an_input_crashed_after_its_commit_applies_before_it,
+                a_compaction_queued_before_an_input_applies_before_it, AfterFrameCommit),
             (a_standard_compaction_frame_crashed_after_its_provider_answered_opens_once,
                 a_standard_compaction_frame_opens_once_whatever_its_crash, AfterProviderAnswer),
             (a_standard_compaction_frame_crashed_after_its_summary_opens_once,
@@ -1581,11 +1705,13 @@ macro_rules! frame_open_redrive_tests {
                 Engine, CrashBeforeEnd),
             (a_superseded_root_ends_typed_on_the_engine_path_on_a_fresh_journal,
                 Engine, FreshJournal));
+        $crate::frame_open_redrive_tests!(@own [$(#[$attr])*] $fixture;
+            (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_drive_loop,
+                DriveLoop),
+            (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
+                Engine));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
-            redrive_after_commit_with_sealed_admission_reports_opened,
             compact_with_production_compactor_crash_matrix,
-            a_compaction_superseded_by_a_newer_admission_is_refused,
-            a_compaction_overlapping_a_pressure_frame_is_refused,
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,
             a_refused_frame_commit_leaves_nothing_visible);
@@ -1625,6 +1751,23 @@ macro_rules! frame_open_redrive_tests {
         $crate::frame_open_redrive_tests!(@superseded [$($attrs)*] $fixture; $($rest),*);
     };
     (@superseded [$($attrs:tt)*] $fixture:block;) => {};
+    (@own [$($attrs:tt)*] $fixture:block; ($name:ident, $path:ident) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame(
+                prefix,
+                host,
+                stores,
+                runner,
+                $crate::registration_macro_support::SupersededRootPath::$path,
+            )
+            .await;
+        }
+        $crate::frame_open_redrive_tests!(@own [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@own [$($attrs:tt)*] $fixture:block;) => {};
     (@once [$($attrs:tt)*] $fixture:block; $law:ident $(, $rest:ident)*) => {
         $($attrs)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

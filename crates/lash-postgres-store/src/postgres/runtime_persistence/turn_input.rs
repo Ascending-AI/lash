@@ -896,12 +896,12 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
         self.cancel_queued_work_batch_pg(session_id, batch_id).await
     }
 
-    async fn queued_work_batch_completed(
+    async fn queued_work_batch_completion(
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        self.queued_work_batch_completed_pg(session_id, batch_id)
+    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
+        self.queued_work_batch_completion_pg(session_id, batch_id)
             .await
     }
 

@@ -987,6 +987,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
                         session_id: read.session_id.clone(),
                         config: read.config.clone(),
                         current_frame_node_id: read.current_frame_node_id.clone(),
+                        published_by_drive: false,
                     },
                     read.head_revision,
                     read.checkpoint_ref.clone(),

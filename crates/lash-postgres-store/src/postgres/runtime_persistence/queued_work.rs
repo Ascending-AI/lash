@@ -80,27 +80,37 @@ impl PostgresStore {
         Ok(Some(batch))
     }
 
-    pub(super) async fn queued_work_batch_completed_pg(
+    pub(super) async fn queued_work_batch_completion_pg(
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
         let marker =
             lash_core_execution::store_backend_support::session_command_batch_completion_key(
                 session_id, batch_id,
             )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query_scalar(
+        let row = sqlx::query(
             crate::session_sql::session_sql()
                 .turn_commits
-                .exists_for_turn
+                .select_receipt
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(marker)
-        .fetch_one(&mut *connection)
+        .bind(&marker)
+        .fetch_optional(&mut *connection)
         .await
-        .map_err(store_sqlx_error)
+        .map_err(store_sqlx_error)?;
+        row.map(|row| {
+            let result_json: String = row.get(1);
+            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                session_id,
+                &marker,
+                &result_json,
+                self.fence.fleet(),
+            )
+        })
+        .transpose()
     }
 
     pub(super) async fn list_queued_work_pg(

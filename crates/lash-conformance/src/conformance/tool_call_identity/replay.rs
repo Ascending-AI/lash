@@ -153,6 +153,21 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
     );
     assert_finished("the turn before the compaction", &world.run(&before).await);
 
+    // The compaction is a session command the next drive applies at its
+    // turn boundary (FIG-4201).
+    let store = world.store().await;
+    let command = crate::SessionCommand::CompactContext { instructions: None };
+    let batch = store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                world.session_id.clone(),
+                crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                command.clone(),
+            )
+            .with_source_key(command.source_key(format!("{}-compaction", world.session_id))),
+        )
+        .await
+        .expect("accept the compaction command");
     let (compacted, mut compaction) = tokio::sync::mpsc::unbounded_channel();
     let compact: crate::ConformanceTurnAttempt = {
         let world = world.clone();
@@ -161,10 +176,14 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
             let compacted = compacted.clone();
             Box::pin(async move {
                 let mut runtime = world.runtime(None).await;
-                let outcome = Box::pin(runtime.compact_context(None, scope))
-                    .await
-                    .map_err(|error| error.to_string());
-                let _ = compacted.send(outcome);
+                let drained = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    scope,
+                )))
+                .await
+                .map(|drained| drained.ran().is_none())
+                .map_err(|error| error.to_string());
+                let _ = compacted.send(drained);
                 crate::ConformanceTurnEnd::Settled
             })
         })
@@ -172,10 +191,10 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
     world
         .runner()
         .run_turn(
-            crate::admit(crate::ExecutionScope::runtime_operation(format!(
-                "{}-compaction",
-                world.session_id
-            ))),
+            crate::admit(crate::ExecutionScope::queue_drain(
+                &world.session_id,
+                format!("{}-compaction", world.session_id),
+            )),
             compact,
         )
         .await;
@@ -183,8 +202,19 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
         compaction
             .recv()
             .await
-            .expect("the tier's runner ran the compaction"),
+            .expect("the tier's runner ran the compaction's drive"),
         Ok(true),
+        "the drive applies only the command lane"
+    );
+    assert!(
+        matches!(
+            store
+                .queued_work_batch_completion(&world.session_id, batch.batch_id.as_str())
+                .await
+                .expect("read the compaction's completion")
+                .and_then(|completion| completion.compact_context_outcome),
+            Some(crate::CompactContextOutcome::Opened { .. })
+        ),
         "the session compacts"
     );
 

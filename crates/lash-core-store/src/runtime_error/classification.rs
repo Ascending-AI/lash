@@ -142,6 +142,7 @@ impl RuntimeErrorCode {
             Self::PluginPrepareTurn => Terminal,
             // context preparation over the same inputs fails the same way.
             Self::ContextPrepareTurn => Terminal,
+            Self::ContextCompaction => Terminal,
             // the protocol refused the request before the model call; the same request is refused again.
             Self::ProtocolBeforeLlmCall => Terminal,
             // the facade's turn task died without reporting.

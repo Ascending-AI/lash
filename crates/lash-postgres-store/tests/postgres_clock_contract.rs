@@ -108,7 +108,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn cancel_queued_work_batch_pg(",
-            "async fn queued_work_batch_completed_pg(",
+            "async fn queued_work_batch_completion_pg(",
         ),
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,

@@ -350,6 +350,12 @@ pub struct SessionHeadPayload {
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<crate::FrameNodeId>,
+    /// Whether the commit that published this head presented a drive fence:
+    /// a root's own commit or the command lane's, never a lane-less host
+    /// write (FIG-4201). A root resumed on a fresh journal reads it to tell a
+    /// head its own commits moved from one another writer overtook.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub published_by_drive: bool,
 }
 
 /// Fully assembled session-head metadata returned by a store.
@@ -372,6 +378,9 @@ pub struct SessionHeadMeta {
     /// The follow-on the head owes, from the `pending_follow_on_json` column
     /// (ADR 0101 §3). It is not part of [`SessionHeadPayload`].
     pub pending_follow_on: Option<PendingFollowOn>,
+    /// Whether a fenced commit published the head
+    /// ([`SessionHeadPayload::published_by_drive`]).
+    pub published_by_drive: bool,
 }
 
 impl SessionHeadMeta {
@@ -408,6 +417,7 @@ impl SessionHeadMeta {
             checkpoint_ref: None,
             leaf_node_id: None,
             pending_follow_on: None,
+            published_by_drive: false,
         }
     }
 
@@ -449,6 +459,7 @@ impl SessionHeadMeta {
             checkpoint_ref,
             leaf_node_id,
             pending_follow_on: None,
+            published_by_drive: payload.published_by_drive,
         })
     }
 
@@ -459,6 +470,7 @@ impl SessionHeadMeta {
             session_id: self.session_id.clone(),
             config: self.config.clone(),
             current_frame_node_id: self.current_frame_node_id.clone(),
+            published_by_drive: self.published_by_drive,
         }
     }
 }
@@ -611,6 +623,7 @@ impl RuntimeCommit {
             turn_commit: _,
             ingress,
             applied_commands,
+            compact_context_outcome,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
             interrupted_turn_input_turn_id,
@@ -623,6 +636,7 @@ impl RuntimeCommit {
         debug_assert!(
             ingress.is_none()
                 && applied_commands.is_none()
+                && compact_context_outcome.is_none()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -698,6 +712,12 @@ impl RuntimeCommit {
                 .applied_commands
                 .as_ref()
                 .is_some_and(|commands| !commands.batch_ids.is_empty());
+        if self.compact_context_outcome.is_some() && self.applied_commands.is_none() {
+            return Err(StoreError::Backend(
+                "a commit carrying an administrative compaction's outcome must apply its command"
+                    .to_string(),
+            ));
+        }
         if settles_rows && self.drive_fence.is_none() {
             return Err(StoreError::IngressSettlementUnfenced {
                 session_id: self.session_id.clone(),
@@ -823,6 +843,7 @@ impl RuntimeCommit {
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             ingress: None,
             applied_commands: None,
+            compact_context_outcome: None,
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -994,6 +1015,7 @@ impl Default for SessionHeadPayload {
             session_id: default_root_session_id(),
             config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
+            published_by_drive: false,
         }
     }
 }
@@ -1587,15 +1609,20 @@ pub trait QueuedWorkStore: Send + Sync {
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
 
-    /// Whether `batch_id` has a durable completion marker written atomically
-    /// with a session-command head commit. Cancellation removes the queued row
-    /// without writing this marker, so an accepted batch that has vanished can
-    /// be classified without mistaking cancellation for completion.
-    async fn queued_work_batch_completed(
+    /// The receipt of the session-command head commit that completed
+    /// `batch_id`, read from the completion marker that commit wrote
+    /// atomically; `None` when no commit completed it. Cancellation removes
+    /// the queued row without writing this marker, so an accepted batch that
+    /// has vanished can be classified without mistaking cancellation for
+    /// completion. The receipt carries what the command settled as, such as
+    /// an administrative compaction's
+    /// [`compact_context_outcome`](RuntimeCommitReceipt::compact_context_outcome)
+    /// (FIG-4201).
+    async fn queued_work_batch_completion(
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<bool, StoreError>;
+    ) -> Result<Option<RuntimeCommitReceipt>, StoreError>;
 
     /// Project the earliest open session-command and next-turn-input ordering
     /// keys without hydrating either payload family. The session-command side

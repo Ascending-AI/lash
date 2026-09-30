@@ -465,6 +465,17 @@ pub enum RuntimeEffectCommand {
     RecordCompactionBase {
         session: crate::SessionId,
     },
+    /// Read the session's leading open command run for a command root to
+    /// apply (ADR 0101 §4, FIG-4201), acknowledging its obligations
+    /// delivered under the root's fence. Keyed by the read's ordinal in the
+    /// root, so a redrive of the root reads back the run its first execution
+    /// applied at each ordinal and applies it again, replaying the steps an
+    /// administrative compaction journaled and meeting the receipts of the
+    /// commits that landed, even after those commits settled the lane. The
+    /// envelope names only the session: the run is the step's outcome.
+    ReadSessionCommandRun {
+        session: crate::SessionId,
+    },
     /// Close a logical root's scope after its terminal evidence (FIG-3600
     /// S7, FIG-3607 item 7). Recorded under the root's scope at
     /// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
@@ -584,6 +595,7 @@ impl RuntimeEffectCommand {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
@@ -1092,15 +1104,22 @@ pub type RuntimeDirectLlmOutcome = (
 );
 
 /// The first execution's decision about the head a root admitted, by how
-/// the live head stands against the admission's base when no commit of the
-/// root is behind it (FIG-3824, FIG-4200). The head is bound to the root
-/// alone (FIG-3927), so no other driver can have answered it.
+/// the live head stands against the admission's base when no final commit
+/// of the root is behind it (FIG-3824, FIG-4200, FIG-4201). The head is
+/// bound to the root alone (FIG-3927), so no other driver can have answered
+/// it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdmittedHeadVerdict {
-    /// The head is the admission's base, or a commit of the root moved it:
-    /// drive the root.
+    /// The head is the admission's base, or the root's final commit moved
+    /// it: drive the root from the base.
     Ready,
+    /// The root's own commits moved the head past the admission's base, to
+    /// `head`: a context-pressure frame or another commit the root made
+    /// before its final one, which a fresh journal no longer records. The
+    /// bound turn owns the head, so the root continues from `head`, its own
+    /// frame, and never meets it as another writer's (FIG-4201).
+    Advanced { head: crate::store::SessionHeadRef },
     /// Another writer committed past the admission's base, to a higher
     /// revision: ordinary head overtaking. The root can never commit on the
     /// base it was admitted on, so it ends typed `StoreCommitSuperseded`.
@@ -1112,17 +1131,15 @@ pub enum AdmittedHeadVerdict {
 }
 
 /// The base an administrative compaction records before its summarizer
-/// runs (FIG-4133): the durable head it summarizes, the frame it opens its
-/// frame from, and the drive fence its frame commit presents (FIG-4134), so a
-/// replay presents the fence the first execution read, never a newer one.
-/// Plain store identities, so any build replays it.
+/// runs (FIG-4133): the durable head it summarizes and the frame it opens its
+/// frame from. The compaction commits under the fence of the command root
+/// that applies it (FIG-4201), so the base records no fence. Plain store
+/// identities, so any build replays it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactionBase {
     pub head: crate::store::SessionHeadRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<crate::FrameNodeId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drive_fence: Option<crate::store::DriveFence>,
 }
 
 /// Serializable result of a runtime effect command.
@@ -1262,6 +1279,11 @@ pub enum RuntimeEffectOutcome {
     /// ran.
     RecordCompactionBase {
         base: Box<CompactionBase>,
+    },
+    /// The command run a command root read: the leading open batches, in
+    /// `enqueue_seq` order, empty when the lane was.
+    ReadSessionCommandRun {
+        batches: Vec<crate::QueuedWorkBatch>,
     },
     /// The terminal evidence of the root the close closed.
     CloseRootScope {
@@ -1739,6 +1761,7 @@ impl RuntimeEffectOutcome {
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
+            Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,

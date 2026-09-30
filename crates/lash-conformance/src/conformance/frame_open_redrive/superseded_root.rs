@@ -426,3 +426,154 @@ pub async fn a_superseded_root_ends_typed_on_every_drive_path(
         "{path_texts:?}"
     );
 }
+
+/// A root whose own pressure frame committed, and whose turn then failed at
+/// its terminal commit, is resumed by a new drive on a fresh journal
+/// (FIG-4201). The head moved from its admission's base, but its own fenced
+/// commit moved it: the bound turn owns the head, so the root is not
+/// overtaken. It continues from its own pressure frame on `path`, without a
+/// second summary, and commits: no refusal, no park, its input answered.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    path: SupersededRootPath,
+) {
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![
+            // The first root's usage crosses the pressure hook's threshold.
+            (protocol.answer("answer 1"), PRESSURE_THRESHOLD_TOKENS),
+            // The resumed root's first execution, whose terminal commit fails.
+            (protocol.answer("answer 2"), 1),
+            // Its execution on the fresh journal.
+            (protocol.answer("answer 2"), 1),
+        ],
+    });
+    let mut law = LawSession::open(
+        prefix,
+        &format!("own-frame-{path:?}").to_lowercase(),
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    let recording = Arc::new(
+        lash_core::testing::runtime_helpers::RecordingStore::over_session(
+            Arc::clone(&law.store),
+            law.session_id.clone(),
+        ),
+    );
+    law.parts.store = Arc::clone(&recording) as Arc<dyn crate::RuntimeStore>;
+
+    law.enqueue("first question").await;
+    law.drive_on("root-1", path)
+        .await
+        .expect("the first root commits below the pressure threshold");
+    let first_frame = law
+        .head()
+        .await
+        .current_frame_node_id
+        .expect("the session stands in its first frame");
+
+    let input = law.enqueue("second question").await;
+    recording.fail_next_turn_terminal_commit(crate::StoreError::Backend(
+        "injected store fault on the turn's terminal commit".to_string(),
+    ));
+    let fault = law
+        .drive_on("root-2", path)
+        .await
+        .expect_err("the root's terminal commit fails");
+    assert_ne!(
+        fault.code,
+        crate::RuntimeErrorCode::StoreCommitSuperseded,
+        "a store fault on the terminal commit is the attempt's live fault: {fault:?}"
+    );
+    let moved = law.head().await;
+    let chain = frame_chain(&moved, &law.session_id);
+    assert_eq!(
+        chain.len(),
+        2,
+        "the root's own pressure frame committed: {chain:?}"
+    );
+    assert!(
+        law.store
+            .unfinished_root(&law.session_id)
+            .await
+            .expect("read the unfinished root")
+            .is_some(),
+        "the root is still bound"
+    );
+
+    law.drive_on("root-2-fresh-journal", path)
+        .await
+        .expect("the resumed root continues from its own pressure frame and commits");
+
+    let root = law
+        .store
+        .root_of_input(&law.session_id, &input)
+        .await
+        .expect("read the input's root")
+        .expect("the input was admitted to a root");
+    let terminal = law
+        .store
+        .root_terminal(&law.session_id, &root)
+        .await
+        .expect("read the root's terminal")
+        .expect("the resumed root ended");
+    assert!(
+        matches!(
+            terminal.cause,
+            crate::store::RootTerminalCause::Committed { .. }
+        ),
+        "the resumed root committed: {terminal:?}"
+    );
+    assert_eq!(
+        law.store
+            .load_turn_park(&law.session_id)
+            .await
+            .expect("read the session's park"),
+        None,
+        "a root its own commits moved never parks"
+    );
+    assert!(
+        law.store
+            .list_pending_turn_inputs(&law.session_id)
+            .await
+            .expect("read pending input")
+            .iter()
+            .all(|row| row.input.input_id != input),
+        "the root's input is answered"
+    );
+    assert_eq!(
+        model.summary_calls.load(Ordering::SeqCst),
+        1,
+        "the root continues from its own pressure frame and never summarizes again"
+    );
+    let head = law.head().await;
+    assert_eq!(
+        head.head_revision,
+        moved.head_revision + 1,
+        "the resumed root commits its turn over its own pressure frame"
+    );
+    let chain = frame_chain(&head, &law.session_id);
+    assert_eq!(chain.len(), 2, "one pressure frame: {chain:?}");
+    assert_eq!(chain[1].1.as_ref(), Some(&first_frame));
+    let path_texts = active_path(&head.graph);
+    let seed_at = path_texts
+        .iter()
+        .position(|text| text == super::SUMMARY_TEXT)
+        .expect("the pressure frame's seed is on the path");
+    assert_eq!(
+        path_texts[seed_at + 1..],
+        ["second question", "answer 2"],
+        "the resumed root runs in its own pressure frame"
+    );
+}

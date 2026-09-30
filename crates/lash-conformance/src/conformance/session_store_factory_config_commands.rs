@@ -353,9 +353,10 @@ pub async fn ingress_follow_on_fork_and_command_coalescing_matrix(
     for batch_id in completed_batch_ids {
         assert!(
             store
-                .queued_work_batch_completed(&batch_id)
+                .queued_work_batch_completion(&batch_id)
                 .await
-                .expect("read config-command completion marker"),
+                .expect("read config-command completion marker")
+                .is_some(),
             "every batch in a coalesced command commit must leave completion evidence"
         );
     }
@@ -833,9 +834,10 @@ where
     assert_eq!(cancelled.batch_id, command_batch.batch_id);
     assert!(
         !store
-            .queued_work_batch_completed(&request.session_id, &command_batch.batch_id)
+            .queued_work_batch_completion(&request.session_id, &command_batch.batch_id)
             .await
-            .expect("read cancelled config marker"),
+            .expect("read cancelled config marker")
+            .is_some(),
         "cancellation must not manufacture completion evidence"
     );
 

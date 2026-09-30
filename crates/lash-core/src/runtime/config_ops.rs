@@ -183,6 +183,11 @@ impl LashRuntime {
             super::SessionCommandSettlement::Refused { code } => Err(SessionError::Protocol(
                 format!("session config command refused at the drain: {code:?}"),
             )),
+            super::SessionCommandSettlement::Compaction { receipt, .. } => {
+                Err(SessionError::Protocol(format!(
+                    "session config command {receipt} settled as an administrative compaction"
+                )))
+            }
         }
     }
 

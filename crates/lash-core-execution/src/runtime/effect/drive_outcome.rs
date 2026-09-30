@@ -113,4 +113,16 @@ impl RuntimeEffectOutcome {
             )),
         }
     }
+
+    pub fn into_session_command_run(
+        self,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeEffectControllerError> {
+        match self {
+            Self::ReadSessionCommandRun { batches } => Ok(batches),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::ReadSessionCommandRun,
+                other.kind(),
+            )),
+        }
+    }
 }

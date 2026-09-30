@@ -372,7 +372,7 @@ impl TurnReport {
     /// This is the recovery seam's read side: the outcome says the stop is
     /// recoverable by compaction rather than an undifferentiated provider
     /// failure. Acting on it is host policy — typically
-    /// [`SessionAdmin::compact_context`](crate::admin::SessionAdmin::compact_context)
+    /// [`SessionStateAdmin::compact_context`](crate::admin::SessionStateAdmin::compact_context)
     /// followed by another turn on the same session. Lash chooses nothing.
     pub fn is_context_overflow(&self) -> bool {
         matches!(

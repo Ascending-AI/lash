@@ -112,7 +112,7 @@ macro_rules! runtime_store_operations {
                 [carried batch] fn enqueue_queued_work_with_outcome(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError>;
                 [carried fence] fn open_session_command_run(&self, fence: &DriveFence) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn cancel_queued_work_batch(&self, session_id: &SessionId, batch_id: &str) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
-                [session] fn queued_work_batch_completed(&self, session_id: &SessionId, batch_id: &str) -> Result<bool, StoreError>;
+                [session] fn queued_work_batch_completion(&self, session_id: &SessionId, batch_id: &str) -> Result<Option<RuntimeCommitReceipt>, StoreError>;
                 [session] fn pending_session_work_ordering(&self, session_id: &SessionId) -> Result<PendingSessionWorkOrdering, StoreError>;
                 [session] fn list_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn list_open_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;

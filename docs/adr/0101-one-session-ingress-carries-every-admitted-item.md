@@ -308,6 +308,36 @@ Commands never apply:
   every claim, command drains included (§3), so commands wait until the chain
   ends.
 
+**The administrative compaction is a command (FIG-4201).** The bound turn
+owns the session head, so `compact_context` is
+`SessionCommand::CompactContext { instructions }`, applied at a turn boundary
+like every other command. A compaction submitted while a turn runs waits for
+that turn's boundary: its context-pressure frame, a `continue_as` and its
+follow-on all commit first, and only then does the compaction's frame open.
+A compaction queued before an input applies before it.
+
+* It applies alone, under the command root's sealed fence, and runs its
+  effects under its own scope, the queue drain its batch names. A redrive of
+  the unsettled command replays the base it recorded and the summary it
+  journaled.
+* One commit opens the frame with its seed, resets the stored execution
+  state and the prompt usage, persists the compaction's billed usage and
+  settles the command.
+* It settles as a typed outcome: `Opened`, `NothingToCompact`, or `Failed`
+  with a runtime error code. The outcome rides the commit's receipt, which
+  the batch's completion marker holds, so the submitter reads it on any
+  runtime. A compaction that cannot open its frame settles all the same: its
+  compactor failed, or a writer outside the lane moved the head from its
+  recorded base (`Failed` with `StoreCommitSuperseded`). The lane never waits
+  on a compaction that cannot apply.
+* The facade's `compact_context` submits the command, releases the runtime
+  writer, awaits the engine's drive and reads the settlement. A compaction
+  the drive has not settled by the deadline answers pending with its
+  receipt.
+* A storeless runtime has no drive and no durable head, and its `&mut`
+  already serializes a compaction with its turns, so it compacts directly
+  and never through a command.
+
 **Commands never block inputs, and inputs never block commands.** There is no
 command barrier at idle or at checkpoints, and no exception for turn-addressed
 items: a `Turn{t}` item is simply deliverable into its running turn at t's

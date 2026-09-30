@@ -4,18 +4,18 @@
 //!   every crash point, replay exactly as the laws' synthetic compactor does:
 //!   the redrive's admitted window hashes to the request identity the first
 //!   execution journaled its summary under, so it reads the summary back.
-//! - An administrative compaction presents the drive fence current when it
-//!   starts: an admission sealed before its frame commit, or a pressure frame
-//!   a turn commits meanwhile, refuses it typed with nothing of it durable,
-//!   and the admitted turn proceeds.
+//! - An administrative compaction queued before an input applies before it
+//!   (FIG-4201), killed at every crash point: the input's root runs in the
+//!   compaction frame and its pressure hook sees no stale prompt usage.
 //! - A session deleted while an administrative compaction opens its frame
 //!   keeps nothing of the open, and a fork made meanwhile sees the point it
 //!   forked from, never a partial seed.
 //! - An explicit empty pressure seed opens one frame; a pressure frame whose
 //!   commit the store refuses leaves nothing of the open visible.
 //! - Two plugins whose pressure hooks share an id keep their records apart.
-//! - Every open restarts the live interpreter: a staged open, administrative
-//!   compactions with and without a store.
+//! - Every open restarts the live interpreter: a staged open, an
+//!   administrative compaction the command lane applies, and a storeless
+//!   runtime's direct compaction.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -39,12 +39,14 @@ const OVERFLOW_RECOVERY_PENDING: &str =
 const OVERFLOW_RECOVERY_COMPLETED: &str =
     "Standard-compaction context-overflow recovery completed:";
 
-type CompactionResult = Result<bool, crate::facade_support::PluginOperationInvokeError>;
+type DriveResult =
+    Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>;
 
 impl LawSession {
-    /// Runs an administrative compaction once on the tier's runner, holding
-    /// it after its journaled summary while `during` runs, and answers what
-    /// the compaction returned.
+    /// Submits an administrative compaction and runs the drive that applies
+    /// it once on the tier's runner, holding the compaction after its
+    /// journaled summary while `during` runs, and answers how the drive
+    /// ended with the command's receipt.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
@@ -53,40 +55,21 @@ impl LawSession {
         &self,
         drive: &str,
         during: F,
-    ) -> CompactionResult {
+    ) -> (DriveResult, crate::SessionCommandReceipt) {
         let hold = self
             .parts
             .compaction
             .hold
             .clone()
             .expect("the law holds its compaction's summarizer");
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let parts = self.parts.clone();
-        let attempt: crate::ConformanceTurnAttempt = Arc::new(move |scope| {
-            let parts = parts.clone();
-            let tx = tx.clone();
-            Box::pin(async move {
-                let mut runtime = build_runtime(&parts, None).await;
-                let _ = tx.send(Box::pin(runtime.compact_context(None, scope)).await);
-                crate::ConformanceTurnEnd::Settled
-            })
-        });
-        let compaction = self.runner.run_turn(
-            admit(crate::ExecutionScope::runtime_operation(format!(
-                "{}-{drive}",
-                self.prefix
-            ))),
-            attempt,
-        );
-        tokio::time::timeout(
+        let receipt = self.submit_compaction(drive).await;
+        let (drove, ()) = tokio::time::timeout(
             std::time::Duration::from_secs(90),
-            futures_util::future::join(compaction, hold.while_held(during)),
+            futures_util::future::join(self.run_root_to_any_end(drive), hold.while_held(during)),
         )
         .await
-        .expect("the held compaction ends");
-        rx.recv()
-            .await
-            .expect("the tier's runner ran the compaction")
+        .expect("the held compaction's drive ends");
+        (drove, receipt)
     }
 
     /// Runs the root queued next once and answers how its drive ended,
@@ -354,158 +337,30 @@ pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     );
 }
 
-/// An administrative compaction writes beside the drive under the fence
-/// current when it starts. Held after its summary while another worker's
-/// admission seals a newer drive epoch (without moving the head), it is
-/// refused typed with nothing of it durable, and the next root proceeds in
-/// the frame it was in.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_compaction_superseded_by_a_newer_admission_is_refused(
+/// An administrative compaction queued before an input applies before it
+/// (FIG-4201): one drive applies the command at its boundary, then runs the
+/// input's root in the compaction frame. The root's pressure hook sees no
+/// stale prompt usage, though the root before the compaction crossed its
+/// threshold. Killed at `crash` and redriven, the compaction opens once, its
+/// summary is requested once (twice only when the crash lost a paid answer
+/// before its journal record), and the input runs once, after it.
+pub async fn a_compaction_queued_before_an_input_applies_before_it(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
+    crash: FrameOpenCrash,
 ) {
-    let protocol = StandardFrameLawProtocol::shared();
-    let model = law_model(ModelScript {
-        turns: vec![
-            (protocol.answer("answer 1"), 1),
-            (protocol.answer("answer 2"), 1),
-        ],
-    });
-    let mut law = LawSession::open(
+    super::followup::compaction_crash_case(
         prefix,
-        "compact-superseded",
         effect_host,
         stores,
         runner,
-        protocol,
-        model.provider.clone(),
+        crash,
+        LawCompactor::Law,
+        true,
     )
     .await;
-    law.parts.compaction.hold = Some(SummaryHold::default());
-    law.enqueue("first question").await;
-    law.run_root("root-1").await;
-    let before = law.head().await;
-
-    let store = Arc::clone(&law.store);
-    let session_id = law.session_id.clone();
-    let refused = law
-        .compact_holding("compact", async move {
-            let stored = store
-                .drive_epoch(&session_id)
-                .await
-                .expect("read the drive epoch");
-            let sealed = store
-                .seal_drive_epoch(
-                    &session_id,
-                    &crate::store::AdmissionId::new(format!("{session_id}-newer-admission")),
-                    stored.epoch,
-                    &crate::store::RootStartNonce::new(format!("{session_id}-newer-start")),
-                )
-                .await
-                .expect("seal a newer drive epoch");
-            assert!(
-                matches!(sealed, crate::store::DriveEpochSeal::Sealed(_)),
-                "{sealed:?}"
-            );
-        })
-        .await;
-    assert!(
-        matches!(
-            refused,
-            Err(crate::facade_support::PluginOperationInvokeError::Store(
-                crate::StoreError::StaleDriveFence { .. }
-            ))
-        ),
-        "a compaction whose fence a newer admission superseded is refused typed: {refused:?}"
-    );
-    let after = law.head().await;
-    assert_eq!(
-        after.head_revision, before.head_revision,
-        "nothing of the refused compaction is durable"
-    );
-    assert_eq!(frame_chain(&after, &law.session_id).len(), 1);
-
-    law.enqueue("second question").await;
-    law.run_root("root-2").await;
-    let head = law.head().await;
-    assert_eq!(frame_chain(&head, &law.session_id).len(), 1);
-    let path = active_path(&head.graph);
-    assert!(path.iter().any(|text| text == "answer 2"), "{path:?}");
-    assert_eq!(count(&path, |text| text == SUMMARY_TEXT), 0, "{path:?}");
-}
-
-/// An administrative compaction held after its summary while a root's
-/// pressure hook opens and commits its own frame: the root's admission
-/// superseded the compaction's fence, so the compaction is refused typed,
-/// and the session holds exactly the pressure frame.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_compaction_overlapping_a_pressure_frame_is_refused(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let protocol = StandardFrameLawProtocol::shared();
-    let model = law_model(ModelScript {
-        turns: vec![
-            (protocol.answer("answer 1"), PRESSURE_THRESHOLD_TOKENS),
-            (protocol.answer("answer 2"), 1),
-        ],
-    });
-    let mut law = LawSession::open(
-        prefix,
-        "compact-overlaps-pressure",
-        effect_host,
-        stores,
-        runner,
-        protocol,
-        model.provider.clone(),
-    )
-    .await;
-    law.parts.compaction.hold = Some(SummaryHold::default());
-    law.enqueue("first question").await;
-    law.run_root("root-1").await;
-    let first_frame = law
-        .head()
-        .await
-        .current_frame_node_id
-        .expect("the session stands in its first frame");
-    law.enqueue("second question").await;
-
-    let refused = law
-        .compact_holding("compact", async {
-            law.run_root("root-2").await;
-        })
-        .await;
-    assert!(
-        matches!(
-            refused,
-            Err(crate::facade_support::PluginOperationInvokeError::Store(
-                crate::StoreError::StaleDriveFence { .. }
-            ))
-        ),
-        "{refused:?}"
-    );
-    assert_eq!(
-        model.summary_calls.load(Ordering::SeqCst),
-        2,
-        "the pressure hook's summary and the refused compaction's"
-    );
-    let head = law.head().await;
-    let chain = frame_chain(&head, &law.session_id);
-    assert_eq!(chain.len(), 2, "only the pressure frame opened: {chain:?}");
-    assert_eq!(chain[1].1.as_ref(), Some(&first_frame));
-    let path = active_path(&head.graph);
-    assert_eq!(count(&path, |text| text == SUMMARY_TEXT), 1, "{path:?}");
-    assert!(path.iter().any(|text| text == "answer 2"), "{path:?}");
 }
 
 /// A session deleted while an administrative compaction opens its frame keeps
@@ -540,7 +395,7 @@ pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
 
     let store = Arc::clone(&law.store);
     let session_id = law.session_id.clone();
-    let compacted = law
+    let (drove, _receipt) = law
         .compact_holding("compact", async move {
             store
                 .delete_session(&session_id)
@@ -549,8 +404,9 @@ pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
         })
         .await;
     assert!(
-        compacted.is_err(),
-        "a compaction of a deleted session commits nothing: {compacted:?}"
+        drove.is_err(),
+        "a compaction of a deleted session commits nothing: {:?}",
+        drove.map(crate::facade_support::QueuedTurnDrain::ran)
     );
     assert!(
         matches!(
@@ -604,7 +460,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
 
     let store = Arc::clone(&law.store);
     let fork = fork_id.clone();
-    let compacted = law
+    let (drove, receipt) = law
         .compact_holding("compact", async move {
             store
                 .fork_session(&crate::ForkSessionRequest {
@@ -619,11 +475,20 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
         })
         .await;
     assert!(
-        matches!(compacted, Ok(true)),
-        "the compaction commits its frame: {compacted:?}"
+        drove.is_ok(),
+        "the compaction's drive ends: {:?}",
+        drove.map(crate::facade_support::QueuedTurnDrain::ran)
     );
     let source = law.head().await;
-    assert_eq!(frame_chain(&source, &law.session_id).len(), 2);
+    let chain = frame_chain(&source, &law.session_id);
+    assert_eq!(chain.len(), 2);
+    assert_eq!(
+        law.compaction_outcome(&receipt).await,
+        Some(crate::CompactContextOutcome::Opened {
+            frame_node_id: chain[1].2.clone(),
+        }),
+        "the compaction commits its frame"
+    );
     assert_eq!(
         count(&active_path(&source.graph), |text| text == SUMMARY_TEXT),
         1
@@ -802,9 +667,10 @@ pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
 pub enum LiveResetPath {
     /// A staged open ([`crate::LashRuntime::open_agent_frame`]).
     Staged,
-    /// An administrative compaction on a store-backed runtime.
+    /// An administrative compaction the command lane applies, on the
+    /// runtime whose drive applies it.
     Compact,
-    /// An administrative compaction on a runtime with no store.
+    /// A storeless runtime's direct compaction.
     StorelessCompact,
 }
 
@@ -887,10 +753,27 @@ pub async fn every_open_restarts_the_live_execution_state(
                     runtime
                 }
                 LiveResetPath::Compact => {
+                    let command = crate::SessionCommand::CompactContext { instructions: None };
+                    parts
+                        .store
+                        .enqueue_queued_work(
+                            crate::QueuedWorkBatchDraft::new(
+                                parts.session_id.clone(),
+                                crate::DeliveryPolicy::AfterCurrentTurnCommit,
+                                command.clone(),
+                            )
+                            .with_source_key(command.source_key("live-reset")),
+                        )
+                        .await
+                        .expect("accept the compaction command");
+                    let drained = Box::pin(runtime.drive_next_queued_root(
+                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                    ))
+                    .await
+                    .expect("the drive applies the compaction");
                     assert!(
-                        Box::pin(runtime.compact_context(None, scope))
-                            .await
-                            .expect("the compaction runs")
+                        drained.ran().is_none(),
+                        "the drive only applies the command lane"
                     );
                     runtime
                 }
@@ -909,9 +792,13 @@ pub async fn every_open_restarts_the_live_execution_state(
                         .expect("restore the live execution state without a store");
                     assert!(live_holds(&mut storeless, global).await);
                     assert!(
-                        Box::pin(storeless.compact_context(None, scope))
-                            .await
-                            .expect("the storeless compaction runs")
+                        matches!(
+                            Box::pin(storeless.compact_storeless_context(None, scope))
+                                .await
+                                .expect("the storeless compaction runs"),
+                            crate::CompactContextOutcome::Opened { .. }
+                        ),
+                        "the storeless compaction opens its frame"
                     );
                     storeless
                 }
@@ -924,16 +811,23 @@ pub async fn every_open_restarts_the_live_execution_state(
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         law.runner.run_turn(
-            admit(crate::ExecutionScope::runtime_operation(format!(
-                "{}-open",
-                law.prefix
-            ))),
+            admit(crate::ExecutionScope::queue_drain(
+                &law.session_id,
+                format!("{}-open", law.prefix),
+            )),
             attempt,
         ),
     )
     .await
     .expect("the open ends");
     let (before, after) = rx.recv().await.expect("the tier's runner ran the open");
+    if path == LiveResetPath::Compact {
+        assert_eq!(
+            frame_chain(&law.head().await, &law.session_id).len(),
+            2,
+            "the command lane applied the compaction"
+        );
+    }
     assert!(
         before,
         "the reopened runtime's interpreter holds the first root's global"

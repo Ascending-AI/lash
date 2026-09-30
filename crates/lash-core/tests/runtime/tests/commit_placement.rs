@@ -133,12 +133,13 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
     .unwrap();
     let controller =
         effect::layered_operation_controller(&backend, Arc::new(JournaledCommitController::<true>));
+    let controller = lash_core::ScopedEffectController::borrowed(
+        controller.as_ref(),
+        lash_core::AdmittedScope::queue_drain(SessionId::from(session_id), "session-command"),
+    )
+    .unwrap();
     runtime
-        .drain_next_session_command_with_cancellation(
-            &lease,
-            CancellationToken::new(),
-            controller.as_ref(),
-        )
+        .drain_next_session_command_with_cancellation(&lease, CancellationToken::new(), &controller)
         .await
         .unwrap()
         .expect("engine-owned command committed");

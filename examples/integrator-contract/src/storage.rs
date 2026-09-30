@@ -449,11 +449,11 @@ impl QueuedWorkStore for Integrator {
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn queued_work_batch_completed(
+    async fn queued_work_batch_completion(
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<RuntimeCommitReceipt>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn pending_session_work_ordering(

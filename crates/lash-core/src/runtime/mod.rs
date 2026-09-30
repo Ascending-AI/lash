@@ -5,6 +5,8 @@ pub mod assembly;
 #[cfg(not(feature = "testing"))]
 mod assembly;
 mod builder;
+mod compact_context;
+pub use compact_context::COMPACT_CONTEXT_COMMITTED_PHASE;
 mod compaction_base;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::causal;
@@ -355,13 +357,13 @@ pub use turn_input_ingress::{
 pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
-    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, PROCESS_WAKE_MERGE_KEY,
-    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy, TurnWorkPayload,
-    process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
-    process_wake_source_key,
+    AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
+    PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority,
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig,
+    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
+    QueuedWorkPayload, SessionCommand, SessionCommandPayload, SessionCommandReceipt,
+    TurnLaneAdmissionPolicy, TurnWorkPayload, process_wake_batch_draft,
+    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
 use usage::nonzero_usage;
 pub use usage::{

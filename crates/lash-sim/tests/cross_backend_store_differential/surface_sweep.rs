@@ -97,7 +97,7 @@ pub(super) enum SurfaceMethod {
     /// [`RootStore::admit_at_checkpoint`](lash_core::store::RootStore::admit_at_checkpoint)
     /// of an after-work checkpoint, which the sweep's rows do not reach.
     AdmitAtCheckpoint,
-    QueuedWorkBatchCompleted,
+    QueuedWorkBatchCompletion,
     CancelQueuedWorkBatch,
     CancelUnknownPendingTurnInput,
     CancelPendingTurnInputs,
@@ -230,7 +230,7 @@ impl SurfaceMethod {
             Self::EnqueueQueuedWorkWithOutcome => "surface:enqueue_queued_work_with_outcome",
             Self::OpenSessionCommandRun => "surface:open_session_command_run",
             Self::AdmitAtCheckpoint => "surface:admit_at_checkpoint",
-            Self::QueuedWorkBatchCompleted => "surface:queued_work_batch_completed",
+            Self::QueuedWorkBatchCompletion => "surface:queued_work_batch_completion",
             Self::CancelQueuedWorkBatch => "surface:cancel_queued_work_batch",
             Self::CancelUnknownPendingTurnInput => "surface:cancel_pending_turn_input_unknown",
             Self::CancelPendingTurnInputs => "surface:cancel_pending_turn_inputs",
@@ -487,7 +487,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::EnqueueQueuedWorkWithOutcome),
             surface(SurfaceMethod::OpenSessionCommandRun),
             surface(SurfaceMethod::AdmitAtCheckpoint),
-            surface(SurfaceMethod::QueuedWorkBatchCompleted),
+            surface(SurfaceMethod::QueuedWorkBatchCompletion),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
             surface(SurfaceMethod::CommittedTurnExists),
             surface(SurfaceMethod::UncommittedTurnExists),
@@ -1166,10 +1166,11 @@ impl BackendRunner {
                     admission.queued.is_some()
                 )
             }
-            SurfaceMethod::QueuedWorkBatchCompleted => {
+            SurfaceMethod::QueuedWorkBatchCompletion => {
                 let completed = store
-                    .queued_work_batch_completed(&session_id, UNKNOWN_BATCH_ID)
-                    .await?;
+                    .queued_work_batch_completion(&session_id, UNKNOWN_BATCH_ID)
+                    .await?
+                    .is_some();
                 format!("completed={completed}")
             }
             SurfaceMethod::CancelQueuedWorkBatch => {

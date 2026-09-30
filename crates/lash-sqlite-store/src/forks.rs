@@ -446,6 +446,7 @@ pub(super) async fn fork_at_in_catalog(
                         .expect("a persisted frame node id is a transparent string");
                         node_id
                     }),
+                    published_by_drive: false,
                 },
                 0,
                 Some(checkpoint_ref.clone().into()),

@@ -280,6 +280,7 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         session_id: SessionId::from("retention-cold-reopen"),
         config,
         current_frame_node_id: None,
+        published_by_drive: false,
     };
 
     let json = serde_json::to_string(&payload).expect("head JSON");

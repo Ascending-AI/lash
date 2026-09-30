@@ -632,7 +632,7 @@ pub(crate) fn engine_retries(error: &RuntimeError) -> bool {
 /// build itself for another scope, and otherwise one the runtime's effect
 /// host lends for the scope. A host never lends a drive its handler's
 /// controller: the engine's session drive is the only executor (D5).
-fn step_controller<'a>(
+pub(crate) fn step_controller<'a>(
     controller: &ScopedEffectController<'a>,
     host: &'a dyn crate::EffectHost,
     admitted: crate::AdmittedScope,

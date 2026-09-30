@@ -163,7 +163,12 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
             .await?
             .is_some()
     );
-    assert!(!store.queued_work_batch_completed(&batch.batch_id).await?);
+    assert!(
+        store
+            .queued_work_batch_completion(&batch.batch_id)
+            .await?
+            .is_none()
+    );
     release.notify_one();
     let error = setter
         .await

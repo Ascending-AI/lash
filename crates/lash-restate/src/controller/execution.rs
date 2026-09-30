@@ -197,7 +197,9 @@ pub(crate) fn restate_effect_execution(
         // resolution: a spec read the store did not answer, or a definition
         // revision this worker does not register, is repaired by a retry or a
         // redeploy, and only a definition's refusal of its context is
-        // recorded (FIG-3838).
+        // recorded (FIG-3838). So is a command root's read of its command
+        // lane: only the run it read, or its fence's refusal, is recorded
+        // (FIG-4201).
         // Presentation likewise retries when the recorded renderer is absent;
         // an unavailable deployment must not turn that fault into history.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
@@ -205,6 +207,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AdmitRoot { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
+        | RuntimeEffectCommand::ReadSessionCommandRun { .. }
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }

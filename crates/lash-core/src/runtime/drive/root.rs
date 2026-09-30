@@ -238,7 +238,9 @@ impl LashRuntime {
 
     /// Apply the session's open command run under `admitted`'s root (ADR 0101
     /// §4): every leading command, each commit fenced by the root's seal,
-    /// until the command lane is empty. The root admits no turn.
+    /// until the command lane is empty. The root admits no turn. An
+    /// administrative compaction runs here, lent the root's controller,
+    /// which it rescopes to the command's own scope (FIG-4201).
     pub(super) async fn run_commands_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -249,7 +251,7 @@ impl LashRuntime {
         while Box::pin(self.drain_next_session_command_fenced(
             fence,
             tokio_util::sync::CancellationToken::new(),
-            root_controller.controller(),
+            root_controller,
         ))
         .await
         .map_err(|error| drive_abort(Some(&root), error))?
@@ -330,10 +332,12 @@ impl LashRuntime {
     /// Adopt the head a root's admission admitted it on and pin its recorded
     /// turn index for the prepare phase (FIG-3682).
     ///
-    /// The recorded inspection alone decides whether the resident head may
-    /// be rebuilt from the admission's base: an `Overtaken` verdict ends the
-    /// root typed `StoreCommitSuperseded`, a `Diverged` one parks it, and a
-    /// `Ready` one is honoured whatever the live head is now.
+    /// The recorded inspection alone decides which head the resident session
+    /// is rebuilt from: a `Ready` verdict rebuilds it from the admission's
+    /// base, whatever the live head is now; an `Advanced` one from the head
+    /// the root's own commits published (FIG-4201); an `Overtaken` verdict
+    /// ends the root typed `StoreCommitSuperseded`, and a `Diverged` one
+    /// parks it.
     ///
     /// A base the store no longer retains parks the root too.
     async fn adopt_admitted_turn(
@@ -364,8 +368,11 @@ impl LashRuntime {
         // whatever the first attempt did after it is already journaled, so a
         // head that moved since is met by the turn's fenced commit as a typed
         // refusal, never re-decided here at a recorded position.
-        match verdict {
-            AdmittedHeadVerdict::Ready => {}
+        let base = match verdict {
+            AdmittedHeadVerdict::Ready => base,
+            // The root's own commits moved the head: it continues from the
+            // head they published, its own frame (FIG-4201).
+            AdmittedHeadVerdict::Advanced { ref head } => head,
             // Ordinary head overtaking: another writer committed past the
             // base, so every commit of the root meets the moved head. The
             // root ends with the refusal its commit would meet (FIG-4200).
@@ -391,7 +398,7 @@ impl LashRuntime {
                     ),
                 ));
             }
-        }
+        };
         self.adopt_admission_base(base)
             .await
             .map_err(|error| match error {
@@ -427,12 +434,19 @@ struct ResidentHead {
 /// It runs only when the step is not recorded yet, so at the attempt's live
 /// frontier before any turn effect, and decides from the resident head this
 /// attempt refreshed. A head that moved from the admission's base with no
-/// commit of the root behind it is decided by its components (FIG-4200): a
-/// higher revision is another writer overtaking the head, `Overtaken`, and
-/// the root ends typed; a lower revision, or the same revision with another
-/// leaf or checkpoint, is an inconsistent head, `Diverged`, and the root
-/// parks before it drives a head it was not admitted on. A replay serves the
-/// recorded verdict and never runs it.
+/// final commit of the root behind it is decided by its components
+/// (FIG-4200): a higher revision that a fenced commit published is the
+/// root's own, `Advanced`, and the root continues from it (FIG-4201); a
+/// higher revision a lane-less write published is another writer
+/// overtaking the head, `Overtaken`, and the root ends typed; a lower
+/// revision, or the same revision with another leaf or checkpoint, is an
+/// inconsistent head, `Diverged`, and the root parks before it drives a
+/// head it was not admitted on. A replay serves the recorded verdict and
+/// never runs it.
+///
+/// A fenced commit that lands while the root is unfinished is the root's
+/// own: the store refuses a fence an admission superseded, and every
+/// admission sealed while the root is unfinished resumes it.
 struct InspectAdmittedHeadRunner {
     store: crate::store::SessionStore,
     root: TurnId,
@@ -450,15 +464,25 @@ impl InspectAdmittedHeadRunner {
             && self.live.checkpoint == self.base.checkpoint
     }
 
-    /// The verdict on a head that moved from the base with no commit of the
-    /// root behind it.
-    fn moved_head_verdict(&self) -> AdmittedHeadVerdict {
+    /// The verdict on a head that moved from the base with no final commit
+    /// of the root behind it. `published_by_drive` is whether a fenced commit
+    /// published the live head.
+    fn moved_head_verdict(&self, published_by_drive: bool) -> AdmittedHeadVerdict {
         let live_revision = self.live.revision;
-        if live_revision > self.base.revision {
-            AdmittedHeadVerdict::Overtaken { live_revision }
-        } else {
-            AdmittedHeadVerdict::Diverged { live_revision }
+        if live_revision <= self.base.revision {
+            return AdmittedHeadVerdict::Diverged { live_revision };
         }
+        if published_by_drive {
+            return AdmittedHeadVerdict::Advanced {
+                head: crate::store::SessionHeadRef {
+                    generation: self.base.generation,
+                    revision: live_revision,
+                    leaf: self.live.leaf.clone(),
+                    checkpoint: self.live.checkpoint.clone(),
+                },
+            };
+        }
+        AdmittedHeadVerdict::Overtaken { live_revision }
     }
 }
 
@@ -496,7 +520,21 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
         {
             AdmittedHeadVerdict::Ready
         } else {
-            self.moved_head_verdict()
+            // Whether a fenced commit published the live head the attempt
+            // refreshed: read from the head's own row, and only when it is
+            // still that head.
+            let published_by_drive = self
+                .store
+                .load_session_head_meta()
+                .await
+                .map_err(store_fault)?
+                .is_some_and(|head| {
+                    head.published_by_drive
+                        && head.head_revision == self.live.revision
+                        && head.leaf_node_id == self.live.leaf
+                        && head.checkpoint_ref == self.live.checkpoint
+                });
+            self.moved_head_verdict(published_by_drive)
         };
         Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })
     }

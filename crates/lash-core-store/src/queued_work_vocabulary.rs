@@ -22,12 +22,22 @@ pub enum SessionCommand {
     RefreshToolCatalog {
         reason: String,
     },
+    /// An administrative compaction (FIG-4201): the command drain summarizes
+    /// the frame current at the boundary and opens a compaction frame seeded
+    /// with the summary, under the command root's sealed fence. It applies
+    /// only at a turn boundary, so the bound turn owns the head until it
+    /// ends. It settles as a [`CompactContextOutcome`].
+    CompactContext {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instructions: Option<String>,
+    },
 }
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::ApplyConfigPatch { .. } => "apply_config_patch",
             Self::RefreshToolCatalog { .. } => "refresh_tool_catalog",
+            Self::CompactContext { .. } => "compact_context",
         }
     }
 
@@ -72,6 +82,34 @@ pub enum SessionCommandSettlement {
     /// Route validation refused the patch at apply time.
     Refused {
         code: lash_core_llm::provider::ConfigRefusalCode,
+    },
+    /// An administrative compaction settled: its commit completed the
+    /// command, and `outcome` is what it settled as (FIG-4201).
+    Compaction {
+        receipt: SessionCommandReceipt,
+        outcome: CompactContextOutcome,
+    },
+}
+
+/// How an administrative compaction the command lane applied settled
+/// (FIG-4201). It is written with the commit that completes the command and
+/// read back from that commit's receipt, so a submitter on any runtime sees
+/// the same answer.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CompactContextOutcome {
+    /// The compaction opened its frame; the session now stands in it.
+    Opened { frame_node_id: crate::FrameNodeId },
+    /// The compactor found nothing to compact. No frame opened.
+    NothingToCompact,
+    /// The compaction failed. No frame opened, and the command is settled:
+    /// it is never applied again.
+    Failed {
+        #[schemars(with = "String")]
+        code: crate::RuntimeErrorCode,
+        message: String,
     },
 }
 

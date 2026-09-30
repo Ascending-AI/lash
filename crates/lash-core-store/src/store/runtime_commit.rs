@@ -229,6 +229,13 @@ pub struct RuntimeCommit {
     /// Requires [`Self::drive_fence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_commands: Option<crate::QueuedWorkCompletion>,
+    /// What the administrative compaction this commit applies settled as
+    /// (FIG-4201): the command's answer, which the receipt carries back to
+    /// its submitter. Requires [`Self::applied_commands`]. It is what the
+    /// commit's frame and settled rows already say, so the commit identity
+    /// covers it through them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_context_outcome: Option<crate::CompactContextOutcome>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces
@@ -872,6 +879,10 @@ pub struct RuntimeCommitReceipt {
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_follow_on: Option<super::PendingFollowOn>,
+    /// What the administrative compaction the commit applied settled as
+    /// (FIG-4201), so the batch's completion answers its submitter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_context_outcome: Option<crate::CompactContextOutcome>,
     /// Canonical input applications settled by this idempotent turn commit.
     ///
     /// Keeping these identities in the durable turn-commit result lets hosts

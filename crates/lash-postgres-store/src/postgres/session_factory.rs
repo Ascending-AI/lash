@@ -759,6 +759,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                             .expect("a persisted frame node id is a transparent string");
                     node_id
                 }),
+                published_by_drive: false,
             },
             0,
             Some(checkpoint_ref.clone().into()),

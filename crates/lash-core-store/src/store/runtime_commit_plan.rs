@@ -442,6 +442,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             checkpoint_ref: Some(checkpoint_ref),
             leaf_node_id: self.committed_leaf_node_id.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
+            published_by_drive: self.commit.drive_fence.is_some(),
         }
     }
 
@@ -464,6 +465,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             failure_evidence: self.commit.failure_evidence.clone(),
             outcome: self.commit.outcome.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
+            compact_context_outcome: self.commit.compact_context_outcome.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
             receipt_replayed: false,

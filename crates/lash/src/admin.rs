@@ -233,6 +233,34 @@ impl SessionAdmin {
         receipt: lash_core::runtime::SessionCommandReceipt,
         previous_policy: Option<lash_core::SessionPolicy>,
     ) -> Result<()> {
+        match self
+            .await_command_settlement(receipt, previous_policy)
+            .await?
+        {
+            lash_core::runtime::SessionCommandSettlement::Durable(_) => Ok(()),
+            lash_core::runtime::SessionCommandSettlement::Stale { base, head } => {
+                Err(EmbedError::Session(SessionError::Protocol(format!(
+                    "session config command was written against config revision {base}, but the running revision is {head}"
+                ))))
+            }
+            lash_core::runtime::SessionCommandSettlement::Refused { code } => {
+                Err(EmbedError::Session(SessionError::Protocol(format!(
+                    "session config command refused at the drain: {code:?}"
+                ))))
+            }
+            settlement => Err(unsettled_command_error(settlement)),
+        }
+    }
+
+    /// Wait, with the writer released, for the engine drive that applies the
+    /// command `receipt` names, then read how it settled. A command the
+    /// drive has not settled by the deadline answers `Pending` with its
+    /// receipt; the command stays durable and settles later.
+    async fn await_command_settlement(
+        &self,
+        receipt: lash_core::runtime::SessionCommandReceipt,
+        previous_policy: Option<lash_core::SessionPolicy>,
+    ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         let request = self
             .ingress
             .current_ask(receipt.batch_id.as_str())
@@ -269,28 +297,7 @@ impl SessionAdmin {
         }
         .map_err(EmbedError::from)?;
         self.runtime.publish_from(&runtime);
-        match settlement {
-            lash_core::runtime::SessionCommandSettlement::Durable(_) => Ok(()),
-            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => Err(
-                EmbedError::Session(SessionError::SessionCommandPending(receipt)),
-            ),
-            lash_core::runtime::SessionCommandSettlement::Cancelled(receipt) => Err(
-                EmbedError::Session(SessionError::SessionCommandCancelled(receipt)),
-            ),
-            lash_core::runtime::SessionCommandSettlement::Rejected(error) => {
-                Err(EmbedError::Runtime(error))
-            }
-            lash_core::runtime::SessionCommandSettlement::Stale { base, head } => {
-                Err(EmbedError::Session(SessionError::Protocol(format!(
-                    "session config command was written against config revision {base}, but the running revision is {head}"
-                ))))
-            }
-            lash_core::runtime::SessionCommandSettlement::Refused { code } => {
-                Err(EmbedError::Session(SessionError::Protocol(format!(
-                    "session config command refused at the drain: {code:?}"
-                ))))
-            }
-        }
+        Ok(settlement)
     }
 
     async fn update_config(&self, patch: SessionConfigPatch) -> Result<()> {
@@ -749,17 +756,58 @@ impl SessionAdmin {
         }
     }
 
-    async fn compact_context(
-        &self,
-        instructions: Option<String>,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<bool> {
-        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
-            Box::pin(runtime.compact_context(instructions, scoped_effect_controller))
-                .await
-                .map_err(Into::into)
-        }))
-        .await
+    /// Submit an administrative compaction to the session's command lane and
+    /// await its settlement (FIG-4201). The writer is held only to submit:
+    /// the engine's drive applies the command at the next turn boundary, on
+    /// whichever runtime drives the session, and the submitter reads the
+    /// outcome that drive committed.
+    ///
+    /// A storeless session has no drive and no command lane: it compacts
+    /// directly under the writer, which already serializes the compaction
+    /// with every turn it runs.
+    async fn compact_context(&self, instructions: Option<String>) -> Result<bool> {
+        let submitted = self
+            .with_writer(async |runtime: &mut LashRuntime| {
+                if runtime.is_store_backed() {
+                    return Box::pin(runtime.submit_session_command(
+                        lash_core::facade_support::SessionCommand::CompactContext { instructions },
+                        format!("compact-context:{}", uuid::Uuid::new_v4()),
+                    ))
+                    .await
+                    .map(SubmittedCompaction::Queued)
+                    .map_err(EmbedError::Runtime);
+                }
+                let host = runtime.effect_host();
+                let controller = host
+                    .scoped(lash_core::AdmittedScope::queue_drain(
+                        SessionId::from(runtime.session_id()),
+                        format!("compact-context:{}", uuid::Uuid::new_v4()),
+                    ))
+                    .map_err(EmbedError::Runtime)?;
+                Box::pin(runtime.compact_storeless_context(instructions, controller))
+                    .await
+                    .map(SubmittedCompaction::Applied)
+                    .map_err(EmbedError::Runtime)
+            })
+            .await?;
+        let outcome = match submitted {
+            SubmittedCompaction::Applied(outcome) => outcome,
+            SubmittedCompaction::Queued(receipt) => {
+                match Box::pin(self.await_command_settlement(receipt, None)).await? {
+                    lash_core::runtime::SessionCommandSettlement::Compaction {
+                        outcome, ..
+                    } => outcome,
+                    settlement => return Err(unsettled_command_error(settlement)),
+                }
+            }
+        };
+        match outcome {
+            lash_core::runtime::CompactContextOutcome::Opened { .. } => Ok(true),
+            lash_core::runtime::CompactContextOutcome::NothingToCompact => Ok(false),
+            lash_core::runtime::CompactContextOutcome::Failed { code, message } => Err(
+                EmbedError::Runtime(lash_core::RuntimeError::new(code, message)),
+            ),
+        }
     }
 
     async fn persist_current_state(&self) -> Result<RuntimeSessionState> {
@@ -1315,19 +1363,22 @@ impl SessionStateAdmin {
         self.control.restore_execution_state(snapshot).await
     }
 
-    /// Compacts the persisted session context using the supplied request.
-    pub async fn compact_context(
-        &self,
-        instructions: Option<String>,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<bool> {
-        // Boxed at the facade seam: compaction opens a frame through a whole
-        // runtime commit, which puts the inline future past the size bound.
-        Box::pin(
-            self.control
-                .compact_context(instructions, scoped_effect_controller),
-        )
-        .await
+    /// Compacts the session's context: an administrative compaction that
+    /// opens a compaction frame seeded with a summary of the frame it leaves.
+    ///
+    /// The compaction is a session command applied at a turn boundary
+    /// (FIG-4201): a turn running when it is submitted finishes first, and
+    /// the compaction applies before any input queued after it. The call
+    /// awaits the settlement: `true` when the frame opened, `false` when the
+    /// compactor found nothing to compact. A compaction that failed answers
+    /// its typed runtime error. One the engine has not applied by the
+    /// settlement deadline answers
+    /// [`SessionError::SessionCommandPending`](crate::support::SessionError::SessionCommandPending)
+    /// with its receipt; it stays durable and applies later.
+    pub async fn compact_context(&self, instructions: Option<String>) -> Result<bool> {
+        // Boxed at the facade seam: the settlement read adopts a whole head,
+        // which puts the inline future past the size bound.
+        Box::pin(self.control.compact_context(instructions)).await
     }
 }
 
@@ -1526,6 +1577,32 @@ impl ProtocolAdmin {
         self.control
             .apply_protocol_session_extension(extension)
             .await
+    }
+}
+
+/// An administrative compaction as its submission left it: queued on a
+/// store-backed session's command lane, or applied directly on a storeless
+/// one.
+enum SubmittedCompaction {
+    Queued(lash_core::runtime::SessionCommandReceipt),
+    Applied(lash_core::runtime::CompactContextOutcome),
+}
+
+/// The error a command's caller answers when its settlement is not one its
+/// command applies with: still pending, withdrawn, rejected before
+/// acceptance, or another command's settlement shape.
+fn unsettled_command_error(settlement: lash_core::runtime::SessionCommandSettlement) -> EmbedError {
+    match settlement {
+        lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+            EmbedError::Session(SessionError::SessionCommandPending(receipt))
+        }
+        lash_core::runtime::SessionCommandSettlement::Cancelled(receipt) => {
+            EmbedError::Session(SessionError::SessionCommandCancelled(receipt))
+        }
+        lash_core::runtime::SessionCommandSettlement::Rejected(error) => EmbedError::Runtime(error),
+        settlement => EmbedError::Session(SessionError::Protocol(format!(
+            "a session command settled with another command's settlement: {settlement:?}"
+        ))),
     }
 }
 

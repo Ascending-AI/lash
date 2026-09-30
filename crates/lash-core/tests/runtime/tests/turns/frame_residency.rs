@@ -203,22 +203,57 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
         probe + 1,
         "the counter counts window reads on the runtime's store"
     );
+    // The compaction is a session command the runtime's next drive applies
+    // at its turn boundary (FIG-4201).
+    let command = lash_core::runtime::SessionCommand::CompactContext { instructions: None };
+    let batch = lash_core::QueuedWorkStore::enqueue_queued_work(
+        store.as_ref(),
+        lash_core::runtime::QueuedWorkBatchDraft::new(
+            SessionId::from(SESSION),
+            lash_core::runtime::DeliveryPolicy::AfterCurrentTurnCommit,
+            command.clone(),
+        )
+        .with_source_key(command.source_key("frame-residency-compaction")),
+    )
+    .await
+    .expect("accept the compaction command");
     let window_loads_before = store.load_session_count();
 
     let handler = double
-        .open_handler(AdmittedScope::runtime_operation(
+        .open_handler(AdmittedScope::queue_drain(
+            SessionId::from(SESSION),
             "frame-residency-compaction",
         ))
         .await
-        .expect("open the compaction's handler");
-    let compacted = Box::pin(runtime.compact_context(None, handler.scoped()))
-        .await
-        .expect("compaction runs");
+        .expect("open the compaction's drive handler");
+    let drained = Box::pin(
+        runtime
+            .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped())),
+    )
+    .await
+    .expect("the drive applies the compaction");
     handler
         .close()
         .await
-        .expect("close the compaction's handler");
-    assert!(compacted, "the compactor answered a summary");
+        .expect("close the compaction's drive handler");
+    assert!(
+        drained.ran().is_none(),
+        "the drive only applies the command"
+    );
+    assert!(
+        matches!(
+            lash_core::QueuedWorkStore::queued_work_batch_completion(
+                store.as_ref(),
+                &SessionId::from(SESSION),
+                batch.batch_id.as_str(),
+            )
+            .await
+            .expect("read the compaction's completion")
+            .and_then(|completion| completion.compact_context_outcome),
+            Some(lash_core::runtime::CompactContextOutcome::Opened { .. })
+        ),
+        "the compactor answered a summary"
+    );
 
     assert_new_frame_resident_without_reload(&runtime, &store, &old_frame, window_loads_before)
         .await;

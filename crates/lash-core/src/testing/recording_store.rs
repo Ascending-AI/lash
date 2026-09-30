@@ -40,6 +40,7 @@ pub struct RecordingStore {
     load_session_head_meta_count: AtomicUsize,
     list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
+    fail_next_turn_terminal_commit: Mutex<Option<StoreError>>,
     fail_next_end_refused_root: Mutex<Option<StoreError>>,
     before_next_end_refused_root: Mutex<Option<EndRefusedRootHook>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
@@ -72,6 +73,7 @@ impl RecordingStore {
             load_session_head_meta_count: AtomicUsize::new(0),
             list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
+            fail_next_turn_terminal_commit: Mutex::new(None),
             fail_next_end_refused_root: Mutex::new(None),
             before_next_end_refused_root: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
@@ -163,6 +165,13 @@ impl RecordingStore {
     /// sees it.
     pub fn fail_next_runtime_commit(&self, error: StoreError) {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
+    }
+
+    /// Refuse the next runtime commit that writes a turn's terminal with
+    /// `error`, before the wrapped store sees it: the commits the turn made
+    /// before its terminal one land, and the turn fails at its end.
+    pub fn fail_next_turn_terminal_commit(&self, error: StoreError) {
+        *self.fail_next_turn_terminal_commit.lock_recover() = Some(error);
     }
 
     /// Refuse the next root-end write of a refused run with `error`, before
@@ -288,6 +297,11 @@ impl RuntimeStoreDecorator for RecordingStore {
         self.commit_attempt_count.fetch_add(1, Ordering::SeqCst);
         let injected_failure = self.fail_next_runtime_commit.lock_recover().take();
         if let Some(error) = injected_failure {
+            return Err(error);
+        }
+        if commit.outcome.is_some()
+            && let Some(error) = self.fail_next_turn_terminal_commit.lock_recover().take()
+        {
             return Err(error);
         }
         let injected_cancel = self

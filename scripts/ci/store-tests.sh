@@ -116,7 +116,7 @@ labels() {
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
-  [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture,skip=reverse_compact_pressure_overlap_redrives_once"
+  [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture"
   [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
