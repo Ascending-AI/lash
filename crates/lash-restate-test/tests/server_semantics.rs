@@ -135,6 +135,29 @@ impl Resolver {
     }
 }
 
+struct HeldTimerFrames;
+
+#[restate_sdk::service]
+impl HeldTimerFrames {
+    #[handler]
+    async fn sleep(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        let sleep = ctx.sleep(Duration::from_millis(400));
+        // Keep the stamped command inside the endpoint's response poll.
+        std::thread::sleep(Duration::from_millis(20));
+        sleep.await?;
+        Ok(())
+    }
+
+    #[handler]
+    async fn send(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        ctx.object_client::<CounterClient>("held-send")
+            .add(Json(1))
+            .send_after(Duration::from_millis(400));
+        std::thread::sleep(Duration::from_millis(20));
+        Ok(())
+    }
+}
+
 struct Flaky;
 
 #[restate_sdk::service]
@@ -275,6 +298,82 @@ fn modes() -> [ServerConfig; 4] {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn sdk_sleep_deadline_survives_a_held_response_frame() {
+    for config in modes() {
+        let server = RestateTestServer::start(
+            Endpoint::builder().bind(HeldTimerFrames).build(),
+            config.time(TimeMode::Manual),
+        )
+        .await
+        .unwrap();
+        let start = server.now_ms();
+        assert_eq!(post(&server, "HeldTimerFrames/sleep/send", "").await.0, 202);
+        server.settle().await;
+        let invocation = server.invocations().into_iter().next().unwrap();
+        let journal = server.journal(&invocation.id).unwrap();
+        let stamped = journal
+            .iter()
+            .find(|entry| entry.ty == lash_restate_test::protocol::MessageType::SleepCommand)
+            .unwrap();
+        use prost::Message as _;
+        let sleep = lash_restate_test::protocol::generated::SleepCommandMessage::decode(
+            stamped.payload.clone(),
+        )
+        .unwrap();
+        let timers = server.timers();
+        assert_eq!(timers.len(), 1, "{timers:?}");
+        assert_eq!(server.advance_to(timers[0].fire_at_ms - 1), 0);
+        assert!(server.outcome(&invocation.id).is_none());
+        let fire_at = server.fire_next_timer().unwrap();
+        assert_eq!(fire_at, timers[0].fire_at_ms);
+        eprintln!(
+            "SDK sleep: stamp={}ms, response hold=20ms, virtual start={start}ms, deadline={}ms, fired={fire_at}ms, elapsed={}ms",
+            sleep.wake_up_time,
+            timers[0].fire_at_ms,
+            fire_at - start,
+        );
+        assert!(
+            fire_at >= start + 400,
+            "the SDK's 400ms sleep fired after {}ms despite its 20ms response hold",
+            fire_at - start,
+        );
+        server.settle().await;
+        assert!(server.outcome(&invocation.id).unwrap().is_ok());
+    }
+}
+
+#[tokio::test]
+async fn sdk_delayed_send_deadline_survives_a_held_response_frame() {
+    for config in modes() {
+        let server = RestateTestServer::start(
+            Endpoint::builder()
+                .bind(HeldTimerFrames)
+                .bind(Counter)
+                .build(),
+            config.time(TimeMode::Manual),
+        )
+        .await
+        .unwrap();
+        let start = server.now_ms();
+        assert_eq!(post(&server, "HeldTimerFrames/send", "").await.0, 200);
+        server.settle().await;
+        let timers = server.timers();
+        assert_eq!(timers.len(), 1, "{timers:?}");
+        assert_eq!(server.advance_to(timers[0].fire_at_ms - 1), 0);
+        assert_eq!(post(&server, "Counter/held-send/read", "").await.1, "0");
+        let fire_at = server.fire_next_timer().unwrap();
+        assert_eq!(fire_at, timers[0].fire_at_ms);
+        assert!(
+            fire_at >= start + 400,
+            "the SDK's 400ms delayed send fired after {}ms despite its 20ms response hold",
+            fire_at - start,
+        );
+        server.settle().await;
+        assert_eq!(post(&server, "Counter/held-send/read", "").await.1, "1");
+    }
+}
+
+#[tokio::test]
 async fn object_state_is_serialized_per_key_and_calls_return_results() {
     for config in modes() {
         let server = server(config).await;
@@ -314,13 +413,13 @@ async fn a_workflow_runs_once_sleeps_on_virtual_time_and_waits_for_its_promise()
         let timers = server.timers();
         assert_eq!(timers.len(), 1, "{timers:?}");
         let start = server.now_ms();
-        assert_eq!(timers[0].fire_at_ms, start + 60_000);
+        assert!(timers[0].fire_at_ms >= start + 60_000);
         assert_eq!(
             post(&server, &format!("Flow/{tag}/peek"), "").await,
             (200, "null".into())
         );
 
-        server.advance(Duration::from_secs(60));
+        server.advance_to(timers[0].fire_at_ms);
         server.settle().await;
         assert_eq!(
             post(&server, &format!("Flow/{tag}/approve"), "\"yes\"")
@@ -379,7 +478,7 @@ async fn a_crash_before_a_run_result_is_stored_replays_and_reruns_the_effect() {
     post(&server, &format!("Flow/{tag}/approve"), "\"ok\"").await;
     // The minute-long sleep is past the auto-advance horizon: move time.
     server.settle().await;
-    server.advance(Duration::from_secs(60));
+    assert!(server.fire_next_timer().is_some());
     let (status, body) =
         post_get_attach(&server, &format!("restate/workflow/Flow/{tag}/attach")).await;
     assert_eq!(status, 200, "{body}");

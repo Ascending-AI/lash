@@ -153,7 +153,6 @@ pub(super) async fn run(
         let Some(frame) = next else {
             break;
         };
-        let received_us = wall_now_us();
         let frame = match frame {
             Ok(frame) => frame,
             Err(error) => {
@@ -168,7 +167,7 @@ pub(super) async fn run(
         loop {
             match decoder.next_frame() {
                 Ok(Some(frame)) => {
-                    if shared.on_frame(key, number, frame, received_us) == Flow::Stop {
+                    if shared.on_frame(key, number, frame) == Flow::Stop {
                         return;
                     }
                 }
@@ -185,13 +184,4 @@ pub(super) async fn run(
         Err(error) => error.to_string(),
     };
     shared.stream_ended(key, number, detail);
-}
-
-/// Wall-clock epoch microseconds, taken when a frame is read — before the
-/// server lock — so a sleep's wall stamp is measured against its arrival.
-fn wall_now_us() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_micros())
-        .unwrap_or(0)
 }

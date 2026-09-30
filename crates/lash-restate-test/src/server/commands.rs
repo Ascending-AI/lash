@@ -267,9 +267,7 @@ impl State {
             }
             MessageType::SleepCommand => {
                 let sleep = frame.decode::<SleepCommandMessage>().map_err(error)?;
-                let fire_at = self
-                    .now_ms
-                    .saturating_add(wall_delay_ms(sleep.wake_up_time, self.frame_received_us));
+                let fire_at = self.anchor.deadline_ms(sleep.wake_up_time);
                 self.add_timer(
                     fire_at,
                     TimerAction::Sleep {
@@ -326,10 +324,8 @@ impl State {
             }
             MessageType::OneWayCallCommand => {
                 let send = frame.decode::<OneWayCallCommandMessage>().map_err(error)?;
-                let start_at_ms = (send.invoke_time > 0).then(|| {
-                    self.now_ms
-                        .saturating_add(wall_delay_ms(send.invoke_time, self.frame_received_us))
-                });
+                let start_at_ms =
+                    (send.invoke_time > 0).then(|| self.anchor.deadline_ms(send.invoke_time));
                 let submission = Submission {
                     target: Target {
                         service: send.service_name.clone(),

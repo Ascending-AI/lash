@@ -31,7 +31,8 @@ use crate::protocol::generated::{
 };
 use crate::protocol::{CANCEL_SIGNAL_ID, Frame, MessageType, ProtocolVersion, SuspensionMessageV6};
 
-pub use super::timers::{duration_ms, wall_delay_ms};
+use super::timers::TimeAnchor;
+pub use super::timers::duration_ms;
 
 /// How an operator command (cancel, kill) applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,9 +163,7 @@ pub struct State {
     pub stats: Stats,
     /// Virtual time at the last move, and the wall instant it happened: auto
     /// advance lets virtual time flow at wall speed from here.
-    pub anchor: (u64, std::time::Instant),
-    /// Wall-clock microseconds the frame being applied was read at.
-    pub frame_received_us: u128,
+    pub anchor: TimeAnchor,
     /// The last handle is gone: nothing starts, and ingress answers 503.
     pub shut: bool,
     /// `(service, key)` targets a test holds
@@ -180,14 +179,12 @@ impl State {
     /// Virtual now as auto-advance sees it: the last virtual time plus the
     /// wall time elapsed since it was set.
     pub fn wall_flowed_ms(&self) -> u64 {
-        let elapsed = u64::try_from(self.anchor.1.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.anchor.0.saturating_add(elapsed)
+        self.anchor.wall_flowed_ms()
     }
 
     pub fn new(seed: u64, start_ms: u64) -> Self {
         Self {
-            anchor: (start_ms, std::time::Instant::now()),
-            frame_received_us: 0,
+            anchor: TimeAnchor::new(start_ms),
             shut: false,
             held: BTreeSet::new(),
             deferred: Vec::new(),
@@ -743,18 +740,10 @@ impl State {
     // ---------------------------------------------------------------------
 
     /// Apply one frame the SDK wrote on attempt `number` of `key`.
-    pub fn on_frame(
-        &mut self,
-        sh: &Arc<Shared>,
-        key: InvKey,
-        number: u32,
-        frame: Frame,
-        received_us: u128,
-    ) -> Flow {
+    pub fn on_frame(&mut self, sh: &Arc<Shared>, key: InvKey, number: u32, frame: Frame) -> Flow {
         if self.running_attempt(key, number).is_none() {
             return Flow::Stop;
         }
-        self.frame_received_us = received_us;
         let site = self.crash_site(key, &frame);
         // A random crash's draw is keyed to the frame it would hit, so one
         // seed crashes the same frames however attempts interleave.

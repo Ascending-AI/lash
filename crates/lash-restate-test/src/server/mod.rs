@@ -448,15 +448,9 @@ impl Shared {
         Ok(())
     }
 
-    fn on_frame(
-        self: &Arc<Self>,
-        key: InvKey,
-        number: u32,
-        frame: Frame,
-        received_us: u128,
-    ) -> Flow {
+    fn on_frame(self: &Arc<Self>, key: InvKey, number: u32, frame: Frame) -> Flow {
         let mut state = self.lock();
-        let flow = state.on_frame(self, key, number, frame, received_us);
+        let flow = state.on_frame(self, key, number, frame);
         drop(state);
         flow
     }
