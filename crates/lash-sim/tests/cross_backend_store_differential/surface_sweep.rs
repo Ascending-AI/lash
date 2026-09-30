@@ -1887,10 +1887,6 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL and compares all three accounting adapters"]
-#[expect(
-    clippy::expect_used,
-    reason = "the service gate provides the database and every adapter"
-)]
 async fn usage_accounting_differential_agrees() {
     let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("required PostgreSQL URL");
     let mut connection = PgConnection::connect(&url).await.expect("connection");
