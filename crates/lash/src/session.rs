@@ -946,7 +946,7 @@ impl LashSession {
 
     /// Refresh the session graph from any background process that signalled it
     /// changed. This is the honest name for the former
-    /// `processes().await_all()` misnomer (ADR 0019 grill): a session-graph
+    /// `processes().await_all()` misnomer (ADR 0014 grill): a session-graph
     /// resync, not a terminal wait on background work — wait on a process with
     /// [`SessionProcessAdmin::await_output`]. It lives on the session surface
     /// because it refreshes the session graph, not the global process registry.

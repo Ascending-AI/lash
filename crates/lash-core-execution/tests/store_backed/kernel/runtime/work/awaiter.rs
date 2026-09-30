@@ -791,7 +791,7 @@ mod tests {
         );
     }
 
-    /// FIG-1744 / ADR 0019: CallerDeparted refusal wins over a recorded terminal
+    /// FIG-1744 / ADR 0016: CallerDeparted refusal wins over a recorded terminal
     /// outcome.
     #[tokio::test]
     async fn caller_departed_refuses_before_terminal_outcome() {

@@ -297,9 +297,8 @@ Lashlang child registration resolves `max_attempts` from the runtime host
 configuration instead of recording `None`. The bridge reads the default once at
 segment start and carries it in segment state, so redrive after configuration
 change uses the recorded value. The fingerprint includes the resolved bound;
-rerunnable disposition remains unchanged. Retries are bounded by attempts, not
-age, as established by
-[ADR 0019](0019-process-recovery-obeys-declared-disposition.md).
+rerunnable disposition remains unchanged. Engine-owned recovery follows
+[ADR 0110](0110-the-engine-owns-process-recovery.md).
 
 ### Cutover
 

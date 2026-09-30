@@ -1,105 +1,21 @@
-# Per-tool telemetry emits from one shared seam and consumers derive from the typed model
+# Per-tool telemetry emits from one shared seam
 
 ## Status
 
 accepted
 
-> Historical note (2026-08-21): The workspace-only `lash-trace-viewer` crate was removed; tracing remains available through the typed JSONL schema and sinks.
-
-> Amendment (2026-09-06, FIG-2361): Trace schema 16 removes the two never-emitted session-start and standalone token-usage events. The closed `TraceEvent` enum and its exhaustive kind mapping define the complete event vocabulary; `TurnStarted` remains the lifecycle start event, and `LlmCallCompleted` retains per-call usage. Exporters and dispatchers drop the unused arms without adding producers. This intentionally changes the serialized schema, so readers and exhaustive consumers must adopt version 16 together.
-
 ## Decision
 
-Per-tool reporting is emitted once, from the shared tool-execution seam, and
-every consumer schema is derived from the typed event rather than re-authored by
-hand.
+Per-tool reporting originates in shared tool execution. `emit_tool_call_started_trace` and `emit_tool_call_completed_trace` emit typed trace events; the same tool-execution path emits `TurnEvent::ToolCallStarted` and `ToolCallCompleted`. Standard native calls and tools invoked during code execution use that path, producing one start/completion pair for each completed call. Identity, provider correlation and issuing language-node containment remain explicit.
 
-- **One emission seam.** `session::execution_context::emit_tool_call_started_trace`
-  and `emit_tool_call_completed_trace`, called from `session::tool_execution`,
-  are the only place per-tool telemetry originates. The same seam emits both the
-  app-facing `TurnEvent::ToolCallStarted` / `ToolCallCompleted` and the durable
-  `lash_trace::TraceEvent::ToolCallStarted` / `ToolCallCompleted`. Protocol
-  drivers do not emit their own per-tool records.
-- **Both modes route through it.** A standard native tool call and a tool
-  invoked inside a code-block (Lashlang) execution both go through
-  `tool_execution`, so each call produces exactly one Started + one Completed
-  pair on every channel. The execution context retains the enclosing code-block
-  graph key, and trace events carry the issuing language node id when present.
-  Tool identity and provider correlation remain explicit event fields.
-- **Consumers derive from the typed model.** `TraceEvent::kind()` is the single
-  source of truth for the `type` tag strings; the trace viewer builds a typed
-  `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*
-  by matching `TraceEvent`; the OpenTelemetry sink maps the same
-  typed events to spans (`lash.tool` for tool calls in both modes, the
-  `lash.exec_code` family for exec diagnostics with the precise phase carried on
-  the `lash.protocol.diagnostic_phase` attribute); and the remote wire mirror is
-  a compile-forced exhaustive `TryFrom<TurnEvent> for RemoteTurnEvent`. `TurnEvent`
-  is deliberately **not** `#[non_exhaustive]` so those matches fail to compile
-  until a new variant is handled everywhere.
+Consumers use typed events. `TraceEvent::kind()` defines trace tag strings, the OpenTelemetry sink maps typed events to spans, and exhaustive remote conversion handles each `TurnEvent` variant. `TurnEvent` is closed so a new variant requires updating its exhaustive consumers. There is no exhaustive turn-event-to-trace conversion; the trace and turn vocabularies have their own producers.
 
-## Why
+## Why and alternatives
 
-The tempting design is for each protocol driver to emit its own per-tool
-telemetry: the standard driver records its tool calls, the RLM / code-exec path
-records its own. That duplicates the most detail-heavy emission in every driver
-and drifts immediately — one path forgets the trace record, another double-counts
-a tool that runs inside a code block, a third omits the containment key. The
-tool-execution module is the one place every tool call already passes through
-regardless of mode, so it is the correct seam: emitting there makes
-pair-exactness and identical containment metadata structural rather than a
-per-driver convention. A regression test
-(`standard_runtime_emits_single_tool_call_trace_pair_per_call`) pins the
-one-pair-per-call guarantee.
-
-Deriving consumer schemas from the typed model is the other half. The trace
-viewer *(Superseded on this point by the 2026-08-21 removal note.)*, the OTel span
-names, the JSONL `type` tags, and the wire DTO all describe the same events; if
-each re-derived its own strings and field lists, they would disagree the first
-time an event changed. Routing every consumer through `TraceEvent::kind()`, an
-exhaustive `TraceEvent` match, or an exhaustive `TryFrom<TurnEvent>` turns "keep the
-consumers in sync" into a compile error instead of a code-review hope.
+Per-protocol emission is rejected because it duplicates detailed reporting and risks dropping or double-counting tools called inside code. Independently authored tag strings and consumer field lists are rejected because they drift without exhaustive typed matches.
 
 ## Consequences
 
-- **Adding a tool-reporting channel is one edit at the seam,** not one per
-  protocol driver. Everything downstream inherits the new record.
-- **A new `TurnEvent` variant is compile-forced** into the exhaustive
-  `TryFrom<TurnEvent> for RemoteTurnEvent` mapping. `TraceEvent::kind()` is
-  exhaustive over trace events, but no exhaustive `TurnEvent`-to-`TraceEvent`
-  conversion exists. There is no version number on `TurnEvent` itself.
-- **Exec-diagnostic detail stays additive.** The `exec_code_completed`
-  diagnostic carries its per-tool `tool_calls` list inside the free-form
-  `ProtocolStep` payload, so richer per-tool reporting shipped without bumping
-  `TRACE_SCHEMA_VERSION`.
-- **Emission is decoupled from the protocol driver that owns the turn loop.**
-  That is a deliberate cost: the code that emits a tool's telemetry is not the
-  code that decided to call the tool. The seam is worth it because the alternative
-  is per-driver duplication, and the containment keys carry the relationship the
-  emission site would otherwise have to imply.
+Adding a reporting channel happens at the common tool path. Telemetry emission is separate from the protocol decision to invoke the tool; containment ids record that relationship. `ProtocolStep` diagnostics can carry per-tool detail inside their payload, while versioned trace and wire contracts follow their own rules under ADR 0100. The typed JSONL schema and sinks supply trace consumption.
 
-## Considered Alternatives
-
-- **Per-protocol emission (each driver records its own tool telemetry).**
-  Rejected: it duplicates emission across the standard and code-exec paths, drifts
-  between them, and either double-counts or drops tools that run inside a code
-  block. The one guarantee that matters — exactly one Started/Completed pair per
-  call on every channel — becomes unenforceable.
-- **String-keyed consumer schemas (each consumer re-derives its own tag strings
-  and field lists).** Rejected: nothing forces the trace viewer *(Superseded on
-  this point by the 2026-08-21 removal note.)*, the OTel span names, and the
-  JSONL tags to agree. A renamed field or new variant drifts silently.
-  `TraceEvent::kind()` plus exhaustive matches make the same drift a build failure.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 26: The closed `TraceEvent` vocabulary and its kind mapping are exhaustive
-within trace, but compilation does not force every `TurnEvent` to map to a
-`TraceEvent`. The mapping claim above is narrowed accordingly.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-Parent-batch dispatch and its `parent_call_id` field are historical, removed by `04ed702406` under ADR 0116; the shared per-tool emission seam survives.
-[The execution context](../../crates/lash-core-execution/src/session/execution_context.rs)
-and `rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step` in
-[the RLM streaming tests](../../crates/lash/src/tests/turn_streaming/rlm_streaming.rs)
-pin the current trace pair.
+[Trace emission](../../crates/lash-core-execution/src/session/execution_context.rs) and [tool execution and turn events](../../crates/lash-core-execution/src/session/tool_execution.rs) own the shared implementation.

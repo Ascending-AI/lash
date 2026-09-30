@@ -375,7 +375,6 @@ old decision as historical.
 | [0009](0009-deterministic-simulation-harness.md) | lash-sim's SQL worlds and their lease, fencing and reopen contention artifacts |
 | [0012](0012-durable-waits-via-effect-host-engines.md) | the SQL substrates' effect journal and promise rows |
 | [0014](0014-operational-policy-stays-with-the-host.md) | Lease Timings for session-execution and effect-replay leases |
-| [0019](0019-process-recovery-obeys-declared-disposition.md) | historical lease-based recovery (superseded by [ADR 0110](0110-the-engine-owns-process-recovery.md)) |
 | [0025](0025-bounded-journals-are-an-effect-controller-obligation.md) | re-drive against `runtime_effect_replay` on the store tier, and SQL replay-row retirement |
 | [0027](0027-unleased-completion-carries-explicit-authority.md) | process completion authority and invocation-bound execution writes |
 | [0029](0029-claims-are-generation-fenced-under-the-session-lease.md) | generation-fenced claims under the session-execution lease |

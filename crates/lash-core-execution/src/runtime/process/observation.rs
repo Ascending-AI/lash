@@ -292,7 +292,7 @@ impl ProcessWorkObserver {
         self.observe_records(records).await
     }
 
-    /// List processes a session originated — the provenance filter (ADR 0019 /
+    /// List processes a session originated — the provenance filter (ADR 0011 /
     /// process design grill). "Originated by" is the lineage lens, distinct from
     /// the observer lens: a process matches when its recorded originator is a
     /// session whose id equals `scope.session_id` (and its agent frame, when

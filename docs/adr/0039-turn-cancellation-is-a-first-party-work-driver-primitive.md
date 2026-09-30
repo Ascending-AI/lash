@@ -86,7 +86,7 @@ Turn cancellation has three operational layers:
    non-cooperative providers have stopped.
 2. Runtime Process cancellation remains the existing process event and worker-recovery protocol.
    Foreground turns do not acquire Process identity, ownership, or lifecycle (ADR 0003).
-3. Engine invocation cancellation or kill is host-owned break-glass recovery. Per ADR 0019, owner
+3. Engine invocation cancellation or kill is host-owned break-glass recovery. Per ADR 0110, owner
    destruction is not cooperative evidence and must never be projected as Lash `Cancelled`; the
    authoritative result is unknown unless a live/replayed owner commits one.
 

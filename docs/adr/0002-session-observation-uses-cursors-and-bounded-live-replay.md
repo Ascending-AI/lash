@@ -1,36 +1,25 @@
-# ADR 0002: Session Observation Uses Cursors And Bounded Live Replay
+# ADR 0002: Session observation uses cursors and bounded live replay
 
 Status: accepted
 
 ## Context
 
-Lash has two different observation needs:
-
-- Durable session state for settled UI and host reconciliation.
-- Live semantic activity for one running turn.
-
-`SessionReadView` already represents the durable projection. `TurnActivity` already represents per-turn semantic activity such as prose deltas, reasoning, tools, usage, and errors. Reconnect/resume should not make `TurnActivity` a durable history API, and it should not require a cursor scoped to a request or turn.
+Hosts need durable session state for reconciliation and live semantic activity for a running turn. `SessionReadView` supplies the durable projection; `TurnActivity` supplies prose, reasoning, tools, usage and errors. Reconnect needs one session-level identity rather than a request- or turn-local cursor.
 
 ## Decision
 
-Reconnect is session-level. A host observes a `SessionObservation`: the current `SessionReadView` plus an opaque `SessionCursor`.
+A `SessionObservation` combines the current read view with an opaque `SessionCursor`. Observation events can carry turn activity, committed replacements, resident replacements, frame switches, queue changes, process changes and replay gaps. Only `Committed` proves a durable revision advance and settles provisional transcript state. `ResidentChanged` records resident authority without claiming durability. Persisted revisions use the store head; an ephemeral runtime uses its turn index.
 
-`SessionObservationEvent` advances that cursor. Events may wrap `TurnActivity`, but they can also represent durable `Committed` replacements, revision-stable `ResidentChanged` replacements, Agent Frame switches, queued-work changes, process changes, or replay gaps. `SessionRevision` names the durable committed point: the store `head_revision` for persisted sessions and a process-local revision for in-memory sessions. Only `Committed` proves that revision advanced and may settle provisional transcript state. `ResidentChanged` makes changed resident authority replayable within one store incarnation without claiming durability.
+Live replay is bounded, best-effort freshness. The default `InMemoryLiveReplayStore` retains at most 2048 events or 120 seconds per session. Hosts can supply a custom store through `LashCoreBuilder::live_replay_store`. This buffer is independent of durable session storage.
 
-Live replay is best-effort and bounded. `LiveReplayStore` is not `RuntimePersistence`, not durable history, and not required to survive process loss. The default `InMemoryLiveReplayStore` keeps at most 2048 events or 120 seconds per session. Hosts that need a deployment-specific buffer can pass a custom store through `LashCoreBuilder::live_replay_store`.
+The cursor binds replay incarnation, session identity, revision and live position. Malformed or cross-session cursors are rejected. A different incarnation, trimmed history or unavailable interval produces a gap and an authoritative replacement observation. A store preserves an incarnation across restart only if it preserves the matching history too.
 
-`SessionCursor` is opaque outside core and binds replay incarnation, durable revision, live position, and session identity into one token. Malformed cursors are invalid input. Cursors for a different session are rejected. A replay-incarnation mismatch returns `Gap(Unavailable)`, never clean empty, unless a host store genuinely preserved both replay history and incarnation across restart. A store that cannot prove both must present a fresh incarnation. Stale or trimmed cursors return a fresh `SessionObservation` plus `LiveReplayGap`.
+Publication reserves a batch through `prepare_publication`, installs the authoritative observation with the reserved tail cursor, then calls `publish_prepared`. Subscribers see ordered published batches. Reserved cursors are valid during installation; abandoning a reservation produces `Gap(Unavailable)`. Reservation and publication errors are logged without failing execution or durable commits.
+
+At the runtime subscription boundary, a revision behind the authoritative observation requires a replayed `Committed` event bridging to that revision. Auxiliary events are insufficient evidence. Without the bridge the result is `Gap(Unavailable)`.
 
 ## Consequences
 
-`TurnBuilder::stream_to`, pull-style `stream`, `run`, and `TurnOutput.activities` remain turn convenience APIs. They are not the reconnect surface.
+Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. The remote protocol carries its observation DTOs and opaque cursor rather than a full read view; per-stream activity sequence numbers provide ordering only. Custom live replay stores implement reservation, abandonment and ordered publication themselves.
 
-Remote protocol turn requests no longer carry a turn-level activity cursor field. `RemoteTurnActivity.sequence` remains only per-stream ordering. Remote session observation uses `RemoteSessionCursor`, `RemoteSessionObservation`, `RemoteSessionObservationEvent`, and `RemoteLiveReplayGap`; the protocol does not serialize a full `SessionReadView`.
-
-Live replay reservation or publication failures must not fail turn execution or durable commits. They are logged, and later reconnect falls back to gap recovery from durable state.
-
-Publication reserves a cursor batch with `LiveReplayStore::prepare_publication`, installs the authoritative `RuntimeObservation` carrying the reserved tail cursor, then calls `publish_prepared` to make the batch replay-visible and notify subscribers in cursor order. Reserved cursors are valid during the install-to-publish window. Dropping a prepared batch retires the missing interval as `Gap(Unavailable)`; it can never become a clean empty replay.
-
-This is a host-facing trait break. Custom stores must replace the removed one-step `append` implementation with `prepare_publication` plus `publish_prepared`, including reservation abandonment and ordered visibility. There is no compatibility adapter or dual publication path.
-
-Revision reconciliation happens at the public runtime subscription seam, where the authoritative projection is available. After positional replay or subscription setup, a cursor whose revision trails the current observation may continue only when the returned replay contains a `Committed` event bridging to that observation revision; otherwise the runtime returns `Gap(Unavailable)` with the authoritative replacement and latest cursor. Auxiliary events carrying the newer revision are not commit evidence, so a failed commit-event append cannot become a clean empty replay even when the session remains idle.
+Durable activity logging is rejected for this interface because settled history already has a store and live transport failure must not affect a commit. The implementation is in [replay](../../crates/lash-core/src/runtime/observation/replay.rs) and [publication and revision reconciliation](../../crates/lash-core/src/runtime/observation.rs).

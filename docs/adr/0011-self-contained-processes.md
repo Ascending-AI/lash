@@ -1,67 +1,19 @@
-# Self-contained processes: capture-at-creation, no session binding, host-policy lifecycle
+# Self-contained processes capture their environment at creation
 
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
+## Decision
 
-A Runtime Process is a standalone durable entity — id, input, captured execution
-environment, event log, status, leases. It never holds a live reference to the session
-that created it: the execution environment (plugin options, policy, lashlang
-module/host requirements refs) is captured at creation as immutable content-addressed references,
-and the durable worker always executes against an ephemeral runtime instantiated from
-that capture — it never rebuilds the originating session. Session relationships are
-explicit, orthogonal, optional edges (originator and caused_by as pure provenance, a
-0..1 wake target, 0..n weak observer edges), none of which implies another and none of
-which implies cleanup: deleting a session erases only the session's side of every edge
-(its observer edges, pending wake deliveries addressed to it, its trigger subscriptions) and
-never cancels a process; lifecycle remains host policy.
+A Runtime Process is a standalone durable record with a minted id, input, captured environment reference, identity, provenance, lifetime, ancestry, events and status. It holds no live reference to its creator's session. Execution reconstructs plugins and policy from the captured immutable environment, rather than reopening the originating session.
 
-Amended 2026-08-31 (FIG-2346, PR #932): descendants of a session-originated
-process chain propagate the root session's observer edge, so the root session
-observes the whole chain. Observer edges remain explicit and orthogonal
-otherwise: a host-originated start still implies no observer.
+Definition starts refer to immutable definitions under ADR 0095. Realization resolves that definition and registers its engine input; the retained record's identity names the definition id. Registry names do not re-resolve an admitted definition. Captured cell locals must be immutable and durably representable.
 
-Amended 2026-09-12 (FIG-2959): provenance remains cleanup-free except for the
-explicit Lifecycle Relation defined by
-[ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md).
-Every process records a Lifecycle Policy and Parent Scope at registration;
-originator, observer, wake, and session relations still imply no cleanup.
-Amended 2026-09-26 (FIG-3607): the Lifecycle Policy and Parent Scope are now
-a recorded Lifetime over an admitted Ancestry
-([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)).
+## Rules and guarantees
 
-Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) makes the definition a first-class
-value and pins a `ProcessDefinitionRef` on every durable record, so capture
-at creation now includes the definition reference itself and a registry name
-is never resolved after registration. Capture-by-value of cell locals into a
-lifted process body is admitted only for immutable, durably representable
-locals, which enforces the prohibition above on capturing a mutable name.
+Originator and `caused_by` are provenance. Observer edges determine observation, and a wake target routes at most one session wake. These relationships do not imply one another or cleanup. Descendants inherit the root session capability; host-originated roots need no session observer. A process-created session is an ordinary child session with its own usage.
 
-## Considered Options
+Every registration records a Lifetime over its admitted Ancestry under ADR 0108. Scope-end cleanup follows that explicit lifetime under ADR 0094. Session deletion removes session-owned relationships and deliveries; provenance alone does not cancel a process. Artifact liveness follows referrer edges under ADR 0113. Engine journals own execution recovery under ADR 0110.
 
-- **Live session binding (status quo)**: the worker rebuilt the owner session's runtime
-  per execution and session deletion auto-cancelled zero-grant processes. Rejected:
-  processes could not outlive or exist without sessions, "what the process sees" was
-  unreproducible across recovery anyway, and ownership silently bundled execution,
-  wake routing, and lifecycle into one field.
-- **An owner enum (Host | Session) with bundled semantics**: rejected as the same
-  coupling wearing a costume — cleanup, wake routing, and execution still hung off one
-  concept.
-- **A configurable "host surface" for session-less execution**: rejected — capture-at-
-  creation makes every process carry its own environment, so no ambient surface concept
-  is needed.
+## Alternatives and consequences
 
-## Consequences
+Live session binding is rejected because session changes would change recovery inputs and prevent session-independent work. An owner enum bundling execution, cleanup and wake routing is rejected because those relationships have independent meanings. An ambient sessionless execution configuration is unnecessary because the process carries its environment.
 
-- Processes outlive sessions structurally, and products can use processes with no
-  sessions at all; sessions are one kind of creator/client.
-- Capture is spec-only and immutable: fresh plugin instances per execution, no creator
-  session state; process arguments are the only state handover. A mutable name must
-  never be captured into an environment — that would be a live coupling in disguise.
-- A process-created session is an ordinary session recording `caused_by` (downstream
-  provenance); its usage is its own — there is no live usage channel to the originator.
-- Wake fan-out is deliberately not a process feature (wake target is 0..1); the
-  trigger bus is the pub/sub path.
-- Persisted process and trigger-subscription records from before this change do not
-  deserialize (pre-1.0 break, no shims).
+Processes can exist without sessions and outlive their creators when their recorded lifetime permits it. Arguments and captured specifications provide state handover; mutable creator state does not. The implementation is in [process records and lineage](../../crates/lash-core-execution/src/runtime/process/model.rs), [environment specifications](../../crates/lash-core-store/src/process_identity.rs) and [process execution](../../crates/lash-lashlang-runtime/src/process.rs).

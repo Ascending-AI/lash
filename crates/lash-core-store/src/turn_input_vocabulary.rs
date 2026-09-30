@@ -377,7 +377,7 @@ impl PendingTurnInputDraft {
     /// row, and never rewrite it. A retry under the same source key is the same
     /// submission exactly when its digest equals the stored one; the row's
     /// *current* ingress and state (which a Defer rewrites to `next_turn` when
-    /// the named turn ends) take no part in the verdict (ADR 0010).
+    /// the named turn ends) take no part in the verdict (ADR 0101).
     ///
     /// The digest covers the submission as the host made it and nothing the
     /// store generates or mutates:

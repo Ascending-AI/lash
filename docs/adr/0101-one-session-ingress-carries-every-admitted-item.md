@@ -10,7 +10,6 @@ under one sequence, and records which sections it overrides. Nothing else below
 describes current behaviour unless it says so. The FIG-3540 arc note is the
 frozen design this ADR records.
 
-Supersedes [ADR 0010](0010-pending-turn-input-is-admission-evidence.md).
 Strengthens [ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md).
 Amends [ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md),
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
@@ -60,7 +59,7 @@ root and the turn. It supersedes ADR 0029.
 
 Lash feeds turns from two durable queues. `pending_turn_inputs` holds host
 input. `queued_work_batches` / `queued_work_items` hold process wakes, frame
-handoffs and session commands. ADR 0010 made the split a rule: "It is not queued
+handoffs and session commands. The separate admission model made the split a rule: "It is not queued
 work." Every lifecycle rule is therefore written twice: dedup, retention, cancel
 disposition, ordering, claim bounds, settlement, affected-item records. The
 second copy lags, and the lag has produced confirmed defects:
@@ -75,7 +74,7 @@ second copy lags, and the lag has produced confirmed defects:
   with the same key after settlement gets it applied again, possibly over newer
   values.
 * **A conflicting replay is silently adopted** on the queued side (pinned by a
-  conformance law), while ADR 0010 makes it an error on the input side.
+  conformance law), while input admission makes it an error on the input side.
 * **A host-cancelled wake can come back** (FIG-3545): host cancel deletes the row
   without raising the wake redelivery floor.
 * **An identical input retry is refused as a conflict** after its row was
@@ -124,7 +123,7 @@ composition unit, and it already spans several rows.
 | `submission_digest` | Written once at admission, never updated (§8). |
 | `payload` | `Input(TurnInput) \| ProcessWake(ProcessWakeDelivery) \| SessionCommand(SessionCommand)`. The wake payload stays a copy of the process delivery. |
 | `authority`, `merge_key` | Per-item data, nullable where a kind has none. They feed the drain policy and traces. Nothing authorizes on them and nothing gates a claim on them (§5). |
-| `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, as ADR 0010 defined it. |
+| `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, under the admission contract. |
 | `terminal_cause` | Closed, non-null exactly on terminal rows (§8). |
 | claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. *(FIG-3927: the claim columns are replaced by `admitted_root` and `admitted_by`; see the FIG-3927 amendment.)* |
 | `enqueued_at_ms`, `terminal_at_ms` | Informational and for claim-size bounds. Never an order key. |
@@ -1073,7 +1072,7 @@ writes nothing". Law 3's "locked head row" becomes "an admitted head row".
 
 ## Alternatives considered
 
-* **Keep two tables (ADR 0010).** Rejected. Every defect in *Context* is a rule
+* **Keep two tables.** Rejected. Every defect in *Context* is a rule
   implemented twice with the second copy lagging.
 * **"Structural merge only", preserving every current arbitration.** Rejected.
   The timestamp arbitration exists only because two counters are incomparable;

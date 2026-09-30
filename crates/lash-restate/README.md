@@ -112,7 +112,7 @@ off forever with no operator told what is wrong.
 from definitive answers. A process await reattaches after connection failures,
 EOF, timeouts, overload, and ingress-generated 5xx responses, preserving the
 durable process and its wait address. An invocation's terminal error stays
-terminal even with a 5xx code. See ADR 0019's FIG-4260 amendment.
+terminal even with a 5xx code. See ADR 0016.
 
 ## Stuck effect-group dispatcher retirement
 

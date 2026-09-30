@@ -46,34 +46,32 @@ The generated region below is checked against the live filenames and headings.
 <!-- adr-index:start -->
 | Number | Decision |
 | --- | --- |
-| 0001 | [Context Management Uses Views Or Frames](0001-context-management-uses-views-or-frames.md) |
-| 0002 | [Session Observation Uses Cursors And Bounded Live Replay](0002-session-observation-uses-cursors-and-bounded-live-replay.md) |
-| 0003 | [Durable Waits are scoped and resolved by the EffectHost](0003-keyed-promise-is-scope-agnostic.md) |
-| 0004 | [Process Environments Carry Plugin Options, Not Product Metadata](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
-| 0005 | [Tool Catalog Membership Replaces Availability Tiers](0005-tool-catalog-membership-replaces-availability-tiers.md) |
-| 0006 | [RLM History Renders in the Emission Format](0006-rlm-history-renders-in-emission-format.md) |
-| 0007 | [Four Layer Scenario Harnesses](0007-four-layer-scenario-harnesses.md) |
-| 0008 | [Confidence Gate](0008-confidence-gate.md) |
-| 0009 | [Randomised simulation harness](0009-deterministic-simulation-harness.md) |
-| 0010 | [Pending Turn Input Is Admission Evidence](0010-pending-turn-input-is-admission-evidence.md) |
-| 0011 | [Self-contained processes: capture-at-creation, no session binding, host-policy lifecycle](0011-self-contained-processes.md) |
-| 0012 | [Durable waits lean on effect-host engines; substrates own their journals](0012-durable-waits-via-effect-host-engines.md) |
-| 0013 | [Protocol Capabilities Enter Through the Plugin Contract](0013-protocol-capabilities-enter-through-the-plugin-contract.md) |
-| 0014 | [Operational Policy Stays With the Host; Lash Exposes Levers](0014-operational-policy-stays-with-the-host.md) |
-| 0015 | [Admission Control Lives in Provider Decorators](0015-admission-control-lives-in-provider-decorators.md) |
+| 0001 | [Context management uses views or frames](0001-context-management-uses-views-or-frames.md) |
+| 0002 | [Session observation uses cursors and bounded live replay](0002-session-observation-uses-cursors-and-bounded-live-replay.md) |
+| 0003 | [Durable waits are scoped and resolved by the effect host](0003-keyed-promise-is-scope-agnostic.md) |
+| 0004 | [Process environments carry plugin options, not product metadata](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
+| 0005 | [Tool Catalog membership defines availability](0005-tool-catalog-membership-replaces-availability-tiers.md) |
+| 0006 | [RLM history renders in the emission format](0006-rlm-history-renders-in-emission-format.md) |
+| 0007 | [Four layer scenario harnesses](0007-four-layer-scenario-harnesses.md) |
+| 0008 | [Confidence gate](0008-confidence-gate.md) |
+| 0009 | [Randomized simulation harness](0009-deterministic-simulation-harness.md) |
+| 0011 | [Self-contained processes capture their environment at creation](0011-self-contained-processes.md) |
+| 0012 | [Durable waits use effect-host engines and engine-owned journals](0012-durable-waits-via-effect-host-engines.md) |
+| 0013 | [Protocol capabilities enter through the plugin contract](0013-protocol-capabilities-enter-through-the-plugin-contract.md) |
+| 0014 | [Operational policy stays with the host and Lash exposes levers](0014-operational-policy-stays-with-the-host.md) |
+| 0015 | [Admission control lives in provider decorators](0015-admission-control-lives-in-provider-decorators.md) |
 | 0016 | [Process waits live on the work-driver seam](0016-process-waits-live-on-the-work-driver-seam.md) |
 | 0017 | [Process observation is best-effort push over state truth](0017-process-observation-is-best-effort-push-over-state-truth.md) |
-| 0018 | [Per-tool telemetry emits from one shared seam and consumers derive from the typed model](0018-per-tool-telemetry-emits-from-one-shared-seam.md) |
-| 0019 | [Process recovery obeys declared disposition; abandonment is a written fact](0019-process-recovery-obeys-declared-disposition.md) |
+| 0018 | [Per-tool telemetry emits from one shared seam](0018-per-tool-telemetry-emits-from-one-shared-seam.md) |
 | 0020 | [Process change feed is a record-level cursor read](0020-process-change-feed-is-a-record-cursor-read.md) |
 | 0021 | [Trigger deliveries are first-class and recoverable](0021-trigger-deliveries-are-first-class-and-recoverable.md) |
 | 0022 | [Host originators carry named scopes](0022-host-originators-carry-named-scopes.md) |
 | 0023 | [Retention stays a parameterized host lever](0023-retention-stays-a-parameterized-host-lever.md) |
-| 0024 | [Drainage reads over artifact refcounts](0024-drainage-reads-over-artifact-refcounts.md) |
+| 0024 | [Drainage reads over artifact references](0024-drainage-reads-over-artifact-refcounts.md) |
 | 0025 | [Bounded journals are an effect-controller obligation](0025-bounded-journals-are-an-effect-controller-obligation.md) |
-| 0026 | [Model capability is host-supplied data; providers are executors](0026-model-capability-is-host-supplied-data.md) |
+| 0026 | [Model capability is host-supplied data and providers are executors](0026-model-capability-is-host-supplied-data.md) |
 | 0027 | [Process completion carries explicit authority](0027-unleased-completion-carries-explicit-authority.md) |
-| 0028 | [Attachments are three layers: dumb blob storage, lash-owned references, host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
+| 0028 | [Attachments have blob storage, reference tracking and host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
 | 0029 | [Claim supersession is reclaim-mediated under the session lease](0029-claims-are-generation-fenced-under-the-session-lease.md) |
 | 0030 | [The session model is resolved once, at session construction](0030-the-session-model-is-resolved-once-at-open.md) |
 | 0031 | [Execution evidence is provider-reported fact, never echoed intent](0031-execution-evidence-is-provider-reported-fact.md) |

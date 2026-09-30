@@ -2,7 +2,7 @@
 //!
 //! [`Processes`] (reached via [`LashCore::processes`](crate::LashCore::processes),
 //! re-exported as [`lash::process::Processes`](crate::process::Processes)) is THE
-//! host-level process surface (ADR 0019 grill): start, observe, signal, cancel,
+//! host-level process surface (ADR 0014 grill): start, observe, signal, cancel,
 //! transfer, prune, and abandon-request every process, with the two distinct
 //! scope filters — `observed_by` (what a session may address) and `originated_by`
 //! (what a session created). The session-scoped
@@ -493,7 +493,7 @@ impl Processes {
     }
 
     /// List processes a session originated — the **provenance** filter (ADR
-    /// 0019). This is the lineage lens (what a session created), distinct from
+    /// 0011). This is the lineage lens (what a session created), distinct from
     /// [`list_observed_by`](Self::list_observed_by): a process a session started
     /// then transferred away still matches here, and one merely observed by it
     /// does not.

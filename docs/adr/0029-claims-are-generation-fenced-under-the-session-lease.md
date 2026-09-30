@@ -111,7 +111,7 @@ CAS plus the batch-ownership check described below. Concretely:
   `TurnInputClaimSuperseded`.
 - The host handback levers `abandon_queued_work_claim` /
   `abandon_turn_input_claim` remain (per ADR 0014), now without expiry columns.
-- The turn-input state machine (ADR 0010) is untouched: claim paths still claim
+- The turn-input state machine (ADR 0101) is untouched: claim paths still claim
   only pending states and keep the `Accepted` lockout as admission evidence.
   Generation-pinned reclaim eligibility is added on top for both wanted-state
   scopes.

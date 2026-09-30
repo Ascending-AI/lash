@@ -447,7 +447,7 @@ impl SessionAdmin {
     /// changed. This is the honest name for what the core `await_background_work`
     /// call does — a session-graph resync, **not** a terminal wait on background
     /// work (that lives on the process admin's `await_output`). Renamed off the
-    /// old `SessionProcessAdmin::await_all` misnomer per the ADR 0019 grill.
+    /// old `SessionProcessAdmin::await_all` misnomer per the ADR 0014 grill.
     pub(crate) async fn refresh_background_graph(&self) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime.await_background_work().await.map_err(Into::into)
