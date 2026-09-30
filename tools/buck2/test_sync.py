@@ -227,6 +227,45 @@ def check_action_bridge() -> None:
     assert "for name, providers in test_info.sub_targets.items()" in tests
 
 
+def check_transitive_source_inputs() -> None:
+    spec = importlib.util.spec_from_file_location("buck2_prelude_overlay", HERE / "prelude_overlay.py")
+    overlay = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(overlay)
+    reindeer = tomllib.loads((HERE / "reindeer.toml").read_text(encoding="utf-8"))
+    package = str(pathlib.PurePosixPath(reindeer["buck"]["file_name"]).parent)
+    assert overlay.THIRD_PARTY_PACKAGE == package
+    # Third-party crates remap to `<package>/<name>-<version>.crate/`; the
+    # checkout must never provide those paths, or rustc could read them.
+    assert not list((ROOT / package).glob("*.crate")), "checkout shadows remapped third-party sources"
+    stock = '''    dep_args.add(
+        cmd_args(
+            hidden = compile_ctx.transitive_srcs.project_as_args("artifacts") if compile_ctx else [],
+        )
+    )
+    compile_cmd = cmd_args(
+        hidden = [toolchain_info.compiler, compile_ctx.transitive_srcs.project_as_args("artifacts")],
+    )
+    hidden = [
+        transitive_srcs.project_as_args("artifacts"),
+'''
+    narrowed = overlay.narrow_transitive_source_inputs(stock)
+    assert narrowed.count('project_as_args("kiln_checkout_artifacts")') == 2
+    assert narrowed.count('project_as_args("artifacts")') == 1
+    assert overlay.narrow_transitive_source_inputs(narrowed) == narrowed
+    sources = '''
+RustSourcesTSet = transitive_set(
+    args_projections = {
+        "artifacts": _get_artifacts,
+    },
+)
+'''
+    projected = overlay.add_checkout_source_projection(sources)
+    assert '"artifacts": _get_artifacts,' in projected
+    assert 'owner.package == "{}"'.format(package) in projected
+    assert overlay.add_checkout_source_projection(projected) == projected
+
+
 def check_measurement_filter() -> None:
     spec = importlib.util.spec_from_file_location("action_sizes", HERE / "action_sizes_from_log.py")
     module = importlib.util.module_from_spec(spec)
@@ -706,6 +745,7 @@ def main() -> int:
         check_sizing,
         check_ownership,
         check_action_bridge,
+        check_transitive_source_inputs,
         check_measurement_filter,
         check_native_inputs,
         check_dependency_and_profile_projection,

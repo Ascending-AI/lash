@@ -31,6 +31,7 @@ INPUT_SHA256 = {
     "rust/profile.bzl": "271c871a774952767253025d88cf3c550566ddd5ea23c9f7ded8791662034f26",
     "rust/rust_binary.bzl": "75125cd6c3bbefc14ee1c654da2f785919b14b14d74d24f22a117b84b00cbf55",
     "rust/rust_library.bzl": "17e84e3f3f608e07ac3a9365b354181d79e35510fe3bc6c8a7ddf8a1b12158fe",
+    "rust/sources.bzl": "a291683f417e408a6f7ba012dff370e83f859050c31b8a5a30dd2132f01e27b2",
     "rust/tools/tool_rules.bzl": "54b9a3ea4cfd04e5a2619d3e93c0fe338c8d67cab06f20a94674e46e2dc65b43",
     "rust/tools/BUCK": "6cfb02281c0addcb59659ba3db612fbf1ae6896ffbf7dd524be5610d8bf3f6d2",
     "rust/tools/buildscript_run.py": "50007e576180b834bc35533a06947446de7dad70470afe19cb473ba3e219128a",
@@ -40,7 +41,7 @@ INPUT_SHA256 = {
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
     "decls/rust_rules.bzl": "97769fd0b4afced56705a34fd4f3e8404f8da78997d57fa161678b79c4ed82bc",
-    "rust/build.bzl": "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
+    "rust/build.bzl": "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
     "rust/failure_filter.bzl": "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
@@ -49,6 +50,7 @@ OUTPUT_SHA256 = {
     "rust/profile.bzl": "c76bcbf08bf1e2f9cf295c619504ff2d398f790dfc68abbe96bcfb35ed4c1e14",
     "rust/rust_binary.bzl": "15c839433910cd64edd2cf0e90666ec062e784aa3591c101a2090b123dc246f9",
     "rust/rust_library.bzl": "16e64e3a0326a8f9e373a037b5a51d99e1851e05a7dd3e1194c67877f103c6a0",
+    "rust/sources.bzl": "5505f55458faba390a75f50118877d16f57f08a41a5924e7c901de51f74c1b69",
     "rust/tools/tool_rules.bzl": "447a2c751cbd20a29663d0c14d641f7055195ca874c9ddcff0dbfaac6f9ff590",
     "rust/tools/BUCK": "1e1f72a05eaab95e347fd69a4c396134017161a59e833ff215b1cbd3e48eb086",
     "rust/tools/buildscript_run.py": "6c6e7aff95ccfa9a022dce9cfb0391e635f2d760e34327eb72ae9cb4bb8ff51a",
@@ -61,6 +63,7 @@ OUTPUT_SHA256 = {
 PREVIOUS_OUTPUT_SHA256 = {
     "rust/build.bzl": {
         "3bed58d24563a0e9c4274d5c5530a9c18c600ee1b3e8e7f6bcddd3a482be16fa",
+        "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
     },
     "rust/cargo_buildscript.bzl": {
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
@@ -367,7 +370,73 @@ def preserve_relative_manifest_dir(text: str) -> str:
     return text.replace(anchor, replacement, 1)
 
 
+# Reindeer's generated package (tools/buck2/reindeer.toml `file_name`). Its
+# crates compile from extracted `<name>-<version>.crate` archive directories.
+THIRD_PARTY_PACKAGE = "third-party/rust"
+
+CHECKOUT_SOURCES_PROJECTION = '''
+# Lash: rust-lang/rust#153898 lets a dependency's source text change the crate
+# hash of a dependent. Every Rust compile remaps its `__srcs` root to its owning
+# package path and dependency metadata keeps only that remapped name, so rustc
+# can find dependency text only at `<package>/<file>` relative to the action
+# root. First-party sources exist there both in a local checkout and in a
+# remote input root, and remain inputs. Extracted third-party archives are
+# never at `{package}/<crate>.crate/`; shipping them to every dependent cannot
+# change a hash and multiplied each archive's files into every input root.
+def _get_checkout_artifacts(sources: Artifact) -> list[Artifact]:
+    owner = sources.owner
+    if owner != None and owner.package == "{package}":
+        return []
+    return [sources]
+
+RustSourcesTSet = transitive_set(
+    args_projections = {{
+        "artifacts": _get_artifacts,
+        "kiln_checkout_artifacts": _get_checkout_artifacts,
+    }},
+)
+'''.format(package=THIRD_PARTY_PACKAGE)
+
+
+def add_checkout_source_projection(text: str) -> str:
+    old = '''
+RustSourcesTSet = transitive_set(
+    args_projections = {
+        "artifacts": _get_artifacts,
+    },
+)
+'''
+    if CHECKOUT_SOURCES_PROJECTION in text:
+        return text
+    if text.count(old) != 1:
+        raise ValueError("Rust sources transitive set changed")
+    return text.replace(old, CHECKOUT_SOURCES_PROJECTION, 1)
+
+
+def narrow_transitive_source_inputs(text: str) -> str:
+    # Compiler and rustdoc actions take the checkout-resolvable projection. The
+    # provider and its full `artifacts` projection stay stock for other users.
+    for old, new in (
+        (
+            'hidden = compile_ctx.transitive_srcs.project_as_args("artifacts") if compile_ctx else [],',
+            'hidden = compile_ctx.transitive_srcs.project_as_args("kiln_checkout_artifacts") if compile_ctx else [],',
+        ),
+        (
+            'hidden = [toolchain_info.compiler, compile_ctx.transitive_srcs.project_as_args("artifacts")],',
+            'hidden = [toolchain_info.compiler, compile_ctx.transitive_srcs.project_as_args("kiln_checkout_artifacts")],',
+        ),
+    ):
+        if new in text:
+            continue
+        if text.count(old) != 1:
+            raise ValueError("Rust compiler transitive source inputs changed")
+        text = text.replace(old, new, 1)
+    return text
+
+
 def transform(relative: str, text: str) -> str:
+    if relative == "rust/sources.bzl":
+        return add_checkout_source_projection(text)
     if relative == "decls/rust_rules.bzl":
         return add_attrs(text, '            "clippy_configuration": attrs.option(attrs.dep(providers = [ClippyConfiguration]), default = None),\n')
     if relative in {"rust/rust_binary.bzl", "rust/rust_library.bzl"}:
@@ -432,6 +501,7 @@ def transform(relative: str, text: str) -> str:
     text = wrap_actions(text)
     if relative == "rust/build.bzl":
         text = preserve_relative_manifest_dir(text)
+        text = narrow_transitive_source_inputs(text)
         old = '''        _lintify("W", is_clippy, toolchain_info.warn_lints),
     )'''
         new = '''        _lintify("W", is_clippy, toolchain_info.warn_lints),
@@ -508,7 +578,7 @@ def clippy_configuration(name, **kwargs):
 
 def upgrade_previous(relative: str, text: str) -> str:
     if relative == "rust/build.bzl":
-        return preserve_relative_manifest_dir(text)
+        return narrow_transitive_source_inputs(preserve_relative_manifest_dir(text))
     if relative != "rust/cargo_buildscript.bzl":
         raise ValueError("no previous-overlay upgrade for {}".format(relative))
     encoded = '''        rust_toolchain_info.rustc_flags,
