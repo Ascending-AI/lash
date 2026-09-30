@@ -275,7 +275,8 @@ impl RuntimeTurnDriver<'_> {
         // next one: a replay, which never runs this body, must make the same
         // next call as the live pass.
         let mut call_provider = self.policy.provider().clone();
-        let completion_sideband = call_provider.prepare_completion(&mut llm_request);
+        let completion_sideband =
+            crate::provider::prepare_completion(&call_provider, &mut llm_request);
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
         let call_id = crate::provider::call_id_for_scope(&llm_request.scope);
@@ -283,9 +284,14 @@ impl RuntimeTurnDriver<'_> {
         // the call and seals it with whatever record this body settles on,
         // the synthetic one of a cancellation included.
         let mut llm_task = crate::task::spawn(async move {
-            call_provider
-                .complete_prepared(llm_request, task_sideband, charge_safety, &usage_call)
-                .await
+            crate::provider::complete_prepared(
+                &mut call_provider,
+                llm_request,
+                task_sideband,
+                charge_safety,
+                &usage_call,
+            )
+            .await
         });
         let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());
 

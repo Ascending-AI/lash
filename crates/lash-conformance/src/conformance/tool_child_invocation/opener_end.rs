@@ -10,6 +10,7 @@
 //! own `ToolAttempt` run's, delivered by the engine (ADR 0125), and no longer
 //! rides the incorporation.
 
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use tokio_util::sync::CancellationToken;
 
 use super::*;

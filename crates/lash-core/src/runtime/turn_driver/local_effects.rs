@@ -269,7 +269,7 @@ pub(super) fn turn_effect_executor(
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
     };
-    crate::RuntimeEffectLocalExecutor::owned_runner(
+    lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),

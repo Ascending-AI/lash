@@ -1,3 +1,4 @@
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use lash_trace::{

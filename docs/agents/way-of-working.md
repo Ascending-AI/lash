@@ -63,6 +63,10 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 - **Shape:** one decision per ADR, filename `NNNN-kebab-case-title.md`, status/context/decision/consequences.
 - **Conflicts:** if your output contradicts an ADR, surface it explicitly ("Contradicts ADR-NNNN … worth reopening because …") rather than silently overriding; see [domain.md](domain.md).
 
+## Facade API surface
+
+The `lash` crate is the host API (ADR 0051). Every type named by a facade signature -- parameters, returns, fields, variants, trait members and supertraits, generic bounds, aliases -- is nameable through `lash::`. Export what hosts genuinely need, in the facade module of the item that names it; narrow the rest (`pub(crate)`, a changed signature, or a hidden cross-crate support module such as `core_internal`, `facade_ops` or `core_support`). `#[doc(hidden)]` is not a resolution, except on explicitly test- or support-only items. `scripts/facade_completeness.py` enforces the rule over the rustdoc JSON (`--document-hidden-items`) of `lash` and every first-party library in its dependency closure. It has no allowlist and no exemption mechanism, and no hand-maintained list of API items of any kind may be added to it.
+
 ## Lifecycle: states and labels
 
 **States are the lifecycle position. Labels carry only what a state can't express: who picks the ticket up.** Keep the two orthogonal; don't say the same thing twice in both.

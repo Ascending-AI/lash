@@ -200,7 +200,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         .with_commit_count_seed_for_testing(0),
     );
     let processes = Arc::new(
-        SqliteProcessRegistry::open_with_clock(
+        SqliteProcessRegistry::open_standalone_with_clock_for_testing(
             &root.join("processes.db"),
             Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         )

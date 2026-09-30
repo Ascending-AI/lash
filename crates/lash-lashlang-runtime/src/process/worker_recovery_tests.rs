@@ -4,6 +4,7 @@
 
 use super::WorkerRecoveryLedger;
 use lash_core::store::worker_recovery::WorkerRecoveryTotals;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 /// A worker service over the backend's recovery store, beside the harness
 /// that keeps the backend open.

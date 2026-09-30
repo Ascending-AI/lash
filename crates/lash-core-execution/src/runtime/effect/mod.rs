@@ -20,6 +20,7 @@ pub use tool_child::{
     UnrecordedSessionSources,
 };
 mod tool_child_driver;
+pub(crate) use tool_child_driver::runtime_ops as tool_child_runtime_ops;
 #[cfg(feature = "testing")]
 pub(crate) use tool_child_driver::validate_recorded_authorities;
 pub use tool_child_driver::{
@@ -53,19 +54,18 @@ pub use envelope::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CommandJournalGuard, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
     EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedJournal,
-    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
-    ServedOnlyRange, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
+    ExternalCompletionError, GroupChildCancelWatch, JournalReplay, ProcessDefinitionLocalExecution,
+    ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
+    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ServedOnlyRange, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
 };

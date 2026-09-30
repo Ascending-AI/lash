@@ -14,10 +14,10 @@ pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, PreparedLiveReplayPublication,
-    SessionCursor, SessionCursorError, SessionObservation, SessionObservationEvent,
-    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
-    SessionQueueEventKind, SessionResume, SessionRevision,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, ParsedSessionCursor,
+    PreparedLiveReplayPublication, SessionCursor, SessionCursorError, SessionObservation,
+    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
+    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
 };
 
 /// The plugin query services one resident session publishes together.

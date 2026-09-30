@@ -16,6 +16,7 @@
 //! part of the core's wiring: a child whose request records one is refused
 //! before this source is asked, and waits for its live opener.
 
+use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 use std::sync::Arc;
 
 use lash_core::facade_support::{

@@ -283,7 +283,10 @@ impl ProviderHandle {
             .await
     }
 
-    pub fn prepare_completion(&self, request: &mut LlmRequest) -> ProviderCompletionSideband {
+    pub(crate) fn prepare_completion(
+        &self,
+        request: &mut LlmRequest,
+    ) -> ProviderCompletionSideband {
         let serving_route = self.route_identity(&request.model);
         // Do not manufacture trace evidence containing an invalid endpoint:
         // URL userinfo may itself be credential material. `complete_prepared`
@@ -323,7 +326,7 @@ impl ProviderHandle {
         clippy::result_large_err,
         reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
     )]
-    pub async fn complete_prepared(
+    pub(crate) async fn complete_prepared(
         &mut self,
         request: LlmRequest,
         sideband: ProviderCompletionSideband,
@@ -1435,4 +1438,32 @@ mod handle_tests {
         ));
         assert!(Arc::ptr_eq(&recovered.rate_limiter, &rate_limiter));
     }
+}
+
+/// Detaches the replay-safety sideband from `request` before `handle` serves
+/// it: the runtime's turn driver prepares the request, spawns the completion,
+/// and reads the sideband however the task ends. The runtime's seam;
+/// `core_internal` re-exports it and the `lash` facade does not.
+pub fn prepare_completion(
+    handle: &ProviderHandle,
+    request: &mut LlmRequest,
+) -> ProviderCompletionSideband {
+    handle.prepare_completion(request)
+}
+
+/// Serves a request [`prepare_completion`] prepared, under its sideband.
+#[allow(
+    clippy::result_large_err,
+    reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
+)]
+pub async fn complete_prepared(
+    handle: &mut ProviderHandle,
+    request: LlmRequest,
+    sideband: ProviderCompletionSideband,
+    charge_safety: crate::ChargeSafetyPolicy,
+    admission: &dyn DispatchAdmission,
+) -> Result<ProviderCompletion, ProviderCompletionError> {
+    handle
+        .complete_prepared(request, sideband, charge_safety, admission)
+        .await
 }

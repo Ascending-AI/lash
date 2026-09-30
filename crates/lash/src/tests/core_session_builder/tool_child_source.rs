@@ -3,6 +3,7 @@
 //! live where it runs.
 
 use super::*;
+use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 
 const SEED: u64 = 0x5c_f107;
 

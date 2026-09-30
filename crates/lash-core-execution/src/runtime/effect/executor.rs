@@ -804,7 +804,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// `PresentToolResult` boundary (ADR 0099 §6, FIG-3420): the ordered
     /// presentation steps run exactly once on the first execution and replay
     /// serves the recorded `ToolPresentation`.
-    pub fn presentation(
+    pub(crate) fn presentation(
         plugins: Arc<crate::plugin::PluginSession>,
         settlement: Arc<super::ToolSettlement>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
@@ -884,17 +884,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             + 'run,
     {
         Self::language_runtime_value_with(run)
-    }
-
-    pub fn owned_runner(
-        runner: Box<dyn RuntimeEffectLocalRunner + Send + 'static>,
-        replay_trace: Option<super::RuntimeEffectReplayTrace>,
-    ) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)),
-            replay_trace,
-            served_only: None,
-        }
     }
 
     pub fn direct(
@@ -1638,6 +1627,21 @@ pub async fn sleep_with_cancellation(
             "runtime effect sleep was cancelled",
         )),
         _ = &mut sleep => Ok(()),
+    }
+}
+
+/// A local executor that runs `runner`, an owned [`RuntimeEffectLocalRunner`].
+///
+/// The runtime's seam for effects whose runner it builds itself;
+/// `core_internal` re-exports it and the `lash` facade does not.
+pub fn owned_runner_executor(
+    runner: Box<dyn RuntimeEffectLocalRunner + Send + 'static>,
+    replay_trace: Option<super::RuntimeEffectReplayTrace>,
+) -> RuntimeEffectLocalExecutor<'static> {
+    RuntimeEffectLocalExecutor {
+        state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)),
+        replay_trace,
+        served_only: None,
     }
 }
 

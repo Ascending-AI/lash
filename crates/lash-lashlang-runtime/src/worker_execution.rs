@@ -1,5 +1,6 @@
 //! The runtime's admitted effect bodies behind the parent broker.
 use lash_vm_broker::*;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::{PoolSlots, service::Service};
 use lash_vm_protocol::*;
 use lashlang::{ExecutionBounds, ExecutionHost};

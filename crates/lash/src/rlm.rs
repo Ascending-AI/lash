@@ -221,9 +221,21 @@ pub use lash_vm_client::service::Service as WorkerService;
 pub use lash_vm_client::{
     Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry,
 };
+/// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
+/// startup, and the counts it reports.
+pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
 /// A source frontend lives in the worker entry the dialect selects.
 pub use lash_vm_worker::{
     Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal,
     worker_entry_with_frontend,
+};
+
+// The vocabulary this module's signatures name (the facade-completeness rule).
+pub use lash_lashlang_runtime::LashlangProcessFailureCode;
+pub use lash_vm_client::service::CompiledModule;
+pub use lash_vm_client::{
+    CodecRefusal, DecodeLimits, InfrastructureOutcome, InspectedArtifact, PoolError,
+    ProcessMetadata, ProtocolBounds, ProtocolVersionRefusal, SupervisorEvidence, VmLimits,
+    WorkerLimit,
 };

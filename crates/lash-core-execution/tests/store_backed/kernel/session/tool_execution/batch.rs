@@ -2,6 +2,7 @@ mod tests {
     use crate::SessionId;
     use crate::plugin::PluginSessionRequest;
     use crate::session::*;
+    use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;

@@ -522,6 +522,7 @@ jobs:
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
+          python3 scripts/test_facade_completeness.py
           python3 scripts/test_check_workflow_graph_model.py
           python3 scripts/test_check_dialect_boundary.py && python3 scripts/test_check_vm_parent_paths.py
           python3 scripts/test_check_service_gate_pinning.py

@@ -18,6 +18,7 @@ use lash_trace::{
     TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLashlangGraphStore,
     TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitResolution,
 };
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::Arc;
 
 /// `finish null`

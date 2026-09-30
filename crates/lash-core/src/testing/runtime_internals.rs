@@ -13,8 +13,8 @@ pub use crate::attachments::{
     AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
 };
 pub use crate::plugin::{
-    ErasedPluginOperationOutcome, OpenAgentFrameRequest, PluginOperationSpec, RuntimeServices,
-    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
+    OpenAgentFrameRequest, RuntimeServices, SessionObservedProcessOutcome,
+    SessionObservedProcessReceipt, SessionObserverIntent,
 };
 pub use crate::runtime::NormalizedItem;
 pub use crate::runtime::assembly::LlmStreamAccumulator;

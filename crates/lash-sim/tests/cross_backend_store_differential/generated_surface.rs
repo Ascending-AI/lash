@@ -443,10 +443,13 @@ async fn surface_runners(
     // generated slots name the same process on both backends.
     let (sqlite_mint, postgres_mint) = super::paired_process_id_mints();
     let sqlite_registry = Arc::new(
-        SqliteProcessRegistry::open_with_clock(&sqlite_process_path, Arc::clone(&clock))
-            .await
-            .unwrap()
-            .with_process_id_mint_for_testing(sqlite_mint),
+        SqliteProcessRegistry::open_standalone_with_clock_for_testing(
+            &sqlite_process_path,
+            Arc::clone(&clock),
+        )
+        .await
+        .unwrap()
+        .with_process_id_mint_for_testing(sqlite_mint),
     );
     let sqlite_triggers = Arc::new(
         SqliteTriggerStore::open_with_clock(&sqlite_trigger_path, Arc::clone(&clock))

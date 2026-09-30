@@ -90,6 +90,7 @@ pub mod facade_ops {
         fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError>;
     }
 
+    #[doc(hidden)]
     impl ToolRegistryFacadeOps for ToolRegistry {
         fn add_tool_provider(
             &self,

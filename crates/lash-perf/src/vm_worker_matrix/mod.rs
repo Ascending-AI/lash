@@ -8,7 +8,7 @@ mod worker;
 mod workload;
 
 use anyhow::{Result, ensure};
-use lash_vm_client::{PoolConfig, WorkerEntry, WorkerPool};
+use lash_vm_client::{PoolConfig, WorkerEntry, WorkerPool, WorkerPoolRuntimeOps as _};
 use lash_vm_protocol::VmOwner;
 use metrics::Samples;
 use std::path::Path;

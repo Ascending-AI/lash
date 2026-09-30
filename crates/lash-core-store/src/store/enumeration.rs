@@ -5,12 +5,12 @@ use std::fmt::Debug;
 use crate::StoreError;
 use crate::artifact_referrer::ArtifactReferrerKind;
 
-mod sealed {
-    pub trait Sealed {}
-}
-
 /// A closed inventory of the sources a destructive boundary protects.
-pub trait EnumerationSource: sealed::Sealed + Copy + Ord + Debug {
+///
+/// Not sealed: an implementor only defines its own closed inventory, and a
+/// [`CompleteEnumeration`] over it still requires every source it lists to
+/// reach its terminal page.
+pub trait EnumerationSource: Copy + Ord + Debug {
     const SCOPE: &'static str;
     fn all() -> Vec<Self>;
 }
@@ -29,7 +29,6 @@ pub enum SqliteBlobRootSource {
     ArtifactPointers,
     CheckpointComponents,
 }
-impl sealed::Sealed for SqliteBlobRootSource {}
 impl EnumerationSource for SqliteBlobRootSource {
     const SCOPE: &'static str = "SQLite blob roots";
     fn all() -> Vec<Self> {
@@ -47,7 +46,6 @@ pub enum PostgresBlobRootSource {
     Checkpoints,
     CheckpointComponents,
 }
-impl sealed::Sealed for PostgresBlobRootSource {}
 impl EnumerationSource for PostgresBlobRootSource {
     const SCOPE: &'static str = "PostgreSQL blob roots";
     fn all() -> Vec<Self> {
@@ -55,7 +53,6 @@ impl EnumerationSource for PostgresBlobRootSource {
     }
 }
 
-impl sealed::Sealed for ArtifactReferrerKind {}
 impl EnumerationSource for ArtifactReferrerKind {
     const SCOPE: &'static str = "artifact referrers";
     fn all() -> Vec<Self> {

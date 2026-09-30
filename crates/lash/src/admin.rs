@@ -1331,17 +1331,6 @@ impl InjectionAdmin {
     ) -> Result<()> {
         self.control.inject_turn_input(turn_id, id, message).await
     }
-
-    /// Injects inputs for a specific session turn.
-    pub async fn inject_turn_inputs_for_turn(
-        &self,
-        turn_id: &TurnId,
-        messages: Vec<lash_core::facade_support::InjectedTurnInput>,
-    ) -> Result<()> {
-        self.control
-            .inject_turn_inputs_for_turn(turn_id, messages)
-            .await
-    }
 }
 
 #[derive(Clone)]

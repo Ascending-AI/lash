@@ -125,7 +125,7 @@ async fn poisoned_paid_call(
     let error = controller
         .execute_effect(
             envelope,
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core::core_internal::owned_runner_executor(
                 Box::new(PaidCall {
                     provider,
                     accounting: lash_core::UsageAccountingBinding::new(

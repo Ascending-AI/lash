@@ -205,25 +205,6 @@ pub struct OpenerGroupsClosed {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    /// The opener state this context incorporates against and hands groups to.
-    #[must_use]
-    pub fn opener_state(&self) -> OpenerState {
-        OpenerState {
-            ledger: Arc::clone(&self.incorporation_ledger),
-            groups: Arc::clone(&self.opener_groups),
-        }
-    }
-
-    /// Share `state` with this phase context: the owner of the opener (a turn
-    /// driver, a process segment) creates it once and passes it to every
-    /// context it builds.
-    #[must_use]
-    pub fn with_opener_state(mut self, state: OpenerState) -> Self {
-        self.incorporation_ledger = state.ledger;
-        self.opener_groups = state.groups;
-        self
-    }
-
     /// Hand a group whose consumer stopped before exhaustion to the opener.
     ///
     /// The handle carries the consumer's cursor, so the prefix the consumer

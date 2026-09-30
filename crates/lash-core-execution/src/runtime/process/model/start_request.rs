@@ -7,7 +7,7 @@ use super::{LifetimeDecision, ProcessInput, ProcessProvenance, ProcessRegistrati
 /// start needs except its key.
 ///
 /// The key is not declaration material. It is a pure function of the declaring
-/// attempt's intent identity ([`crate::StartKey::for_tool_intent`]), so every
+/// attempt's intent identity ([`crate::StartKeyDerivation::for_tool_intent`]), so every
 /// redrive of the declaration presents the same key and starts the same
 /// process. The process id is minted by the registrar at realization and read
 /// back off the recorded result (ADR 0107).
@@ -103,7 +103,7 @@ impl ProcessStartDeclaration {
     }
 
     /// The only way a declaration becomes a request: every realization route
-    /// passes `StartKey::for_tool_intent(identity)` here, so every redrive of
+    /// passes `StartKeyDerivation::for_tool_intent(identity)` here, so every redrive of
     /// one declaration starts the same process by construction.
     pub(crate) fn into_request(self, start_key: crate::StartKey) -> ProcessStartRequest {
         ProcessStartRequest {

@@ -407,6 +407,21 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     );
 }
 
+/// The plugin command [`plugin_command_settles_its_events_in_one_commit`]
+/// registers: it emits one durable event.
+struct TestEmitCommand;
+
+impl lash_core::plugin::PluginOperation for TestEmitCommand {
+    const NAME: &'static str = "test.emit";
+    const DESCRIPTION: &'static str = "emit one durable event";
+    const SESSION_PARAM: lash_core::facade_support::SessionParam =
+        lash_core::facade_support::SessionParam::Optional;
+    type Args = serde_json::Value;
+    type Output = serde_json::Value;
+}
+
+impl lash_core::plugin::PluginCommand for TestEmitCommand {}
+
 /// A host's plugin command is a session command (FIG-4202): the drive runs
 /// the plugin's code at the boundary and lands its output and its events in
 /// the one commit that settles it.
@@ -423,27 +438,18 @@ pub(super) async fn plugin_command_settles_its_events_in_one_commit() {
                     presentation_steps: vec![],
                     runtime_event: None,
                     external_registrar: Some(Arc::new(|reg| {
-                        reg.operations().command(
-                            lash_core::plugin::PluginOperationSpec {
-                                name: "test.emit".to_string(),
-                                description: "emit one durable event".to_string(),
-                                session_param: lash_core::facade_support::SessionParam::Optional,
-                                input_schema: json!({}),
-                                output_schema: json!({}),
-                            },
-                            Arc::new(|_, _| {
-                                Box::pin(async move {
-                                    Ok(lash_core::plugin::ErasedPluginOperationOutcome {
-                                        output: json!({"ok": true}),
-                                        events: vec![lash_core::PluginRuntimeEvent::Custom {
-                                            name: "test.event".to_string(),
-                                            payload: json!({"value": 1}),
-                                        }],
-                                        directives: Vec::new(),
-                                    })
-                                })
-                            }),
-                        )
+                        reg.operations()
+                            .typed_command::<TestEmitCommand, _, _>(|_, _| async {
+                                Ok(lash_core::plugin::PluginOperationOutcome::new(
+                                    json!({"ok": true}),
+                                )
+                                .with_events(vec![
+                                    lash_core::PluginRuntimeEvent::Custom {
+                                        name: "test.event".to_string(),
+                                        payload: json!({"value": 1}),
+                                    },
+                                ]))
+                            })
                     })),
                 }))
             }),

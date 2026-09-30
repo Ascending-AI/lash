@@ -1,8 +1,8 @@
 error[E0433]: cannot find `StartKeyDerivation` in `process`
-  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:10:55
+  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:10:28
    |
-10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS);
-   |                                                       ^^^^^^^^^^^^^^^^^^ could not find `StartKeyDerivation` in `process`
+10 |     let _ = lash::process::StartKeyDerivation::LASH_START_PATHS.for_keyless_host();
+   |                            ^^^^^^^^^^^^^^^^^^ could not find `StartKeyDerivation` in `process`
 
 error[E0599]: no method named `start` found for struct `AttemptProcessReads` in the current scope
  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:7:33
@@ -31,19 +31,3 @@ help: a method `start_key` also exists, call it with parentheses
   |
 9 |     let _ = &request.start_key();
   |                               ++
-
-error[E0061]: this function takes 3 arguments but 1 argument was supplied
-  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:10:13
-   |
-10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS);
-   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^----------------------------------------------------- two arguments of type `&ExecutionScope` and `u32` are missing
-   |
-note: associated function defined here
-  --> $WORKSPACE/crates/lash-core-store/src/process_identity.rs
-   |
-   |     pub fn for_keyless_host(
-   |            ^^^^^^^^^^^^^^^^
-help: provide the arguments
-   |
-10 |     let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS, /* &ExecutionScope */, /* u32 */);
-   |                                                                                           ++++++++++++++++++++++++++++++++++

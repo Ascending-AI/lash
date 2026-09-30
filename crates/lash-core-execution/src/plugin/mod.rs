@@ -34,9 +34,6 @@ pub(crate) use actions::{
     PluginOperationRegistration, PluginQueryHandler, PluginQueryInvokeFuture, PluginTaskHandler,
     RegisteredPluginOperation, plugin_operation_spec,
 };
-#[cfg(feature = "testing")]
-pub use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
-#[cfg(not(feature = "testing"))]
 pub(crate) use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
 pub use actions::{
     PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
@@ -95,8 +92,7 @@ pub use runtime_host::{
     SessionGraphService, SessionLifecycleService, SessionStateService,
 };
 pub use runtime_impl::{
-    PluginHost, PluginSessionMaterializationRequest, PluginSessionRequest,
-    ProcessEngineContributionTarget, SessionAuthorityContext,
+    PluginHost, PluginSessionMaterializationRequest, PluginSessionRequest, SessionAuthorityContext,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use services::NoopSessionManager;

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 /// The rows of one admitted set, keyed by row id.
 trait AdmittedRows {

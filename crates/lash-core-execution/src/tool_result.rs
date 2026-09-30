@@ -121,7 +121,7 @@ impl PendingResolver {
 /// the start against the attempt that declares it, and it holds exactly one
 /// [`StartProcessIntent`](crate::StartProcessIntent). Its intent identity is
 /// the declaring attempt's identity for index 0, so its start key is
-/// [`StartKey::for_tool_intent`](crate::StartKey::for_tool_intent) of that
+/// [`StartKeyDerivation::for_tool_intent`](crate::StartKeyDerivation::for_tool_intent) of that
 /// identity and every redrive reaches the same child.
 ///
 /// Only the attempt whose `Pending` the runtime records ever launches: a

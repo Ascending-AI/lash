@@ -50,6 +50,23 @@
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of that root.
+//!
+//! # Every type a facade signature names is nameable here
+//!
+//! A type that appears anywhere in a signature this crate exports -- a
+//! function's parameters and return, a field, a variant, a trait's members and
+//! supertraits, a generic bound, an alias -- has a `lash::` path. When a host
+//! genuinely needs the type, it is exported in the module of the item that
+//! names it. When no host needs it, the signature is narrowed instead
+//! (`pub(crate)`, a changed signature, or a move into a hidden support module
+//! such as `lash_core::core_internal`). `#[doc(hidden)]` is not a way out: it
+//! is reserved for explicitly test- or support-only items, and a hidden item's
+//! own signature is not part of the host API.
+//!
+//! `scripts/facade_completeness.py` enforces the rule over the rustdoc JSON of
+//! this crate and of every first-party library in its dependency closure. It
+//! has no allowlist and no exemption mechanism: a gap is fixed by exporting or
+//! by narrowing, never by listing it.
 
 /// Administrative facade handles and operations.
 pub mod admin;
@@ -90,6 +107,8 @@ pub mod recoverable_chat;
 pub mod config {
     pub use crate::admin::SessionConfigAdmin;
     pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
+    /// The owner of the core configuration the commands below change.
+    pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
         AddPromptContribution, ClearPromptSlot, ClearPromptTemplate, ReplacePromptSlot,
         SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetModel,
@@ -109,7 +128,8 @@ pub mod render {
         ToolRenderPatch, resolve,
     };
     pub use lash_protocol_standard::{
-        SetStandardRender, StandardRecordedBehaviour, StandardRecordedConfig, StandardTurnOptions,
+        SetStandardRender, StandardConfigOwner, StandardConfigRefusal, StandardRecordedBehaviour,
+        StandardRecordedConfig, StandardTurnOptions,
     };
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
@@ -194,8 +214,8 @@ pub use lash_core::store::{
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
-    FrameKey, InputId, InputItem, LlmCallRecord, LocalTurnStop, ModelLimits, ModelLimitsError,
-    ModelSpec, ModelSpecBuilder, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
+    FrameKey, InputId, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec,
+    ModelSpecBuilder, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
@@ -239,6 +259,27 @@ pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteEx
 /// Cooperative cancellation handle; re-exported so embedders hold one
 /// without depending on `tokio-util` themselves.
 pub use tokio_util::sync::CancellationToken;
+// The vocabulary this module's signatures name (the facade-completeness rule).
+pub use lash_core::ConfigTransactionRecord;
+pub use lash_core::SessionPluginInit;
+pub use lash_core::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+pub use lash_core::drive::{ObligationRelayUnavailable, RelayNeed};
+pub use lash_core::facade_support::ConfigRefusalCode;
+pub use lash_core::runtime::ConfigTransactionSubmitError;
+pub use lash_core::session_close::SessionCloseServices;
+pub use lash_core::session_delete::SessionDeleteStores;
+pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
+pub use lash_core_store::build_generation::BuildGenerationParseError;
+pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
+pub use lash_core_store::session_policy::ProviderPinMismatch;
+pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
+pub use lash_sansio::llm::types::{
+    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockKind,
+};
+pub use lash_sansio::{
+    ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
+    ToolCallPosition, ToolCallRoot,
+};
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary
 /// without the lower-level integration types or domain modules also exposed
@@ -264,6 +305,9 @@ pub mod prelude {
 /// recovery for host frontends. Entry point: [`LashSession::observe`] /
 /// [`ObservableSession`].
 pub mod observe {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::runtime::ParsedSessionCursor;
+
     pub use crate::session::{
         RemoteSessionObservationEventStream, RemoteSessionObservationStream,
         RemoteSessionObservationStreamItem, RemoteSessionObservationSubscription,
@@ -290,6 +334,10 @@ pub mod observe {
 /// The tables a durable store keeps (`lash_*` in the first-party SQL backends) are private to
 /// lash; raw SQL against them is unsupported for reads and writes alike.
 pub mod triggers {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::TriggerLifecycleColumnError;
+    pub use lash_core::triggers::TriggerEventKey;
+
     /// Trigger catalog state exposed to protocol and engine integrators.
     pub use lash_core::TriggerEventCatalog;
     pub use lash_core::facade_support::deterministic_subscription_id;
@@ -326,6 +374,10 @@ pub mod triggers {
 /// [`AttemptContext::attempt_number`](crate::tools::AttemptContext::attempt_number)
 /// counts the runs apart from it.
 pub mod tools {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent, RegisterTriggerIntent};
+    pub use lash_sansio::{ModelTool, ToolCallStatus};
+
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
     };
@@ -408,6 +460,12 @@ pub mod tools {
 
 /// Direct protocol transport types.
 pub mod direct {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_sansio::llm::types::{
+        GenerationProjectionProvenance, ProviderReplayMeta, ProviderReplayOriginConflict,
+        ResponsePhase, ResponseTextMeta,
+    };
+
     pub use lash_core::llm::types::{
         AttachmentSource, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
         LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
@@ -426,6 +484,39 @@ pub mod direct {
 
 /// Session persistence types and services.
 pub mod persistence {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::usage_accounting::{
+        AttemptFactOutcome, RunAccounting, UsageAdmissionError, UsageAppendError,
+        UsageAppendReceipt, UsageAttemptFact, UsageCorrection, UsageFactConflict,
+        UsageRunAdmission, UsageRunAdmitted, UsageRunResolution, UsageSettleReceipt,
+        UsageSettlement,
+    };
+    pub use lash_core_store::PersistedNodeIds;
+    pub use lash_core_store::artifact_referrer::{
+        ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactReferrerError,
+        ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId, SubscriptionRevisionId,
+        UploadReferrerId,
+    };
+    pub use lash_core_store::attachments::{AttachmentExecutionBinding, AttachmentHolder};
+    pub use lash_core_store::compat::{CompatRefusal, CompatStamp};
+    pub use lash_core_store::runtime_error::ExecutableGenerationRefusal;
+    pub use lash_core_store::session_graph::{
+        SessionGraphAppendBuilder, SessionGraphData, SessionNodeDraft, SessionReadModel,
+    };
+    pub use lash_core_store::session_identity::{
+        SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
+        SessionObserverIntent,
+    };
+    pub use lash_core_store::session_state::{RuntimeSessionAuthority, SessionPluginStateSource};
+    pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
+    pub use lash_core_store::store::{
+        EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreRefusal,
+        StoredRootTerminal, SurfaceFormat, WriterPin,
+    };
+    /// The protocol-generic form [`SessionHistoryRecord`] specializes.
+    pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
+    pub use lash_sansio::{AppendVec, BaseRenderCache, ConversationRecord};
+
     pub use lash_core::CheckpointKind;
     /// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
     /// objects, nameable so a host can decorate a store set (FIG-4373).
@@ -492,6 +583,10 @@ pub mod persistence {
     pub use lash_core::{AttachmentReferrers, AttachmentWrite, SessionReferrerState};
     /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
+        // The vocabulary this module's signatures name (the facade-completeness rule).
+        pub use lash_core_store::store::TurnWorkPrefix;
+        pub use lash_core_store::store::queued_work::TurnLaneCandidate;
+
         /// Stable queued-work ordering values and selection helpers for store implementations.
         pub use lash_core::store::queued_work::{
             PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
@@ -596,6 +691,48 @@ pub mod persistence {
 
 /// Plugin contracts, manifests, and operation types.
 pub mod plugins {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::plugin::{
+        AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
+        DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
+        PromptContributor, ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
+        ToolPresentationInput, ToolPresentationStep,
+    };
+    pub use lash_core::runtime::ToolAttemptEffectOutcome;
+    pub use lash_core::runtime::{
+        ChildStreamTruncation, DecodedChildEvent, IncorporatedGroupRank, RecordedChildChannel,
+        RecordedChildEvent, RecordedChildStream, ToolAttemptCapture, ToolSettlement,
+    };
+    pub use lash_core::session::{
+        CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,
+        SettlementSource, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
+        ToolAggregateOutcome, ToolAggregateRequest,
+    };
+    pub use lash_core::tool_dispatch::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
+    pub use lash_core::{
+        ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DeclaredModuleArtifact,
+        DefinitionAcquisition, RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange,
+        ResolvedProcessDefinition, ServedOnlyRange, WeakProcessEngineRegistry,
+    };
+    pub use lash_core::{ConfigImplementationMismatch, ConfigRegistry};
+    pub use lash_core_store::session_identity::FrameNodeIdError;
+    pub use lash_core_worker::execution::runtime::ProcessExecutionEnvLoadError;
+    pub use lash_protocol_standard::BatchSugar;
+    pub use lash_sansio::{
+        AttachmentMaterializationNotice, CheckpointResumeAction, CompletedToolCall,
+        DegradedBinding, DriverAction, DriverContextView, EffectId, ExpandedRow, ExpandedWrapper,
+        ModelToolCalls, ModelToolReturn, Observation, PendingWork, ProjectorContext,
+        ResponseToolCalls, SessionStreamEvent, StreamMessageKind, ToolCatalogBuildError,
+        ToolContractResolver, ToolExpansionPlan, TurnMachineConfig, TurnProtocol, UnitTurnProtocol,
+        WriterFormats,
+    };
+    /// The protocol-generic forms [`TurnDriverConfig`] and
+    /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
+    pub use lash_sansio::{
+        TurnDriverConfig as GenericTurnDriverConfig,
+        TurnDriverPreamble as GenericTurnDriverPreamble,
+    };
+
     pub use lash_core::PluginOptions;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
@@ -753,6 +890,9 @@ pub mod plugins {
 
 /// Protocol message and content types.
 pub mod messages {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_sansio::ModelToolReturnPart;
+
     pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
@@ -809,6 +949,13 @@ pub mod remote {
     /// LLM request/response envelopes: messages, attachments, tool specs,
     /// output specs, and provider metadata.
     pub mod llm {
+        // The vocabulary this module's signatures name (the facade-completeness rule).
+        pub use lash_remote_protocol::{
+            RemoteAttemptUsageOutcome, RemoteCacheControlDialect, RemoteProjectionMode,
+            RemoteSamplingCapability, RemoteStreamTermination,
+        };
+        pub use lash_sansio::llm::types::{ChargeSafetyDecision, RetryDecision};
+
         pub use lash_remote_protocol::llm::{
             RemoteAnthropicThinkingRetention, RemoteAttachmentAcceptanceRule,
             RemoteAttachmentAcceptor, RemoteAttachmentCapabilitySnapshot,
@@ -836,6 +983,15 @@ pub mod remote {
     /// Session observation: cursors, resumable observation events, and live
     /// replay gaps.
     pub mod observations {
+        // The vocabulary this module's signatures name (the facade-completeness rule).
+        pub use lash_remote_protocol::{
+            RemoteProcessDurableCompleteness, RemoteProcessDurableGapReason,
+            RemoteProcessDurableSnapshot, RemoteProcessEffectNodeReport,
+            RemoteProcessEffectOccurrence, RemoteProcessEffectOmittedCounts,
+            RemoteProcessEffectOutcomeClass, RemoteProcessHistoryRetention,
+            RemoteProcessObservationSnapshot,
+        };
+
         pub use lash_remote_protocol::observations::{
             RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteProcessObservationCompleteness,
             RemoteProcessObservationGapReason, RemoteProcessObservationItem,
@@ -850,6 +1006,9 @@ pub mod remote {
     /// and results, process records, event semantics, and execution
     /// environments.
     pub mod processes {
+        // The vocabulary this module's signatures name (the facade-completeness rule).
+        pub use lash_remote_protocol::RemoteToolIntentIdentity;
+
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonWriter, RemoteChargeSafetyPolicy,
             RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
@@ -950,6 +1109,12 @@ pub mod remote {
 
     /// Token usage accounting and the streaming turn-activity vocabulary.
     pub mod usage {
+        // The vocabulary this module's signatures name (the facade-completeness rule).
+        pub use lash_remote_protocol::{
+            RemoteCellFailure, RemoteCellFailureKind, RemoteToolIntentExecutionOutcome,
+            RemoteToolIntentKind, RemoteToolIntentRefusalReason,
+        };
+
         pub use lash_remote_protocol::queued_events::{
             RemoteAdmissionBoundary, RemoteMessageOrigin, RemoteMessageRole, RemotePart,
             RemotePartAttachment, RemotePartKind, RemotePluginMessage, RemoteTurnCause,
@@ -963,6 +1128,15 @@ pub mod remote {
 
 /// Durable process definitions, handles, and events.
 pub mod process {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::facade_support::ProcessEventSinkRegistration;
+    pub use lash_core::{
+        ConsumerHold, ProcessDefinitionStoredError, ProcessRegistrationProbe,
+        ProcessSpawnProvenance, ProcessStartDeclaration,
+    };
+    pub use lash_core_store::effect_opener::EffectOpenerError;
+    pub use lash_sansio::{HandleTarget, ObservedProcessFailure};
+
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::artifacts::{HostArtifactPin, HostArtifacts};
     pub use crate::process_admin::Processes;
@@ -1060,6 +1234,17 @@ pub mod process {
 
 /// Durability configuration and backend contracts.
 pub mod durability {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::RecordedKeys;
+    pub use lash_core::runtime::process_start::ProcessStartRelay;
+    pub use lash_core::session::OpenerWorkBound;
+    pub use lash_core::usage_accounting::UsageAccountingBinding;
+    pub use lash_core_store::attachments::{
+        AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
+    };
+    pub use lash_core_store::effect_opener::EffectOpener;
+    pub use lash_sansio::{CancelRequest, ToolCallAdmission};
+
     /// Child execution hosts and atomic group completion inputs.
     pub use lash_core::facade_support::{
         EffectGroupChildCommitOutcome, GroupChildFinalCommit, ToolChildHost,
@@ -1088,6 +1273,46 @@ pub mod durability {
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use lash_core::IngressReservedSourceKeyRefusal;
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::drive::relay::RelayPolicy;
+    pub use lash_core::engine::{
+        AdmitRequest, AdmitVerdict, DriveAbort, EngineAck, EngineCursor, EnginePage,
+        EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
+        ParkTarget, ScopeCloseSink, SealVerdict, SessionControlEngine, StalledExecution,
+    };
+    pub use lash_core::facade_support::CommittedGroupChildFinal;
+    pub use lash_core::facade_support::{
+        ToolChildDriver, ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts,
+        UnrecordedSessionSources,
+    };
+    pub use lash_core::provider::{
+        ProviderBinding, ProviderResolutionError, RuntimeProviderResolver,
+    };
+    pub use lash_core::runtime::DirectUsage;
+    pub use lash_core::runtime::ProcessDefinitionLocalExecution;
+    pub use lash_core::runtime::{
+        AdmittedHeadVerdict, CompactionBase, ToolChildAdmission, ToolChildCompletionRouting,
+        ToolChildScope, ToolPresentation,
+    };
+    pub use lash_core::tool_dispatch::ToolAttemptLineage;
+    pub use lash_core::triggers::TriggerDeliveryAdmission;
+    pub use lash_core::usage_accounting::{
+        EffectUsage, RecordedEffectExecution, UsageCall, UsageRun, UsageRunError,
+    };
+    pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
+    pub use lash_core::{
+        GroupReopen, ProtocolSessionExtension, ScopeBoundController, ServedOnly,
+        TurnControlAttachment,
+    };
+    pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
+    pub use lash_core_store::store::FollowOnRecoveryAnswer;
+    pub use lash_core_store::turn_control_binding::{
+        TurnControlBindingId, TurnControlBindingIdError,
+    };
+    pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
+    pub use lash_sansio::sansio::{ExecutionEnvironmentSync, ProjectorTurnInputs};
+    pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
+
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
@@ -1109,15 +1334,14 @@ pub mod runtime {
         AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
         CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
         EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
-        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord,
-        LoserPolicy, NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, ProcessListSelection, RuntimeAttribution, RuntimeControlConfig,
-        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectController,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
-        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
-        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        GroupSettlement, GroupWakePolicy, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
+        NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        ProcessListSelection, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
+        RuntimeNamedPhase, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
         RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
         SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
         WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
@@ -1130,13 +1354,15 @@ pub mod runtime {
     /// The session extension handle and turn options exposed to runtime integrators.
     pub use lash_core::{
         ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
-        facade_support::PersistentRuntimeServices, facade_support::SessionHandle,
-        facade_support::render_turn_causes_prompt,
+        facade_support::SessionHandle, facade_support::render_turn_causes_prompt,
     };
 }
 
 /// Prompt templates, layers, and contributions.
 pub mod prompt {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_sansio::PromptContext;
+
     pub use lash_core::{
         PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate,
         PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate,
@@ -1147,6 +1373,10 @@ pub mod prompt {
 
 /// Trace context, events, and sink configuration.
 pub mod tracing {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
+    pub use lash_trace::TraceLashlangNodeRetention;
+
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
     pub use lash_core::{
@@ -1207,6 +1437,12 @@ pub mod schema {
 /// SQLite durable store backend. Enable with `features = ["sqlite"]`.
 #[cfg(feature = "sqlite")]
 pub mod sqlite {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core_store::process_identity::ProcessIdMint;
+    pub use lash_core_store::store::fleet_finalize::{
+        FinalizeError, FinalizeHold, FinalizeRefusal, FleetEpochFlip,
+    };
+
     pub use lash_sqlite_store::*;
 }
 
@@ -1229,6 +1465,18 @@ pub mod s3 {
 /// [`RestateEngine`]: lash_restate::RestateEngine
 #[cfg(feature = "restate")]
 pub mod restate {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::SessionDriver;
+    pub use lash_core::engine::{
+        Admitted, AdmittedWork, DriveHold, DriveOutcome, DriveRequest, DriveRequestId, DriveStop,
+        ReconcileCursor, RootOutcome, RootRunEnd,
+    };
+    pub use lash_core_store::compat::ComponentId;
+    pub use lash_core_store::store::fleet_finalize::{
+        DeploymentRegistry, DeploymentRegistryError, RetainedDeployment,
+    };
+    pub use lash_sansio::VersionRangeError;
+
     use crate::formats::{
         DurableFormat, DurableFormatEntry, EngineFormat, FormatProbe, FormatVersion,
     };
@@ -1303,6 +1551,19 @@ pub mod mcp {
     pub use lash_plugin_mcp::*;
 }
 
+/// First-party process-control tools: `start_process`, `signal_process`,
+/// `emit_process_event`, `get_process_definition`, `list_process_handles`,
+/// `await_process` and `cancel_process`.
+///
+/// A host installs [`SessionProcessAdminPluginFactory`] with
+/// [`LashCoreBuilder::plugin`](crate::LashCoreBuilder::plugin) instead of
+/// declaring these tools itself. Its [`Lifetime`](crate::process::Lifetime)
+/// policy, for example [`lifetime::session_or_starter`](crate::process::lifetime::session_or_starter),
+/// decides the lifetime of every process a model's `start_process` declares.
+pub mod process_controls {
+    pub use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
+}
+
 /// Subagent spawning plugin.
 #[cfg(feature = "subagents")]
 pub mod subagents {
@@ -1323,6 +1584,12 @@ pub mod http_transport {
 
 /// Model-provider configuration and request types.
 pub mod provider {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::llm::transport::HttpFailureContext;
+    pub use lash_sansio::llm::types::{
+        LlmProviderTraceEvent, LlmProviderTraceSender, ProviderReasoningRetentionSupport,
+    };
+
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
     pub use lash_core::ProviderFailureKind;
@@ -1342,7 +1609,7 @@ pub mod provider {
     /// call's accounting itself (ADR 0125).
     pub use lash_core::provider::{
         CacheRetention, DefaultProviderFailureClassifier, DispatchAdmission, DispatchRefused,
-        ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
+        ProviderCompletion, ProviderCompletionError, ProviderDispatch, ProviderFailureClassifier,
         ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
         ProviderRetryPolicy, RequestTimeout,
     };

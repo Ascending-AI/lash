@@ -1,5 +1,6 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::{Arc, OnceLock};
 
 use lash_core::plugin::{

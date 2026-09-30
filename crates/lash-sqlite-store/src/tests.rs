@@ -923,7 +923,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("processes.db");
     let proc_persist_id = {
-        let registry = SqliteProcessRegistry::open(&path)
+        let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open registry");
         let session_scope = lash_core_execution::SessionScope::new("session");
@@ -954,7 +954,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     };
 
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&path)
+        SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn lash_core_execution::ProcessRegistry>;

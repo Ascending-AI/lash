@@ -367,9 +367,7 @@ fn processes_area_witnesses() {
         }
     });
     // W0135: lash::plugins::PluginHost::install_process_engine_contributions [function]
-    let _ = lash::plugins::PluginHost::install_process_engine_contributions::<
-        lash::durability::RuntimeHostConfig,
-    >(todo!(), todo!(), todo!());
+    let _ = lash::plugins::PluginHost::install_process_engine_contributions;
     // W0136: lash::process::AbandonEvidence [struct]
     type_witness::<lash::process::AbandonEvidence>();
     // W0138: lash::process::AbandonWriter [enum]

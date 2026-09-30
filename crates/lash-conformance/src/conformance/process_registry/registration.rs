@@ -30,15 +30,12 @@ where
 pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let key = crate::StartKey::for_tool_intent(
-        crate::DERIVED_START_KEYS,
-        &crate::derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(crate::SessionId::from("start-key-disposition")),
-            "start-key-disposition",
-            &lash_core::ToolCallId::fixture("call-1"),
-            0,
-        ),
-    );
+    let key = crate::DERIVED_START_KEYS.for_tool_intent(&crate::derive_tool_intent_identity(
+        &crate::RuntimeOwner::Session(crate::SessionId::from("start-key-disposition")),
+        "start-key-disposition",
+        &lash_core::ToolCallId::fixture("call-1"),
+        0,
+    ));
     let first = registry
         .register_process_reporting_outcome(
             registration("start-key-disposition").with_start_key(Some(key.clone())),
@@ -424,8 +421,7 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
     const RACERS: usize = 8;
     for (round, differing_content) in [("identical", false), ("differing", true)] {
         let key = if differing_content {
-            crate::StartKey::for_trigger_delivery(
-                crate::DERIVED_START_KEYS,
+            crate::DERIVED_START_KEYS.for_trigger_delivery(
                 &format!("concurrent-start-key-{round}"),
                 "concurrent-start-subscription",
                 "incarnation",

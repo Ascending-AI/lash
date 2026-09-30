@@ -14,6 +14,7 @@
 //! observe a new ambient definition. The flat Tool Catalog is never mutated —
 //! resolution is link-scoped only.
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 

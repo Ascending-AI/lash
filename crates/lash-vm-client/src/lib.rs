@@ -14,7 +14,15 @@ pub use broker::PoolSlots;
 pub use config::{Deadlines, PoolConfig, WorkerEntry};
 pub use context::{ProjectionDescription, ProjectionRead, RunContext};
 pub use error::PoolError;
+/// The VM-protocol vocabulary a worker pool's configuration and outcomes
+/// name.
+pub use lash_vm_protocol::{
+    CodecRefusal, DecodeLimits, InfrastructureOutcome, ProtocolBounds, ProtocolVersionRefusal,
+    SupervisorEvidence, VmLimits, WorkerLimit,
+};
 pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};
+/// Runtime-only checkout on [`WorkerPool`]; the lash facade does not export it.
+pub use pool::runtime_ops::WorkerPoolRuntimeOps;
 pub use pool::{Checkout, ExecutionBudget, ParkOutcome, PoolStats, WorkerPool};
 pub use remote_state::{RemoteRestoreError, RemoteState, RemoteVm};
 

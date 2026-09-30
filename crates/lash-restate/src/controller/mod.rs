@@ -65,7 +65,10 @@ use crate::process::RestateProcessCancelRequest;
 use context::journaled_restate_durable_wait_request;
 pub(crate) use live_frontier::LiveFrontier;
 
-pub use context::RestateControllerContext;
+pub use context::{
+    GroupChildCancelArm, GroupChildCancelRace, ProcessCancelRace, RestateControllerContext,
+    SignalWaitOutcome,
+};
 
 struct RestateTraceObserver {
     sink: Weak<dyn lash_trace::TraceSink>,
@@ -1569,6 +1572,7 @@ pub use process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION;
 use process_command::execute_restate_process_command;
 
 mod process_scheduling;
+pub use process_scheduling::ProcessWorkflowStartFailure;
 use process_scheduling::schedule_restate_process;
 
 mod execution;

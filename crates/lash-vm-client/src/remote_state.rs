@@ -1,5 +1,6 @@
 //! Parent-held bytes and read-only guest projections. All state operations
 //! which open a snapshot run in a worker through the service.
+use crate::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_core_execution::FleetFormat;
 use lashlang::{Record, Value};
 use std::collections::BTreeSet;

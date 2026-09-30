@@ -1,6 +1,7 @@
 use super::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 thread_local! {
     static CONTRACT_CHECKPOINT_COLLECTOR:

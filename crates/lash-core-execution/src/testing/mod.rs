@@ -18,6 +18,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use crate::plugin::PluginSessionRequest;
+use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
@@ -274,49 +275,14 @@ fn test_clock_wall_clock_faces_agree() {
 }
 
 /// Production-equivalent logical payload accounting for one runtime commit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RuntimeCommitBudgetMeasurement {
-    /// Graph-node rows written by the commit.
-    pub graph_rows: usize,
-    /// Attachment-manifest rows stamped as adopted by the commit.
-    pub adopted_intent_rows: usize,
-    /// Saturating sum of graph and attachment-adoption rows.
-    pub total_rows: usize,
-    /// Persisted JSON encoding of the session configuration, including prompt.
-    pub session_config_bytes: usize,
-    pub graph_delta_bytes: usize,
-    /// Named-MessagePack size of the hydrated checkpoint.
-    pub checkpoint_bytes: usize,
-    /// Raw UTF-8 byte length of the committed attachment ids.
-    pub attachment_referrer_bytes: usize,
-    pub follow_on_bytes: usize,
-    /// Persisted JSON encoding of the selected Agent Frame identity.
-    pub agent_frame_bytes: usize,
-    /// Persisted JSON encoding of the durable turn result stamp.
-    pub turn_result_bytes: usize,
-    /// Saturating sum of the budgeted components.
-    pub total_bytes: usize,
-}
+pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
 
 /// Measure a commit with the exact accounting used by
 /// [`crate::RuntimeCommit::validate_budget`].
 pub fn measure_runtime_commit_budget(
     commit: &crate::RuntimeCommit,
 ) -> Result<RuntimeCommitBudgetMeasurement, crate::StoreError> {
-    let measurement = commit.measure_budget()?;
-    Ok(RuntimeCommitBudgetMeasurement {
-        graph_rows: measurement.graph_rows,
-        adopted_intent_rows: measurement.adopted_intent_rows,
-        total_rows: measurement.total_rows,
-        session_config_bytes: measurement.session_config_bytes,
-        graph_delta_bytes: measurement.graph_delta_bytes,
-        checkpoint_bytes: measurement.checkpoint_bytes,
-        attachment_referrer_bytes: measurement.attachment_referrer_bytes,
-        follow_on_bytes: measurement.follow_on_bytes,
-        agent_frame_bytes: measurement.agent_frame_bytes,
-        turn_result_bytes: measurement.turn_result_bytes,
-        total_bytes: measurement.total_bytes,
-    })
+    commit.measure_budget()
 }
 
 /// Stage a protocol-owned execution-state root and its complete keyed leaf set

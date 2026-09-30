@@ -1107,7 +1107,7 @@ impl LashRuntime {
             let batches = execute_session_command_run_read(
                 effect_controller,
                 &self.state.session_id,
-                crate::RuntimeEffectLocalExecutor::owned_runner(
+                lash_core_execution::core_internal::owned_runner_executor(
                     Box::new(ReadSessionCommandRunRunner {
                         store: store.clone(),
                         fence: drive_fence.clone(),

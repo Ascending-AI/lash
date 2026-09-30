@@ -1,4 +1,5 @@
 use super::*;
+use crate::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use crate::plugin::PluginSessionRequest;
 use crate::tool_dispatch::ToolDispatchContext;
 use crate::{ToolCall, ToolOutcome, ToolProvider};

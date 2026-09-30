@@ -23,8 +23,8 @@ use crate::store::{ControlIntent, ControlIntentState, StoreError};
 use crate::{
     Clock, DeploymentStore, EffectAddress, ExecutionScope, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, SessionDeleteContext, SessionId, SessionWorkEngine,
+    RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    SessionDeleteContext, SessionId, SessionWorkEngine,
 };
 
 /// What a session's close runs against besides its catalog: the engine whose
@@ -168,7 +168,7 @@ pub async fn close_session(
                     session: session_id.clone(),
                 },
             ),
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(BeginSessionCloseRunner {
                     stores: Arc::clone(stores),
                     session_id: session_id.clone(),

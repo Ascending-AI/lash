@@ -56,6 +56,7 @@ impl ProtocolTurnOptions {
         serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
     }
 }
+#[doc(hidden)]
 impl facade_ops::ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
     fn merged_with_override(&self, override_options: &Self) -> Self {
         self.merged_with(override_options)

@@ -1,9 +1,9 @@
 mod segment_state;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use segment_state::capture_segment;
 mod definition_holds;
 use definition_holds::hold_segment_definitions;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_sansio::{ProcessId, SessionId};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;

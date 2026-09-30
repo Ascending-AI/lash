@@ -90,3 +90,6 @@ pub use lash_core::testing::checkpoint_observer;
 /// scenarios: session-store requests, lease claims, commit helpers, and the
 /// completion-deferral authorization seam.
 pub use lash_core::testing::store_fixtures;
+
+// The vocabulary this module's signatures name (the facade-completeness rule).
+pub use lash_core::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};

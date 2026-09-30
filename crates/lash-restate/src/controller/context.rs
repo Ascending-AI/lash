@@ -62,8 +62,9 @@ mod index_calls;
 mod segment_wait;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
+pub use child_cancel::GroupChildCancelArm;
+pub use child_cancel::GroupChildCancelRace;
 use child_cancel::race_group_child_cancel;
-pub(crate) use child_cancel::{GroupChildCancelArm, GroupChildCancelRace};
 use segment_wait::race_signal_wait;
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
 #[cfg(test)]

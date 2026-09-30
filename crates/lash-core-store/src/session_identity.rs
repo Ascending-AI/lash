@@ -159,6 +159,7 @@ pub mod facade_ops {
         fn continue_as() -> Self;
     }
 
+    #[doc(hidden)]
     impl AgentFrameReasonFacadeOps for AgentFrameReason {
         fn continue_as() -> Self {
             Self::new(Self::CONTINUE_AS)

@@ -51,7 +51,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             .expect("open paused process registry reader"),
     );
     let writer = Arc::new(
-        SqliteProcessRegistry::open(&path)
+        SqliteProcessRegistry::open_standalone_for_testing(&path)
             .await
             .expect("open competing process registry writer"),
     );

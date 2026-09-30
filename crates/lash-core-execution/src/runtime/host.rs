@@ -425,16 +425,18 @@ impl RuntimeHostConfig {
     }
 }
 
-impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
-    fn process_engine_trace_context(&self) -> &TraceContext {
+/// What [`PluginHost::install_process_engine_contributions`](crate::plugin::PluginHost::install_process_engine_contributions)
+/// reads from and writes to the config it installs into.
+impl RuntimeHostConfig {
+    pub(crate) fn process_engine_trace_context(&self) -> &TraceContext {
         &self.tracing.trace_context
     }
 
-    fn process_observation_sink(&self) -> Option<Arc<dyn TraceSink>> {
+    pub(crate) fn process_observation_sink(&self) -> Option<Arc<dyn TraceSink>> {
         self.process_observation_sink.clone()
     }
 
-    fn install_contributed_process_engine(
+    pub(crate) fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,
     ) -> Result<(), crate::PluginError> {

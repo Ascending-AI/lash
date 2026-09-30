@@ -19,7 +19,8 @@ pub mod turn_vocabulary;
 /// `lash-core` re-exports each one crate-internally.
 pub mod core_internal {
     pub use crate::provider::handle::{
-        ProviderCompletionSideband, call_id_for_scope, synthetic_terminal_call_record,
+        ProviderCompletionSideband, call_id_for_scope, complete_prepared, prepare_completion,
+        synthetic_terminal_call_record,
     };
 }
 

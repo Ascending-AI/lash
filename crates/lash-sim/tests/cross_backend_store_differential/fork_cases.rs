@@ -321,7 +321,7 @@ pub(super) async fn selected_observer_intents(
     use lash_core::ProcessEventLogTestSupport as _;
     let root = sqlite_root.join("selected-observer-sessions");
     let path = sqlite_root.join("selected-observer-processes.db");
-    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path)
+    let sqlite = lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&path)
         .await
         .expect("SQLite observer registry");
     let memory = lash_sqlite_store::SqliteStoreSet::memory()

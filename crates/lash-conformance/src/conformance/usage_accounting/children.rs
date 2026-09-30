@@ -1,5 +1,6 @@
 #![expect(clippy::expect_used, reason = "conformance fixture assertions")]
 use super::*;
+use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 use lash_core::runtime::effect::{EffectLayer, LayeredEffectHost};
 
 #[derive(Default)]

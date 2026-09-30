@@ -320,8 +320,7 @@ pub fn derived_trigger_subscription_key(
 /// subscription revision it was reserved against — so every attempt at the
 /// delivery, the first and every recovery, presents the same key.
 pub fn trigger_delivery_start_key(reservation: &TriggerDeliveryReservation) -> crate::StartKey {
-    crate::StartKey::for_trigger_delivery(
-        crate::StartKeyDerivation::LASH_START_PATHS,
+    crate::StartKeyDerivation::LASH_START_PATHS.for_trigger_delivery(
         &reservation.occurrence.occurrence_id,
         &reservation.subscription.subscription_id,
         &reservation.subscription.incarnation,
@@ -655,7 +654,7 @@ impl TriggerRouter {
                         subscription_id: subscription.subscription_id.clone(),
                     },
                 ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(runner, None),
+                crate::runtime::effect::executor::owned_runner_executor(runner, None),
             )
             .await?
             .into_trigger_delivery_admission()

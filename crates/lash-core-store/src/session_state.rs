@@ -1278,10 +1278,9 @@ pub mod facade_ops {
     pub trait RuntimeSessionStateFacadeOps {
         fn turn_state(&self) -> PersistedTurnState;
 
-        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        // Both scope methods take APIT, intentionally non-dyn-compatible: one static impl.
         fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope;
 
-        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
         fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope;
 
         fn process_execution_env_spec(
@@ -1290,6 +1289,7 @@ pub mod facade_ops {
         ) -> crate::ProcessExecutionEnvSpec;
     }
 
+    #[doc(hidden)]
     impl RuntimeSessionStateFacadeOps for RuntimeSessionState {
         fn turn_state(&self) -> PersistedTurnState {
             PersistedTurnState {

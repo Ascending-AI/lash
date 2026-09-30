@@ -142,8 +142,6 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::ExecutionScope::validates_turn_trace_id;
     // W0037: lash::runtime::RuntimeEffectLocalExecutor::replay_validation_trace [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::replay_validation_trace;
-    // W0038: lash::runtime::RuntimeHandle::publish_resident_from [function]
-    let _ = lash::runtime::RuntimeHandle::publish_resident_from;
     // W0039: lash::runtime::SessionSnapshot::token_usage [field]
     field_witness(|value: &lash::runtime::SessionSnapshot| {
         let _ = &value.token_usage;

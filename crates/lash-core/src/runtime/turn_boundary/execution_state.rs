@@ -83,7 +83,10 @@ pub(in crate::runtime) async fn derive_seed_carries(
     let session_id = session.session_id().to_string();
     let carries = code_executor
         .frame_switch_carries(
-            crate::plugin::ProtocolSessionContext::new(session, &SessionId::from(session_id)),
+            crate::plugin::ProtocolSessionContext::new(
+                &SessionId::from(session_id),
+                session.fleet_format(),
+            ),
             successor,
             seed,
         )
@@ -195,8 +198,8 @@ pub(super) async fn capture_execution_state_update(
     let session_id = session.session_id().to_string();
     let snapshot = code_executor
         .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
-            session,
             &SessionId::from(session_id),
+            session.fleet_format(),
         ))
         .await?;
     Ok(if snapshot.root.is_some() {
@@ -231,8 +234,8 @@ pub(super) async fn probe_execution_state_capture(
     let session_id = session.session_id().to_string();
     code_executor
         .probe_execution_state_capture(crate::plugin::ProtocolSessionContext::new(
-            session,
             &SessionId::from(session_id),
+            session.fleet_format(),
         ))
         .await
 }

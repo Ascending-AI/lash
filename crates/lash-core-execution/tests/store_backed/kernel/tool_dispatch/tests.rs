@@ -14,6 +14,7 @@ use crate::{
     coordinate_prepared_tool_call_launch_with_execution_context,
     dispatch_tool_call_with_execution_context,
 };
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;

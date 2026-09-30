@@ -245,6 +245,26 @@ impl Service {
         self.receipts = Some(Arc::new(Mutex::new(Vec::new())));
         self
     }
+
+    /// The worker pool this service checks workers out of, started on first
+    /// use. A host calls it once at startup to prewarm the pool before any
+    /// credentials load.
+    pub fn pool(&self) -> Result<WorkerPool, PoolError> {
+        let mut slot = self
+            .pool
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pool) = slot.as_ref() {
+            return Ok(pool.clone());
+        }
+        let pool = WorkerPool::new(self.config.as_ref().clone())?;
+        *slot = Some(pool.clone());
+        Ok(pool)
+    }
+
+    /// The workers this service checked out, when receipts are recorded.
+    /// Hidden from docs: test support, not dialect surface.
+    #[doc(hidden)]
     #[cfg(feature = "testing")]
     pub fn worker_receipts(&self) -> Vec<WorkerReceipt> {
         self.receipts
@@ -289,190 +309,8 @@ impl Service {
     ) -> Option<&Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore>> {
         self.recovery.as_ref()
     }
-    pub fn execution_budget(&self) -> Option<&ExecutionBudget> {
-        self.budget.as_ref()
-    }
-    pub async fn begin_execution(
-        &self,
-        scope: &str,
-    ) -> Result<crate::RecoveryExecution, PoolError> {
-        self.begin_execution_from(scope, Default::default()).await
-    }
-    /// Reserve `scope` for an execution that continues work earlier scopes
-    /// already consumed `carried` of (ADR 0123): a process body reserves a
-    /// scope per segment boundary and carries the totals its boundary
-    /// recorded. The reservation starts from no less than `carried`, and the
-    /// row is seeded with it before any worker launches, so a redrive of
-    /// this scope counts on from the carried totals too.
-    pub async fn begin_execution_from(
-        &self,
-        scope: &str,
-        carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
-    ) -> Result<crate::RecoveryExecution, PoolError> {
-        use lash_core_execution::store::worker_recovery::{
-            WorkerRecoveryError, WorkerRecoveryLimits,
-        };
-        let store = self
-            .recovery
-            .as_ref()
-            .ok_or_else(|| {
-                PoolError::protocol("worker execution requires its backend recovery store")
-            })?
-            .clone();
-        let limits = WorkerRecoveryLimits {
-            max_attempts: self.config.deadlines.max_attempts,
-            max_cpu_nanos: self
-                .config
-                .deadlines
-                .cumulative_cpu
-                .as_nanos()
-                .try_into()
-                .map_err(|_| PoolError::InvalidConfiguration)?,
-        };
-        let mut claim = store
-            .reserve(scope, limits)
-            .await
-            .map_err(crate::recovery::recovery_error)?;
-        let seeded = crate::recovery::at_least(claim.baseline, carried);
-        if seeded != claim.baseline {
-            if seeded.cpu_nanos >= limits.max_cpu_nanos {
-                return Err(crate::recovery::recovery_error(
-                    WorkerRecoveryError::CpuExhausted,
-                ));
-            }
-            store
-                .settle(&claim, seeded)
-                .await
-                .map_err(crate::recovery::recovery_error)?;
-            claim.baseline = seeded;
-        }
-        let budget = ExecutionBudget::from_recovery(claim.baseline);
-        let mut service = self.clone();
-        service.budget = Some(budget.clone());
-        service.claim = Some(Arc::new(claim.clone()));
-        Ok(crate::RecoveryExecution {
-            service,
-            store,
-            claim,
-            budget,
-        })
-    }
-    pub async fn mark_running(&self) -> Result<(), PoolError> {
-        if let (Some(store), Some(claim)) = (&self.recovery, &self.claim) {
-            store
-                .mark_running(claim)
-                .await
-                .map_err(crate::recovery::recovery_error)?;
-        }
-        Ok(())
-    }
-    pub async fn checkpoint(&self) -> Result<(), PoolError> {
-        if let (Some(store), Some(claim), Some(budget)) =
-            (&self.recovery, &self.claim, &self.budget)
-        {
-            store
-                .settle(claim, budget.recovery_totals())
-                .await
-                .map_err(crate::recovery::recovery_error)?;
-        }
-        Ok(())
-    }
-    pub async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
-        self.mark_running().await?;
-        let response = self.request(request);
-        self.checkpoint().await?;
-        response
-    }
-    pub async fn inspect_artifact(
-        &self,
-        store: &lashlang::LashlangArtifacts,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<crate::InspectedArtifact>, lash_core_execution::ArtifactStoreError> {
-        let Some(bytes) = store
-            .store()
-            .get_module_artifact(module_ref.as_str())
-            .await?
-        else {
-            return Ok(None);
-        };
-        match self
-            .request_accounted(Request::InspectArtifact {
-                module_ref: module_ref.clone(),
-                bytes,
-            })
-            .await
-            .map_err(|error| lash_core_execution::ArtifactStoreError::Backend(error.to_string()))?
-        {
-            Response::Artifact(artifact) => Ok(Some(artifact)),
-            Response::ArtifactRefused { message } => {
-                Err(lash_core_execution::ArtifactStoreError::Decode(message))
-            }
-            _ => Err(lash_core_execution::ArtifactStoreError::Backend(
-                "unexpected worker artifact inspection response".into(),
-            )),
-        }
-    }
     pub fn config(&self) -> &PoolConfig {
         &self.config
-    }
-    pub fn pool(&self) -> Result<WorkerPool, PoolError> {
-        let mut slot = self
-            .pool
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(pool) = slot.as_ref() {
-            return Ok(pool.clone());
-        }
-        let pool = WorkerPool::new(self.config.as_ref().clone())?;
-        *slot = Some(pool.clone());
-        Ok(pool)
-    }
-    pub fn request(&self, request: Request) -> Result<Response, PoolError> {
-        let source = match &request {
-            Request::References { source }
-            | Request::CreateDefinition { source, .. }
-            | Request::CompileModule { source, .. }
-            | Request::CompileAst { source, .. }
-            | Request::LinkAst { source, .. } => Some(source),
-            _ => None,
-        };
-        if let Some(source) = source
-            && source.len() as u64 > self.config.protocol.max_source_bytes
-        {
-            return Err(lash_vm_protocol::InfrastructureOutcome::PayloadTooLarge {
-                limit: self.config.protocol.max_source_bytes,
-                size: source.len() as u64,
-            }
-            .into());
-        }
-        let bytes = rmp_serde::to_vec_named(&request).map_err(PoolError::protocol)?;
-        let mut worker = self.pool()?.checkout(
-            bytes.len().saturating_add(4096),
-            OwnerEpoch(0),
-            FrameEpoch(0),
-            self.budget.clone().unwrap_or_default(),
-        )?;
-        #[cfg(feature = "testing")]
-        self.record_worker(
-            match &request {
-                Request::References { .. } => WorkerPath::References,
-                Request::CompileModule { .. }
-                | Request::CompileAst { .. }
-                | Request::LinkAst { .. } => WorkerPath::Compile,
-                Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
-                Request::InspectArtifact { .. }
-                | Request::VerifyArtifact { .. }
-                | Request::TriggerCompatibility { .. } => WorkerPath::Artifact,
-                _ => WorkerPath::State,
-            },
-            &worker,
-        )?;
-        let response = worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
-        lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
-            .check_payload(&response.0)?;
-        let response = rmp_serde::from_slice(&response.0).map_err(PoolError::protocol)?;
-        worker.release()?;
-        Ok(response)
     }
 }
 impl Default for Service {
@@ -513,4 +351,238 @@ pub enum WorkerPath {
 pub struct WorkerReceipt {
     pub path: WorkerPath,
     pub pid: u32,
+}
+
+/// Runtime-only operations on a [`Service`]: the pool, requests, and the
+/// recovery accounting the Lashlang runtime and the RLM protocol drive a
+/// worker through. A dialect only constructs a service; these members are
+/// the cross-crate runtime seam, which the `lash` facade does not re-export,
+/// and the impl is hidden from docs because it is support plumbing rather
+/// than dialect surface (ADR 0051).
+pub mod runtime_ops {
+    use std::future::Future;
+
+    use super::*;
+    use crate::WorkerPoolRuntimeOps as _;
+
+    pub trait ServiceRuntimeOps {
+        fn execution_budget(&self) -> Option<&ExecutionBudget>;
+
+        fn begin_execution(
+            &self,
+            scope: &str,
+        ) -> impl Future<Output = Result<crate::RecoveryExecution, PoolError>> + Send;
+
+        /// Reserve `scope` for an execution that continues work earlier scopes
+        /// already consumed `carried` of (ADR 0123): a process body reserves a
+        /// scope per segment boundary and carries the totals its boundary
+        /// recorded. The reservation starts from no less than `carried`, and the
+        /// row is seeded with it before any worker launches, so a redrive of
+        /// this scope counts on from the carried totals too.
+        fn begin_execution_from(
+            &self,
+            scope: &str,
+            carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
+        ) -> impl Future<Output = Result<crate::RecoveryExecution, PoolError>> + Send;
+
+        fn mark_running(&self) -> impl Future<Output = Result<(), PoolError>> + Send;
+
+        fn checkpoint(&self) -> impl Future<Output = Result<(), PoolError>> + Send;
+
+        fn request_accounted(
+            &self,
+            request: Request,
+        ) -> impl Future<Output = Result<Response, PoolError>> + Send;
+
+        fn inspect_artifact(
+            &self,
+            store: &lashlang::LashlangArtifacts,
+            module_ref: &lashlang::ModuleRef,
+        ) -> impl Future<
+            Output = Result<
+                Option<crate::InspectedArtifact>,
+                lash_core_execution::ArtifactStoreError,
+            >,
+        > + Send;
+
+        fn request(&self, request: Request) -> Result<Response, PoolError>;
+    }
+
+    #[doc(hidden)]
+    impl ServiceRuntimeOps for Service {
+        fn execution_budget(&self) -> Option<&ExecutionBudget> {
+            self.budget.as_ref()
+        }
+
+        async fn begin_execution(
+            &self,
+            scope: &str,
+        ) -> Result<crate::RecoveryExecution, PoolError> {
+            self.begin_execution_from(scope, Default::default()).await
+        }
+
+        async fn begin_execution_from(
+            &self,
+            scope: &str,
+            carried: lash_core_execution::store::worker_recovery::WorkerRecoveryTotals,
+        ) -> Result<crate::RecoveryExecution, PoolError> {
+            use lash_core_execution::store::worker_recovery::{
+                WorkerRecoveryError, WorkerRecoveryLimits,
+            };
+            let store = self
+                .recovery
+                .as_ref()
+                .ok_or_else(|| {
+                    PoolError::protocol("worker execution requires its backend recovery store")
+                })?
+                .clone();
+            let limits = WorkerRecoveryLimits {
+                max_attempts: self.config.deadlines.max_attempts,
+                max_cpu_nanos: self
+                    .config
+                    .deadlines
+                    .cumulative_cpu
+                    .as_nanos()
+                    .try_into()
+                    .map_err(|_| PoolError::InvalidConfiguration)?,
+            };
+            let mut claim = store
+                .reserve(scope, limits)
+                .await
+                .map_err(crate::recovery::recovery_error)?;
+            let seeded = crate::recovery::at_least(claim.baseline, carried);
+            if seeded != claim.baseline {
+                if seeded.cpu_nanos >= limits.max_cpu_nanos {
+                    return Err(crate::recovery::recovery_error(
+                        WorkerRecoveryError::CpuExhausted,
+                    ));
+                }
+                store
+                    .settle(&claim, seeded)
+                    .await
+                    .map_err(crate::recovery::recovery_error)?;
+                claim.baseline = seeded;
+            }
+            let budget = ExecutionBudget::from_recovery(claim.baseline);
+            let mut service = self.clone();
+            service.budget = Some(budget.clone());
+            service.claim = Some(Arc::new(claim.clone()));
+            Ok(crate::RecoveryExecution {
+                service,
+                store,
+                claim,
+                budget,
+            })
+        }
+
+        async fn mark_running(&self) -> Result<(), PoolError> {
+            if let (Some(store), Some(claim)) = (&self.recovery, &self.claim) {
+                store
+                    .mark_running(claim)
+                    .await
+                    .map_err(crate::recovery::recovery_error)?;
+            }
+            Ok(())
+        }
+
+        async fn checkpoint(&self) -> Result<(), PoolError> {
+            if let (Some(store), Some(claim), Some(budget)) =
+                (&self.recovery, &self.claim, &self.budget)
+            {
+                store
+                    .settle(claim, budget.recovery_totals())
+                    .await
+                    .map_err(crate::recovery::recovery_error)?;
+            }
+            Ok(())
+        }
+
+        async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
+            self.mark_running().await?;
+            let response = self.request(request);
+            self.checkpoint().await?;
+            response
+        }
+
+        async fn inspect_artifact(
+            &self,
+            store: &lashlang::LashlangArtifacts,
+            module_ref: &lashlang::ModuleRef,
+        ) -> Result<Option<crate::InspectedArtifact>, lash_core_execution::ArtifactStoreError>
+        {
+            let Some(bytes) = store
+                .store()
+                .get_module_artifact(module_ref.as_str())
+                .await?
+            else {
+                return Ok(None);
+            };
+            match self
+                .request_accounted(Request::InspectArtifact {
+                    module_ref: module_ref.clone(),
+                    bytes,
+                })
+                .await
+                .map_err(|error| {
+                    lash_core_execution::ArtifactStoreError::Backend(error.to_string())
+                })? {
+                Response::Artifact(artifact) => Ok(Some(artifact)),
+                Response::ArtifactRefused { message } => {
+                    Err(lash_core_execution::ArtifactStoreError::Decode(message))
+                }
+                _ => Err(lash_core_execution::ArtifactStoreError::Backend(
+                    "unexpected worker artifact inspection response".into(),
+                )),
+            }
+        }
+
+        fn request(&self, request: Request) -> Result<Response, PoolError> {
+            let source = match &request {
+                Request::References { source }
+                | Request::CreateDefinition { source, .. }
+                | Request::CompileModule { source, .. }
+                | Request::CompileAst { source, .. }
+                | Request::LinkAst { source, .. } => Some(source),
+                _ => None,
+            };
+            if let Some(source) = source
+                && source.len() as u64 > self.config.protocol.max_source_bytes
+            {
+                return Err(lash_vm_protocol::InfrastructureOutcome::PayloadTooLarge {
+                    limit: self.config.protocol.max_source_bytes,
+                    size: source.len() as u64,
+                }
+                .into());
+            }
+            let bytes = rmp_serde::to_vec_named(&request).map_err(PoolError::protocol)?;
+            let mut worker = self.pool()?.checkout(
+                bytes.len().saturating_add(4096),
+                OwnerEpoch(0),
+                FrameEpoch(0),
+                self.budget.clone().unwrap_or_default(),
+            )?;
+            #[cfg(feature = "testing")]
+            self.record_worker(
+                match &request {
+                    Request::References { .. } => WorkerPath::References,
+                    Request::CompileModule { .. }
+                    | Request::CompileAst { .. }
+                    | Request::LinkAst { .. } => WorkerPath::Compile,
+                    Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
+                    Request::InspectArtifact { .. }
+                    | Request::VerifyArtifact { .. }
+                    | Request::TriggerCompatibility { .. } => WorkerPath::Artifact,
+                    _ => WorkerPath::State,
+                },
+                &worker,
+            )?;
+            let response =
+                worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
+            lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
+                .check_payload(&response.0)?;
+            let response = rmp_serde::from_slice(&response.0).map_err(PoolError::protocol)?;
+            worker.release()?;
+            Ok(response)
+        }
+    }
 }

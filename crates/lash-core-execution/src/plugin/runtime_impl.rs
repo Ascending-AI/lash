@@ -7,15 +7,6 @@ use lash_sansio::sync::MutexExt;
 
 use super::*;
 
-pub trait ProcessEngineContributionTarget {
-    fn process_engine_trace_context(&self) -> &lash_trace::TraceContext;
-    fn process_observation_sink(&self) -> Option<Arc<dyn lash_trace::TraceSink>>;
-    fn install_contributed_process_engine(
-        &mut self,
-        registration: crate::ProcessEngineRegistration,
-    ) -> Result<(), crate::PluginError>;
-}
-
 #[derive(Clone)]
 pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
@@ -211,11 +202,11 @@ impl PluginHost {
     /// out-of-band wiring: engine construction that needs the fully-built plugin
     /// host's extensions runs here, after the host is built. The trace context
     /// handed to factories is the one already on `runtime_host`.
-    pub fn install_process_engine_contributions<T: ProcessEngineContributionTarget>(
+    pub fn install_process_engine_contributions(
         &self,
-        mut runtime_host: T,
+        mut runtime_host: crate::RuntimeHostConfig,
         process_lifecycle_available: bool,
-    ) -> Result<T, PluginError> {
+    ) -> Result<crate::RuntimeHostConfig, PluginError> {
         let trace_context = runtime_host.process_engine_trace_context().clone();
         let observation_sink = runtime_host.process_observation_sink();
         let ctx = super::ProcessEngineContributionContext::new(

@@ -178,6 +178,55 @@ impl StartKeyDerivation {
     /// The one authority lash's own start paths derive under.
     #[doc(hidden)]
     pub const LASH_START_PATHS: Self = Self(());
+
+    /// The key of a start declared by a recorded tool intent: the model's
+    /// `processes.start`, and every leaf that declares a start. The intent's
+    /// replay key is its admitted operation identity.
+    pub fn for_tool_intent(self, identity: &crate::ToolIntentIdentity) -> StartKey {
+        StartKey::derive(StartKeyNamespace::ToolIntent, |encoder| {
+            encoder.string(&identity.replay_key);
+        })
+    }
+
+    /// The key of the one start a trigger delivery makes: its occurrence and
+    /// the exact subscription revision the delivery was reserved against.
+    pub fn for_trigger_delivery(
+        self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        subscription_incarnation: &str,
+        subscription_revision: u64,
+    ) -> StartKey {
+        StartKey::derive(StartKeyNamespace::TriggerDelivery, |encoder| {
+            encoder.string(occurrence_id);
+            encoder.string(subscription_id);
+            encoder.string(subscription_incarnation);
+            encoder.u64(subscription_revision);
+        })
+    }
+
+    /// The key of the `ordinal`th keyless host start issued under `scope`.
+    ///
+    /// A keyless start is always new, yet a start effect is addressed by its
+    /// key and a durable handler replays it: the key is derived from the
+    /// admitted scope and the start's ordinal within the run, never drawn at
+    /// random, so a replay re-issues the same key.
+    pub fn for_keyless_host(self, scope: &crate::ExecutionScope, ordinal: u32) -> StartKey {
+        StartKey::derive(StartKeyNamespace::KeylessHost, |encoder| {
+            write_scope(encoder, scope);
+            encoder.u32(ordinal);
+        })
+    }
+
+    /// Parse a stored or wire start key.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidStartKey`] for anything that is not a rendered key of this
+    /// family and version.
+    pub fn parse(self, value: &str) -> Result<StartKey, InvalidStartKey> {
+        StartKey::parse_rendered(value)
+    }
 }
 
 /// A string that is not a start key this build derives.
@@ -206,35 +255,6 @@ impl StartKey {
         ))
     }
 
-    /// The key of a start declared by a recorded tool intent: the model's
-    /// `processes.start`, and every leaf that declares a start. The intent's
-    /// replay key is its admitted operation identity.
-    pub fn for_tool_intent(
-        _derivation: StartKeyDerivation,
-        identity: &crate::ToolIntentIdentity,
-    ) -> Self {
-        Self::derive(StartKeyNamespace::ToolIntent, |encoder| {
-            encoder.string(&identity.replay_key);
-        })
-    }
-
-    /// The key of the one start a trigger delivery makes: its occurrence and
-    /// the exact subscription revision the delivery was reserved against.
-    pub fn for_trigger_delivery(
-        _derivation: StartKeyDerivation,
-        occurrence_id: &str,
-        subscription_id: &str,
-        subscription_incarnation: &str,
-        subscription_revision: u64,
-    ) -> Self {
-        Self::derive(StartKeyNamespace::TriggerDelivery, |encoder| {
-            encoder.string(occurrence_id);
-            encoder.string(subscription_id);
-            encoder.string(subscription_incarnation);
-            encoder.u64(subscription_revision);
-        })
-    }
-
     /// The key a host or remote caller supplies for an idempotent start:
     /// arbitrary bytes in a namespace no lash-derived key shares. Lash mixes
     /// nothing into it, so the same bytes are one key across the store set,
@@ -243,23 +263,6 @@ impl StartKey {
     pub fn for_host(key: impl AsRef<[u8]>) -> Self {
         Self::derive(StartKeyNamespace::Host, |encoder| {
             encoder.bytes(key.as_ref());
-        })
-    }
-
-    /// The key of the `ordinal`th keyless host start issued under `scope`.
-    ///
-    /// A keyless start is always new, yet a start effect is addressed by its
-    /// key and a durable handler replays it: the key is derived from the
-    /// admitted scope and the start's ordinal within the run, never drawn at
-    /// random, so a replay re-issues the same key.
-    pub fn for_keyless_host(
-        _derivation: StartKeyDerivation,
-        scope: &crate::ExecutionScope,
-        ordinal: u32,
-    ) -> Self {
-        Self::derive(StartKeyNamespace::KeylessHost, |encoder| {
-            write_scope(encoder, scope);
-            encoder.u32(ordinal);
         })
     }
 
@@ -292,16 +295,6 @@ impl StartKey {
         StartKeyNamespace::ALL
             .into_iter()
             .find(|namespace| namespace.name() == name)
-    }
-
-    /// Parse a stored or wire start key.
-    ///
-    /// # Errors
-    ///
-    /// [`InvalidStartKey`] for anything that is not a rendered key of this
-    /// family and version.
-    pub fn parse(_derivation: StartKeyDerivation, value: &str) -> Result<Self, InvalidStartKey> {
-        Self::parse_rendered(value)
     }
 
     pub(crate) fn parse_rendered(value: &str) -> Result<Self, InvalidStartKey> {

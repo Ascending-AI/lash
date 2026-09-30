@@ -41,8 +41,8 @@ use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     EffectAddress, ModelSpec, PersistedSessionConfig, RuntimeAttribution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    ScopedEffectController, SessionError, TurnId,
+    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError,
+    TurnId,
 };
 
 /// The replay key of `root`'s config record. Keyed by the root, never by
@@ -115,7 +115,7 @@ impl LashRuntime {
                     invocation,
                     RuntimeEffectCommand::ResolveTurnConfig { root: root.clone() },
                 ),
-                RuntimeEffectLocalExecutor::owned_runner(Box::new(runner), None),
+                lash_core_execution::core_internal::owned_runner_executor(Box::new(runner), None),
             )
             .await
             .and_then(RuntimeEffectOutcome::into_resolve_turn_config)

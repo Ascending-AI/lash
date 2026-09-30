@@ -17,6 +17,8 @@ mod integrator_facade;
 mod mcp_catalog;
 #[path = "integration/one_home.rs"]
 mod one_home;
+#[path = "integration/process_controls.rs"]
+mod process_controls;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
 #[path = "integration/support.rs"]

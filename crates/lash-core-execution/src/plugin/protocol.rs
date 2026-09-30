@@ -124,10 +124,10 @@ pub struct ProtocolSessionContext<'a> {
 }
 
 impl<'a> ProtocolSessionContext<'a> {
-    pub fn new(session: &'a mut crate::Session, session_id: &'a SessionId) -> Self {
+    pub fn new(session_id: &'a SessionId, fleet_format: crate::FleetFormat) -> Self {
         Self {
             session_id,
-            fleet_format: session.fleet_format(),
+            fleet_format,
             recorded_render: None,
         }
     }

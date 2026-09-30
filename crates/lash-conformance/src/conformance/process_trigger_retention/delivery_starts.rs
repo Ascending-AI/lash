@@ -202,8 +202,7 @@ pub(super) async fn a_delivery_start_registers_nothing_once_its_process_was_prun
     let registry = &handles.registry;
     let reservation = reserve_delivery(&handles, "delivery-start-admission").await;
     let pin = delivery_pin(&reservation);
-    let start_key = crate::StartKey::for_trigger_delivery(
-        crate::DERIVED_START_KEYS,
+    let start_key = crate::DERIVED_START_KEYS.for_trigger_delivery(
         &reservation.occurrence.occurrence_id,
         &reservation.subscription.subscription_id,
         &reservation.subscription.incarnation,

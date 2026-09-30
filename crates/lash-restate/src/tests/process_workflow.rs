@@ -1332,7 +1332,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -1422,7 +1422,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;

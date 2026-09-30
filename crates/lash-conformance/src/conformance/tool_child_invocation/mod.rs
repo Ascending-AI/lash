@@ -43,6 +43,7 @@
 //! None`: Restate redrives the child invocation itself and keeps no
 //! Lash-owned drain, so the laws take their open-time shape there.
 
+use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

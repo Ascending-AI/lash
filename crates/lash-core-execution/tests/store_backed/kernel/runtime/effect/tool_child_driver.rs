@@ -1,5 +1,6 @@
 mod tests {
     use crate::plugin::PluginSessionRequest;
+    use lash_core_execution::core_internal::ToolChildHostRuntimeOps as _;
     use std::sync::Arc;
 
     /// The driver laws' server-double seed.

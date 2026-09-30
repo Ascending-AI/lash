@@ -278,7 +278,7 @@ impl LashRuntime {
         let session_id = state.session_id.clone();
         protocol_session
             .restore_session(
-                crate::plugin::ProtocolSessionContext::new(&mut session, &session_id),
+                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
                 crate::plugin::ProtocolSessionRestoreView::new(&state),
             )
             .await?;

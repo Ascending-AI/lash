@@ -11,6 +11,7 @@ mod tests {
         PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
     };
     use crate::{ProcessInput, ProcessRegistration};
+    use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
     use lash_sansio::sync::MutexExt as _;
     use serde_json::json;
     use std::collections::BTreeMap;

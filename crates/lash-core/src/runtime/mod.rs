@@ -12,6 +12,8 @@ pub use host_commands::{
     SESSION_COMMAND_STAGED_PHASE, request_plugin_task_cancel,
 };
 mod compaction_base;
+mod decoded_outcome;
+pub(crate) use decoded_outcome::DecodedEffectOutcome;
 pub use lash_core_execution::runtime::attachment_delivery;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::causal;
@@ -194,6 +196,14 @@ pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
 pub use effect::TurnCancelWait;
+/// Tool-child, presentation and recorded-stream vocabulary the effect
+/// contracts below name.
+pub use effect::{
+    AdmittedHeadVerdict, ChildStreamTruncation, CompactionBase, DecodedChildEvent, DirectUsage,
+    IncorporatedGroupRank, ProcessDefinitionLocalExecution, RecordedChildChannel,
+    RecordedChildEvent, RecordedChildStream, ToolAttemptCapture, ToolChildAdmission,
+    ToolChildCompletionRouting, ToolChildScope, ToolPresentation, ToolSettlement,
+};
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePhase, AssistantStreamHookState,
@@ -243,8 +253,8 @@ pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, ObservationPluginServices,
-    PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation, SessionCursor,
-    SessionCursorError, SessionObservation, SessionObservationEvent,
+    ParsedSessionCursor, PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation,
+    SessionCursor, SessionCursorError, SessionObservation, SessionObservationEvent,
     SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
     SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
 };

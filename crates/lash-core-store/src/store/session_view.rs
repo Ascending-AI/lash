@@ -72,7 +72,7 @@ impl SessionStore {
 }
 
 /// A request that names the session it acts on (ADR 0112 §1).
-pub trait CarriesSession {
+pub(crate) trait CarriesSession {
     /// Refuse the request unless every session id it carries is `session_id`.
     fn check_session(&self, session_id: &SessionId) -> Result<(), StoreError>;
 }

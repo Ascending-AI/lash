@@ -467,7 +467,11 @@ impl RuntimeSessionServices {
         effect_controller: crate::runtime::ScopedEffectController<'run>,
         turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
-        DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)
+        lash_core_execution::core_internal::runtime_direct_completion_client(
+            self.clone(),
+            effect_controller,
+            turn_id,
+        )
     }
 
     pub(in crate::runtime) fn process_engines(&self) -> &crate::ProcessEngineRegistry {

@@ -37,6 +37,7 @@
 //! descriptor after the pin, released as soon as the new deployment is up,
 //! is gone. In the first at most one was, and never two.
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::Arc;
 
 use lash_core::ProcessId;

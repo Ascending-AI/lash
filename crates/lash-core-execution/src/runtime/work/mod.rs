@@ -346,10 +346,6 @@ impl ProcessWorkWiring {
     pub fn port(&self) -> &Arc<dyn ProcessWorkSubstrate> {
         &self.port
     }
-
-    pub fn event_awaiter(&self) -> &ProcessRegistryAwaiter {
-        &self.event_awaiter
-    }
 }
 
 /// The process port of an engine that runs no processes: it admits nothing,

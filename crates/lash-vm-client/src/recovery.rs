@@ -1,4 +1,5 @@
 //! A parent execution's durable reservation and shared checkout accounting.
+use crate::service::runtime_ops::ServiceRuntimeOps as _;
 use crate::{ExecutionBudget, PoolError, service::Service};
 use lash_core_execution::store::worker_recovery::*;
 use std::sync::Arc;

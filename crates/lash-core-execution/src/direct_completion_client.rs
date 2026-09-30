@@ -119,7 +119,7 @@ pub struct DirectCompletionClient<'run> {
 }
 
 impl<'run> DirectCompletionClient<'run> {
-    pub fn runtime(
+    pub(crate) fn runtime(
         service: Arc<dyn DirectCompletionService>,
         effect_controller: crate::runtime::ScopedEffectController<'run>,
         turn_id: Option<crate::TurnId>,
@@ -177,7 +177,7 @@ impl<'run> DirectCompletionClient<'run> {
     /// A service that cannot prove it executes under the recorded owner and
     /// environment makes this a typed refusal rather than a silent authority
     /// leak.
-    pub fn bind_tool_child<'child>(
+    pub(crate) fn bind_tool_child<'child>(
         &self,
         owner: &crate::RuntimeOwner,
         execution_env_spec: &crate::ProcessExecutionEnvSpec,
@@ -488,4 +488,17 @@ pub enum DirectExecutionPosition {
     #[default]
     Independent,
     ToolAttempt,
+}
+
+/// The direct-completion client a runtime lends a turn or process: completions
+/// run through `service` under `effect_controller`'s admitted scope.
+///
+/// The runtime's construction seam; `core_internal` re-exports it and the
+/// `lash` facade does not.
+pub fn runtime_direct_completion_client<'run>(
+    service: Arc<dyn DirectCompletionService>,
+    effect_controller: crate::runtime::ScopedEffectController<'run>,
+    turn_id: Option<crate::TurnId>,
+) -> DirectCompletionClient<'run> {
+    DirectCompletionClient::runtime(service, effect_controller, turn_id)
 }

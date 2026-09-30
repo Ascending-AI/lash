@@ -75,10 +75,10 @@ pub use effect::{
     TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION, TOOL_SETTLEMENT_VERSION,
     ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildAdmission,
     ToolChildCompletionRouting, ToolChildDriver, ToolChildRebuildRefusal, ToolChildRequest,
-    ToolChildScope, ToolChildSessionFacts, ToolInvocationEffectOutcome, ToolSettlement,
-    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    UnrecordedSessionSources, effect_groups_unsupported, refuse_unhonored_group_membership,
+    ToolChildScope, ToolChildSessionFacts, ToolSettlement, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, UnrecordedSessionSources,
+    effect_groups_unsupported, refuse_unhonored_group_membership,
     turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.

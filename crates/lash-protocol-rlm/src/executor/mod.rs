@@ -1,5 +1,6 @@
 mod globals;
 use globals::{apply_global_defaults, process_handle_names};
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 mod definition_holds;
 use definition_holds::hold_global_definitions;
 mod cell_run;

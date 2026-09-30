@@ -220,8 +220,10 @@ impl RuntimeTurnDriver<'_> {
             .authority
             .resolved_render
             .as_ref();
-        let mut context =
-            crate::plugin::ProtocolSessionContext::new(&mut self.session, &self.session_id);
+        let mut context = crate::plugin::ProtocolSessionContext::new(
+            &self.session_id,
+            self.session.fleet_format(),
+        );
         if let Some(recorded_render) = recorded_render {
             context = context.with_recorded_render(recorded_render);
         }

@@ -78,7 +78,7 @@ impl LashRuntime {
             root_controller,
             admitted,
             head,
-            crate::RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(AdmitRootRunner {
                     store: store.clone(),
                     effect_host: Arc::clone(&self.host.core.control.effect_host),
@@ -133,7 +133,7 @@ impl LashRuntime {
                     root_controller,
                     admitted,
                     head,
-                    crate::RuntimeEffectLocalExecutor::owned_runner(
+                    lash_core_execution::core_internal::owned_runner_executor(
                         Box::new(InspectAdmittedHeadRunner {
                             store: store.clone(),
                             root: root.clone(),
@@ -353,7 +353,7 @@ impl LashRuntime {
             root_controller,
             admitted,
             follow_on,
-            crate::RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(RecoverFollowOnRunner {
                     store,
                     fence: fence.clone(),
@@ -840,7 +840,7 @@ pub(super) async fn run_headless_root(
 ) -> Result<RootOutcome, DriveAbort> {
     let root = admitted.root().clone();
     let runner = || {
-        crate::RuntimeEffectLocalExecutor::owned_runner(
+        lash_core_execution::core_internal::owned_runner_executor(
             Box::new(HeadlessRootStepRunner {
                 session: admitted.session().clone(),
                 step: HeadlessStep::Root {
@@ -890,7 +890,7 @@ pub(super) async fn run_headless_commands_root(
         let batches = crate::runtime::session_api::execute_session_command_run_read(
             root_controller,
             admitted.session(),
-            crate::RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(HeadlessRootStepRunner {
                     session: admitted.session().clone(),
                     step: HeadlessStep::CommandRun,
@@ -940,7 +940,7 @@ pub(super) async fn run_headless_follow_on_root(
     headless: HeadlessRoot,
 ) -> Result<RootOutcome, DriveAbort> {
     let root = admitted.root().clone();
-    let runner = crate::RuntimeEffectLocalExecutor::owned_runner(
+    let runner = lash_core_execution::core_internal::owned_runner_executor(
         Box::new(HeadlessRootStepRunner {
             session: admitted.session().clone(),
             step: HeadlessStep::FollowOn {

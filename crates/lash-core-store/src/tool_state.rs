@@ -178,6 +178,7 @@ pub mod facade_ops {
         fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError>;
     }
 
+    #[doc(hidden)]
     impl ToolStateFacadeOps for ToolState {
         fn generation(&self) -> u64 {
             self.generation
@@ -233,6 +234,7 @@ pub trait ToolStateConformanceAccess {
     fn with_generation_for_conformance(self, generation: u64) -> Self;
 }
 
+#[doc(hidden)]
 #[cfg(any(test, feature = "testing"))]
 impl ToolStateConformanceAccess for ToolState {
     fn with_generation_for_conformance(self, generation: u64) -> Self {

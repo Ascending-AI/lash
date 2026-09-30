@@ -145,7 +145,7 @@ impl RestateEffectHost {
 
     /// Bind the reads [`EffectHost::journal_replay`] answers from, once; a
     /// later binding is ignored, like the host's other get-or-init cells.
-    pub fn bind_journal_authority(&self, authority: RestateJournalAuthority) {
+    pub(crate) fn bind_journal_authority(&self, authority: RestateJournalAuthority) {
         let _ = self.journal_authority.set(authority);
     }
 

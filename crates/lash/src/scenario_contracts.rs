@@ -1,4 +1,4 @@
-use lash_core::runtime::ScenarioContractSpec;
+pub use lash_core::runtime::ScenarioContractSpec;
 
 /// Canonical agent scenario contracts used by facade consumers.
 pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[

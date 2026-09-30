@@ -77,7 +77,7 @@ pub use lash_core_ids::perf_witness;
 /// surface unchanged and keeps the crate-internal helper crate-internal.
 pub mod provider {
     pub(crate) use lash_core_llm::core_internal::{
-        call_id_for_scope, synthetic_terminal_call_record,
+        call_id_for_scope, complete_prepared, prepare_completion, synthetic_terminal_call_record,
     };
     pub use lash_core_llm::provider::*;
 }
@@ -856,8 +856,9 @@ pub use tool_provider::{
 pub mod core_internal {
     pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
     pub use lash_core_execution::core_internal::{
-        RuntimeEffectLocalRunner, StartKeyDerivation, attach_process_invocation_correlation,
-        clear_process_invocation_correlation,
+        RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
+        ToolChildHostRuntimeOps, attach_process_invocation_correlation,
+        clear_process_invocation_correlation, owned_runner_executor,
     };
 }
 

@@ -82,8 +82,8 @@ use crate::runtime::LashRuntime;
 use crate::{
     AgentFrameRun, EffectAddress, EventSink, LocalTurnStop, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeError, RuntimeErrorCode,
-    ScopedEffectController, TurnActivitySink, TurnId,
+    RuntimeEffectInvocation, RuntimeError, RuntimeErrorCode, ScopedEffectController,
+    TurnActivitySink, TurnId,
 };
 
 /// Where the turns of a drive publish, and the host-local stop they honour.
@@ -382,7 +382,7 @@ async fn emit_admission_step(
                     request: Box::new(admit_request.clone()),
                 },
             ),
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(admission::AdmitDriveRunner {
                     store,
                     stores,
@@ -1203,7 +1203,7 @@ async fn emit_close_step(
                 invocation,
                 RuntimeEffectCommand::CloseRootScope { root: root.clone() },
             ),
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(close::CloseRootScopeRunner {
                     terminals,
                     session: session.clone(),
@@ -1255,7 +1255,7 @@ async fn mark_and_seal_root(
                 start,
                 RuntimeEffectCommand::DrawRootStart { root: root.clone() },
             ),
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(crate::runtime::root_start::DrawRootStartRunner { root: root.clone() }),
                 None,
             ),
@@ -1277,7 +1277,7 @@ async fn mark_and_seal_root(
                     admitted: Box::new(admitted.clone()),
                 },
             ),
-            RuntimeEffectLocalExecutor::owned_runner(
+            lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(admission::SealDriveRunner {
                     store,
                     admitted: admitted.clone(),

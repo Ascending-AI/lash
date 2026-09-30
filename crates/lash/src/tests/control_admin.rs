@@ -1679,15 +1679,13 @@ fn external_host_start(metadata: serde_json::Value) -> lash_core::ProcessStartRe
 #[tokio::test]
 async fn a_host_rail_refuses_a_derived_family_start_key() -> Result<()> {
     let core = host_start_core().await?;
-    let intent_key = lash_core::StartKey::for_tool_intent(
-        lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS,
-        &lash_core::derive_tool_intent_identity(
+    let intent_key = lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS
+        .for_tool_intent(&lash_core::derive_tool_intent_identity(
             &lash_core::RuntimeOwner::Session(SessionId::from("model-session")),
             "turn-1",
             &lash_core::ToolCallId::fixture("call-1"),
             0,
-        ),
-    );
+        ));
     let mut wire = serde_json::to_value(external_host_start(serde_json::Value::Null))
         .expect("encode the request");
     wire["start_key"] = serde_json::Value::String(intent_key.as_str().to_owned());

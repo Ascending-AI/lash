@@ -1,0 +1,11 @@
+error[E0599]: no associated function or constant named `open` found for struct `SqliteProcessRegistry` in the current scope
+ --> tests/ui/process_registry_comes_from_a_store_set.rs:8:55
+  |
+8 |     let _ = lash_sqlite_store::SqliteProcessRegistry::open(path).await;
+  |                                                       ^^^^ associated function or constant not found in `SqliteProcessRegistry`
+
+error[E0599]: no associated function or constant named `open_with_clock` found for struct `SqliteProcessRegistry` in the current scope
+ --> tests/ui/process_registry_comes_from_a_store_set.rs:9:55
+  |
+9 |     let _ = lash_sqlite_store::SqliteProcessRegistry::open_with_clock(path, clock).await;
+  |                                                       ^^^^^^^^^^^^^^^ associated function or constant not found in `SqliteProcessRegistry`

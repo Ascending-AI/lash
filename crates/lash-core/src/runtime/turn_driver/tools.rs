@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 impl RuntimeTurnDriver<'_> {
     pub(super) async fn report_undispatched_turn_tool_calls(

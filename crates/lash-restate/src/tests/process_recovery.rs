@@ -13,7 +13,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -27,7 +27,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -152,7 +152,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
             .expect("open the session catalog"),
     ) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -190,7 +190,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
     drop(registry_a);
 
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -854,7 +854,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     // the durable row exists and is non-terminal. We register it directly to
     // model exactly that mid-flight crash state.
     let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -880,7 +880,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     // non-terminal process by workflow key; Restate coalesces duplicates and
     // the workflow, run here on the fresh worker, writes the terminal outcome.
     let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db)
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&process_db)
             .await
             .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;

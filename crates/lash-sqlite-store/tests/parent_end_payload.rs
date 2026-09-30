@@ -37,7 +37,7 @@ fn inject(dir: &std::path::Path, kind: &str, id: &str, payload: &str) {
 async fn a_ledger_row_decodes_its_typed_payload() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -75,7 +75,7 @@ async fn a_ledger_row_decodes_its_typed_payload() {
 async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -116,7 +116,7 @@ async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
 async fn a_parent_scope_row_is_refused_as_malformed() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -148,7 +148,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
 async fn an_unsupported_payload_version_is_refused() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;
@@ -182,7 +182,7 @@ async fn an_unsupported_payload_version_is_refused() {
 async fn a_payload_that_disagrees_with_its_projection_is_refused() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
-        SqliteProcessRegistry::open(&dir.path().join("processes.db"))
+        SqliteProcessRegistry::open_standalone_for_testing(&dir.path().join("processes.db"))
             .await
             .expect("process registry"),
     ) as Arc<dyn ProcessRegistry>;

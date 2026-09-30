@@ -1,4 +1,5 @@
 use super::{LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessHost, LashlangSegmentState};
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 /// The segment state a boundary hands over: the worker's continuation bytes,
 /// sealed as opaque state, beside the parent's own ledgers the next segment

@@ -134,7 +134,7 @@ impl LashRuntime {
             let session_id = self.state.session_id.clone();
             let appended = protocol_session
                 .append_session_nodes(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                    crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
                     &request.nodes,
                 )
                 .await;

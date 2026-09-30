@@ -734,7 +734,7 @@ impl PluginSession {
     /// step's, or the boundary's own — fails the presentation with a typed
     /// `OutputRetentionFailed` error: a step that turned the refusal into
     /// text does not make it the call's return.
-    pub async fn present_tool_result(
+    pub(crate) async fn present_tool_result(
         &self,
         ctx: ToolResultProjectionContext,
         settlement: Arc<crate::runtime::effect::ToolSettlement>,
@@ -1035,44 +1035,6 @@ impl PluginSession {
         clippy::too_many_arguments,
         reason = "plugin command invocation carries the runtime mutation services exposed to commands"
     )]
-    pub async fn run_plugin_command_value(
-        &self,
-        name: &str,
-        args: serde_json::Value,
-        session_id: Option<SessionId>,
-        default_to_current_session: bool,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
-    ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
-    {
-        let (plugin_id, outcome) = self
-            .run_plugin_command(
-                name,
-                args,
-                session_id,
-                default_to_current_session,
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
-            )
-            .await?;
-        Ok((
-            plugin_id,
-            PluginOperationOutcome {
-                output: outcome.output,
-                events: outcome.events,
-                directives: outcome.directives,
-            },
-        ))
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "plugin command invocation carries the runtime mutation services exposed to commands"
-    )]
     pub async fn run_plugin_command(
         &self,
         name: &str,
@@ -1083,52 +1045,20 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-    ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
-        self.invoke_plugin_operation(
-            name,
-            args,
-            session_id,
-            default_to_current_session,
-            PluginOperationInvocation::Command {
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
-            },
-        )
-        .await
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "plugin task invocation carries mutation services plus the scoped effect boundary"
-    )]
-    pub async fn run_plugin_task_value(
-        &self,
-        name: &str,
-        args: serde_json::Value,
-        session_id: Option<SessionId>,
-        default_to_current_session: bool,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
-        scoped_effect_controller: crate::ScopedEffectController<'static>,
-        cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
         let (plugin_id, outcome) = self
-            .run_plugin_task(
+            .invoke_plugin_operation(
                 name,
                 args,
                 session_id,
                 default_to_current_session,
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
-                scoped_effect_controller,
-                cancellation_token,
+                PluginOperationInvocation::Command {
+                    sessions,
+                    session_lifecycle,
+                    session_graph,
+                    processes,
+                },
             )
             .await?;
         Ok((
@@ -1157,22 +1087,32 @@ impl PluginSession {
         processes: Arc<dyn crate::ProcessService>,
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
-        self.invoke_plugin_operation(
-            name,
-            args,
-            session_id,
-            default_to_current_session,
-            PluginOperationInvocation::Task {
-                sessions,
-                session_lifecycle,
-                session_graph,
-                processes,
-                scoped_effect_controller,
-                cancellation_token,
+    ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
+    {
+        let (plugin_id, outcome) = self
+            .invoke_plugin_operation(
+                name,
+                args,
+                session_id,
+                default_to_current_session,
+                PluginOperationInvocation::Task {
+                    sessions,
+                    session_lifecycle,
+                    session_graph,
+                    processes,
+                    scoped_effect_controller,
+                    cancellation_token,
+                },
+            )
+            .await?;
+        Ok((
+            plugin_id,
+            PluginOperationOutcome {
+                output: outcome.output,
+                events: outcome.events,
+                directives: outcome.directives,
             },
-        )
-        .await
+        ))
     }
 }
 

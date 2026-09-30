@@ -1,6 +1,8 @@
 use super::workload::{Case, Host, environment};
 use anyhow::{Result, bail};
-use lash_vm_client::{ExecutionBudget, ParkOutcome, RunContext, WorkerPool};
+use lash_vm_client::{
+    ExecutionBudget, ParkOutcome, RunContext, WorkerPool, WorkerPoolRuntimeOps as _,
+};
 use lash_vm_protocol::*;
 use lashlang::{ExecutionMode, ExecutionOutcome};
 use std::time::Instant;

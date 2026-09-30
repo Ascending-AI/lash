@@ -14,6 +14,7 @@
 //! data it may not be able to read.
 
 use lash_core::{DurableItem, DurablePayload, DurableSurface};
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 use super::msgpack;
 use super::{PRIMARY_FORMATS, SurfaceRelation, format_surface};

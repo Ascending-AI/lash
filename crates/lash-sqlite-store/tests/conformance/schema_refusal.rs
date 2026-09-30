@@ -88,7 +88,11 @@ async fn sqlite_process_registry_refuses_an_unstamped_populated_catalog_before_s
             },
         }
     );
-    assert!(SqliteProcessRegistry::open(&path).await.is_err());
+    assert!(
+        SqliteProcessRegistry::open_standalone_for_testing(&path)
+            .await
+            .is_err()
+    );
     let conn = rusqlite::Connection::open(&path).expect("inspect refused registry");
     let stamps: i64 = conn
         .query_row(

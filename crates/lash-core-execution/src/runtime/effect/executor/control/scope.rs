@@ -350,11 +350,7 @@ impl<'run> ScopedEffectController<'run> {
     /// returned the processes they registered.
     pub(crate) fn next_keyless_start_key(&self) -> crate::StartKey {
         let ordinal = self.keyless_starts.fetch_add(1, Ordering::SeqCst);
-        crate::StartKey::for_keyless_host(
-            crate::StartKeyDerivation::LASH_START_PATHS,
-            self.admitted.scope(),
-            ordinal,
-        )
+        crate::StartKeyDerivation::LASH_START_PATHS.for_keyless_host(self.admitted.scope(), ordinal)
     }
 
     /// The ordinal of the next administrative compaction run through this
@@ -585,6 +581,7 @@ pub mod facade_ops {
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
     }
 
+    #[doc(hidden)]
     #[async_trait::async_trait]
     impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
         fn execution_scope(&self) -> &ExecutionScope {

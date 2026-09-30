@@ -11,6 +11,7 @@
 //! A segment is dispatched on lash's stable process lane, so the newest
 //! deployment at the start runs it, whichever build asked.
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};

@@ -289,8 +289,8 @@ impl SqliteStorePreflight {
         }
     }
 
-    /// Also read the process-registry database at the path the host passes to
-    /// [`SqliteProcessRegistry::open`](crate::SqliteProcessRegistry::open).
+    /// Also read a process-registry database at `path`, one kept outside the
+    /// store set's root.
     pub fn with_process_registry(mut self, path: impl Into<PathBuf>) -> Self {
         self.process_registry = Some(path.into());
         self

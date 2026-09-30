@@ -1,6 +1,7 @@
 use crate::SessionId;
 #[cfg(test)]
 use crate::plugin::PluginSessionRequest;
+use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
@@ -19,6 +20,7 @@ pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::resolve_trigger_owner_scope;
+pub(crate) use execution_context::runtime_ops;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,
@@ -28,8 +30,9 @@ pub use opener_groups::{OpenerGroupRegistry, OpenerGroupsClosed, OpenerState, Op
 pub use settlement_incorporation::{Incorporated, IncorporationLedger, SettlementSource};
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
-    ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
-    ToolAggregateRequest, ToolBatchReplies, ToolInvocation, ToolInvocationReply,
+    CompletedProtocolToolCall, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
+    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolInvocation,
+    ToolInvocationReply,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -413,7 +416,7 @@ impl Session {
         session_id: &SessionId,
     ) -> Result<Self, SessionError> {
         let tool_registry = services.plugins.tool_registry();
-        let mut session = Self {
+        let session = Self {
             session_id: SessionId::from(session_id.to_string()),
             services,
             context_overlay_revision: 0,
@@ -429,8 +432,8 @@ impl Session {
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         protocol_session
             .initialize_session(crate::plugin::ProtocolSessionContext::new(
-                &mut session,
                 session_id,
+                session.fleet_format(),
             ))
             .await?;
 

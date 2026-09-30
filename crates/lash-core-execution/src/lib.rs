@@ -855,7 +855,6 @@ pub(crate) use runtime::{
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
-pub(crate) use session::Session;
 pub use session::{
     ExecRequest, RuntimeExecutionContext, SessionConfigRefusal, SessionError, ToolDispatchSurface,
     ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
@@ -917,9 +916,13 @@ pub(crate) use tool_provider::ToolContext;
 
 #[doc(hidden)]
 pub mod core_internal {
-    pub use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
-    pub use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
+    pub use crate::direct_completion_client::{
+        DirectCompletionService, DirectExecutionPosition, runtime_direct_completion_client,
+    };
+    pub use crate::runtime::effect::executor::{RuntimeEffectLocalRunner, owned_runner_executor};
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
+    pub use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps;
+    pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
     pub use lash_core_store::process_identity::StartKeyDerivation;
     pub fn attach_process_invocation_correlation(
         turn_context: &mut crate::TurnContext,

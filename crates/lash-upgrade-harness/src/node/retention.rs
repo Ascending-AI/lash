@@ -19,6 +19,7 @@
 //! up, so the only relay that delivers is the one it asks, and it counts
 //! every delivery.
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 

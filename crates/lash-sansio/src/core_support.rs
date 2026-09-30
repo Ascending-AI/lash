@@ -2,6 +2,12 @@
 //!
 //! These traits keep runtime-only operations callable across the crate boundary
 //! without publishing the same operations as supported `lash_core` host APIs.
+//!
+//! Every impl below is `#[doc(hidden)]`: the traits are not re-exported through
+//! the `lash` facade, so a host can neither name nor call them, and the impl on
+//! a facade type is support plumbing rather than part of that type's API (ADR
+//! 0051). The facade-completeness check reads hidden impls as outside the
+//! facade surface.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -142,6 +148,7 @@ pub trait AttachmentIdCoreSupport {
     fn as_str(&self) -> &str;
 }
 
+#[doc(hidden)]
 impl AttachmentIdCoreSupport for AttachmentId {
     fn as_str(&self) -> &str {
         AttachmentId::as_str(self)
@@ -152,6 +159,7 @@ pub trait MediaTypeCoreSupport {
     fn family(&self) -> &str;
 }
 
+#[doc(hidden)]
 impl MediaTypeCoreSupport for MediaType {
     fn family(&self) -> &str {
         MediaType::family(self)
@@ -162,6 +170,7 @@ pub trait AttachmentTypeMetadataCoreSupport {
     fn image(width: Option<u32>, height: Option<u32>) -> Self;
 }
 
+#[doc(hidden)]
 impl AttachmentTypeMetadataCoreSupport for AttachmentTypeMetadata {
     fn image(width: Option<u32>, height: Option<u32>) -> Self {
         AttachmentTypeMetadata::image(width, height)
@@ -172,6 +181,7 @@ pub trait ModelEffortValidationCategoryCoreSupport {
     fn failure_code(&self) -> crate::session_model::TurnFailureCode;
 }
 
+#[doc(hidden)]
 impl ModelEffortValidationCategoryCoreSupport for ModelEffortValidationCategory {
     fn failure_code(&self) -> crate::session_model::TurnFailureCode {
         ModelEffortValidationCategory::failure_code(self)
@@ -182,12 +192,14 @@ pub trait MessageCoreSupport {
     fn content_equals(&self, other: &Message) -> bool;
 }
 
+#[doc(hidden)]
 impl MessageCoreSupport for Message {
     fn content_equals(&self, other: &Message) -> bool {
         crate::session_model::message::message_content_equal(self, other)
     }
 }
 
+#[doc(hidden)]
 impl MessageCoreSupport for ConversationRecord {
     fn content_equals(&self, other: &Message) -> bool {
         crate::session_model::message::message_content_equal(self, other)
@@ -205,6 +217,7 @@ pub trait MessageSequenceCoreSupport {
     fn extend(&mut self, messages: Vec<Message>);
 }
 
+#[doc(hidden)]
 impl MessageSequenceCoreSupport for MessageSequence {
     fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]> {
         MessageSequence::preserved_extension_delta(self, next)
@@ -243,6 +256,7 @@ pub trait SessionAppendNodeCoreSupport {
     fn protocol_event(event: ProtocolEvent) -> Self;
 }
 
+#[doc(hidden)]
 impl SessionAppendNodeCoreSupport for SessionAppendNode {
     fn protocol_event(event: ProtocolEvent) -> Self {
         SessionAppendNode::protocol_event(event)
@@ -264,6 +278,7 @@ pub trait ToolCatalogCoreSupport: Sized {
     ) -> Vec<PromptContribution>;
 }
 
+#[doc(hidden)]
 impl ToolCatalogCoreSupport for ToolCatalog {
     fn from_tool_definitions(tools: Vec<ToolDefinition>) -> Self {
         ToolCatalog::from_tool_definitions(tools)
@@ -302,6 +317,7 @@ pub trait ToolRetryPolicyCoreSupport {
     fn delay_ms_for_retry(self, retry_index: u32, requested_after_ms: Option<u64>) -> u64;
 }
 
+#[doc(hidden)]
 impl ToolRetryPolicyCoreSupport for ToolRetryPolicy {
     fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
         ToolRetryPolicy::idempotent(max_attempts, base_delay_ms, max_delay_ms)
@@ -320,6 +336,7 @@ pub trait ToolValueCoreSupport {
     fn to_json_value(&self) -> Value;
 }
 
+#[doc(hidden)]
 impl ToolValueCoreSupport for ToolValue {
     fn to_json_value(&self) -> Value {
         ToolValue::to_json_value(self)
@@ -336,6 +353,7 @@ pub trait ToolFailureCoreSupport {
     fn to_json_value(&self) -> Value;
 }
 
+#[doc(hidden)]
 impl ToolFailureCoreSupport for ToolFailure {
     fn runtime(
         class: ToolFailureClass,
@@ -359,6 +377,7 @@ pub trait ToolCancellationCoreSupport {
     fn to_json_value(&self) -> Value;
 }
 
+#[doc(hidden)]
 impl ToolCancellationCoreSupport for ToolCancellation {
     fn runtime(message: impl Into<String>) -> Self {
         ToolCancellation::runtime(message)
@@ -373,6 +392,7 @@ pub trait ModelToolReturnCoreSupport {
     fn text(tool_name: String, content: impl Into<String>) -> Self;
 }
 
+#[doc(hidden)]
 impl ModelToolReturnCoreSupport for ModelToolReturn {
     fn text(tool_name: String, content: impl Into<String>) -> Self {
         ModelToolReturn::text(tool_name, content)
@@ -383,6 +403,7 @@ pub trait ModelToolReturnPartCoreSupport {
     fn text(text: impl Into<String>) -> Self;
 }
 
+#[doc(hidden)]
 impl ModelToolReturnPartCoreSupport for ModelToolReturnPart {
     fn text(text: impl Into<String>) -> Self {
         ModelToolReturnPart::text(text)

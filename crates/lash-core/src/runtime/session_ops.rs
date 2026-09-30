@@ -132,7 +132,7 @@ impl LashRuntime {
             let session_id = self.state.session_id.clone();
             protocol_session
                 .append_session_nodes(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                    crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
                     &request.nodes,
                 )
                 .await?;
@@ -208,8 +208,8 @@ impl LashRuntime {
         let session_id = self.state.session_id.clone();
         code_executor
             .hydrated_execution_state(crate::plugin::ProtocolSessionContext::new(
-                session,
                 &session_id,
+                session.fleet_format(),
             ))
             .await
     }
@@ -233,7 +233,7 @@ impl LashRuntime {
         let session_id = self.state.session_id.clone();
         code_executor
             .restore_execution_state(
-                crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
                 snapshot,
             )
             .await?;

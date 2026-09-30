@@ -107,6 +107,11 @@ mod usage_accounting;
 mod wire;
 pub use wire::{CallDecodeError, JsonDecodeError, JsonDecodeLimits};
 
+/// The HTTP transport a [`RestateConnection`] sends through, and the request
+/// and response vocabulary it speaks.
+pub use lash_http_transport::{
+    ByteStream, HttpMethod, HttpRequest, HttpResponse, HttpResponseBody, HttpTransport,
+};
 pub use restate_sdk;
 
 pub use compat::{
@@ -114,13 +119,15 @@ pub use compat::{
 };
 
 pub use usage_accounting::{
-    LashUsageAccounting, USAGE_ACCOUNTING_WIRE_VERSION, UsageAccountingSettle,
-    UsageExecutionRetirement, UsageOwnerDrain, UsageOwnerRetiredWire,
+    LashUsageAccounting, ServeLashUsageAccounting, USAGE_ACCOUNTING_WIRE_VERSION,
+    UsageAccountingSettle, UsageExecutionRetirement, UsageOwnerDrain, UsageOwnerRetiredWire,
 };
 
 pub use controller::{
-    EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+    EFFECT_JOURNAL_VERSION, GroupChildCancelArm, GroupChildCancelRace,
+    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, ProcessCancelRace, ProcessWorkflowStartFailure,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
+    SignalWaitOutcome,
 };
 pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{
@@ -129,8 +136,9 @@ pub use durable_wait::{
     RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
     RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
-    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
-    RestateDurableWaitSettleRequest,
+    RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
+    RestateDurableWaitResolveResponse, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
+    RestateTurnGatePeek,
 };
 pub use effect_group::{
     EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
@@ -147,6 +155,11 @@ pub use effect_group::{
     EffectGroupRegisterRefusalResponse, EffectGroupRetireResponse,
     EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
     EffectGroupSettlementTerminal, EffectGroupShape,
+};
+pub use effect_group::{
+    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupCommittedFinal,
+    EffectGroupNotice, EffectGroupNotification, EffectGroupServedRank, EffectGroupStateLiveRecord,
 };
 pub use effect_host::RestateEffectHost;
 pub use engine::{RestateConfig, RestateEngine, RestateRegistrationError, deployment_path};

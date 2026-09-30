@@ -264,7 +264,7 @@ impl PluginOperationRegistrations<'_> {
             .add_plugin_operation(PluginOperationRegistration::query(spec, handler))
     }
 
-    pub fn command(
+    pub(crate) fn command(
         self,
         spec: PluginOperationSpec,
         handler: PluginCommandHandler,

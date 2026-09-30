@@ -84,17 +84,29 @@ fn is_uncharged_refusal_receipt(outcome: &crate::SessionCommandOutcome) -> bool 
     )
 }
 
+/// Logical payload accounting for one runtime commit, the measurement
+/// [`RuntimeCommit::validate_budget`] checks against its limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeCommitBudgetMeasurement {
+    /// Graph-node rows written by the commit.
     pub graph_rows: usize,
+    /// Attachment-manifest rows stamped as adopted by the commit.
     pub adopted_intent_rows: usize,
+    /// Saturating sum of graph and attachment-adoption rows.
     pub total_rows: usize,
+    /// Persisted JSON encoding of the session configuration, including prompt.
     pub session_config_bytes: usize,
     pub graph_delta_bytes: usize,
+    /// Named-MessagePack size of the hydrated checkpoint.
     pub checkpoint_bytes: usize,
+    /// Raw UTF-8 byte length of the committed attachment ids.
     pub attachment_referrer_bytes: usize,
     pub follow_on_bytes: usize,
+    /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
+    /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
+    /// Saturating sum of the budgeted components.
     pub total_bytes: usize,
 }
 

@@ -1,4 +1,5 @@
 mod tests {
+    use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
     use std::sync::Arc;
 
     use crate::{ProcessId, RuntimeExecutionContext};

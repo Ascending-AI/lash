@@ -20,7 +20,7 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
-use super::llm_outcome::{AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome};
+use super::llm_outcome::{AssistantStreamHookState, LlmStreamRecord};
 use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
 
 /// Effect-specific header whose address is present by construction.
@@ -1080,21 +1080,6 @@ pub struct ToolAttemptEffectOutcome {
     pub capture: ToolAttemptCapture,
 }
 
-/// What one tool child of a durable effect group settled on, unpacked.
-///
-/// The read side of
-/// [`RuntimeEffectOutcome::ToolInvocation`](RuntimeEffectOutcome::ToolInvocation).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolInvocationEffectOutcome {
-    /// The terminal the per-leaf coordinator produced for this child.
-    pub outcome: crate::tool_dispatch::ToolDispatchOutcome,
-    /// The child's complete semantic record: realized intent outcomes, realized
-    /// started-process identities, trigger receipts, committed checkpoint
-    /// messages, per-attempt usage deltas and the resolved `ModelToolReturn`
-    /// (ADR 0099 §6, §13).
-    pub settlement: ToolSettlement,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolAttemptLaunch {
@@ -1526,53 +1511,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_llm_call(self) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
-        match self {
-            Self::LlmCall {
-                result,
-                text_streamed,
-                call_record,
-                stream,
-            } => Ok(RuntimeLlmCallOutcome {
-                result: *result,
-                text_streamed,
-                call_record,
-                stream: *stream,
-            }),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::LlmCall,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_assistant_response_hooks(
-        self,
-    ) -> Result<RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError> {
-        match self {
-            Self::AssistantResponseHooks { response, events } => Ok((*response, events)),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::AssistantResponseHooks,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_direct_response(
-        self,
-    ) -> Result<RuntimeDirectLlmOutcome, RuntimeEffectControllerError> {
-        match self {
-            Self::Direct {
-                result,
-                call_record,
-            } => Ok((*result, call_record)),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::Direct,
-                other.kind(),
-            )),
-        }
-    }
-
     pub(crate) fn into_tool_attempt_effect(
         self,
     ) -> Result<ToolAttemptEffectOutcome, RuntimeEffectControllerError> {
@@ -1597,36 +1535,8 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// Unpacks a settled tool child of a durable effect group.
-    ///
-    /// Validates the settlement rather than trusting it: a journal entry
-    /// written by a build whose settlement format this build cannot read
-    /// completely is refused here, where the outcome is consumed, instead of
-    /// being served to an opener as a prefix of what its child actually
-    /// produced.
-    pub fn into_tool_invocation_effect(
-        self,
-    ) -> Result<ToolInvocationEffectOutcome, RuntimeEffectControllerError> {
-        match self {
-            Self::ToolInvocation {
-                outcome,
-                settlement,
-            } => {
-                settlement.validate()?;
-                Ok(ToolInvocationEffectOutcome {
-                    outcome: *outcome,
-                    settlement: *settlement,
-                })
-            }
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::ToolInvocation,
-                other.kind(),
-            )),
-        }
-    }
-
     /// Unpacks the recorded incorporation prefix of a durable effect group.
-    pub fn into_incorporate_group_settlements(
+    pub(crate) fn into_incorporate_group_settlements(
         self,
     ) -> Result<Vec<super::group::IncorporatedGroupRank>, RuntimeEffectControllerError> {
         match self {
@@ -1644,7 +1554,7 @@ impl RuntimeEffectOutcome {
     /// by a build whose presentation format this build cannot read completely
     /// is refused here, where the outcome is consumed, instead of serving the
     /// model a prefix of what the chain produced.
-    pub fn into_tool_presentation(
+    pub(crate) fn into_tool_presentation(
         self,
     ) -> Result<super::ToolPresentation, RuntimeEffectControllerError> {
         match self {
@@ -1685,7 +1595,7 @@ impl RuntimeEffectOutcome {
 
     /// Extracts the admission an emission recorded for one trigger delivery
     /// (FIG-4297).
-    pub fn into_trigger_delivery_admission(
+    pub(crate) fn into_trigger_delivery_admission(
         self,
     ) -> Result<crate::TriggerDeliveryAdmission, RuntimeEffectControllerError> {
         match self {
@@ -1716,25 +1626,6 @@ impl RuntimeEffectOutcome {
             Self::Checkpoint { result, admitted } => Ok((result, *admitted)),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Checkpoint,
-                other.kind(),
-            )),
-        }
-    }
-
-    /// The sync's result and the tool surface its record names.
-    pub fn into_sync_execution_environment(
-        self,
-    ) -> Result<ServedExecutionEnvironmentSync, RuntimeEffectControllerError> {
-        match self {
-            Self::SyncExecutionEnvironment {
-                result,
-                tool_surface,
-            } => Ok(ServedExecutionEnvironmentSync {
-                result,
-                tool_surface,
-            }),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::SyncExecutionEnvironment,
                 other.kind(),
             )),
         }

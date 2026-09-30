@@ -177,174 +177,6 @@ impl WorkerPool {
     pub fn measured_cpu(&self) -> Duration {
         Duration::from_nanos(lock(&self.0.state).measured_cpu_nanos)
     }
-    /// Reserve the complete encoded input size, including the frame envelope.
-    /// Queue admission checks both items and bytes before retaining any input.
-    pub fn checkout(
-        &self,
-        queued_bytes: usize,
-        owner_epoch: OwnerEpoch,
-        frame_epoch: FrameEpoch,
-        budget: ExecutionBudget,
-    ) -> Result<Checkout, PoolError> {
-        #[cfg(feature = "testing")]
-        let checkout_started = Instant::now();
-        let queue_started = Instant::now();
-        let deadline = Instant::now() + self.0.config.deadlines.checkout;
-        let mut state = lock(&self.0.state);
-        let mut queued = false;
-        loop {
-            if queued && Instant::now() >= deadline {
-                #[cfg(feature = "testing")]
-                self.0
-                    .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
-                self.0
-                    .unqueue(&mut state, queued, queued_bytes, queue_started);
-                return Err(PoolError::CheckoutTimedOut);
-            }
-            if state.failed {
-                self.0
-                    .unqueue(&mut state, queued, queued_bytes, queue_started);
-                return Err(PoolError::RestartStorm);
-            }
-            let worker = if let Some(worker) = state.idle.pop() {
-                Some(worker)
-            } else if state.workers < self.0.config.max_workers {
-                state.workers += 1;
-                self.0
-                    .unqueue(&mut state, queued, queued_bytes, queue_started);
-                queued = false;
-                drop(state);
-                let spawned = self.0.spawn_ready_until(deadline);
-                state = lock(&self.0.state);
-                match spawned {
-                    Ok(worker) if !state.failed => Some(worker),
-                    Ok(mut worker) => {
-                        drop(state);
-                        worker.terminate();
-                        state = lock(&self.0.state);
-                        state.workers -= 1;
-                        return Err(PoolError::RestartStorm);
-                    }
-                    Err(error) => {
-                        #[cfg(feature = "testing")]
-                        if matches!(
-                            error,
-                            PoolError::Infrastructure(
-                                InfrastructureOutcome::WorkerUnresponsive { .. }
-                            )
-                        ) {
-                            self.0.report_deadline(
-                                &state,
-                                "checkout",
-                                checkout_started.elapsed(),
-                                &budget,
-                            );
-                        }
-                        state.workers -= 1;
-                        self.0.failed(&mut state);
-                        self.0.available.notify_all();
-                        return Err(if state.failed {
-                            PoolError::RestartStorm
-                        } else {
-                            error
-                        });
-                    }
-                }
-            } else {
-                None
-            };
-            if let Some(mut worker) = worker {
-                self.0
-                    .unqueue(&mut state, queued, queued_bytes, queue_started);
-                if let Err(error) = budget.admit(&self.0.config) {
-                    #[cfg(feature = "testing")]
-                    if matches!(
-                        error,
-                        PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
-                            limit: WorkerLimit::Deadline
-                        })
-                    ) {
-                        self.0
-                            .report_deadline(&state, "cumulative_cpu", Duration::ZERO, &budget);
-                    }
-                    state.idle.push(worker);
-                    self.0.available.notify_all();
-                    return Err(error);
-                }
-                let lease = ExecutionLease(state.next_lease);
-                state.next_lease = state
-                    .next_lease
-                    .checked_add(1)
-                    .ok_or_else(|| PoolError::protocol("lease space exhausted"))?;
-                {
-                    let mut measurements = lock(&self.0.measurements);
-                    measurements.counters.checkouts += 1;
-                    if worker.used {
-                        measurements.counters.reuses += 1;
-                    }
-                }
-                worker.used = true;
-                let credited_cpu = worker.cpu_nanos;
-                return Ok(Checkout {
-                    #[cfg(feature = "testing")]
-                    admitted_at: Instant::now(),
-                    #[cfg(feature = "testing")]
-                    measured_cpu_receipt: std::cell::Cell::new(credited_cpu),
-                    pool: self.0.clone(),
-                    worker: Some(worker),
-                    budget,
-                    credited_cpu,
-                    outgoing: MessageFence::new(lease, owner_epoch, frame_epoch),
-                    incoming: MessageFence::new(lease, owner_epoch, frame_epoch),
-                    reservation: queued_bytes,
-                    started: false,
-                    pending: None,
-                    resettable: false,
-                    owner: None,
-                    observations: Vec::new(),
-                    observation_budget: None,
-                    observed_bytes: 0,
-                    execution_class: None,
-                    execution_recorded: false,
-                });
-            }
-            if !queued {
-                if state.queued_items >= self.0.config.max_queue_items
-                    || queued_bytes
-                        > self
-                            .0
-                            .config
-                            .max_queue_bytes
-                            .saturating_sub(state.queued_bytes)
-                {
-                    return Err(PoolError::QueueFull {
-                        bytes: queued_bytes,
-                    });
-                }
-                lock(&self.0.measurements).counters.queue_waits += 1;
-                state.queued_items += 1;
-                state.queued_bytes += queued_bytes;
-                queued = true;
-            }
-            let Some(wait) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|d| !d.is_zero())
-            else {
-                #[cfg(feature = "testing")]
-                self.0
-                    .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
-                self.0
-                    .unqueue(&mut state, queued, queued_bytes, queue_started);
-                return Err(PoolError::CheckoutTimedOut);
-            };
-            let (next, _) = self
-                .0
-                .available
-                .wait_timeout(state, wait)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state = next;
-        }
-    }
 }
 
 impl Pool {
@@ -1012,5 +844,201 @@ impl Checkout {
 impl Drop for Checkout {
     fn drop(&mut self) {
         self.discard_for(false);
+    }
+}
+
+/// Runtime-only worker checkout.
+///
+/// The VM service checks a worker out for each execution; a host only starts
+/// and prewarms the pool. The trait is not part of the lash facade, and its
+/// impl is hidden from docs because it is support plumbing, not host surface
+/// (ADR 0051).
+pub mod runtime_ops {
+    use super::*;
+
+    pub trait WorkerPoolRuntimeOps {
+        /// Reserve the complete encoded input size, including the frame envelope.
+        /// Queue admission checks both items and bytes before retaining any input.
+        fn checkout(
+            &self,
+            queued_bytes: usize,
+            owner_epoch: OwnerEpoch,
+            frame_epoch: FrameEpoch,
+            budget: ExecutionBudget,
+        ) -> Result<Checkout, PoolError>;
+    }
+
+    #[doc(hidden)]
+    impl WorkerPoolRuntimeOps for WorkerPool {
+        fn checkout(
+            &self,
+            queued_bytes: usize,
+            owner_epoch: OwnerEpoch,
+            frame_epoch: FrameEpoch,
+            budget: ExecutionBudget,
+        ) -> Result<Checkout, PoolError> {
+            #[cfg(feature = "testing")]
+            let checkout_started = Instant::now();
+            let queue_started = Instant::now();
+            let deadline = Instant::now() + self.0.config.deadlines.checkout;
+            let mut state = lock(&self.0.state);
+            let mut queued = false;
+            loop {
+                if queued && Instant::now() >= deadline {
+                    #[cfg(feature = "testing")]
+                    self.0
+                        .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
+                    self.0
+                        .unqueue(&mut state, queued, queued_bytes, queue_started);
+                    return Err(PoolError::CheckoutTimedOut);
+                }
+                if state.failed {
+                    self.0
+                        .unqueue(&mut state, queued, queued_bytes, queue_started);
+                    return Err(PoolError::RestartStorm);
+                }
+                let worker = if let Some(worker) = state.idle.pop() {
+                    Some(worker)
+                } else if state.workers < self.0.config.max_workers {
+                    state.workers += 1;
+                    self.0
+                        .unqueue(&mut state, queued, queued_bytes, queue_started);
+                    queued = false;
+                    drop(state);
+                    let spawned = self.0.spawn_ready_until(deadline);
+                    state = lock(&self.0.state);
+                    match spawned {
+                        Ok(worker) if !state.failed => Some(worker),
+                        Ok(mut worker) => {
+                            drop(state);
+                            worker.terminate();
+                            state = lock(&self.0.state);
+                            state.workers -= 1;
+                            return Err(PoolError::RestartStorm);
+                        }
+                        Err(error) => {
+                            #[cfg(feature = "testing")]
+                            if matches!(
+                                error,
+                                PoolError::Infrastructure(
+                                    InfrastructureOutcome::WorkerUnresponsive { .. }
+                                )
+                            ) {
+                                self.0.report_deadline(
+                                    &state,
+                                    "checkout",
+                                    checkout_started.elapsed(),
+                                    &budget,
+                                );
+                            }
+                            state.workers -= 1;
+                            self.0.failed(&mut state);
+                            self.0.available.notify_all();
+                            return Err(if state.failed {
+                                PoolError::RestartStorm
+                            } else {
+                                error
+                            });
+                        }
+                    }
+                } else {
+                    None
+                };
+                if let Some(mut worker) = worker {
+                    self.0
+                        .unqueue(&mut state, queued, queued_bytes, queue_started);
+                    if let Err(error) = budget.admit(&self.0.config) {
+                        #[cfg(feature = "testing")]
+                        if matches!(
+                            error,
+                            PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+                                limit: WorkerLimit::Deadline
+                            })
+                        ) {
+                            self.0.report_deadline(
+                                &state,
+                                "cumulative_cpu",
+                                Duration::ZERO,
+                                &budget,
+                            );
+                        }
+                        state.idle.push(worker);
+                        self.0.available.notify_all();
+                        return Err(error);
+                    }
+                    let lease = ExecutionLease(state.next_lease);
+                    state.next_lease = state
+                        .next_lease
+                        .checked_add(1)
+                        .ok_or_else(|| PoolError::protocol("lease space exhausted"))?;
+                    {
+                        let mut measurements = lock(&self.0.measurements);
+                        measurements.counters.checkouts += 1;
+                        if worker.used {
+                            measurements.counters.reuses += 1;
+                        }
+                    }
+                    worker.used = true;
+                    let credited_cpu = worker.cpu_nanos;
+                    return Ok(Checkout {
+                        #[cfg(feature = "testing")]
+                        admitted_at: Instant::now(),
+                        #[cfg(feature = "testing")]
+                        measured_cpu_receipt: std::cell::Cell::new(credited_cpu),
+                        pool: self.0.clone(),
+                        worker: Some(worker),
+                        budget,
+                        credited_cpu,
+                        outgoing: MessageFence::new(lease, owner_epoch, frame_epoch),
+                        incoming: MessageFence::new(lease, owner_epoch, frame_epoch),
+                        reservation: queued_bytes,
+                        started: false,
+                        pending: None,
+                        resettable: false,
+                        owner: None,
+                        observations: Vec::new(),
+                        observation_budget: None,
+                        observed_bytes: 0,
+                        execution_class: None,
+                        execution_recorded: false,
+                    });
+                }
+                if !queued {
+                    if state.queued_items >= self.0.config.max_queue_items
+                        || queued_bytes
+                            > self
+                                .0
+                                .config
+                                .max_queue_bytes
+                                .saturating_sub(state.queued_bytes)
+                    {
+                        return Err(PoolError::QueueFull {
+                            bytes: queued_bytes,
+                        });
+                    }
+                    lock(&self.0.measurements).counters.queue_waits += 1;
+                    state.queued_items += 1;
+                    state.queued_bytes += queued_bytes;
+                    queued = true;
+                }
+                let Some(wait) = deadline
+                    .checked_duration_since(Instant::now())
+                    .filter(|d| !d.is_zero())
+                else {
+                    #[cfg(feature = "testing")]
+                    self.0
+                        .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
+                    self.0
+                        .unqueue(&mut state, queued, queued_bytes, queue_started);
+                    return Err(PoolError::CheckoutTimedOut);
+                };
+                let (next, _) = self
+                    .0
+                    .available
+                    .wait_timeout(state, wait)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state = next;
+            }
+        }
     }
 }

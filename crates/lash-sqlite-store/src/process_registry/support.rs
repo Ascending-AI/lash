@@ -317,30 +317,35 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    /// Open a process registry.
-    pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(
+    /// Open a standalone registry at `path`, outside any store set.
+    ///
+    /// Test-only: a standalone registry has no trigger store attached, so it
+    /// cannot check a delivery's start against the delivery's binding
+    /// (FIG-4369). Hosts get their registry from a store set
+    /// ([`SqliteStoreSet::process_registry`](crate::SqliteStoreSet::process_registry)).
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
+    pub async fn open_standalone_for_testing(path: &Path) -> tokio_rusqlite::Result<Self> {
+        Self::open_standalone_with_clock_for_testing(
             path,
             Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
 
-    pub async fn open_with_clock(
+    /// [`Self::open_standalone_for_testing`] reading time from `clock`.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
+    pub async fn open_standalone_with_clock_for_testing(
         path: &Path,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
-        Self::open_at(
-            &DatabaseLocation::standalone_file(path),
-            clock,
-            #[cfg(feature = "testing")]
-            None,
-        )
-        .await
+        Self::open_at(&DatabaseLocation::standalone_file(path), clock, None).await
     }
 
     #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub async fn open_with_fault_injector_for_testing(
         path: &Path,
         fault_injector: crate::testing::SqliteFaultInjector,

@@ -1,5 +1,7 @@
 //! The asynchronous broker's slots over the synchronous, owned process pool.
 
+use crate::WorkerPoolRuntimeOps as _;
+use crate::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_broker::{CheckoutRefusal, WorkerCheckout, WorkerRead, WorkerSlots, WorkerTransport};
 use lash_vm_protocol::*;
 use tokio::sync::mpsc;

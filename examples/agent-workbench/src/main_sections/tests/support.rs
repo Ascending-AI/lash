@@ -272,12 +272,13 @@ pub(crate) async fn standalone_process_registry(
 ) -> Arc<dyn lash::process::ProcessRegistry> {
     let sessions = data_dir.join("lash-sessions");
     std::fs::create_dir_all(&sessions).expect("create the sessions root");
-    let registry = lash_sqlite_store::SqliteProcessRegistry::open_with_clock(
-        &sessions.join(format!("standalone-registry-{}.db", uuid::Uuid::new_v4())),
-        clock,
-    )
-    .await
-    .expect("open a standalone process registry");
+    let registry =
+        lash_sqlite_store::SqliteProcessRegistry::open_standalone_with_clock_for_testing(
+            &sessions.join(format!("standalone-registry-{}.db", uuid::Uuid::new_v4())),
+            clock,
+        )
+        .await
+        .expect("open a standalone process registry");
     Arc::new(match wake_delivery {
         Some(config) => registry.with_wake_delivery_config(config),
         None => registry,

@@ -17,8 +17,8 @@ use crate::runtime::effect::CompactionBase;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeError,
+    RuntimeErrorCode, ScopedEffectController,
 };
 
 /// The replay key of the base the run's `ordinal`th compaction records.
@@ -68,7 +68,7 @@ impl LashRuntime {
                         session: session_id,
                     },
                 ),
-                RuntimeEffectLocalExecutor::owned_runner(Box::new(runner), None),
+                lash_core_execution::core_internal::owned_runner_executor(Box::new(runner), None),
             )
             .await
             .and_then(RuntimeEffectOutcome::into_compaction_base)

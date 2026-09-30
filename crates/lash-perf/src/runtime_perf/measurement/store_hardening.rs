@@ -89,9 +89,8 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_memory_stores = sqlite_memory_stores().await?;
             let memory_factory = sqlite_memory_stores.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
-            let sqlite_factory = lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
-                .await?
-                .session_store_factory();
+            let sqlite_stores = lash_sqlite_store::SqliteStoreSet::open(&sqlite_root).await?;
+            let sqlite_factory = sqlite_stores.session_store_factory();
             let postgres = lash_postgres_store::PostgresStorage::connect_with(
                 postgres_database.url(),
                 lash_postgres_store::PostgresStoreConfig {
@@ -121,12 +120,8 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
 
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
                 sqlite_memory_stores.process_registry();
-            let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
-                lash_sqlite_store::SqliteProcessRegistry::open(
-                    &sqlite_root.join("process-registry.sqlite"),
-                )
-                .await?,
-            );
+            let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> =
+                sqlite_stores.process_registry();
             let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
                 Arc::new(postgres.process_registry());
             Ok((

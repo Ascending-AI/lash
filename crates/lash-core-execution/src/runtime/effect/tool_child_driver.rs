@@ -192,12 +192,6 @@ impl ToolChildHost {
         Arc::clone(self)
     }
 
-    /// The registry the turn and process sites register their openers in.
-    #[must_use]
-    pub fn openers(&self) -> &Arc<LiveOpenerRegistry> {
-        &self.openers
-    }
-
     /// Called by a handler-driven engine when it installs this host. Its
     /// child invocation, rather than the opener, releases each local pin.
     pub fn enable_handler_group_pinning(&self) {
@@ -223,34 +217,6 @@ impl ToolChildHost {
             pinned
                 .entry((group_key.to_string(), position))
                 .or_insert_with(|| context.clone());
-        }
-    }
-
-    /// Installs the deployment's builder of a child's context for when its
-    /// opener is not live here (FIG-3712).
-    ///
-    /// One host has one answer, as it has one resolver: while two distinct
-    /// sources are alive, which wiring a child ran under would depend on
-    /// which embedder was built last, so neither is used. The host is
-    /// ambiguous, and a child with no live opener here is refused, typed,
-    /// until only one source is left. A source that has been dropped no longer
-    /// counts. Installing the same source again changes nothing.
-    pub fn install_context_source(
-        &self,
-        source: &Arc<dyn ToolChildContextSource>,
-    ) -> ContextSourceInstall {
-        let mut installed = self.context_source.lock_recover();
-        installed.retain(|existing| existing.strong_count() > 0);
-        if !installed.iter().any(|existing| {
-            existing
-                .upgrade()
-                .is_some_and(|existing| Arc::ptr_eq(&existing, source))
-        }) {
-            installed.push(Arc::downgrade(source));
-        }
-        match installed.len() {
-            1 => ContextSourceInstall::Sole,
-            live => ContextSourceInstall::Ambiguous { live },
         }
     }
 
@@ -564,7 +530,7 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
         match &envelope.command {
             RuntimeEffectCommand::ToolInvocation { request } => {
                 let opener = self.child_opener(&request.scope.opener, envelope)?;
-                Some(RuntimeEffectLocalExecutor::owned_runner(
+                Some(crate::runtime::effect::executor::owned_runner_executor(
                     Box::new(ToolChildRunner {
                         host: self.clone(),
                         opener,
@@ -622,76 +588,6 @@ impl ToolChildHost {
     ) -> Arc<Self> {
         let _ = self.law_fallback.set(fallback);
         Arc::clone(self)
-    }
-}
-
-#[cfg(feature = "testing")]
-impl ToolChildHost {
-    /// A testing seam (FIG-3429): a runner bound to `context` at *resolution*
-    /// time — the shape an authority leak takes when the group-open selector
-    /// hands a retained child whatever the reoffering successor staged under
-    /// its replay key.
-    ///
-    /// [`ToolChildRunner`] deliberately does not do this: it re-derives the
-    /// live context from the envelope's recorded opener at the execution
-    /// boundary, which is the binding the differential exists to prove.
-    /// Staging this runner for an offered child and letting the `KeyOnly`
-    /// offered-child selection reuse it is how the oracle demonstrates what
-    /// the retained-envelope check prevents: the retained request's work
-    /// executing under the *stager's* plugins, provider, completions,
-    /// processes and cancellation token.
-    pub fn executor_bound_to(
-        &self,
-        context: LiveOpenerContext,
-    ) -> RuntimeEffectLocalExecutor<'static> {
-        RuntimeEffectLocalExecutor::owned_runner(
-            Box::new(BoundToolChildRunner {
-                host: self.clone(),
-                context,
-            }),
-            None,
-        )
-    }
-}
-
-/// The resolution-bound twin of [`ToolChildRunner`], testing-only: the live
-/// context is captured when the executor is minted rather than re-derived
-/// from the envelope's recorded opener at execution. That is precisely the
-/// leak — "which context" answered at resolution instead of "may this runner
-/// serve this request" answered at execution — so nothing outside
-/// `#[cfg(feature = "testing")]` may build one.
-#[cfg(feature = "testing")]
-struct BoundToolChildRunner {
-    host: ToolChildHost,
-    context: LiveOpenerContext,
-}
-
-#[cfg(feature = "testing")]
-#[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for BoundToolChildRunner {
-    async fn execute(
-        self: Box<Self>,
-        envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let binding = envelope_group_child_binding(&envelope)?;
-        let RuntimeEffectCommand::ToolInvocation { request } = envelope.command else {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                "the tool-child driver was handed an envelope that is not a tool invocation",
-            ));
-        };
-        Box::pin(run_tool_child(
-            &self.host,
-            &ChildOpenerContext::Live(self.context.clone()),
-            &request,
-            ChildTerminal::Drive {
-                child: envelope.invocation.address.clone(),
-            },
-            self.host
-                .child_controller(&request.scope.admitted_scope, binding)?,
-        ))
-        .await
     }
 }
 
@@ -1814,3 +1710,57 @@ mod tests;
 
 #[cfg(test)]
 mod rebuild_tests;
+
+/// Runtime-only wiring of a [`ToolChildHost`]: the live-opener registry the
+/// turn and process sites register in, and the deployment context source the
+/// `lash` facade installs. `core_internal` re-exports the trait and the
+/// facade does not; the impl is hidden from docs because it is support
+/// plumbing, not effect-host surface (ADR 0051).
+pub mod runtime_ops {
+    use super::*;
+
+    pub trait ToolChildHostRuntimeOps {
+        /// The registry the turn and process sites register their openers in.
+        #[must_use]
+        fn openers(&self) -> &Arc<LiveOpenerRegistry>;
+
+        /// Installs the deployment's builder of a child's context for when its
+        /// opener is not live here (FIG-3712).
+        ///
+        /// One host has one answer, as it has one resolver: while two distinct
+        /// sources are alive, which wiring a child ran under would depend on
+        /// which embedder was built last, so neither is used. The host is
+        /// ambiguous, and a child with no live opener here is refused, typed,
+        /// until only one source is left. A source that has been dropped no longer
+        /// counts. Installing the same source again changes nothing.
+        fn install_context_source(
+            &self,
+            source: &Arc<dyn ToolChildContextSource>,
+        ) -> ContextSourceInstall;
+    }
+
+    #[doc(hidden)]
+    impl ToolChildHostRuntimeOps for ToolChildHost {
+        fn openers(&self) -> &Arc<LiveOpenerRegistry> {
+            &self.openers
+        }
+        fn install_context_source(
+            &self,
+            source: &Arc<dyn ToolChildContextSource>,
+        ) -> ContextSourceInstall {
+            let mut installed = self.context_source.lock_recover();
+            installed.retain(|existing| existing.strong_count() > 0);
+            if !installed.iter().any(|existing| {
+                existing
+                    .upgrade()
+                    .is_some_and(|existing| Arc::ptr_eq(&existing, source))
+            }) {
+                installed.push(Arc::downgrade(source));
+            }
+            match installed.len() {
+                1 => ContextSourceInstall::Sole,
+                live => ContextSourceInstall::Ambiguous { live },
+            }
+        }
+    }
+}

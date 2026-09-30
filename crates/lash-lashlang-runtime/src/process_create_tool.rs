@@ -12,6 +12,7 @@
 //! binds it holds its module, a `continue_as` seed carries it, and the frame's
 //! end or its session's deletion releases it (ADR 0113 §3.1, §6).
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use serde_json::Value;
 
 use lash_core::{

@@ -66,17 +66,17 @@ use super::{HandleShared, RootHandle, SendBuilder, SendHandle, SendOutcome, Send
 use crate::support::{EmbedError, TurnActivitySink};
 use crate::{DurableSession, SessionBuilder, SessionCreation};
 
-mod sealed {
-    pub trait WaitContext {}
-}
-
 /// A Restate handler context that holds no exclusive object lock, and so may
 /// wait for a root (see the module docs on the dependency cycle).
-pub trait RestateWaitContext<'ctx>: sealed::WaitContext + RestateControllerContext<'ctx> {}
+///
+/// Implemented here for exactly the Restate SDK's non-exclusive contexts.
+/// The orphan rule keeps a host from marking the SDK's exclusive
+/// `ObjectContext` as one, which is the whole invariant, so the trait carries
+/// no seal a host could not name.
+pub trait RestateWaitContext<'ctx>: RestateControllerContext<'ctx> {}
 
 macro_rules! wait_context {
     ($($context:ident),* $(,)?) => {$(
-        impl sealed::WaitContext for $context<'_> {}
         impl<'ctx> RestateWaitContext<'ctx> for $context<'ctx> {}
     )*};
 }

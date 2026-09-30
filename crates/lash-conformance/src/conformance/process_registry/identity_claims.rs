@@ -442,15 +442,12 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
         SessionId::from("execution-owner"),
         crate::TurnId::from("original-turn"),
     );
-    let key = crate::StartKey::for_tool_intent(
-        crate::DERIVED_START_KEYS,
-        &crate::derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(SessionId::from("execution-owner")),
-            "original-turn",
-            &crate::ToolCallId::fixture("scope-environment"),
-            0,
-        ),
-    );
+    let key = crate::DERIVED_START_KEYS.for_tool_intent(&crate::derive_tool_intent_identity(
+        &crate::RuntimeOwner::Session(SessionId::from("execution-owner")),
+        "original-turn",
+        &crate::ToolCallId::fixture("scope-environment"),
+        0,
+    ));
     let mut engine = registration("scope-environment");
     engine.input = crate::ProcessInput::Engine {
         kind: "scope-environment".into(),

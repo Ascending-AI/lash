@@ -63,3 +63,8 @@ pub mod sources {
     /// Standard-compaction compaction passes.
     pub const COMPACTION: &str = "compaction";
 }
+
+// The vocabulary this module's signatures name (the facade-completeness rule).
+pub use lash_core::usage_accounting::{
+    UsageEffectKey, UsageFactIdentity, UsageFactKind, UsageRunId,
+};

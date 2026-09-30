@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_execution::core_internal::ToolChildHostRuntimeOps as _;
 
 #[cfg(test)]
 mod context_tests;

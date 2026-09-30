@@ -439,8 +439,7 @@ mod tests {
         let first_ref = first_env.stable_ref().expect("first environment reference");
         let retry_ref = retry_env.stable_ref().expect("retry environment reference");
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
-        let key = crate::StartKey::for_tool_intent(
-            crate::StartKeyDerivation::LASH_START_PATHS,
+        let key = crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(
             &crate::derive_tool_intent_identity(
                 &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
                 "runtime",
@@ -680,8 +679,7 @@ mod tests {
     #[tokio::test]
     async fn an_engine_trigger_delivery_names_its_tool_call_by_the_process_it_starts() {
         let delivery = |occurrence: &str| {
-            crate::StartKey::for_trigger_delivery(
-                crate::StartKeyDerivation::LASH_START_PATHS,
+            crate::StartKeyDerivation::LASH_START_PATHS.for_trigger_delivery(
                 occurrence,
                 "subscription",
                 "incarnation",
@@ -746,8 +744,7 @@ mod tests {
     #[tokio::test]
     async fn a_changed_content_retry_reclaims_its_unadopted_start_artifact() {
         let key = "changed-content-start";
-        let start_key = crate::StartKey::for_trigger_delivery(
-            crate::StartKeyDerivation::LASH_START_PATHS,
+        let start_key = crate::StartKeyDerivation::LASH_START_PATHS.for_trigger_delivery(
             key,
             "subscription",
             "incarnation",

@@ -491,57 +491,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::tool_dispatch::resolve_tool_argument_projection_policy(&self.dispatch, name)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "code execution bridge carries explicit per-turn runtime dependencies"
-    )]
-    pub fn new(
-        dispatch: Arc<ToolDispatchContext<'run>>,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-        attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        chronological_projection: Arc<crate::ChronologicalProjection>,
-        turn_context: crate::TurnContext,
-    ) -> Self {
-        Self {
-            dispatch,
-            tool_children: None,
-            process_env_store,
-            attachment_store,
-            chronological_projection,
-            turn_context,
-            live_tool_catalog: None,
-            // This build's own epoch until the caller binds its store's
-            // recorded `F` with `with_fleet_format`, as every context over a
-            // durable store must (the session's and the process runner's).
-            fleet_format: crate::FleetFormat::current(),
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ),
-            process_execution: None,
-            started_process_ids: Arc::default(),
-            nested_effect_error: Arc::default(),
-            incorporation_ledger: Arc::default(),
-            opener_groups: Arc::default(),
-            unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
-            parent_invocation: None,
-            turn_phase_probe: None,
-            cancellation_token: None,
-            token_is_lent_stop: false,
-            turn_cancel: RecordedTurnCancel::default(),
-            observe_turn_cancel: true,
-            turn_cancel_scope: None,
-            tracing: None,
-            code_block_graph_key: None,
-            issuing_language_node_id: None,
-            process_work: None,
-            #[cfg(any(test, feature = "testing"))]
-            live_opener_guard: None,
-            #[cfg(any(test, feature = "testing"))]
-            tool_child_host: None,
-        }
-    }
-
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
             dispatch: Arc::new(self.dispatch.to_static()?),
@@ -690,18 +639,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         context
     }
 
-    /// Adds sources this context was built from that have no recorded form:
-    /// what the embedder's open supplied and the turn's context overlay. A
-    /// group tool child this context opens records them (FIG-3712).
-    #[must_use]
-    pub fn with_unrecorded_session_sources(
-        mut self,
-        sources: crate::runtime::effect::UnrecordedSessionSources,
-    ) -> Self {
-        self.unrecorded_sources = self.unrecorded_sources.union(sources);
-        self
-    }
-
     /// The fleet-format generation this context's durable writers emit —
     /// `F` as the bound store recorded it, or this build's own generation
     /// where the context holds no store (FIG-3796).
@@ -715,20 +652,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     #[must_use]
     pub fn with_fleet_format(mut self, fleet_format: crate::FleetFormat) -> Self {
         self.fleet_format = fleet_format;
-        self
-    }
-
-    /// Overrides the dispatch's observation sink, for tests and hosts that
-    /// probe the emitted stream directly.
-    pub fn with_observer(mut self, observer: Arc<dyn crate::engine::ObservationSink>) -> Self {
-        let mut dispatch = (*self.dispatch).clone();
-        dispatch.observer = observer;
-        self.dispatch = Arc::new(dispatch);
-        self
-    }
-
-    pub fn with_tracing(mut self, tracing: Option<RuntimeExecutionTracing>) -> Self {
-        self.tracing = tracing;
         self
     }
 
@@ -813,7 +736,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// Retains a live-opener registration for this context's lifetime (test
-    /// and conformance contexts only).
+    /// and conformance contexts only). Hidden from docs: test support, not
+    /// code-executor surface.
+    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn with_live_opener_guard(
         mut self,
@@ -825,7 +750,9 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Retains the effect host this context's tool children route through —
     /// the `ToolChildHost` resolver holds it weakly (test and conformance
-    /// contexts only).
+    /// contexts only). Hidden from docs: test support, not code-executor
+    /// surface.
+    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn with_tool_child_host(mut self, host: Arc<dyn crate::EffectHost>) -> Self {
         self.tool_child_host = Some(host);
@@ -855,30 +782,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_recorded_render(mut self, recorded: crate::RecordedRender) -> Self {
         self.execution_env_spec.render = Some(recorded);
-        self
-    }
-
-    pub fn with_process_execution(
-        mut self,
-        process_id: ProcessId,
-        registration: &crate::ProcessRegistration,
-        event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
-    ) -> Self {
-        // The lineage the process's body starts children under (FIG-3607 R1),
-        // on the dispatch every start made inside this run realizes through.
-        let mut dispatch = (*self.dispatch).clone();
-        if dispatch.process_lineage.is_none() {
-            dispatch.process_lineage = Some(registration.lineage(&process_id));
-        }
-        dispatch.process_originator = Some(registration.provenance.originator.clone());
-        self.dispatch = Arc::new(dispatch);
-        self.process_execution = Some(RuntimeProcessExecution {
-            process_id,
-            originator: registration.provenance.originator.clone(),
-            env_ref: registration.env_ref.clone(),
-            wake_session_id: registration.wake_session_id.clone(),
-            event_context: event_context.into(),
-        });
         self
     }
 
@@ -942,38 +845,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .controller()
             .observe_process_cancel(&self.cancellation_token.clone().unwrap_or_default())
             .await
-    }
-
-    /// Starts this execution's recorded turn-cancel fact: `honoured` is
-    /// whether the turn had already recorded a cancellation when it built
-    /// this execution, `control` is the gate pair a code cell's cancel
-    /// checkpoints peek, and `lent` is the stop the turn lends its tool
-    /// children, fired when the fact advances. The turn driver is the only
-    /// caller.
-    pub fn with_recorded_turn_cancel(
-        mut self,
-        honoured: bool,
-        control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
-        host: Arc<dyn crate::EffectHost>,
-        lent: CancellationToken,
-    ) -> Self {
-        // A tool this execution runs in process cooperates through the same
-        // lent stop its group children get: it fires only when the recorded
-        // fact advances, so a tool's cancel is never a live read of the gate.
-        if self.cancellation_token.is_none() {
-            self.cancellation_token = Some(lent.clone());
-        }
-        let turn_cancel = RecordedTurnCancel {
-            observed: Arc::default(),
-            control: Some(control),
-            host: Some(host),
-            lent: Some(lent),
-        };
-        if honoured {
-            turn_cancel.note();
-        }
-        self.turn_cancel = turn_cancel;
-        self
     }
 
     /// Records that a recorded outcome this execution received cancelled its
@@ -1298,15 +1169,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.env_ref.clone())
-    }
-
-    /// The tool-execution context this run lends its tool calls.
-    ///
-    /// Exposed so the turn path can publish it to the live-opener registry
-    /// (ADR 0099 §3): a tool child of a group this turn opens borrows the live
-    /// half of exactly this context.
-    pub fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>> {
-        &self.dispatch
     }
 
     /// The start context a code-executor's child start draws its lifetime
@@ -1842,3 +1704,12 @@ pub(crate) use correlation::{
 
 #[cfg(test)]
 mod tests;
+
+/// Runtime-only construction and wiring of a [`RuntimeExecutionContext`].
+///
+/// The turn driver and the process runner in `lash-core` build every
+/// execution context; a code executor only consumes one. These members are
+/// that cross-crate construction seam: `lash_core::core_internal` re-exports
+/// the trait, the `lash` facade does not, and the impl is hidden from docs
+/// because it is support plumbing rather than code-executor surface (ADR 0051).
+pub mod runtime_ops;

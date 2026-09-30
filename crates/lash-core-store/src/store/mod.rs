@@ -193,7 +193,7 @@ pub use semantic_boundary::{
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 
-pub use session_view::{CarriesSession, SessionStore};
+pub use session_view::SessionStore;
 pub use state_version::{
     CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,
     resolve_session_state_version,

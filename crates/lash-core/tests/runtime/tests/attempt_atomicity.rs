@@ -20,6 +20,7 @@ use lash_core::ProcessId;
 use lash_core::ProcessRegistrar as _;
 use lash_core::SessionId;
 use lash_core::TurnId;
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_core::plugin::PluginSessionRequest;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

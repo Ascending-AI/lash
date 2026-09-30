@@ -22,6 +22,11 @@ mod tracking;
 mod trigger;
 mod value_refs;
 mod vm_contract;
+/// The VM-protocol vocabulary [`vm_contract_reads`] and
+/// [`vm_contract_versions`] answer in.
+pub use lash_vm_protocol::{
+    OpaqueStateRefusal, VmContract, VmContractComponent, VmContractReads, VmOwner, VmStateKind,
+};
 pub use vm_contract::{VM_CONTINUATION_READ_RANGE, vm_contract_reads, vm_contract_versions};
 mod workflow_graph;
 
@@ -47,7 +52,8 @@ pub use ast::{
     format_type_expr, lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
 };
 pub use ast::{
-    AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, UpdateOperator,
+    AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, ExprChildren,
+    ExprChildrenMut, UpdateOperator,
 };
 
 /// Names of every source Lashlang builtin, in registry order.
@@ -76,9 +82,10 @@ pub use json_schema::{
 pub use lash_sansio::MediaType;
 pub use linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
-    LashlangLanguageFeatures, LinkError, LinkedModule, NamedDataType, NamedDataTypeError,
-    OperationContract, OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding,
-    ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
+    LashlangLanguageFeatures, LinkError, LinkedModule, ModuleInstanceCatalog,
+    ModuleOperationBinding, NamedDataType, NamedDataTypeError, OperationContract,
+    OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
+    TriggerSourceBinding, ValueConstructorBinding,
 };
 #[cfg(test)]
 pub(crate) use runtime::compile_ast;
@@ -99,13 +106,13 @@ pub use runtime::{
     ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
     ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
     RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State,
-    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
-    VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
-    VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
-    VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation,
-    VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError,
-    VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
-    is_javascript_builtin_global, is_process_handle, unwrap_type_value,
+    StringValue, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation,
+    VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError,
+    VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation,
+    VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation,
+    VmProfileContinuation, VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep,
+    VmStepError, VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute,
+    from_json, is_javascript_builtin_global, is_process_handle, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -197,10 +204,11 @@ pub use tracking::{
 };
 pub use trigger::{
     HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, REGISTER_TRIGGER_TOOL_ID,
-    TRIGGER_MODULE_ALIAS, TRIGGER_REGISTRATION_TYPE_NAME, TriggerCompatibility,
-    TriggerCompatibilityError, TriggerCompatibilityRequest, TriggerHostOperation,
-    TriggerInputBinding, TriggerInputTemplate, TriggerListRequest, TriggerPruneRequest,
-    TriggerRegistrationRequest, add_trigger_register_tool_binding, add_trigger_resource_operations,
+    TRIGGER_MODULE_ALIAS, TRIGGER_REGISTRATION_TYPE_NAME, TriggerCallShapeError,
+    TriggerCompatibility, TriggerCompatibilityError, TriggerCompatibilityRequest,
+    TriggerHostOperation, TriggerInputBinding, TriggerInputTemplate, TriggerListCall,
+    TriggerListRequest, TriggerPruneRequest, TriggerRegistrationCall, TriggerRegistrationRequest,
+    TriggerRequestDecodeError, add_trigger_register_tool_binding, add_trigger_resource_operations,
     check_trigger_compatibility, event_type_for_source, is_resolved_type_assignable,
     is_trigger_resource_type, list_call_args, register_call_args,
     register_trigger_tool_input_schema, register_trigger_tool_output_schema,

@@ -7,6 +7,7 @@ use super::{
     LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, ReplayOrdinalsState,
     decode_lashlang_segment_state, segment_continuation_expectation, segment_continuation_owner,
 };
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 /// Answers whether `T` implements `DeserializeOwned`, at compile time: the
 /// inherent constant exists only where the bound holds, and the trait

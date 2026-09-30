@@ -213,7 +213,7 @@ pub enum ToolIntentSubmissionAdmission {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// The declaration carries no process id and no key. Realization derives the
-/// key with [`crate::StartKey::for_tool_intent`] from this declaration's own
+/// key with [`crate::StartKeyDerivation::for_tool_intent`] from this declaration's own
 /// intent identity, so every redrive presents the same key and starts the
 /// same process; the registrar mints the id and the realized result carries
 /// it (FIG-2994, ADR 0107).
@@ -230,10 +230,7 @@ impl StartProcessIntent {
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
         self.declaration
             .clone()
-            .into_request(crate::StartKey::for_tool_intent(
-                crate::StartKeyDerivation::LASH_START_PATHS,
-                identity,
-            ))
+            .into_request(crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(identity))
     }
 }
 
@@ -792,7 +789,7 @@ mod tests {
         /// equal ones.
         ///
         /// The replay key is the start key's preimage for a start declaration
-        /// (`StartKey::for_tool_intent`), so a collision here is two
+        /// (`StartKeyDerivation::for_tool_intent`), so a collision here is two
         /// declarations realizing as one process, and a spurious difference is
         /// a re-submitted declaration starting a second one. The encoder
         /// length-prefixes each field precisely so that `("a", "b")` and
@@ -828,13 +825,9 @@ mod tests {
             let rederived = rederive_tool_intent_identity(&derived);
             proptest::prop_assert_eq!(&derived, &rederived);
             proptest::prop_assert_eq!(
-                crate::StartKey::for_tool_intent(
-                    crate::StartKeyDerivation::LASH_START_PATHS,
-                    &derived
+                crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(&derived
                 ),
-                crate::StartKey::for_tool_intent(
-                    crate::StartKeyDerivation::LASH_START_PATHS,
-                    &rederived
+                crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(&rederived
                 )
             );
         }

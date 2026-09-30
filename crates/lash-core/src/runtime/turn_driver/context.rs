@@ -1,6 +1,8 @@
 use super::*;
 use crate::PluginError;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
+use lash_core_execution::core_internal::ToolChildHostRuntimeOps as _;
 
 impl<'run> RuntimeTurnDriver<'run> {
     /// The scope whose cancellation gate this turn's waits race: always the

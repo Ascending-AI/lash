@@ -73,6 +73,7 @@ pub mod facade_ops {
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
     }
 
+    #[doc(hidden)]
     impl SessionGraphFacadeOps for SessionGraph {
         fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
             self.cache()

@@ -1,5 +1,7 @@
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
+use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps as _;
+use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use std::sync::Arc;
 
 use super::{EmptyToolProvider, MockSessionManager};

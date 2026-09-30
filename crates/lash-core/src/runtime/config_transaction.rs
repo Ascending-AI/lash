@@ -333,7 +333,7 @@ impl LashRuntime {
                         transaction: transaction.id.clone(),
                     },
                 ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(Box::new(runner), None),
+                lash_core_execution::core_internal::owned_runner_executor(Box::new(runner), None),
             )
             .await
             .and_then(crate::RuntimeEffectOutcome::into_config_resolution)

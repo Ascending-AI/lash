@@ -7,7 +7,7 @@ async fn attempt_body(context: &lash::tools::AttemptContext<'_>, request: Proces
     let _ = context.processes().start(request.clone());
     let _ = request.clone().with_start_key(Some(StartKey::for_host("model-chosen")));
     let _ = &request.start_key;
-    let _ = StartKey::for_keyless_host(lash::process::StartKeyDerivation::LASH_START_PATHS);
+    let _ = lash::process::StartKeyDerivation::LASH_START_PATHS.for_keyless_host();
 }
 
 fn main() {}

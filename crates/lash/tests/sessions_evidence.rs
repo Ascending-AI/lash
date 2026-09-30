@@ -20,10 +20,6 @@ fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 fn drain_area_witnesses() {
     // W0001: lash::AwaitEventWaitIdentity [enum]
     type_witness::<lash::AwaitEventWaitIdentity>();
-    // W0002: lash::runtime::LashRuntime::set_turn_phase_probe [function]
-    let _ = lash::runtime::LashRuntime::set_turn_phase_probe;
-    // W0003: lash::runtime::LashRuntime::set_turn_phase_probe_if_changed [function]
-    let _ = lash::runtime::LashRuntime::set_turn_phase_probe_if_changed;
     // W0008: lash::EmbedError::MissingTurnBudget [variant]
     variant_witness(|value: &lash::EmbedError| {
         matches!(value, lash::EmbedError::MissingTurnBudget)

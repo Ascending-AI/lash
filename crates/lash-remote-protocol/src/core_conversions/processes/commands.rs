@@ -33,7 +33,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             // caller's key. A caller that echoes that digest back as its key
             // would have it hashed again into a different key and silently
             // start a second process, so the digest spelling is refused.
-            if lash_core::StartKey::parse(START_KEY_DECODING, &start_key).is_ok() {
+            if START_KEY_DECODING.parse(&start_key).is_ok() {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessStartRequest",
                     message: "start_key is a derived start-key digest (a record's \
@@ -139,7 +139,7 @@ impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessStartReceipt {
         } = value;
         let start_key = start_key_digest
             .map(|digest| {
-                lash_core::StartKey::parse(START_KEY_DECODING, &digest).map_err(|error| {
+                START_KEY_DECODING.parse(&digest).map_err(|error| {
                     RemoteProtocolError::InvalidEnvelope {
                         type_name: "RemoteProcessStartReceipt",
                         message: error.to_string(),

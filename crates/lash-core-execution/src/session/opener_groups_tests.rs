@@ -1,6 +1,7 @@
 //! The per-opener retained-work bound (ADR 0099 §9).
 
 use super::*;
+use crate::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 fn bound(children: usize) -> OpenerWorkBound {
     OpenerWorkBound::new(std::num::NonZeroUsize::new(children).expect("a nonzero bound"))

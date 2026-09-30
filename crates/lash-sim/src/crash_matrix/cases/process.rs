@@ -20,6 +20,7 @@
 //! run and ends the process `SubstrateLost` (ADR 0110), and the terminal's
 //! publication answers the waiter.
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::Arc;
 
 use lash_core::ProcessId;

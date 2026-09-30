@@ -1,4 +1,5 @@
 use super::CurrentOwnerCapability;
+use crate::runtime::DecodedEffectOutcome as _;
 use crate::runtime::effect::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,
     emit_llm_trace_started, token_usage_from_llm,
