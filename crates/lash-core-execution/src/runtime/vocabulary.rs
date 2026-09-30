@@ -487,12 +487,16 @@ pub trait DeploymentStore:
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<crate::engine::RootRef>, crate::StoreError>;
 
-    /// End a root only after the engine proved its one workflow run failed
-    /// terminally. The write settles the root's ingress and arms scope close
-    /// atomically. An already terminal or deleted root is a no-op.
+    /// End an open root `SubstrateLost` on the engine's evidence `loss` that
+    /// its execution is gone ([`RootRunLoss`](crate::engine::RootRunLoss)).
+    /// The write settles the root's ingress and arms scope close
+    /// atomically. An already terminal or deleted root is a no-op, and so is
+    /// a root with no run on the engine that never recorded its admission:
+    /// it started nothing, and its ingress obligation still drives it.
     async fn end_lost_root(
         &self,
         target: &crate::engine::RootRef,
+        loss: crate::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
 

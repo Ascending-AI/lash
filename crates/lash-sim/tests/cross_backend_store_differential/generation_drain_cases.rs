@@ -189,6 +189,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
                         session: session_id.clone(),
                         root,
                     },
+                    lash_core::engine::RootRunLoss::FailedRun,
                     T0,
                 )
                 .await

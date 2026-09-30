@@ -731,6 +731,12 @@ impl LiveConformanceHarness {
         }
     }
 
+    /// The harness's admin face: an operator's kill and the retention
+    /// sweep's purge.
+    pub(super) fn harness_admin(&self) -> &HarnessAdmin {
+        &self.admin
+    }
+
     /// A client of [`Self::admin_connection`].
     pub(super) fn admin_client(&self) -> crate::RestateAdminClient {
         crate::RestateAdminClient::new(self.admin_connection())

@@ -12,6 +12,9 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod lost_root;
+pub use lost_root::*;
+
 struct Control {
     fail: AtomicBool,
     /// Releases that fail retryably before one succeeds.
@@ -718,6 +721,7 @@ pub async fn no_row_stays_bound_after_a_roots_verb_close_or_lost_end(
                 session: lost.parts.session_id.clone(),
                 root: lost.root.clone(),
             },
+            RootRunLoss::FailedRun,
             stores.clock().timestamp_ms(),
         )
         .await
@@ -859,6 +863,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
                     session: parts.session_id.clone(),
                     root: root.clone(),
                 },
+                RootRunLoss::NoRun,
                 at_ms + 2,
             )
             .await

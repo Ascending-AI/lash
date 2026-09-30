@@ -448,6 +448,9 @@ pub async fn run(config: SoakConfig) -> SoakReport {
 }
 
 #[cfg(test)]
+mod lost_root_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -269,6 +269,17 @@ Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148`,
 `crates/lash-restate/src/process/park_reconcile.rs:109`, and
 `crates/lash-core-execution/src/runtime/vocabulary.rs:493`.
 
+The same pass reads a root whose key Restate holds no run of on any
+generation lane: retention purged the run, or its journal store was lost. An
+admission delivers its input's ingress obligation in the same write, so no
+relay owns that input. The store decides from the root's own record. A root
+that recorded its admission has started, its effects may have run, and a
+fresh execution would run them again under an empty journal, so it ends
+`SubstrateLost` in the same transaction as a failed run's root. A root whose
+record holds no admission has started nothing: its ingress obligation still
+owes its input and drives it, so the pass leaves it. An admin read that fails
+proves nothing about any run and ends nothing.
+
 ## 4. Two-phase session delete
 
 Delete first records `CloseSession` and marks the session closing. New sends

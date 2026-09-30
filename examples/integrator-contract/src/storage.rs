@@ -638,6 +638,7 @@ impl DeploymentStore for Integrator {
     async fn end_lost_root(
         &self,
         target: &RootRef,
+        loss: RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<RootTerminal>, StoreError> {
         unreachable!("external signature witness")

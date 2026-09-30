@@ -319,20 +319,31 @@ fn release_root_rows_conn(
     Ok(())
 }
 
-/// The engine proved the root's workflow run ended without an outcome. This
+/// The engine proved the root's execution is lost (`loss`). This
 /// transaction makes its inputs and root terminal together, so the existing
 /// scope-close obligation takes over before recovery acknowledges the loss.
-/// A root that already has terminal evidence, or no row, is left as it is.
+/// A root that already has terminal evidence, or no row, is left as it is,
+/// and so is a root the engine holds no run of that never recorded its
+/// admission: it started nothing, and its ingress obligation still owns its
+/// input.
 pub(crate) fn end_lost_root_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RootRef,
+    loss: lash_core_execution::engine::RootRunLoss,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
     match unanswered_root_conn(tx, target)? {
-        UnansweredRoot::Open => write_unanswered_root_end_conn(tx, target, at_ms, |cancelled_by| {
-            RootTerminalCause::SubstrateLost { cancelled_by }
-        })
-        .map(Some),
+        UnansweredRoot::Open => {
+            if loss == lash_core_execution::engine::RootRunLoss::NoRun
+                && root_admission_conn(tx, &target.session, &target.root)?.is_none()
+            {
+                return Ok(None);
+            }
+            write_unanswered_root_end_conn(tx, target, at_ms, |cancelled_by| {
+                RootTerminalCause::SubstrateLost { cancelled_by }
+            })
+            .map(Some)
+        }
         UnansweredRoot::Ended(_) | UnansweredRoot::Unknown => Ok(None),
     }
 }

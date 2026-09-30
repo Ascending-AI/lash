@@ -442,6 +442,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
     async fn end_lost_root(
         &self,
         target: &lash_core_execution::engine::RootRef,
+        loss: lash_core_execution::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
@@ -450,7 +451,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         let target = target.clone();
         conn.write_flow(move |tx| {
             Ok(
-                match crate::session_roots::end_lost_root_conn(tx, &target, at_ms) {
+                match crate::session_roots::end_lost_root_conn(tx, &target, loss, at_ms) {
                     Ok(terminal) => crate::conn::TxOutcome::Commit(Ok(terminal)),
                     Err(error) => crate::conn::TxOutcome::Rollback(Err(error)),
                 },

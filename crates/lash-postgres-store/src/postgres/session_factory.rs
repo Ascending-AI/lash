@@ -311,11 +311,12 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
     async fn end_lost_root(
         &self,
         target: &lash_core_execution::engine::RootRef,
+        loss: lash_core_execution::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, at_ms).await?;
+        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, loss, at_ms).await?;
         tx.commit().await.map_err(crate::store_sqlx_error)?;
         Ok(result)
     }

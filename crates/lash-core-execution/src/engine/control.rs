@@ -91,6 +91,25 @@ pub struct RootRef {
     pub root: TurnId,
 }
 
+/// The engine's evidence that an open root's execution is lost, which
+/// [`DeploymentStore::end_lost_root`](crate::DeploymentStore::end_lost_root)
+/// ends the root on (ADR 0104 O2, O6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RootRunLoss {
+    /// The root's workflow run ended with a failure and recorded no
+    /// outcome: an operator's kill, or a refusal that ended nothing. The
+    /// engine never runs that key again, so the root ends whether or not it
+    /// had recorded its admission.
+    FailedRun,
+    /// The engine holds no run of the root's key on any generation lane: the
+    /// run was purged or its history lost. A root that recorded its admission
+    /// started, and its effects may have run, so it ends: a fresh execution
+    /// must never run it again (ADR 0105 L-S8). A root that never recorded
+    /// its admission started nothing; its input is still owed by its ingress
+    /// obligation, which drives it, so the store leaves it open.
+    NoRun,
+}
+
 /// What an engine did for a control verb.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -340,8 +359,10 @@ pub struct ParkReconcileReport {
     /// finished their current segment's execution without their terminal (an
     /// operator's kill): nothing would ever run them again.
     pub ended_processes: Vec<crate::ProcessId>,
-    /// Roots whose only engine run failed without a Lash terminal. Their
-    /// scope close is now owed by the terminal row.
+    /// Roots this pass ended `SubstrateLost` because the engine lost their
+    /// execution ([`RootRunLoss`]): every run of the root failed without a
+    /// Lash terminal, or the engine holds no run of a root that started.
+    /// Their scope close is now owed by the terminal row.
     pub ended_roots: Vec<RootRef>,
     /// Sessions whose stopped drive this pass resumed: it stopped only behind
     /// a redrive that has since settled (D15). Any other stopped drive is

@@ -1368,7 +1368,11 @@ impl BackendRunner {
                     session: session_id.clone(),
                     root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
                 };
-                match self.factory().end_lost_root(&root, 1).await? {
+                match self
+                    .factory()
+                    .end_lost_root(&root, lash_core::engine::RootRunLoss::NoRun, 1)
+                    .await?
+                {
                     Some(terminal) => format!("ended={:?}", terminal.kind),
                     None => "ended=none".to_string(),
                 }

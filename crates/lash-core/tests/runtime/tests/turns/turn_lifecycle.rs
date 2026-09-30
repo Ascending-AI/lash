@@ -648,6 +648,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
                 session: SessionId::from(session_id),
                 root: TurnId::from(live_turn_id),
             },
+            lash_core::engine::RootRunLoss::FailedRun,
             0,
         )
         .await

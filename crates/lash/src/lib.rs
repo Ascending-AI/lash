@@ -384,6 +384,9 @@ pub mod persistence {
     pub use lash_core::CheckpointKind;
     /// Logical root references returned by a root store.
     pub use lash_core::engine::RootRef;
+    /// The engine's evidence that a root's execution is lost, which
+    /// `DeploymentStore::end_lost_root` ends the root on.
+    pub use lash_core::engine::RootRunLoss;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{

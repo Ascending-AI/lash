@@ -1643,3 +1643,340 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
 async fn live_recovery_tick_keeps_cadence_with_slow_control_rpc() {
     recovery_tick_keeps_cadence_with_slow_control_rpc(HarnessServer::Live).await;
 }
+
+/// FIG-4281: a root that admits its input, records its admission and starts
+/// an effect, then blocks inside it. Every execution of the root is counted:
+/// recovery must never start another one under a fresh journal.
+struct StartedRootDriver {
+    session: SessionId,
+    root: TurnId,
+    input: lash_core::InputId,
+    store: lash_core::store::SessionStore,
+    admits: AtomicUsize,
+    executions: AtomicUsize,
+    effects: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl SessionDriver for StartedRootDriver {
+    async fn admit(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        request: &DriveRequest,
+        ordinal: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        self.admits.fetch_add(1, Ordering::SeqCst);
+        if self
+            .store
+            .root_terminal(&self.root)
+            .await
+            .expect("terminal")
+            .is_some()
+        {
+            return Ok(AdmitVerdict::Idle);
+        }
+        Ok(AdmitVerdict::Admit(admission_body::admitted(
+            self.session.clone(),
+            self.root.clone(),
+            request.request.clone(),
+            AdmissionId::new(format!("{}#{ordinal}", request.request.as_str())),
+            0,
+            request.build_generation.clone(),
+            AdmittedWork::Input {
+                head: self.input.clone(),
+            },
+        )))
+    }
+    async fn run_root(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        admitted: Admitted,
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                self.executions.fetch_add(1, Ordering::SeqCst);
+                let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+                    self.store.store(),
+                    &self.session,
+                    "started-root",
+                )
+                .await;
+                lash_core::testing::store_fixtures::admit_root_for_test(
+                    self.store.store(),
+                    &fence,
+                    admitted.root(),
+                    AdmittedHead::Input(self.input.clone()),
+                )
+                .await
+                .expect("admit the root")
+                .expect("the root's admission reaches its head");
+                self.effects.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<Result<RootOutcome, DriveAbort>>().await
+            }
+            .await,
+        )
+    }
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
+    }
+}
+
+/// Let the double run what it can for a moment. A started root blocks inside
+/// its effect on purpose, so the double never settles while it runs.
+async fn settle_briefly(server: &lash_restate_test::RestateTestServer) {
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(50), server.settle()).await;
+}
+
+/// An admin endpoint that answers every request 503: the engine's state is
+/// unreadable, which proves nothing about any run.
+#[derive(Debug)]
+struct AdminOutage;
+#[async_trait::async_trait]
+impl lash_http_transport::HttpTransport for AdminOutage {
+    async fn send(
+        &self,
+        _request: lash_http_transport::HttpRequest,
+        _timeout: Option<std::time::Duration>,
+    ) -> Result<lash_http_transport::HttpResponse, lash_http_transport::LlmTransportError> {
+        Ok(lash_http_transport::HttpResponse {
+            status: 503,
+            headers: vec![("content-type".to_string(), "text/plain".to_string())],
+            body: lash_http_transport::HttpResponseBody::buffered("admin unavailable".to_string()),
+        })
+    }
+}
+
+/// A root admits its input and starts its effect; an operator kills its
+/// `LashTurn` run, the drive consumes the release and stops `RootAborted`,
+/// and the run's record is purged before any recovery pass. The recovery
+/// pass alone ends the root `SubstrateLost` and settles its input: no new
+/// submission, no new drive, no second execution. With `admin_outage`, a
+/// pass whose admin read fails first ends nothing.
+async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
+    let harness = LiveConformanceHarness::start_on(server).await;
+    let session = SessionId::from(format!("lost-root-{}", harness.run_nonce()));
+    let root = TurnId::from("lost-root");
+    let factory = harness.law_stores().session_store_factory();
+    let store = lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
+            session_id: session.clone(),
+            relation: lash_core::SessionRelation::Root,
+            pending_observer_intents: vec![],
+            config: lash_core::testing::mock_session_policy().into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
+            owning_process_id: None,
+        },
+    )
+    .await
+    .expect("store");
+    let input = store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core::TurnInputIngress::next_turn(),
+                lash_core::TurnInput::text("input"),
+            )
+            .with_source_key(root.as_str()),
+        )
+        .await
+        .expect("enqueue")
+        .input_id;
+    let driver = Arc::new(StartedRootDriver {
+        session: session.clone(),
+        root: root.clone(),
+        input: input.clone(),
+        store,
+        admits: AtomicUsize::new(0),
+        executions: AtomicUsize::new(0),
+        effects: AtomicUsize::new(0),
+    });
+    let work = harness.session_work();
+    let _installation = work.install_session_driver(driver.clone());
+    work.send_drive(&session, DriveRequestId::new("initial"))
+        .await
+        .expect("send");
+    for _ in 0..2000 {
+        if driver.effects.load(Ordering::SeqCst) > 0 {
+            break;
+        }
+        if let Some(server) = harness.server_double() {
+            settle_briefly(&server).await;
+            server.fire_next_timer();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        driver.effects.load(Ordering::SeqCst),
+        1,
+        "the root started its one effect"
+    );
+
+    let turn = crate::RestateNamespace::default()
+        .stable(crate::LashService::TurnDriver)
+        .name()
+        .into_owned();
+    let key = crate::session_driver::turn_workflow_key(&session, &root);
+    let killed = harness.harness_admin().kill_workflow_run(&turn, &key).await;
+    let attach = work.attach_drive(&session, DriveRequestId::new("initial"));
+    tokio::pin!(attach);
+    let mut outcome = None;
+    for _ in 0..2000 {
+        if let Some(server) = harness.server_double() {
+            settle_briefly(&server).await;
+            server.fire_next_timer();
+        }
+        tokio::select! {
+            ended = &mut attach => {
+                outcome = Some(ended.expect("the drive answers"));
+                break;
+            }
+            () = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+        }
+    }
+    let outcome = outcome.expect("the drive ends within the bounded witness");
+    assert!(
+        matches!(outcome.ran.as_slice(), [RootOutcome::Released { root: released }] if *released == root),
+        "{:?}",
+        outcome.ran
+    );
+    assert_eq!(outcome.stop, DriveStop::RootAborted { root: root.clone() });
+    harness.harness_admin().purge_invocation(&killed).await;
+    assert!(
+        harness
+            .admin_client()
+            .root_runs(
+                &crate::RestateNamespace::default(),
+                std::slice::from_ref(&key)
+            )
+            .await
+            .expect("root runs")
+            .is_empty(),
+        "the engine holds no run of the root on any lane"
+    );
+    let executions = driver.executions.load(Ordering::SeqCst);
+    let admits = driver.admits.load(Ordering::SeqCst);
+    let target = RootRef {
+        session: session.clone(),
+        root: root.clone(),
+    };
+
+    if admin_outage {
+        let outage = crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
+            "http://admin.invalid",
+            Arc::new(AdminOutage),
+        ));
+        let read = crate::session_control::end_lost_root_runs(
+            &outage,
+            &crate::RestateIngressClient::new(harness.connection()),
+            &crate::RestateNamespace::default(),
+            &factory,
+            NonZeroUsize::new(16).expect("page"),
+        )
+        .await;
+        assert!(
+            read.is_err(),
+            "an unreadable engine is an error of the pass, never a lost root"
+        );
+        assert!(
+            factory
+                .root_terminal(&session, &root)
+                .await
+                .expect("terminal read")
+                .is_none(),
+            "a failed admin read ends no root"
+        );
+        assert!(
+            matches!(
+                factory
+                    .list_pending_turn_inputs(&session)
+                    .await
+                    .expect("pending")
+                    .as_slice(),
+                [row] if row.input.input_id == input
+                    && matches!(row.status, lash_core::PendingTurnInputReadStatus::Admitted { .. })
+            ),
+            "the root still holds its input"
+        );
+    }
+
+    let clock = lash_core::facade_support::SystemClock;
+    let writer = lash_core::drive::StoreParkRecovery::new(factory.as_ref(), &clock);
+    // A pass the engine cannot answer ends nothing and the next pass
+    // retries it, as the recovery interval does: a loaded server's admin
+    // query can time out.
+    let mut passes = Vec::new();
+    for _ in 0..20 {
+        let pass = work
+            .control()
+            .reconcile_parks(
+                &writer,
+                EnginePage {
+                    after: None,
+                    limit: NonZeroUsize::new(16).expect("page"),
+                },
+            )
+            .await;
+        let ended = pass
+            .as_ref()
+            .is_ok_and(|report| report.ended_roots.contains(&target));
+        passes.push(pass);
+        if ended {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(
+        matches!(passes.last(), Some(Ok(report)) if report.ended_roots.contains(&target)),
+        "a recovery pass ended the lost root: {passes:?}"
+    );
+    let terminal = factory
+        .root_terminal(&session, &root)
+        .await
+        .expect("terminal read")
+        .expect("the root has its terminal");
+    assert_eq!(
+        terminal.cause,
+        RootTerminalCause::SubstrateLost { cancelled_by: None }
+    );
+    assert!(
+        factory
+            .list_pending_turn_inputs(&session)
+            .await
+            .expect("pending")
+            .is_empty(),
+        "the root's input is settled with it"
+    );
+    if let Some(server) = harness.server_double() {
+        settle_briefly(&server).await;
+    }
+    assert_eq!(
+        driver.executions.load(Ordering::SeqCst),
+        executions,
+        "recovery never executed the root again"
+    );
+    assert_eq!(driver.effects.load(Ordering::SeqCst), 1, "one effect, once");
+    assert_eq!(
+        driver.admits.load(Ordering::SeqCst),
+        admits,
+        "recovery asked for no drive"
+    );
+    harness.finish().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn missing_started_root_is_settled_without_new_ingress() {
+    missing_started_root(HarnessServer::in_process(), false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires the pinned live Restate server"]
+async fn live_missing_started_root_is_settled_without_new_ingress() {
+    missing_started_root(HarnessServer::Live, false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_root_run_read_ends_no_root() {
+    missing_started_root(HarnessServer::in_process(), true).await;
+}

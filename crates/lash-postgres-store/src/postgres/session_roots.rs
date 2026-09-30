@@ -307,21 +307,33 @@ async fn release_root_rows_conn(
     Ok(())
 }
 
-/// Store half of recovery after the engine proves a root run failed without
-/// an outcome. The terminal, ingress settlement and scope-close arm commit
+/// Store half of recovery after the engine proves a root's execution is lost
+/// (`loss`). The terminal, ingress settlement and scope-close arm commit
 /// together under the session history lock. A root that already has
-/// terminal evidence, or no row, is left as it is.
+/// terminal evidence, or no row, is left as it is, and so is a root the
+/// engine holds no run of that never recorded its admission: it started
+/// nothing, and its ingress obligation still owns its input.
 pub(crate) async fn end_lost_root_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RootRef,
+    loss: lash_core_execution::engine::RootRunLoss,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
     match unanswered_root_tx(tx, target).await? {
-        UnansweredRoot::Open => write_unanswered_root_end_tx(tx, target, at_ms, |cancelled_by| {
-            RootTerminalCause::SubstrateLost { cancelled_by }
-        })
-        .await
-        .map(Some),
+        UnansweredRoot::Open => {
+            if loss == lash_core_execution::engine::RootRunLoss::NoRun
+                && root_admission_conn(tx, &target.session, &target.root)
+                    .await?
+                    .is_none()
+            {
+                return Ok(None);
+            }
+            write_unanswered_root_end_tx(tx, target, at_ms, |cancelled_by| {
+                RootTerminalCause::SubstrateLost { cancelled_by }
+            })
+            .await
+            .map(Some)
+        }
         UnansweredRoot::Ended(_) | UnansweredRoot::Unknown => Ok(None),
     }
 }
